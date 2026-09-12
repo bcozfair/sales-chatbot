@@ -7,9 +7,14 @@
 //  ทุกการแก้ต้องแก้สองที่ตลอดไป — เหมือนเหตุผลของ ProductComboBox / ScopeComboBox
 //
 //  กติกาของตัวนี้ที่ต่างจาก ScopeComboBox (ซึ่งเลือก "ค่า" ไม่ใช่ "คน"):
-//    · ปุ่มโชว์ ชื่อ + meta (เบอร์/รหัส) ในบรรทัดเดียว ⇒ ไม่ต้องมีบรรทัดเบอร์แยกใต้ช่อง
-//    · ค้นได้ทั้งชื่อ · meta · keywords ⇒ พิมพ์รหัสพนักงานก็เจอ ไม่ต้องจำชื่อเต็ม
+//    · ปุ่มโชว์ ชื่อ + รหัส + เบอร์ ในบรรทัดเดียว ⇒ ไม่ต้องมีบรรทัดเบอร์แยกใต้ช่อง
+//    · ค้นได้ทั้ง ชื่อ · รหัส · เบอร์ ⇒ พิมพ์อะไรที่จำได้ก็เจอ ไม่ต้องจำชื่อเต็ม
 //    · ไม่มีปุ่มล้างค่า — สองช่องนี้ "ต้องมีคน" เสมอ การล้างเป็นสถานะที่ออกใบไม่ได้
+//
+//  ทำไม "ไม่มีเบอร์" ขึ้นสีเตือนเองโดยไม่ต้องมี prop สั่ง: เบอร์ของทั้งสองฝั่งไปโผล่บน PDF
+//  (`buildSignatureBlocksHtml`) และฝั่งพนักงานขายที่ไม่มีเบอร์จะพิมพ์คำว่า `( เบอร์โทร )`
+//  ให้ลูกค้าเห็นคาใบ ⇒ เบอร์ว่างเป็นเรื่องต้องรู้ "ก่อนกดเลือก" เสมอ ไม่ใช่ข้อมูลประกอบ
+//  จึงเตือนทั้งในช่องและในรายชื่อ — เลิกเปิดให้ call site เลือกว่าจะเตือนไหม เพราะลืมได้
 // ─────────────────────────────────────────────────────────────────────────────
 import React, { useEffect, useRef, useState } from 'react';
 import { ChevronDown, Loader2, Search } from 'lucide-react';
@@ -18,10 +23,10 @@ export interface PersonOption {
   /** ค่าที่ส่งกลับเวลาเลือก */
   id: string;
   name: string;
-  /** เบอร์/รหัส ที่โชว์ต่อท้ายชื่อ — ข้อเท็จจริงของคนคนนั้น ไม่ใช่ข้อมูลคนละชิ้น */
-  meta?: string | null;
-  /** ข้อความเพิ่มที่ให้ค้นหาเจอแต่ไม่ต้องโชว์ (เช่น เบอร์ของพนักงานขายที่โชว์รหัสอยู่แล้ว) */
-  keywords?: string | null;
+  /** รหัสพนักงาน — สิ่งที่คนในร้านใช้เรียกกันแทนชื่อ (ฝั่งผู้เสนอราคาไม่มี) */
+  code?: string | null;
+  /** เบอร์โทร — ขึ้นบน PDF ⇒ ว่างแล้วขึ้นสีเตือนเอง ดูเหตุผลที่หัวไฟล์ */
+  phone?: string | null;
 }
 
 interface Props {
@@ -41,11 +46,22 @@ interface Props {
   busy?: boolean;
   /** ยังไม่เลือกทั้งที่จำเป็น ⇒ กรอบสีเตือน (แทนป้ายเตือนแยกก้อน) */
   invalid?: boolean;
-  /** meta ของค่าที่เลือกเป็นเรื่องต้องรู้ ไม่ใช่ข้อมูลประกอบ (เช่น "ไม่มีเบอร์") ⇒ ย้อมสีเตือน */
-  metaWarn?: boolean;
   /** หมายเหตุใต้รายการ — โชว์ตอนกางเท่านั้น เพราะมันอธิบาย "รายชื่อ" ไม่ใช่ "ค่าที่เลือก" */
   footer?: React.ReactNode;
 }
+
+/**
+ * รหัส + เบอร์ ของคนคนหนึ่ง — ใช้ทั้งในช่องที่เลือกแล้วและในรายชื่อตอนกาง
+ * ที่เดียวโดยตั้งใจ: ถ้าสองที่แสดงไม่เหมือนกัน คนจะนึกว่าเป็นข้อมูลคนละชุด
+ */
+const PersonFacts: React.FC<{ person: PersonOption }> = ({ person }) => (
+  <span className="flex items-baseline gap-2 shrink-0 text-xs whitespace-nowrap">
+    {person.code && <span className="text-slate-500">{person.code}</span>}
+    <span className={person.phone ? 'text-slate-500' : 'text-amber-700 font-medium'}>
+      {person.phone || 'ไม่มีเบอร์'}
+    </span>
+  </span>
+);
 
 export const PersonComboBox: React.FC<Props> = ({
   value,
@@ -56,7 +72,6 @@ export const PersonComboBox: React.FC<Props> = ({
   ariaLabel,
   busy,
   invalid,
-  metaWarn,
   footer,
 }) => {
   const [open, setOpen] = useState(false);
@@ -76,9 +91,7 @@ export const PersonComboBox: React.FC<Props> = ({
 
   const q = query.trim().toLowerCase();
   const filtered = q
-    ? options.filter((o) =>
-        `${o.name} ${o.meta ?? ''} ${o.keywords ?? ''}`.toLowerCase().includes(q),
-      )
+    ? options.filter((o) => `${o.name} ${o.code ?? ''} ${o.phone ?? ''}`.toLowerCase().includes(q))
     : options;
 
   const frame = open
@@ -118,17 +131,13 @@ export const PersonComboBox: React.FC<Props> = ({
                 setQuery('');
               }
             }}
-            placeholder="พิมพ์ชื่อหรือรหัสเพื่อค้นหา..."
+            placeholder="พิมพ์ชื่อ รหัส หรือเบอร์เพื่อค้นหา..."
             className="flex-1 min-w-0 bg-transparent outline-none text-sm text-slate-800 placeholder:text-slate-400"
           />
         ) : value ? (
           <span className="flex flex-1 items-baseline gap-2 min-w-0">
             <span className="font-semibold text-slate-800 truncate">{value.name}</span>
-            {value.meta && (
-              <span className={`text-xs shrink-0 ${metaWarn ? 'text-amber-700 font-medium' : 'text-slate-500'}`}>
-                {value.meta}
-              </span>
-            )}
+            <PersonFacts person={value} />
           </span>
         ) : (
           <span className={`flex-1 truncate ${invalid ? 'text-amber-700' : 'text-slate-400'}`}>{placeholder}</span>
@@ -160,7 +169,7 @@ export const PersonComboBox: React.FC<Props> = ({
                   }`}
                 >
                   <span className="truncate">{o.name}</span>
-                  <span className="text-xs text-slate-400 shrink-0">{o.meta ?? ''}</span>
+                  <PersonFacts person={o} />
                 </button>
               ))
             )}

@@ -122,18 +122,13 @@ export const QuoteIssuerProfile: React.FC<Props> = ({ spUserId, onSpUserIdChange
 
   // id ของฝั่งผู้จัดทำคือ "ชื่อ" เอง — endpoint นี้รับชื่อเป็นค่าที่บันทึก (§2.5b)
   const makerOptions: PersonOption[] = useMemo(
-    () => makers.map((m) => ({ id: m.name, name: m.name, meta: m.phone ?? 'ไม่มีเบอร์' })),
+    () => makers.map((m) => ({ id: m.name, name: m.name, phone: m.phone })),
     [makers],
   );
+  // โชว์ทั้งรหัสและเบอร์: รหัสคือสิ่งที่คนในร้านใช้เรียกกัน แต่เบอร์คือสิ่งที่ไปอยู่บนใบ
+  // (ไม่มีเบอร์ = ใบพิมพ์คำว่า `( เบอร์โทร )` ให้ลูกค้าเห็น) ⇒ ต้องเห็นก่อนกดเลือก
   const spOptions: PersonOption[] = useMemo(
-    () =>
-      salespersons.map((s) => ({
-        id: s.user_id,
-        name: s.name,
-        meta: s.salesperson_id,
-        // ค้นด้วยเบอร์ได้ แต่ไม่โชว์ในช่องแคบ ๆ — รหัสคือสิ่งที่คนในร้านใช้เรียกกัน
-        keywords: s.phone,
-      })),
+    () => salespersons.map((s) => ({ id: s.user_id, name: s.name, code: s.salesperson_id, phone: s.phone })),
     [salespersons],
   );
 
@@ -227,7 +222,7 @@ export const QuoteIssuerProfile: React.FC<Props> = ({ spUserId, onSpUserIdChange
           <span className="text-xs text-slate-400 shrink-0 hidden xl:block">ผู้เสนอราคา</span>
 
           <PersonComboBox
-            value={issuerName ? { id: issuerName, name: issuerName, meta: issuerPhone ?? 'ไม่มีเบอร์' } : null}
+            value={issuerName ? { id: issuerName, name: issuerName, phone: issuerPhone } : null}
             options={makerOptions}
             onPick={(o) => saveMaker(o.id)}
             placeholder="ตั้งชื่อผู้เสนอราคาก่อนออกใบ"
@@ -235,7 +230,6 @@ export const QuoteIssuerProfile: React.FC<Props> = ({ spUserId, onSpUserIdChange
             ariaLabel="ชื่อผู้เสนอราคา / ผู้จัดทำ"
             busy={saving}
             invalid={!profile?.is_ready}
-            metaWarn={!issuerPhone}
           />
 
           {/* ลายเซ็น: กรอบคือปุ่มอัปโหลดในตัว ⇒ ไม่ต้องมีปุ่มข้อความและคำอธิบายใต้กรอบ */}
@@ -288,11 +282,15 @@ export const QuoteIssuerProfile: React.FC<Props> = ({ spUserId, onSpUserIdChange
           <span className="text-xs text-slate-400 shrink-0 hidden xl:block">ออกในนาม</span>
 
           <PersonComboBox
-            value={selectedSp ? { id: selectedSp.user_id, name: selectedSp.name, meta: selectedSp.salesperson_id } : null}
+            value={
+              selectedSp
+                ? { id: selectedSp.user_id, name: selectedSp.name, code: selectedSp.salesperson_id, phone: selectedSp.phone }
+                : null
+            }
             options={spOptions}
             onPick={(o) => onSpUserIdChange(o.id)}
             placeholder="เลือกพนักงานขายที่จะออกใบในนาม"
-            emptyText="ไม่พบพนักงานขายชื่อ/รหัสนี้"
+            emptyText="ไม่พบพนักงานขายชื่อ รหัส หรือเบอร์นี้"
             ariaLabel="พนักงานขายที่จะออกใบในนาม"
             invalid={!spUserId}
             footer={
