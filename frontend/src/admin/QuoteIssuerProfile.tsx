@@ -3,7 +3,7 @@
 //  แผน: docs/plan-web-quote-request.md §2 (ตัวตนผู้เสนอราคา) · §2.5b (เบอร์)
 //
 //  ใบที่ออกจากหน้านี้มี "คนสองคน" อยู่บนกระดาษใบเดียวกัน และนี่คือที่เดียวที่ตั้งค่าทั้งคู่:
-//    · พนักงานขาย        = เซลส์ที่แอดมิน "ออกในนาม" (เลือกใหม่ได้ทุกใบ)
+//    · พนักงานขาย        = เซลส์ที่แอดมิน "ออกในนาม" (เลือกใหม่ได้ทุกใบ · จำคนล่าสุดไว้ที่เครื่อง)
 //    · ผู้เสนอราคา/ผู้จัดทำ = ตัวแอดมินเอง (ตั้งครั้งเดียว จำไว้ แก้ได้ทีหลัง)
 //
 //  กติกาที่ห้ามเผลอทำกลับด้าน:
@@ -70,6 +70,31 @@ const SIG_FRAME =
   'relative w-[144px] h-[40px] shrink-0 rounded-xl border border-dashed border-slate-300 bg-slate-50 flex items-center justify-center overflow-hidden';
 const SIG_BOX = 'max-h-[36px] max-w-[138px] object-contain';
 
+/**
+ * จำเซลส์ที่ "ออกในนาม" ล่าสุดไว้ที่เครื่อง — แอดมินคนหนึ่งมักออกใบให้เซลส์คนเดิมทั้งวัน
+ * แยก key ตาม `admin_id` เพราะเครื่องเดียวกันมีแอดมินหลายคนสลับกันล็อกอินได้
+ * เก็บที่ localStorage ไม่ใช่ DB โดยตั้งใจ: นี่คือความสะดวกของเครื่อง ไม่ใช่ข้อเท็จจริงของใบ
+ * — ค่าที่คืนมาต้องเทียบกับรายชื่อที่โหลดได้จริงก่อนใช้เสมอ (เซลส์อาจถูกยุบ/ลบไปแล้ว)
+ *   ไม่งั้นหน้าแม่จะถือ id ที่ช่องเลือกโชว์ไม่ได้ ⇒ ปุ่ม "สร้างร่าง" เปิดทั้งที่ดูเหมือนยังไม่ได้เลือก
+ */
+const spStorageKey = (adminId: number) => `webquote.acting_sp.${adminId}`;
+
+const readStoredSp = (adminId: number): string | null => {
+  try {
+    return localStorage.getItem(spStorageKey(adminId));
+  } catch {
+    return null; // localStorage ใช้ไม่ได้ (โหมดส่วนตัว ฯลฯ) — ยังทำงานได้ แค่ไม่จำข้ามรอบ
+  }
+};
+
+const writeStoredSp = (adminId: number, userId: string) => {
+  try {
+    localStorage.setItem(spStorageKey(adminId), userId);
+  } catch {
+    /* เหมือนกัน — จำไม่ได้ไม่ใช่เหตุให้ออกใบไม่ได้ */
+  }
+};
+
 export const QuoteIssuerProfile: React.FC<Props> = ({ spUserId, onSpUserIdChange, onReadyChange }) => {
   const { token } = useAuth();
   const [profile, setProfile] = useState<IssuerProfile | null>(null);
@@ -80,6 +105,11 @@ export const QuoteIssuerProfile: React.FC<Props> = ({ spUserId, onSpUserIdChange
   const [saving, setSaving] = useState(false);
 
   const fileRef = useRef<HTMLInputElement>(null);
+  // อ่านค่าปัจจุบันของ prop ใน effect โดยไม่ต้องใส่เป็น dependency — ใส่แล้ว effect จะยิง fetch ใหม่ทุกครั้งที่เลือกเซลส์
+  const spUserIdRef = useRef(spUserId);
+  useEffect(() => {
+    spUserIdRef.current = spUserId;
+  }, [spUserId]);
 
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
@@ -107,6 +137,13 @@ export const QuoteIssuerProfile: React.FC<Props> = ({ spUserId, onSpUserIdChange
         setMakers(data.makers);
         setSalespersons(data.salespersons);
         onReadyChange(data.me.is_ready);
+        // คืนค่าเซลส์ที่เลือกไว้ล่าสุด — เฉพาะตอนที่หน้ายังไม่ได้เลือกอะไร และ id นั้นยังอยู่ในรายชื่อจริง
+        if (!spUserIdRef.current) {
+          const remembered = readStoredSp(data.me.admin_id);
+          if (remembered && data.salespersons.some((s) => s.user_id === remembered)) {
+            onSpUserIdChange(remembered);
+          }
+        }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : 'โหลดข้อมูลไม่สำเร็จ');
       } finally {
@@ -114,7 +151,7 @@ export const QuoteIssuerProfile: React.FC<Props> = ({ spUserId, onSpUserIdChange
       }
     })();
     return () => { cancelled = true; };
-  }, [token, loadAll, onReadyChange]);
+  }, [token, loadAll, onReadyChange, onSpUserIdChange]);
 
   const selectedSp = salespersons.find((s) => s.user_id === spUserId) ?? null;
   /** รวมจำนวนบัญชีซ้ำที่ถูกยุบทิ้ง — อธิบายว่าทำไมรายชื่อสั้นกว่าที่เคยเห็น จึงไปอยู่ใต้รายชื่อ */
@@ -288,7 +325,10 @@ export const QuoteIssuerProfile: React.FC<Props> = ({ spUserId, onSpUserIdChange
                 : null
             }
             options={spOptions}
-            onPick={(o) => onSpUserIdChange(o.id)}
+            onPick={(o) => {
+              onSpUserIdChange(o.id);
+              if (profile) writeStoredSp(profile.admin_id, o.id);
+            }}
             placeholder="เลือกพนักงานขายที่จะออกใบในนาม"
             emptyText="ไม่พบพนักงานขายชื่อ รหัส หรือเบอร์นี้"
             ariaLabel="พนักงานขายที่จะออกใบในนาม"
