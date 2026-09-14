@@ -7,12 +7,15 @@
 //  2. proposeFromText() ต้อง **ไม่เขียน quotations** และ **ไม่ลบร่างที่ค้างอยู่**      [เฟส D]
 //  3. createDraft() → PUT /api/quotation/:id → confirm ครบวงจรด้วย webUserId          [เฟส D]
 //  4. reviseQuotation() — ใบที่ยืนยันแล้ว → ได้ร่าง revision · เลขที่ไม่มีจริง → ปฏิเสธ [เฟส D]
+//  5. ประวัติลง `messages` ครบ 4 ชนิด · chosen_rank คำนวณถูก · แถวของ LINE ไม่ปนเปื้อน
+//     (docs/plan-web-quote-logging.md §7)
 //
 //  ⚠️ เขียนข้อมูลจริงลง DB (salesperson · admin_users · quotations ของ user ทดสอบ)
 //     แล้วลบทิ้งใน finally ทุกกรณี — user/แอดมินทดสอบเป็นค่าคงที่ที่ไม่ชนของจริง
 //  ค่าใช้จ่าย: LLM ~2-4 call (ข้อ 1 และข้อ 2 อย่างละรอบ)
 // ─────────────────────────────────────────────────────────────────────────────
 import { pool } from '../../config/db.js';
+import { insertMessage } from '../../db/repositories.js';
 import { extractQuoteFromText, buildResolvedItem } from '../../services/quoteExtraction.js';
 import { validateQuotationItems } from '../../services/quotationService.js';
 import {
@@ -280,6 +283,92 @@ async function case4(quotationNo: string | null) {
 
 // ── main ─────────────────────────────────────────────────────────────────────
 
+/**
+ * ข้อ 5 — ประวัติของหน้าเว็บลง `messages` (docs/plan-web-quote-logging.md)
+ *
+ * ต้องรันหลังข้อ 2–4 เพราะมันตรวจ "ร่องรอยที่สามข้อนั้นทิ้งไว้" ไม่ได้สร้างเหตุการณ์ใหม่เอง
+ * ยกเว้นท่อนสุดท้ายที่ปลูกแถว web_propose สังเคราะห์เพื่อวัด chosen_rank แบบ deterministic
+ * (ไม่ต้องพึ่ง LLM ว่าจะค้นเจอบริษัทไหน ⇒ ด่านไม่แกว่งตามข้อมูลจริง)
+ */
+async function case5() {
+  console.log(`\n${BOLD}5) ประวัติลง messages${RESET}`);
+
+  const rowsOf = async (t: string) => (await pool.query(
+    'SELECT content, reply_content, reply_token, meta FROM messages WHERE user_id = $1 AND type = $2 ORDER BY id',
+    [webUserId, t]
+  )).rows;
+
+  const propose = await rowsOf('web_propose');
+  ok('propose เขียนแถว web_propose', propose.length >= 1, `${propose.length} แถว`);
+  const p0 = propose[0];
+  ok('content เก็บข้อความที่วางไว้ดิบ ๆ', p0?.content === SAMPLE_TEXT);
+  ok('reply_token เป็น NULL (เว็บไม่มี token)', p0?.reply_token === null);
+  ok('meta.cust_candidates ไม่ว่าง', Array.isArray(p0?.meta?.cust_candidates) && p0.meta.cust_candidates.length > 0,
+    `${p0?.meta?.cust_candidates?.length ?? 0} ตัว`);
+  ok('candidate เก็บ rank/score ไว้ให้วัดได้',
+    p0?.meta?.cust_candidates?.[0]?.rank === 1 && p0?.meta?.cust_candidates?.[0]?.score !== undefined);
+
+  const draft = await rowsOf('web_draft');
+  ok('createDraft เขียนแถว web_draft', draft.length >= 1, `${draft.length} แถว`);
+  ok('reply_content คงรูปแบบที่ evalCustomerSearch ขุดเฉลยได้',
+    /ร่างใบเสนอราคา/.test(draft[0]?.reply_content ?? '') && /🏢 .+/.test(draft[0]?.reply_content ?? ''));
+  ok('meta บันทึกสิ่งที่แอดมินเคาะจริง',
+    Number(draft[0]?.meta?.chosen_customer_id) > 0 && Number(draft[0]?.meta?.chosen_contact_id) > 0);
+
+  const confirmed = await rowsOf('web_confirm');
+  ok('confirm เขียนแถว web_confirm', confirmed.length >= 1, `${confirmed.length} แถว`);
+  ok('reply_content มีคำว่า "ยืนยันสำเร็จ" (ตัวตัดหน้าต่างประวัติ)',
+    /ยืนยันสำเร็จ/.test(confirmed[0]?.reply_content ?? ''));
+  ok('meta เก็บเลขที่ใบ', !!confirmed[0]?.meta?.quotation_no, confirmed[0]?.meta?.quotation_no ?? '-');
+
+  const revised = await rowsOf('web_revise');
+  ok('revise เขียนแถว web_revise', revised.length >= 1, `${revised.length} แถว`);
+
+  // ── chosen_rank: ปลูก candidate ที่รู้คำตอบล่วงหน้า แล้ววัดว่าหลังบ้านอ่านกลับถูก ──
+  const cust = await pickCustomerContact();
+  const plantedId = await insertMessage({
+    user_id: webUserId,
+    message_id: `web_propose_planted_${Date.now()}`,
+    type: 'web_propose',
+    content: '(แถวสังเคราะห์ของด่าน — วัด chosen_rank)',
+    reply_token: null,
+    reply_content: '📝 ร่างใบเสนอราคา (ยังไม่บันทึก)',
+    meta: {
+      cust_candidates: [
+        { rank: 1, id: -1, display_name: 'DIAG บริษัทที่ไม่ถูกเลือก', score: 0 },
+        { rank: 2, id: cust.customerId, display_name: cust.name, score: 0.1 },
+      ],
+    },
+  });
+  ok('insertMessage คืน id ของแถวที่เพิ่งเขียน', typeof plantedId === 'number' && plantedId > 0, String(plantedId));
+
+  const product = await pickProduct(cust);
+  const d2 = await createDraft({
+    adminId, spUserId: TEST_SP_USER,
+    customerId: cust.customerId, contactId: cust.contactId,
+    items: [{ product_template_id: product.product_template_id, quantity: 1 }],
+    proposeMsgId: plantedId,
+  });
+  const linked = (await pool.query(
+    `SELECT meta FROM messages WHERE user_id = $1 AND type = 'web_draft' ORDER BY id DESC LIMIT 1`, [webUserId]
+  )).rows[0];
+  ok('web_draft อ้างกลับไปที่แถว propose ที่ถูกต้อง', Number(linked?.meta?.propose_msg_id) === plantedId);
+  ok('chosen_rank = อันดับที่แอดมินเคาะจริง (ปลูกไว้ที่ 2)', Number(linked?.meta?.chosen_rank) === 2,
+    `ได้ ${linked?.meta?.chosen_rank}`);
+  ok('createDraft ยังคืนใบร่างตามปกติ', (d2.quotes?.length ?? 0) > 0);
+
+  // ── กันแถวสองช่องทางปนกัน (§3.1 · §7) ──
+  const bleed = Number((await pool.query(
+    `SELECT COUNT(*)::int AS n FROM messages WHERE user_id NOT LIKE 'web:%' AND meta IS NOT NULL`
+  )).rows[0].n);
+  ok('แถวที่ไม่ใช่ของเว็บต้องมี meta เป็น NULL ทุกแถว', bleed === 0, `พบ ${bleed} แถว`);
+
+  const wrongType = Number((await pool.query(
+    `SELECT COUNT(*)::int AS n FROM messages WHERE user_id LIKE 'web:%' AND left(type, 4) <> 'web_'`
+  )).rows[0].n);
+  ok("แถวของเว็บต้องไม่ใช้ type ของ LINE (เช่น 'text')", wrongType === 0, `พบ ${wrongType} แถว`);
+}
+
 async function main() {
   console.log(`${BOLD}webQuoteSmoke — ด่านเฟส D${RESET} ${DIM}(${BASE})${RESET}`);
 
@@ -296,6 +385,7 @@ async function main() {
     await case2();
     const quotationNo = await case3();
     await case4(quotationNo);
+    await case5();
   } finally {
     await teardown();
   }

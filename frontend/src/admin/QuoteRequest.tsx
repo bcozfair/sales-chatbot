@@ -92,6 +92,8 @@ interface ProposeResult {
   unresolved_count: number;
   customer_candidates: Scored<CustomerRow>[];
   contact_candidates: Scored<ContactRow>[];
+  /** id แถวประวัติของขั้น propose — ส่งกลับตอนสร้างร่างเพื่อให้หลังบ้านวัดได้ว่าเคาะอันดับไหน */
+  propose_msg_id: number | null;
 }
 
 interface QuoteItem {
@@ -329,6 +331,9 @@ export const QuoteRequest: React.FC = () => {
 
   // ── ส่วนที่ 2 ──
   const [webUserId, setWebUserId] = useState('');
+  // ประวัติของขั้น propose — ไม่มีผลกับสิ่งที่แสดงบนหน้าจอ ใช้ผูกแถว web_draft กลับไปหาแถว
+  // web_propose เท่านั้น (docs/plan-web-quote-logging.md §5)
+  const [proposeMsgId, setProposeMsgId] = useState<number | null>(null);
   const [rows, setRows] = useState<Row[] | null>(null);
   const [aiMessage, setAiMessage] = useState('');
   const [customerOptions, setCustomerOptions] = useState<CustomerRow[]>([]);
@@ -442,6 +447,7 @@ export const QuoteRequest: React.FC = () => {
       const data: ProposeResult = await res.json();
 
       setWebUserId(data.web_user_id);
+      setProposeMsgId(data.propose_msg_id ?? null);
       setQuotes(null);
       setResults([]);
       setReviseFrom('');
@@ -518,6 +524,7 @@ export const QuoteRequest: React.FC = () => {
           sp_user_id: spUserId,
           customer_id: customerId,
           contact_id: contactId,
+          propose_msg_id: proposeMsgId,
           items: rows.map((r) => ({
             product_template_id: r.productTemplateId,
             model: r.model,

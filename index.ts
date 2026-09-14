@@ -41,6 +41,7 @@ import {
   countApiLogs,
   getApiLogById,
   getApiLogStats,
+  insertMessage,
 } from './db/repositories.js';
 import { confirmQuotationAtomic, enrichQuotationData, buildItemSnapshots, buildViolationDisplay } from './services/quotationService.js';
 import { pdfCacheKey, getCachedPdf, setCachedPdf, isPrintFrozen, invalidatePdfCache } from './services/pdfCache.js';
@@ -96,6 +97,7 @@ import {
   getAdminSignature,
   saveAdminSignature,
   deleteAdminSignature,
+  parseWebUserId,
 } from './services/webIdentity.js';
 import {
   WebQuoteError,
@@ -1309,6 +1311,29 @@ app.post('/api/quotation/:id/confirm', express.json(), async (req: any, res: any
     // ลิงก์ต้องสร้างหลังตรงนี้ เพราะเลขใบเสนอราคาเพิ่งถูกออกใน confirmQuotationAtomic
     const pdfLink = buildPdfLink(reqUrl, quoteId, confirmResult.quotationNo);
     console.log(`[Push Disabled] Confirm quotation no: ${confirmResult.quotationNo} for user: ${userId}`);
+
+    // ประวัติของหน้าเว็บแอดมิน — docs/plan-web-quote-logging.md §4
+    //
+    // route นี้ใช้ร่วมกับ LIFF ของเซลส์ ⇒ เขียนเฉพาะขา `web:%` เท่านั้น ถ้าเขียนทุกขา
+    // ใบที่เซลส์ยืนยันผ่าน LIFF จะเริ่มมีแถวใหม่ใน messages ซึ่งไปเปลี่ยนความหมายของประวัติ
+    // ที่ quoteExtraction อ่านอยู่ (ตัดหน้าต่าง 15 นาทีด้วยคำว่า "ยืนยันสำเร็จ")
+    //
+    // อยู่หลัง confirmQuotationAtomic ที่ COMMIT ไปแล้ว — ห้ามขยับขึ้นไปอยู่ในทรานแซกชัน
+    if (parseWebUserId(userId)) {
+      await insertMessage({
+        user_id: userId,
+        message_id: `web_confirm_${Date.now()}`,
+        type: 'web_confirm',
+        content: 'ยืนยัน',
+        reply_token: null,
+        reply_content: `✅ ยืนยันสำเร็จ!\n📄 ใบเสนอราคาเลขที่: ${confirmResult.quotationNo}`,
+        meta: {
+          quotation_no: confirmResult.quotationNo,
+          quotation_id: String(quoteId),
+          outcome: confirmResult.outcome,
+        },
+      });
+    }
     res.json({ success: true, quotation_no: confirmResult.quotationNo, pdf_link: pdfLink });
   } catch (err: any) {
     console.error("API POST confirm error:", err);
@@ -2499,6 +2524,7 @@ app.post('/api/admin/webquote/drafts', adminAuthMiddleware, requireRole('admin',
       customerId: req.body?.customer_id,
       contactId: req.body?.contact_id,
       items: req.body?.items,
+      proposeMsgId: req.body?.propose_msg_id,
     }));
   } catch (err: any) {
     sendWebQuoteError(res, 'POST /api/admin/webquote/drafts', err);

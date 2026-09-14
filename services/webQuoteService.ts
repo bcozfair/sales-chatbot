@@ -18,7 +18,10 @@
 //  ไม่งั้นแค่วางข้อความผิดก็ไปลบร่างที่ค้างอยู่ทิ้งแล้ว (ด่าน diag:web-quote ข้อ 2 ตรวจข้อนี้)
 // ─────────────────────────────────────────────────────────────────────────────
 import { pool } from '../config/db.js';
-import { getCustomerById, getContactById, getSalespersonByUserId } from '../db/repositories.js';
+import {
+  getCustomerById, getContactById, getSalespersonByUserId,
+  insertMessage, getMessageMetaById,
+} from '../db/repositories.js';
 import { KeyedTaskQueue, runWithDeadline } from './webhookQueue.js';
 import { extractQuoteFromText, buildResolvedItem, type QuoteSlot } from './quoteExtraction.js';
 import { findCustomerCandidates, findContactCandidates } from './customerService.js';
@@ -146,6 +149,93 @@ async function runQueued<T>(key: string, work: () => Promise<T>): Promise<T> {
   });
 }
 
+// ── ประวัติการใช้งานของหน้าเว็บ — docs/plan-web-quote-logging.md ─────────────
+//
+//  เก็บลง `messages` ตารางเดียวกับ LINE ไม่แยกตารางใหม่ · `user_id = web:%` คือสวิตช์
+//  ช่องทาง (services/webIdentity.ts) จึงไม่มีคอลัมน์ "channel" มาซ้ำ
+//
+//  ⚠️ `type` ต้องขึ้นต้น `web_` เสมอ ห้ามใช้ `'text'` — ด่านขุด corpus ทุกตัวกรอง
+//     `type = 'text'` ถ้าใช้ชื่อเดียวกัน แถวของเว็บจะไหลเข้า corpus ของ eval เงียบ ๆ
+//     และ customerSearchEval จะให้คะแนนด้วย "แถวพร็อกซีที่ branch เป็น NULL" แทนเซลส์ตัวจริง
+//     ⇒ ผลก่อน/หลังเทียบกันไม่ได้ · prefix นี้ทำให้ค่าตั้งต้นคือ "ถูกกันออก"
+//
+//  ⚠️ โครงสร้างไปอยู่ที่ `meta` เท่านั้น ห้ามยัด JSON ลง `reply_content` — evalCustomerSearch
+//     ขุดเฉลยด้วย `reply_content LIKE '%ร่างใบเสนอราคา%'` แล้ว `/🏢 (.+)/` การคงรูปแบบข้อความ
+//     ไว้ทำให้แถวของเว็บใช้เป็นเฉลยได้ทันทีในวันที่เราตัดสินใจเปิดให้มันเข้า corpus
+
+/** จำนวน candidate ที่เก็บลง meta — เท่ากับที่ picker ของ LINE slice ไว้ (quotationService.ts) */
+const LOG_CANDIDATE_LIMIT = 12;
+
+/** ชนิดของเหตุการณ์ที่หน้าเว็บเขียนลง messages.type */
+type WebEventType = 'web_propose' | 'web_draft' | 'web_revise';
+
+/**
+ * ย่อ candidate ให้เหลือเฉพาะสิ่งที่ตอบคำถาม "ทำไมระบบเรียงลำดับแบบนี้"
+ * ไม่เก็บแถวลูกค้าทั้งแถว — ที่อยู่/เบอร์/อีเมลของลูกค้าไม่ได้ช่วยตอบคำถามนั้นเลย
+ * และการไม่ก๊อปมันมาไว้อีกที่คือการไม่เพิ่มจุดที่ PII รั่วโดยไม่จำเป็น
+ */
+function slimCustomerCandidates(candidates: any[] | null | undefined): any[] {
+  return (candidates ?? []).slice(0, LOG_CANDIDATE_LIMIT).map((c: any, i: number) => ({
+    rank: i + 1,
+    id: c?.item?.id ?? null,
+    display_name: c?.item?.display_name ?? null,
+    reference: c?.item?.reference ?? null,
+    score: c?.score ?? null,
+    matched_contacts: c?.evidence?.matchedContacts ?? [],
+    partial_contacts: c?.evidence?.partialContacts ?? [],
+  }));
+}
+
+function slimContactCandidates(candidates: any[] | null | undefined): any[] {
+  return (candidates ?? []).slice(0, LOG_CANDIDATE_LIMIT).map((c: any, i: number) => ({
+    rank: i + 1,
+    id: c?.item?.id ?? null,
+    name: c?.item?.name ?? null,
+    score: c?.score ?? null,
+  }));
+}
+
+/**
+ * เขียนแถวประวัติ 1 เหตุการณ์ — **ห้าม throw และห้ามให้เส้นทางหลักรอผลของมันเพื่อตัดสินใจอะไร**
+ * `insertMessage()` กลืน error ไว้เองอยู่แล้ว (db/repositories.ts) ที่นี่แค่ยืนยันสัญญานั้น
+ *
+ * ⚠️ ทุกจุดที่เรียกต้องอยู่ **นอกทรานแซกชัน** — ฟังก์ชันนี้ใช้ `pool` ตามกฎเหล็กของ CLAUDE.md
+ */
+async function logWebEvent(params: {
+  webUserId: string;
+  type: WebEventType;
+  content: string;
+  replyContent: string;
+  meta: Record<string, any>;
+}): Promise<number | null> {
+  return insertMessage({
+    user_id: params.webUserId,
+    message_id: `${params.type}_${Date.now()}`,
+    type: params.type,
+    content: params.content,
+    // เว็บไม่มี replyToken และจะไม่มีวันมี — ไม่ใช่ "ยังไม่ได้ใส่"
+    reply_token: null,
+    reply_content: params.replyContent,
+    meta: params.meta,
+  });
+}
+
+/** สรุปผลของ propose เป็นข้อความ — ถ้อยคำเดินตามฝั่ง LINE เพื่อให้อ่านเทียบกันได้ */
+function buildProposeReplyText(r: ProposeResult, customerQuery: string): string {
+  if (r.extraction_failed) return r.reply_message || 'ระบบไม่ว่าง สกัดข้อความไม่สำเร็จ';
+  if (!r.quote_data) return r.reply_message || `intent=${r.intent}`;
+
+  const lines = [`📝 ร่างใบเสนอราคา (ยังไม่บันทึก)`];
+  const n = r.customer_candidates.length;
+  if (customerQuery === '') lines.push(`⚠️ ไม่ได้ระบุชื่อบริษัท/ลูกค้า`);
+  else if (n === 0) lines.push(`❌ ไม่พบชื่อบริษัท "${customerQuery}" ในระบบ`);
+  else if (n === 1) lines.push(`🏢 ${r.customer_candidates[0]?.item?.display_name ?? '-'}`);
+  else lines.push(`🏢 พบชื่อบริษัทใกล้เคียงกับ "${customerQuery}" ${n} ราย — รอเคาะ`);
+
+  lines.push(`📦 รายการ ${r.slots.length} · ยังไม่ระบุรุ่นได้ ${r.unresolved_count}`);
+  return lines.join('\n');
+}
+
 // ── 1) ข้อความ → ร่าง (ยังไม่เขียน quotations) ───────────────────────────────
 
 export interface ProposeResult {
@@ -161,16 +251,25 @@ export interface ProposeResult {
   unresolved_count: number;
   customer_candidates: any[];
   contact_candidates: any[];
+  /**
+   * id ของแถวประวัติที่เพิ่งเขียนลง `messages` — ฟอร์มต้องส่งกลับมาตอนกดสร้างร่าง
+   * เพื่อให้คำนวณ `chosen_rank` ได้ว่าแอดมินเคาะบริษัทอันดับที่เท่าไรของสิ่งที่ระบบเรียงให้
+   * (docs/plan-web-quote-logging.md §5) · `null` = เขียน log ไม่สำเร็จ ซึ่งไม่ใช่เหตุให้งานล้ม
+   */
+  propose_msg_id: number | null;
 }
 
 /**
- * วางข้อความ → คืน slots + candidates โดย **ไม่เขียน DB สักแถว**
+ * วางข้อความ → คืน slots + candidates โดย **ไม่เขียน `quotations` สักแถว**
  *
  * ต่างจากทางเดินของ LINE 2 จุดเท่านั้น:
  *   1. `purgePending: false` — ยังไม่ใช่การตัดสินใจ จึงไม่มีสิทธิ์ไปลบร่างที่ค้างอยู่
  *   2. ไม่เรียก processQuotationRequest — ฟังก์ชันนั้นเขียนใบสถานะ `pending_*` ระหว่างไล่ถามหา
  *      บริษัท/ผู้ติดต่อ ซึ่งเป็นกลไกของแชทล้วน ๆ · ฟอร์มถามทั้งหมดจบในหน้าเดียวก่อน insert
  *      ⇒ เรียก findCustomerCandidates/findContactCandidates (อ่านอย่างเดียว) ตรง ๆ แทน
+ *
+ * **เขียน `messages` 1 แถว** (`type='web_propose'`) ตั้งแต่ 2026-09-14 — ตารางคนละตัวกับ
+ * `quotations` และคำมั่นข้อ 1 ยังอยู่ครบ ด่าน `diag:web-quote` ข้อ 2 ตรวจที่ `quotations`
  */
 export async function proposeFromText(params: {
   adminId: number;
@@ -183,7 +282,12 @@ export async function proposeFromText(params: {
   const webUserId = await resolveWebUserId(params.adminId, params.spUserId);
 
   return runQueued(webUserId, async () => {
-    const extracted = await extractQuoteFromText({ userId: webUserId, text, purgePending: false });
+    const startedAt = Date.now();
+    // useHistory: false — เส้นเว็บมีแถวของตัวเองใน messages แล้ว แต่ยังไม่เปิดให้ป้อน prompt
+    // (เหตุผลเต็มอยู่ที่นิยามของพารามิเตอร์ใน quoteExtraction.ts)
+    const extracted = await extractQuoteFromText({
+      userId: webUserId, text, purgePending: false, useHistory: false,
+    });
 
     const base: ProposeResult = {
       web_user_id: webUserId,
@@ -195,10 +299,32 @@ export async function proposeFromText(params: {
       unresolved_count: (extracted.slots ?? []).filter(s => !s.resolved).length,
       customer_candidates: [],
       contact_candidates: [],
+      propose_msg_id: null,
+    };
+
+    /** เขียนประวัติแล้วติด id กลับเข้า result — เรียกที่ทางออกทุกทางของฟังก์ชันนี้ */
+    const finish = async (customerQuery: string, outcome: string): Promise<ProposeResult> => {
+      base.propose_msg_id = await logWebEvent({
+        webUserId,
+        type: 'web_propose',
+        content: text,
+        replyContent: buildProposeReplyText(base, customerQuery),
+        meta: {
+          intent: base.intent,
+          outcome,
+          extracted: base.quote_data,
+          cust_candidates: slimCustomerCandidates(base.customer_candidates),
+          contact_candidates: slimContactCandidates(base.contact_candidates),
+          duration_ms: Date.now() - startedAt,
+        },
+      });
+      return base;
     };
 
     // intent อื่น (REGISTER / PRODUCT_INFO / UNCLEAR) ไม่มีอะไรให้เติม — ฟอร์มขึ้นข้อความจาก AI
-    if (!extracted.quoteData) return base;
+    if (!extracted.quoteData) {
+      return finish('', base.extraction_failed ? 'extraction_failed' : `intent_${base.intent}`);
+    }
 
     // ใช้แถวเซลส์ "ตัวจริง" ไม่ใช่แถวพร็อกซี — การให้คะแนนใช้ชื่อเจ้าของลูกค้าและสาขา
     // ซึ่งแถวพร็อกซีไม่ได้ก๊อป branch มาด้วยตามที่ §2.3 ตั้งใจ ⇒ ใช้พร็อกซีจะได้คะแนน
@@ -218,7 +344,13 @@ export async function proposeFromText(params: {
       if (customerId) base.contact_candidates = await findContactCandidates(customerId, contactQuery);
     }
 
-    return base;
+    return finish(
+      customerQuery,
+      customerQuery === '' ? 'no_customer_query'
+        : base.customer_candidates.length === 0 ? 'no_candidates'
+        : base.customer_candidates.length === 1 ? 'single_candidate'
+        : 'ambiguous'
+    );
   });
 }
 
@@ -316,6 +448,8 @@ export async function createDraft(params: {
   customerId: number | string;
   contactId: number | string;
   items: WebQuoteItemInput[];
+  /** id ของแถว `web_propose` ที่ฟอร์มได้มาจากขั้นก่อนหน้า — ไม่ส่งมาก็สร้างร่างได้ตามปกติ */
+  proposeMsgId?: number | string | null;
 }): Promise<CreateDraftResult> {
   if (!Array.isArray(params.items) || params.items.length === 0) {
     throw new WebQuoteError('BAD_REQUEST', 'ต้องมีรายการสินค้าอย่างน้อย 1 รายการ (items)', 400);
@@ -331,9 +465,14 @@ export async function createDraft(params: {
     throw new WebQuoteError('BAD_REQUEST', 'ต้องระบุผู้ติดต่อ (contact_id) เป็นตัวเลข', 400);
   }
 
+  // ไม่ใช่ตัวเลข = ไม่มีการอ้างอิง ไม่ใช่ error — ร่างต้องสร้างได้แม้ log ของขั้นก่อนหน้าจะหาย
+  const proposeMsgIdRaw = Number(params.proposeMsgId);
+  const proposeMsgId = Number.isFinite(proposeMsgIdRaw) && proposeMsgIdRaw > 0 ? proposeMsgIdRaw : null;
+
   const webUserId = await resolveWebUserId(params.adminId, params.spUserId);
 
   return runQueued(webUserId, async () => {
+    const startedAt = Date.now();
     const contact = await getContactById(contactId);
     if (!contact) throw new WebQuoteError('BAD_REQUEST', `ไม่พบผู้ติดต่อ id=${contactId}`, 400);
 
@@ -364,6 +503,29 @@ export async function createDraft(params: {
       throw new WebQuoteError('INSERT_FAILED', 'ไม่สามารถบันทึกข้อมูลใบเสนอราคาได้', 500);
     }
 
+    // ── ประวัติ: เขียน "หลัง" insertDraftQuotations คืนค่าแล้วเท่านั้น ──────────
+    // ฟังก์ชันนั้นมี withTransaction อยู่ข้างใน (services/quotationService.ts) การเขียน log
+    // ระหว่างนั้นคือการเรียก pool.query ในทรานแซกชัน = ผิดกฎเหล็กของ CLAUDE.md
+    await logWebEvent({
+      webUserId,
+      type: 'web_draft',
+      content: `เลือก ${customer.display_name} / ${contact.name}`,
+      // รูปแบบเดียวกับสรุปร่างของ LINE (utils/flexTemplates.ts) — คง `📝 ร่างใบเสนอราคา`
+      // และ `🏢 <ชื่อบริษัท>` ไว้เพื่อให้แถวนี้ใช้เป็นเฉลยของ evalCustomerSearch ได้ตรง ๆ
+      replyContent:
+        `📝 ร่างใบเสนอราคา\n🏢 ${customer.display_name}\n👤 ${contact.name}\n` +
+        `📄 รหัสร่าง: ${quotes.map((q: any) => q.id).join(', ')}`,
+      meta: {
+        propose_msg_id: proposeMsgId,
+        chosen_customer_id: resolvedCustomerId,
+        chosen_contact_id: contactId,
+        chosen_rank: await resolveChosenRank(proposeMsgId, resolvedCustomerId, customerIdIn),
+        quote_ids: quotes.map((q: any) => String(q.id)),
+        outcome: 'ok',
+        duration_ms: Date.now() - startedAt,
+      },
+    });
+
     return {
       web_user_id: webUserId,
       customer_id: resolvedCustomerId,
@@ -372,6 +534,30 @@ export async function createDraft(params: {
       quotes,
     };
   });
+}
+
+/**
+ * แอดมินเคาะบริษัทอันดับที่เท่าไรของสิ่งที่ระบบเรียงให้ตอน propose (§5 ของแผน)
+ *
+ * เทียบทั้ง `resolvedCustomerId` (บริษัทของผู้ติดต่อที่เลือกจริง ซึ่งอาจเป็นสาขาพี่น้อง) และ
+ * `pickedCustomerId` (บริษัทที่กดใน dropdown) เพราะสองค่านี้ต่างกันได้ตามกติกา resolveContactFlow
+ * — เจอค่าใดค่าหนึ่งก็ถือว่าระบบเสนอถูกแล้ว
+ *
+ * คืน `null` เมื่อ: ไม่มี propose_msg_id · อ่าน meta ไม่ได้ · หรือ **ไม่เจอในรายการที่เสนอไป**
+ * กรณีสุดท้ายคือข้อมูลที่มีค่าที่สุดของตารางนี้ — แปลว่าแอดมินต้องไปค้นเพิ่มเอง
+ */
+async function resolveChosenRank(
+  proposeMsgId: number | null,
+  resolvedCustomerId: number,
+  pickedCustomerId: number
+): Promise<number | null> {
+  if (proposeMsgId == null) return null;
+  const meta = await getMessageMetaById(proposeMsgId);
+  const list: any[] = Array.isArray(meta?.cust_candidates) ? meta.cust_candidates : [];
+  const hit = list.find(
+    (c: any) => Number(c?.id) === resolvedCustomerId || Number(c?.id) === pickedCustomerId
+  );
+  return hit ? Number(hit.rank) : null;
 }
 
 // ── 5) revise ────────────────────────────────────────────────────────────────
@@ -404,6 +590,7 @@ export async function reviseQuotation(params: {
   const webUserId = await resolveWebUserId(params.adminId, params.spUserId);
 
   return runQueued(webUserId, async () => {
+    const startedAt = Date.now();
     const active = await loadActiveQuotation(quoteNo);
     if (!active) {
       throw new WebQuoteError('QUOTATION_NOT_FOUND', `ไม่พบใบเสนอราคาเลขที่ "${quoteNo}" ในระบบ`, 404);
@@ -445,6 +632,24 @@ export async function reviseQuotation(params: {
     if (!quotes || quotes.length === 0) {
       throw new WebQuoteError('INSERT_FAILED', 'ไม่สามารถเตรียมใบเสนอราคาเพื่อแก้ไขได้', 500);
     }
+
+    // นอกทรานแซกชันของ insertDraftQuotations แล้ว — เหตุผลเดียวกับใน createDraft()
+    await logWebEvent({
+      webUserId,
+      type: 'web_revise',
+      content: `แก้ไข ${active.quotation_no}`,
+      replyContent:
+        `📝 ร่างใบเสนอราคา\n🏢 ${active.customer_name}\n` +
+        `📄 รหัสร่าง: ${quotes[0].id} (แก้จาก ${active.quotation_no})`,
+      meta: {
+        revise_from: active.quotation_no,
+        draft_quote_id: String(quotes[0].id),
+        chosen_customer_id: active.customer_id ?? null,
+        chosen_contact_id: active.contact_id ?? null,
+        outcome: 'ok',
+        duration_ms: Date.now() - startedAt,
+      },
+    });
 
     return {
       web_user_id: webUserId,

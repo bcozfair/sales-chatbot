@@ -97,10 +97,13 @@ status (pending_branch/pending_profile/pending_profile_confirm/active/edit_field
 branch_code (TEXT comma-separated), created_at, updated_at
 ```
 
-**`messages`** — log การสนทนา LINE
+**`messages`** — log การสนทนา **ทั้งสองช่องทาง** (LINE และหน้าเว็บขอใบเสนอราคา)
 ```
-user_id, message_id, type, content, reply_token, reply_content, created_at
+user_id, message_id, type, content, reply_token, reply_content, meta (jsonb), created_at
 ```
+`user_id` ขึ้นต้น `web:` = มาจากหน้าเว็บ · `type` ของเว็บขึ้นต้น `web_` เสมอ (`web_propose` ·
+`web_draft` · `web_confirm` · `web_revise`) และ `meta` เป็น NULL เฉพาะแถวของ LINE
+— รายละเอียดใน `docs/plan-web-quote-logging.md`
 
 #### ตาราง Sync จาก Odoo
 

@@ -618,7 +618,8 @@ CREATE TABLE public.messages (
     type text,
     content text,
     reply_token text,
-    reply_content text
+    reply_content text,
+    meta jsonb
 );
 
 

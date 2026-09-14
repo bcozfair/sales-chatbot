@@ -349,16 +349,37 @@ export async function updateSalespersonByUserId(userId: string, updates: Record<
 
 // ═══════════════════════════ messages ═══════════════════════════
 
+/**
+ * เขียนประวัติ 1 เหตุการณ์ — ใช้ร่วมกันทั้งเส้น LINE และเส้นหน้าเว็บแอดมิน
+ *
+ * `meta` เป็นของเส้นเว็บเท่านั้น (docs/plan-web-quote-logging.md §3) — แถวจาก LINE ต้องเป็น
+ * NULL เสมอ เพราะ "มี meta หรือไม่มี" คือสิ่งที่แยกสองช่องทางออกจากกันในด่านตรวจ
+ *
+ * คืน `id` ของแถวที่เพิ่งเขียนเพราะแถว `web_draft` ต้องอ้างกลับไปที่แถว `web_propose`
+ * เพื่อคำนวณ `chosen_rank` · คืน `null` เมื่อเขียนไม่สำเร็จ — **ฟังก์ชันนี้ห้าม throw**
+ * การ log ล้มต้องไม่ทำให้เส้นทางที่กำลังตอบลูกค้าอยู่ล้มตาม
+ */
 export async function insertMessage(msg: {
   user_id: string; message_id: string; type: string;
   content: string; reply_token?: string | null; reply_content?: string | null;
-}): Promise<void> {
+  meta?: any;
+}): Promise<number | null> {
   try {
-    await pool.query(
-      `INSERT INTO messages (user_id, message_id, type, content, reply_token, reply_content)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [msg.user_id, msg.message_id, msg.type, msg.content, msg.reply_token ?? null, msg.reply_content ?? null]);
-  } catch (err) { logErr('insertMessage', err); }
+    const { rows } = await pool.query(
+      `INSERT INTO messages (user_id, message_id, type, content, reply_token, reply_content, meta)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+      [msg.user_id, msg.message_id, msg.type, msg.content, msg.reply_token ?? null, msg.reply_content ?? null,
+       msg.meta === undefined ? null : JSON.stringify(msg.meta)]);
+    return rows[0]?.id != null ? Number(rows[0].id) : null;
+  } catch (err) { logErr('insertMessage', err); return null; }
+}
+
+/** meta ของแถวเดียวตาม id — ใช้ตอนคำนวณ chosen_rank ของ web_draft (§5) */
+export async function getMessageMetaById(id: number): Promise<any | null> {
+  try {
+    const { rows } = await pool.query(`SELECT meta FROM messages WHERE id = $1`, [id]);
+    return rows[0]?.meta ?? null;
+  } catch (err) { logErr('getMessageMetaById', err); return null; }
 }
 
 /** ประวัติแชทล่าสุดของ user (ใหม่→เก่า) สำหรับ AI context */

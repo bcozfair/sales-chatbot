@@ -69,6 +69,20 @@ export interface ExtractQuoteParams {
    * (docs/plan-web-quote-request.md ขั้น 3′ · ด่าน `diag:web-quote` ข้อ 2 ตรวจข้อนี้โดยตรง)
    */
   purgePending?: boolean;
+  /**
+   * ใส่ประวัติแชทของ `userId` เข้า prompt หรือไม่ — **ค่าปริยาย `true` = พฤติกรรมของ LINE เดิมเป๊ะ**
+   *
+   * มีสวิตช์นี้เพราะตั้งแต่ 2026-09-14 หน้าเว็บเริ่มเขียนแถวของตัวเองลง `messages` แล้ว
+   * (docs/plan-web-quote-logging.md) ⇒ `getRecentMessages()` ที่เคยคืน 0 แถวให้เส้นเว็บมาตลอด
+   * จะเริ่มคืนแถวจริง = **พฤติกรรมการสกัดของเว็บเปลี่ยนเงียบ ๆ เพราะงาน log** ซึ่งไม่ใช่สิ่งที่
+   * งานนั้นขอ
+   *
+   * และหน้าต่าง 15 นาทีจะยังตัดไม่ได้จนกว่าจะมีแถว `web_confirm` สะสมพอ ⇒ แอดมินวางใบที่สอง
+   * ของลูกค้าคนละรายภายใน 15 นาที จะได้ลูกค้าของใบแรกติดมาด้วย
+   *
+   * เปิดเมื่อไหร่ต้องมีตัวเลขของตัวเอง — เป็นงานคนละชิ้นกับการเก็บ log (§5.2 ของแผนนั้น)
+   */
+  useHistory?: boolean;
 }
 
 // คำนวณรายการสินค้าที่พร้อมบันทึก (ราคา/ส่วนลดสุทธิ) จาก product ในฐานข้อมูล + item ที่เซลส์ระบุ + ส่วนลดระดับบิล
@@ -238,12 +252,13 @@ export async function extractQuoteFromText(params: ExtractQuoteParams): Promise<
   const remainingMs = params.remainingMs ?? (() => Infinity);
   const checkpoint = params.checkpoint ?? (() => {});
   const purgePending = params.purgePending ?? true;
+  const useHistory = params.useHistory ?? true;
 
       checkpoint('ดึงประวัติแชท + สกัดคำสั่งด้วย LLM');
       // ดึงประวัติการคุยย้อนหลังของ userId นี้
       let historyContext = "";
       try {
-        const history = await getRecentMessages(userId, 10);
+        const history = useHistory ? await getRecentMessages(userId, 10) : [];
         if (history && history.length > 0) {
           // กรองข้อมูลเฉพาะ 15 นาทีล่าสุดเพื่อไม่ให้ดึงประวัติเก่าที่ค้างมาข้ามวัน/ชั่วโมง
           const now = new Date();
