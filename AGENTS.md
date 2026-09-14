@@ -536,6 +536,26 @@ git-ignore ไว้ ⇒ `git worktree add` ไม่พาไปให้ตา
 ใน VSCode ไม่ใช่ปัญหาในโค้ด** — ยืนยันด้วย `git worktree list` ว่าทรีนั้นไม่มีแล้ว แล้วสั่ง
 `TypeScript: Restart TS Server` ก็หาย ห้ามไล่แก้ `tsconfig` ตามข้อความ error
 
+**กันไม่ให้ VSCode ฟ้องอีก — ทำครั้งเดียวต่อเครื่อง** (วัด 2026-09-14: error 2 บรรทัด → **0** ·
+ทรีหลักยัง `exit=0` เหมือนเดิม) วาง junction ไว้ **ข้าง ๆ** `.claude/worktrees/` ไม่ใช่ข้างใน
+ทุกทรีที่สร้างหลังจากนี้จึง resolve `vite/client` ได้เองโดยไม่ต้อง install อะไร:
+
+```powershell
+New-Item -ItemType Junction -Path <repo>\.claude\worktrees\node_modules\vite `
+         -Target <repo>\frontend\node_modules\vite
+```
+
+TS ไต่ `node_modules` ขึ้นไปตามลำดับ ⇒ `<ทรี>/frontend/` เจอตัวนี้ก่อนถึงรากเสมอ ·
+**junction เฉพาะ `vite` ไม่ใช่ทั้ง `frontend/node_modules`** เพราะสอง `node_modules` มีชื่อซ้ำกัน
+16 ตัวรวม `@types` กับ `typescript` — ยกทั้งก้อนไปจะบัง `@types` ของ backend ส่วน `vite`
+ไม่อยู่ในรายชื่อซ้ำและ backend ไม่ import มันเลยสักไฟล์ ⇒ ไม่บังอะไรทั้งสิ้น
+**ปลอดภัยกับการปิดทรี** (พิสูจน์แล้ว): มันอยู่นอกทุก worktree `git worktree remove` จึงไม่แตะ
+· แต่ **ห้าม `rm -rf .claude/worktrees/*`** เพราะจะทะลุ junction ไปลบ `vite` ตัวจริง
+(เสียหาย 2.2 MB ซ่อมด้วย `npm --prefix frontend install` — ดังและรู้ตัวทันที)
+มันอยู่ใต้ path ที่ git-ignore ไว้ ⇒ **ไม่เดินทางไปกับ `git pull`** เครื่องใหม่ต้องสั่งเอง
+· นี่แก้แค่ "VSCode เลิกฟ้อง" เท่านั้น จะ **รัน** `lint`/`build` ในทรีจริง ๆ ยังต้อง
+`npm --prefix frontend install` ตามย่อหน้าบน
+
 **ไม่มี unit test suite** (`npm test` เป็น stub) — typecheck + `scripts/diag/*` คือด่านตรวจหลัก
 กฎ "รันทั้งก่อนและหลังแล้วเทียบผล" อยู่ที่ A7.6
 
