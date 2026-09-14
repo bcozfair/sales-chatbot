@@ -15,7 +15,8 @@
 //  ขั้นตอนหลังได้ร่างแล้วใช้ endpoint เดิมของ LIFF ทั้งหมด (PUT/confirm/cancel) ซึ่งตรวจสิทธิ์
 //  ด้วย `userId` ใน body ⇒ ต้องแนบ `web_user_id` ที่ได้จาก /drafts ไปทุกครั้ง (ขั้น 8′)
 // ─────────────────────────────────────────────────────────────────────────────
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useAuth } from '../context/AuthContext';
 import { PageHeader } from './PageHeader';
 import { QuoteIssuerProfile } from './QuoteIssuerProfile';
@@ -189,9 +190,17 @@ function rowsFromSlots(slots: Slot[], quoteData: Record<string, unknown> | null)
   });
 }
 
-// ── ช่องค้นหาสินค้าแบบกะทัดรัดสำหรับ "ในแถวตาราง" ───────────────────────────
+// ── ช่องค้นหาสินค้าแบบกะทัดรัด — ใช้สองที่: ในแถวตาราง และแถบเพิ่มสินค้าใต้ตาราง ────
 //  ไม่ใช้ ProductComboBox ของหน้าตั้งค่า เพราะตัวนั้นเป็นฟิลด์เต็มความสูง 44px พร้อม label
 //  ซึ่งวางในเซลล์ตารางไม่ได้ และไม่คืนราคามาให้ (แถวนี้ต้องเติมราคาตั้งต้นทันทีที่เลือก)
+//
+//  **รายการผลค้นต้องอยู่นอกกล่องตาราง** — ตารางสินค้าถูกครอบด้วย `overflow-x-auto` และ
+//  ตามสเปค CSS พออีกแกนเป็น `visible` เบราว์เซอร์จะคำนวณ `overflow-y` เป็น `auto` ให้เอง
+//  กล่องนั้นจึงกลายเป็น clipping context: dropdown แบบ `absolute` ในเซลล์ถูกตัด **และ**
+//  ไปดันให้กล่องตารางงอก scrollbar ของตัวเองขึ้นมาอีกชั้น (วัดที่ 1280px: ตัดทิ้ง 219px
+//  จากรายการสูง 224px · กล่องตารางงอก scroll 219px) ⇒ ต้อง `createPortal` ออกไปที่
+//  `document.body` แล้ววางด้วย `position: fixed` จากพิกัดของช่องค้น
+//  — วิธีเดียวกับ flyout ของ sidebar ใน AdminApp.tsx ซึ่งชน `overflow-y-auto` ของ nav แบบเดียวกัน
 
 interface SearchHit {
   product_id: number;
@@ -201,80 +210,238 @@ interface SearchHit {
   stock?: number | string;
 }
 
-const ProductPickerCell: React.FC<{ initialQuery: string; onPick: (hit: SearchHit) => void }> = ({
-  initialQuery,
-  onPick,
-}) => {
+/** พิกัดของรายการผลค้นบนจอ — คำนวณใหม่ทุกครั้งที่เปิด/เลื่อนจอ/ปรับขนาดหน้าต่าง */
+interface PopPos {
+  left: number;
+  top?: number;
+  bottom?: number;
+  width: number;
+  maxHeight: number;
+}
+
+const ProductSearchBox: React.FC<{
+  /** คำที่เติมไว้ให้ตั้งแต่แรก — แถวที่จับคู่ไม่ได้ใช้รุ่นที่ลูกค้าพิมพ์มาเป็นตัวตั้ง */
+  initialQuery?: string;
+  placeholder: string;
+  /** danger = ช่องในแถวที่ยังเคาะไม่เสร็จ · plain = แถบเพิ่มสินค้าใต้ตาราง */
+  tone: 'danger' | 'plain';
+  /** แถบเพิ่มสินค้าต้องล้างคำค้นหลังเลือก เพื่อพิมพ์ตัวถัดไปต่อได้ทันที */
+  clearOnPick?: boolean;
+  onPick: (hit: SearchHit) => void;
+}> = ({ initialQuery = '', placeholder, tone, clearOnPick, onPick }) => {
   const [query, setQuery] = useState(initialQuery);
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState(false);
-  const boxRef = useRef<HTMLDivElement>(null);
+  const [active, setActive] = useState(0);
+  const [pos, setPos] = useState<PopPos | null>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+  const popId = useId();
+
+  const place = useCallback(() => {
+    const el = shellRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const width = Math.max(r.width, 320);
+    const below = window.innerHeight - r.bottom - 16;
+    const above = r.top - 16;
+    // คีย์บอร์ดมือถือกินครึ่งล่างของจอ ⇒ ถ้าข้างล่างไม่พอให้พลิกขึ้นบนแทน
+    const down = below >= 220 || below >= above;
+    setPos({
+      left: Math.max(8, Math.min(r.left, window.innerWidth - width - 12)),
+      top: down ? r.bottom + 4 : undefined,
+      bottom: down ? undefined : window.innerHeight - r.top + 4,
+      width,
+      maxHeight: Math.max(120, Math.min(360, down ? below : above)),
+    });
+  }, []);
 
   useEffect(() => {
+    // ล้างผลค้นตอนช่องว่างทำที่ onChange ไม่ใช่ที่นี่ — setState ตรง ๆ ใน effect
+    // ถูกกฎ react-hooks/set-state-in-effect ปฏิเสธ (และมันคืองานของ event handler จริง ๆ)
     const q = query.trim();
     if (!q) return;
     const timer = setTimeout(async () => {
       setLoading(true);
       try {
         const res = await fetch(`/api/products/search?q=${encodeURIComponent(q)}&limit=12`);
-        const data = res.ok ? await res.json() : [];
+        if (!res.ok) throw new Error(String(res.status));
+        const data = await res.json();
         setHits(Array.isArray(data) ? data : []);
-        setOpen(true);
+        setFailed(false);
       } catch {
         setHits([]);
+        setFailed(true);
       } finally {
         setLoading(false);
+        setActive(0);
       }
     }, 300);
     return () => clearTimeout(timer);
   }, [query]);
 
+  // `scroll` ต้องดักแบบ capture เพราะกล่องตารางเลื่อนเองได้ ไม่ใช่แค่หน้าเว็บ
+  useEffect(() => {
+    if (!open) return;
+    place();
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    return () => {
+      window.removeEventListener('scroll', place, true);
+      window.removeEventListener('resize', place);
+    };
+  }, [open, place, hits.length, loading, failed]);
+
   useEffect(() => {
     if (!open) return;
     const onPointer = (e: MouseEvent) => {
-      if (boxRef.current?.contains(e.target as Node)) return;
+      const t = e.target as Node;
+      if (shellRef.current?.contains(t) || popRef.current?.contains(t)) return;
       setOpen(false);
     };
     document.addEventListener('mousedown', onPointer);
     return () => document.removeEventListener('mousedown', onPointer);
   }, [open]);
 
+  const choose = (h: SearchHit) => {
+    onPick(h);
+    setOpen(false);
+    if (clearOnPick) {
+      setQuery('');
+      setHits([]);
+    }
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (!open) return setOpen(query.trim().length > 0);
+      setActive((i) => (hits.length ? (i + 1) % hits.length : 0));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActive((i) => (hits.length ? (i - 1 + hits.length) % hits.length : 0));
+    } else if (e.key === 'Enter') {
+      const hit = hits[active];
+      if (open && hit) {
+        e.preventDefault();
+        choose(hit);
+      }
+    } else if (e.key === 'Escape') {
+      if (open) {
+        e.preventDefault();
+        setOpen(false);
+      }
+    } else if (e.key === 'Tab') {
+      setOpen(false);
+    }
+  };
+
   return (
-    <div className="relative" ref={boxRef}>
-      <div className="flex items-center gap-1.5 h-9 px-2.5 rounded-lg border border-red-300 bg-card">
-        <Search className="w-3.5 h-3.5 text-red-400 shrink-0" />
+    <>
+      <div
+        ref={shellRef}
+        className={`flex items-center gap-1.5 h-9 px-2.5 rounded-lg border bg-card ${
+          tone === 'danger' ? 'border-red-300' : 'border-slate-200'
+        }`}
+      >
+        <Search className={`w-3.5 h-3.5 shrink-0 ${tone === 'danger' ? 'text-red-400' : 'text-slate-400'}`} />
         <input
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onFocus={() => hits.length > 0 && setOpen(true)}
-          placeholder="ค้นหารุ่นที่ถูกต้อง..."
+          onChange={(e) => {
+            const v = e.target.value;
+            setQuery(v);
+            setOpen(v.trim().length > 0);
+            if (!v.trim()) {
+              setHits([]);
+              setFailed(false);
+            }
+          }}
+          onFocus={() => setOpen(query.trim().length > 0)}
+          onKeyDown={onKeyDown}
+          placeholder={placeholder}
+          autoComplete="off"
+          role="combobox"
+          aria-expanded={open}
+          aria-controls={popId}
+          aria-activedescendant={open && hits[active] ? `${popId}-opt-${active}` : undefined}
           className="flex-1 bg-transparent outline-none text-xs text-slate-800 placeholder:text-slate-400 min-w-0"
         />
         {loading && <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400" />}
       </div>
-      {open && hits.length > 0 && (
-        <div className="absolute z-40 mt-1 w-[320px] max-w-[80vw] bg-card border border-slate-200 rounded-xl shadow-xl max-h-56 overflow-y-auto divide-y divide-slate-100">
-          {hits.map((h) => (
-            <button
-              key={h.product_id}
-              type="button"
-              onClick={() => {
-                onPick(h);
-                setOpen(false);
-              }}
-              className="w-full text-left px-3 py-2 hover:bg-slate-50 flex flex-col gap-0.5"
-            >
-              <span className="text-xs font-semibold text-slate-800">{h.model}</span>
-              <span className="text-[11px] text-slate-500 line-clamp-1">{h.name}</span>
-              <span className="text-[11px] text-slate-400">
-                ฿{money(h.price)} · คงเหลือ {money(h.stock ?? 0)}
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
+
+      {open &&
+        pos &&
+        createPortal(
+          <div
+            ref={popRef}
+            id={popId}
+            role="listbox"
+            // กดที่รายการแล้วต้องไม่ทำให้ช่องค้นเสียโฟกัส ไม่งั้นพิมพ์ตัวถัดไปต่อไม่ได้
+            onMouseDown={(e) => e.preventDefault()}
+            style={{
+              position: 'fixed',
+              left: pos.left,
+              top: pos.top,
+              bottom: pos.bottom,
+              width: pos.width,
+              maxHeight: pos.maxHeight,
+            }}
+            className="z-50 overflow-y-auto overscroll-contain bg-card border border-slate-200 rounded-xl shadow-xl"
+          >
+            {/* slate-500 ไม่ใช่ slate-400: ตัวอักษร 10px บนพื้น slate-50 ของธีมสว่าง
+                ที่ slate-400 ได้ contrast ~2.6:1 ซึ่งตกเกณฑ์ 4.5 ของตัวอักษรขนาดปกติ */}
+            <div className="sticky top-0 flex items-center gap-2 px-3 py-1 bg-slate-50 border-b border-slate-200 text-[10px] text-slate-500">
+              {loading ? 'กำลังค้นหา...' : failed ? 'ค้นหาไม่สำเร็จ' : `${hits.length} รายการ`}
+              <span className="ml-auto hidden sm:inline">↑ ↓ เลื่อน · Enter เลือก · Esc ปิด</span>
+            </div>
+
+            {loading ? (
+              <p className="flex items-center gap-2 px-3 py-4 text-xs text-slate-500">
+                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                กำลังค้นหา &ldquo;{query.trim()}&rdquo;
+              </p>
+            ) : failed ? (
+              <p className="flex items-start gap-2 px-3 py-4 text-xs text-red-700">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-px" />
+                ค้นหาไม่สำเร็จ — เช็กการเชื่อมต่อแล้วพิมพ์ใหม่อีกครั้ง
+              </p>
+            ) : hits.length === 0 ? (
+              <p className="px-3 py-4 text-xs text-slate-500">
+                ไม่พบสินค้าที่ตรงกับ &ldquo;{query.trim()}&rdquo;
+              </p>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {hits.map((h, i) => (
+                  <button
+                    key={h.product_id}
+                    id={`${popId}-opt-${i}`}
+                    role="option"
+                    aria-selected={i === active}
+                    type="button"
+                    onMouseEnter={() => setActive(i)}
+                    onClick={() => choose(h)}
+                    ref={(el) => {
+                      if (i === active) el?.scrollIntoView({ block: 'nearest' });
+                    }}
+                    className={`w-full text-left px-3 py-2 flex flex-col gap-0.5 ${
+                      i === active ? 'bg-slate-100' : 'hover:bg-slate-50'
+                    }`}
+                  >
+                    <span className="text-xs font-semibold text-slate-800">{h.model}</span>
+                    <span className="text-[11px] text-slate-500 line-clamp-1">{h.name}</span>
+                    <span className="text-[11px] text-slate-400">
+                      ฿{money(h.price)} · คงเหลือ {money(h.stock ?? 0)}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>,
+          document.body,
+        )}
+    </>
   );
 };
 
@@ -506,6 +673,32 @@ export const QuoteRequest: React.FC = () => {
     ]);
 
   const removeRow = (key: string) => setRows((rs) => (rs ? rs.filter((r) => r.key !== key) : rs));
+
+  // แถบเพิ่มสินค้าใต้ตาราง — เลือกแล้วได้แถวที่เคาะเสร็จเลย ไม่ต้องไปค้นซ้ำในแถว
+  const addedTimer = useRef<number | null>(null);
+  const [justAdded, setJustAdded] = useState<string | null>(null);
+  useEffect(() => () => { if (addedTimer.current) window.clearTimeout(addedTimer.current); }, []);
+
+  const addProductRow = (h: SearchHit) => {
+    setRows((rs) => [
+      ...(rs ?? []),
+      {
+        key: newKey(),
+        productTemplateId: h.product_id,
+        model: h.model,
+        name: h.name,
+        quantity: '1',
+        price: String(num(h.price)),
+        disc1: '',
+        disc2: '',
+        candidates: [],
+        status: 'ok',
+      },
+    ]);
+    setJustAdded(h.model);
+    if (addedTimer.current) window.clearTimeout(addedTimer.current);
+    addedTimer.current = window.setTimeout(() => setJustAdded(null), 2500);
+  };
 
   const unresolved = (rows ?? []).filter((r) => r.status !== 'ok').length;
   const formTotal = (rows ?? []).reduce((sum, r) => sum + (r.status === 'ok' ? rowTotal(r) : 0), 0);
@@ -850,8 +1043,10 @@ export const QuoteRequest: React.FC = () => {
                           <p className="text-[11px] text-red-700">
                             {r.model ? `ไม่พบรุ่น “${r.model}” ในระบบ` : 'ยังไม่ได้เลือกสินค้า'}
                           </p>
-                          <ProductPickerCell
+                          <ProductSearchBox
                             initialQuery={r.model}
+                            placeholder="ค้นหารุ่นที่ถูกต้อง..."
+                            tone="danger"
                             onPick={(h) =>
                               patchRow(r.key, {
                                 productTemplateId: h.product_id,
@@ -920,14 +1115,33 @@ export const QuoteRequest: React.FC = () => {
             </table>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
+          {/* แถบเพิ่มสินค้า — พิมพ์แล้ว Enter ได้แถวที่เคาะเสร็จทันที โฟกัสค้างไว้ให้พิมพ์ตัวถัดไปต่อ
+              ปุ่ม "แถวเปล่า" คือของเดิม เก็บไว้สำหรับกรณีที่ยังไม่รู้ว่าจะใส่รุ่นอะไร */}
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-2">
+            <Plus className="w-4 h-4 shrink-0" style={{ color: BRAND }} />
+            <div className="flex-1 min-w-[180px]">
+              <ProductSearchBox
+                placeholder="เพิ่มสินค้า — พิมพ์รุ่นหรือชื่อ แล้วกด Enter"
+                tone="plain"
+                clearOnPick
+                onPick={addProductRow}
+              />
+            </div>
             <button
               onClick={addRow}
-              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg border border-slate-200 bg-card text-slate-600 hover:bg-slate-100"
             >
-              <Plus className="w-3.5 h-3.5" />
-              เพิ่มแถวสินค้า
+              แถวเปล่า
             </button>
+            {justAdded && (
+              <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-700">
+                <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                เพิ่ม {justAdded} แล้ว
+              </span>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
             <div className="ml-auto text-sm">
               <span className="text-slate-500">ยอดรวม (ก่อน VAT/ค่าขนส่ง): </span>
               <span className="font-extrabold text-slate-900 tabular-nums">฿{money(formTotal)}</span>
