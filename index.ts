@@ -104,6 +104,7 @@ import {
   listSalespersonsForWeb,
   proposeFromText,
   createDraft as createWebQuoteDraft,
+  previewDraft as previewWebQuoteDraft,
   reviseQuotation as reviseWebQuotation,
 } from './services/webQuoteService.js';
 import {
@@ -471,6 +472,7 @@ app.get('/api/shipping-fee/config', async (req: any, res: any) => {
       default_item_name: cfg.defaultItemName,
       product_id: cfg.productId,
       product_model: cfg.productModel,
+      product_name: cfg.productName,
       internal_reference: cfg.productInternalReference
     });
   } catch (err: any) {
@@ -2507,6 +2509,25 @@ app.post('/api/admin/webquote/propose', adminAuthMiddleware, requireRole('admin'
     }));
   } catch (err: any) {
     sendWebQuoteError(res, 'POST /api/admin/webquote/propose', err);
+  }
+});
+
+/**
+ * ฟอร์มที่เคาะแล้ว → "ใบที่จะได้" โดยยังไม่เขียน DB สักแถว (dry-run ของ /drafts)
+ *
+ * มีเพราะเส้นเว็บทิ้งร่างทั้งใบเมื่อติดกฎ — ถ้าไม่มีพรีวิว แอดมินจะรู้ว่าติดอะไรก็ต่อเมื่อ
+ * กดสร้างไปแล้ว · ไม่รับ `sp_user_id` โดยตั้งใจ เพราะพรีวิวไม่ต้องมีตัวตนผู้ออกใบ
+ * และการ resolve ตัวตนจะไปเขียนแถวพร็อกซีลง salesperson (ดูหัวข้อ previewDraft)
+ */
+app.post('/api/admin/webquote/preview', adminAuthMiddleware, requireRole('admin', 'subadmin'), express.json({ limit: '2mb' }), async (req: any, res: any) => {
+  try {
+    res.json(await previewWebQuoteDraft({
+      customerId: req.body?.customer_id,
+      contactId: req.body?.contact_id,
+      items: req.body?.items,
+    }));
+  } catch (err: any) {
+    sendWebQuoteError(res, 'POST /api/admin/webquote/preview', err);
   }
 });
 

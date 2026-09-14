@@ -528,6 +528,10 @@ export async function insertDraftQuotations(
     await import('./shippingFee.js');
   const shippingCfg = await loadShippingFeeConfig();
   const items = (itemsForDb || []).filter((item: any) => !isShippingFeeItem(item, shippingCfg));
+  // ตัดออกจากการแบ่งใบ แต่ต้องไม่ทิ้ง — ส่งต่อให้ applyShippingFeeToQuoteGroup เติมกลับหลัง COMMIT
+  // (มีได้บรรทัดเดียว ⇒ หยิบตัวแรกพอ) ถ้าปล่อยหายตรงนี้ ค่าบริการที่แอดมินเพิ่มจากหน้าเว็บ
+  // จะไม่มีวันถึง DB เลยสักครั้ง
+  const incomingFee = (itemsForDb || []).find((item: any) => isShippingFeeItem(item, shippingCfg)) ?? null;
   const pmItems: any[] = [];
   const thtItems: any[] = [];
 
@@ -818,7 +822,7 @@ export async function insertDraftQuotations(
 
   // ค่าขนส่งอัตโนมัติ — ต้องทำหลัง COMMIT เพราะกฎคิดจากยอดรวมของ "ทุกใบในกลุ่ม"
   // ซึ่งเพิ่งมีครบตอนนี้ แล้วอ่านแถวกลับมาใหม่เพื่อให้ผู้เรียกได้ item_details ล่าสุด
-  await applyShippingFeeToQuoteGroup(userId);
+  await applyShippingFeeToQuoteGroup(userId, incomingFee);
   const insertedIds = insertedRaw.map((row: any) => row.id);
   if (insertedIds.length > 0) {
     try {
@@ -1881,7 +1885,10 @@ export async function enrichQuotationData(quoteDb: any): Promise<any> {
         production: item.production || '',
         stock: liveStock,
         is_optional: !!item.is_optional,
-        linked_to_product_id: item.linked_to_product_id || null
+        linked_to_product_id: item.linked_to_product_id || null,
+        // ข้อเท็จจริงของบรรทัดนั้นที่สร้างใหม่ไม่ได้ (ใครเป็นคนใส่บรรทัดค่าบริการ) ⇒ ต้องอยู่ในลิสต์
+        // ตกหล่นเมื่อไหร่ = ค่าบริการที่แอดมินเพิ่มกลายเป็นบรรทัดของกฎ แล้วโดนถอดทิ้งรอบถัดไป
+        is_manual_service: item.is_manual_service === true
       };
     });
 

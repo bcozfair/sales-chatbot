@@ -9,6 +9,8 @@
 //  4. reviseQuotation() — ใบที่ยืนยันแล้ว → ได้ร่าง revision · เลขที่ไม่มีจริง → ปฏิเสธ [เฟส D]
 //  5. ประวัติลง `messages` ครบ 4 ชนิด · chosen_rank คำนวณถูก · แถวของ LINE ไม่ปนเปื้อน
 //     (docs/plan-web-quote-logging.md §7)
+//  6. previewDraft() — dry-run ที่ต้องไม่เขียน DB · แบ่งใบ PM/THT · คืนกำหนดส่ง
+//     และบรรทัดค่าบริการที่แอดมินเพิ่มเองต้องรอดไปถึงใบจริง (บรรทัดเดียวเสมอ)
 //
 //  ⚠️ เขียนข้อมูลจริงลง DB (salesperson · admin_users · quotations ของ user ทดสอบ)
 //     แล้วลบทิ้งใน finally ทุกกรณี — user/แอดมินทดสอบเป็นค่าคงที่ที่ไม่ชนของจริง
@@ -22,6 +24,7 @@ import { decideCustomerSelection } from '../../services/customerService.js';
 import {
   proposeFromText,
   createDraft,
+  previewDraft,
   reviseQuotation,
   resolveWebUserId,
   WebQuoteError,
@@ -390,6 +393,78 @@ async function case5() {
   ok("แถวของเว็บต้องไม่ใช้ type ของ LINE (เช่น 'text')", wrongType === 0, `พบ ${wrongType} แถว`);
 }
 
+/**
+ * ข้อ 6 — พรีวิวก่อนกดสร้างร่าง + ค่าบริการที่แอดมินเพิ่มเอง
+ *
+ * สองเรื่องนี้อยู่ในข้อเดียวกันเพราะมันคือเส้นทางเดียวกันของแอดมิน: เห็นก่อน → เคาะ → กด
+ * และทั้งคู่พังเงียบได้แบบเดียวกัน (บรรทัดหาย / ตัวเลขไม่ตรงกับที่บันทึกจริง)
+ */
+async function case6() {
+  console.log(`\n${BOLD}6) previewDraft + ค่าบริการที่แอดมินเพิ่มเอง${RESET}`);
+  const cust = await pickCustomerContact();
+  const product = await pickProduct(cust);
+  const { loadShippingFeeConfig, isShippingFeeItem } = await import('../../services/shippingFee.js');
+  const cfg = await loadShippingFeeConfig();
+  console.log(`  ${DIM}ลูกค้า: ${cust.name} · สินค้า: ${product.model} · ค่าบริการ: ${cfg.productInternalReference}${RESET}`);
+
+  const items = [
+    { product_template_id: product.product_template_id, quantity: 2 },
+    { product_template_id: cfg.productId, quantity: 1, price: 3500, name: 'ค่าติดตั้งหน้างาน' },
+  ];
+
+  const countQuotes = async () =>
+    Number((await pool.query(`SELECT COUNT(*)::int AS n FROM quotations`)).rows[0].n);
+
+  const before = await countQuotes();
+  const pv = await previewDraft({ customerId: cust.customerId, contactId: cust.contactId, items });
+  const after = await countQuotes();
+  ok('previewDraft ไม่เขียน quotations สักแถว', before === after, `${before} → ${after}`);
+  ok('คืนใบอย่างน้อย 1 ใบ พร้อมข้อความกำหนดส่ง',
+    pv.quotes.length > 0 && !!pv.quotes[0].delivery_text, pv.quotes[0]?.delivery_text);
+  ok('คืนข้อมูลลูกค้าที่จะถูกบันทึกลงใบ', !!pv.customer.display_name && pv.customer.contact_id === cust.contactId);
+
+  const pvFees = pv.quotes.flatMap((q) => q.items).filter((it) => it.is_shipping_fee);
+  ok('บรรทัดค่าบริการมีบรรทัดเดียว', pvFees.length === 1, `ได้ ${pvFees.length}`);
+  ok('  ใช้ชื่อที่แอดมินตั้ง ไม่ใช่ชื่อกลางจาก products', pvFees[0]?.name === 'ค่าติดตั้งหน้างาน', pvFees[0]?.name);
+  ok('  ถูกทำเครื่องหมายว่าเป็นของที่คนใส่เอง', pvFees[0]?.is_manual_service === true);
+  // กติกาของ applyShippingFeeToQuoteGroup: ใบ PM ก่อน ถ้าไม่มีใบ PM เลยก็ใบแรกที่มีสินค้า
+  // (สินค้านำเข้าล้วนจะได้ใบ THT ใบเดียว — บรรทัดต้องไปอยู่ที่นั่น ไม่ใช่สร้างใบ PM เปล่าขึ้นมา)
+  const feeQuote = pv.quotes.find((q) => q.items.some((it) => it.is_shipping_fee));
+  const expectQuote = pv.quotes.find((q) => q.quote_company === 'PM') ?? pv.quotes[0];
+  ok('  อยู่ในใบเดียวกับที่กฎฝั่ง server จะวางไว้', feeQuote === expectQuote,
+    `ได้ใบ ${feeQuote?.quote_company} · คาด ${expectQuote?.quote_company}`);
+  ok('ยอดสินค้าที่ใช้ตัดสินกฎไม่รวมค่าบริการ', pv.goods_total < pv.grand_total,
+    `goods=${pv.goods_total} grand=${pv.grand_total}`);
+  ok('ลูกค้า/สินค้าชุดนี้ไม่ติดกฎ ⇒ สร้างร่างได้', pv.violations.length === 0 && pv.can_create_draft);
+
+  // ของจริง: กดสร้างแล้วบรรทัดต้องยังอยู่ — จุดที่เคยหายคือ insertDraftQuotations ตัดทิ้งก่อนแบ่งใบ
+  const draft = await createDraft({
+    adminId, spUserId: TEST_SP_USER,
+    customerId: cust.customerId, contactId: cust.contactId, items,
+  });
+  ok('createDraft คืนใบร่าง', (draft.quotes?.length ?? 0) > 0, `${draft.quotes?.length ?? 0} ใบ`);
+
+  const { rows: dbRows } = await pool.query(
+    `SELECT item_details FROM quotations WHERE user_id = $1 AND status = 'draft'`, [webUserId]
+  );
+  const dbItems = dbRows.flatMap((r: any) => (Array.isArray(r.item_details) ? r.item_details : []));
+  const dbFees = dbItems.filter((it: any) => isShippingFeeItem(it, cfg));
+  ok('บรรทัดค่าบริการรอดไปถึงใบจริง 1 บรรทัด', dbFees.length === 1, `ได้ ${dbFees.length}`);
+  ok('  ชื่อที่แอดมินตั้งอยู่รอดถึง DB', dbFees[0]?.name === 'ค่าติดตั้งหน้างาน', dbFees[0]?.name);
+  ok('  ราคาที่แอดมินตั้งอยู่รอดถึง DB', Number(dbFees[0]?.price) === 3500, String(dbFees[0]?.price));
+  ok('  ธง is_manual_service ถูกเก็บลง snapshot', dbFees[0]?.is_manual_service === true);
+
+  // ตัวเลขที่แอดมินเห็นก่อนกด ต้องตรงกับที่บันทึกจริง ไม่งั้นพรีวิวไม่มีความหมาย
+  const dbSum = Number(
+    (await pool.query(
+      `SELECT COALESCE(SUM(total_sum), 0)::float8 AS s FROM quotations WHERE user_id = $1 AND status = 'draft'`,
+      [webUserId]
+    )).rows[0].s
+  );
+  ok('ยอดรวมที่พรีวิวโชว์ = ยอดที่บันทึกจริง', Math.abs(dbSum - pv.grand_total) < 0.01,
+    `พรีวิว ${pv.grand_total} · ใบจริง ${dbSum}`);
+}
+
 async function main() {
   console.log(`${BOLD}webQuoteSmoke — ด่านเฟส D${RESET} ${DIM}(${BASE})${RESET}`);
 
@@ -407,6 +482,7 @@ async function main() {
     const quotationNo = await case3();
     await case4(quotationNo);
     await case5();
+    await case6();
   } finally {
     await teardown();
   }
