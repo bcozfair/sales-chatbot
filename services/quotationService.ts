@@ -18,7 +18,7 @@ import { expandOptionalProducts, checkStockRules, StockViolation } from './produ
 import { sumLineTotals, calcNetPrice } from '../utils/pricing.js';
 import { validateProductPriceWithPromotions } from '../utils/promotionValidator.js';
 import { buildThaiAddress } from '../utils/address.js';
-import { resolveDeliveryTerms } from '../utils/deliveryTerms.js';
+import { resolveDeliveryTerms, type DeliveryTypeKey } from '../utils/deliveryTerms.js';
 import { isBlacklisted } from './blacklistService.js';
 import { checkCreditHold, type CreditHoldResult } from './creditHoldService.js';
 import { getIssuerSnapshot } from './webIdentity.js';
@@ -509,6 +509,28 @@ export function companyNameOfRow(row: any, current: string): string {
   return String(row?.customer_name ?? row?.display_name ?? '').trim() || current;
 }
 
+/**
+ * ค่าที่ "คนออกใบ" ตั้งทับของที่ระบบหามาให้ — ใบร่างจากหน้าเว็บใช้ตัวนี้ (2026-09-14)
+ *
+ * แยกเป็นพารามิเตอร์ตัวสุดท้ายแบบไม่บังคับ เพราะ **เส้น LINE ไม่ส่งมาเลยสักฟิลด์** และต้อง
+ * ได้ผลเหมือนเดิมทุกไบต์ (ไม่ส่ง ⇒ เครดิตมาจากลูกค้า · คอลัมน์ override เป็น null เหมือนเดิม)
+ */
+export interface DraftQuoteOverrides {
+  /**
+   * เครดิตที่แอดมินเขียนทับเฉพาะชุดใบนี้ — ลงใน `customer_details.payment_terms`
+   *
+   * ⚠️ ไม่ได้แค่ขึ้นบนเอกสาร: `applyShippingFeeToQuoteGroup()` ที่ถูกเรียกท้ายฟังก์ชันนี้
+   *    อ่านค่านี้จากแถวไปตัดสินว่าใบนี้ต้องมีบรรทัดค่าบริการไหม (เจ้าของเลือกไว้ 2026-09-14
+   *    ว่าให้ "มีผลทุกอย่าง" — สิ่งที่เห็นบนจอต้องเท่ากับสิ่งที่บันทึก ไม่มีเลขซ่อน)
+   */
+  paymentTerms?: string | null;
+  /**
+   * กำหนดส่งที่ตั้งเอง แยกตาม "ใบที่จะออกจริง" เพราะ PM กับ THT มีสต๊อกคนละชุด
+   * ⇒ ค่าอัตโนมัติของสองใบไม่เท่ากันอยู่แล้ว การตั้งทับจึงต้องแยกใบตามไปด้วย
+   */
+  delivery?: Partial<Record<'PM' | 'THT', { type?: DeliveryTypeKey | null; days?: number | null }>>;
+}
+
 export async function insertDraftQuotations(
   userId: string,
   customerName: string,
@@ -516,7 +538,8 @@ export async function insertDraftQuotations(
   status: string,
   customerId?: number | null,
   contactId?: number | null,
-  preserveDrafts: boolean = false
+  preserveDrafts: boolean = false,
+  overrides?: DraftQuoteOverrides
 ): Promise<any[] | null> {
   // การลบร่างเดิม (pending/draft) ย้ายไปทำใน transaction เดียวกับ INSERT ด้านล่าง
   // เพื่อให้ DELETE+INSERT เป็น atomic — ถ้า INSERT ล้ม ร่างเดิมจะไม่ถูกลบทิ้งไปฟรี ๆ
@@ -737,6 +760,11 @@ export async function insertDraftQuotations(
     if (customMeta.address) contactAddress = customMeta.address;
   }
 
+  // เครดิตที่คนออกใบตั้งทับ — ทับ *หลัง* custom_meta เพราะเป็นค่าที่เพิ่งพิมพ์มากับคำขอนี้
+  // `null`/ไม่ส่ง = ใช้ของลูกค้าตามเดิม · สตริงว่าง = ตั้งใจให้ใบนี้ไม่มีเครดิต (คนละความหมาย)
+  const paymentTermsOverride = overrides?.paymentTerms ?? null;
+  if (paymentTermsOverride !== null) paymentTerms = paymentTermsOverride;
+
   // ยังไม่ได้ผูกลูกค้า = null (ระบบอนุญาตเฉพาะลูกค้าที่มีในฐานข้อมูล ไม่มีค่า default อีกแล้ว)
   const customerDetails = {
     customer_name: companyName || null,
@@ -747,11 +775,26 @@ export async function insertDraftQuotations(
     email: contactEmail,
     address: contactAddress,
     payment_terms: paymentTerms,
+    /**
+     * ธงบอกว่า `payment_terms` ข้างบนเป็นค่าที่ "คนสั่งทับ" ไม่ใช่ค่าที่อ่านมาจากลูกค้า
+     *
+     * ⚠️ จำเป็นเพราะ **ทุกจุดที่บันทึกใบจะประกอบ `customer_details` ใหม่จาก `customers_data_view`**
+     *    (ที่นี่ และ `PUT /api/quotation/:id`) ⇒ ถ้าไม่ทิ้งร่องรอยไว้ การกดบันทึกครั้งถัดไป
+     *    จะเขียนเครดิตกลับเป็นของลูกค้าเงียบ ๆ — ปัญหาที่ docs/plan-web-quote-request.md §4.1
+     *    ทำนายไว้ตั้งแต่ก่อนลงมือ · null = ไม่ได้ทับ (ใบของ LINE ทุกใบเป็นแบบนี้)
+     */
+    payment_terms_override: paymentTermsOverride,
     revise_from: reviseFrom,
     custom_meta: customMetaStr
   };
 
   const draftQuotesToInsert: any[] = [];
+
+  /** กำหนดส่งที่ตั้งทับของใบนั้น — ไม่ส่งมา = null ซึ่งคือค่าที่คอลัมน์นี้เคยเป็นมาตลอด */
+  const deliveryOf = (company: 'PM' | 'THT') => ({
+    delivery_type_override: overrides?.delivery?.[company]?.type ?? null,
+    delivery_days_override: overrides?.delivery?.[company]?.days ?? null,
+  });
 
   if (pmItems.length > 0) {
     const pmSum = sumLineTotals(pmItems);
@@ -765,7 +808,8 @@ export async function insertDraftQuotations(
       salesperson_id: salespersonIdStr,
       employee_details: employeeDetails,
       customer_id: customerId || null,
-      contact_id: contactId || null
+      contact_id: contactId || null,
+      ...deliveryOf('PM')
     });
   }
 
@@ -781,7 +825,8 @@ export async function insertDraftQuotations(
       salesperson_id: salespersonIdStr,
       employee_details: employeeDetails,
       customer_id: customerId || null,
-      contact_id: contactId || null
+      contact_id: contactId || null,
+      ...deliveryOf('THT')
     });
   }
 
@@ -802,14 +847,17 @@ export async function insertDraftQuotations(
           INSERT INTO quotations (
             user_id, total_sum, status,
             customer_details, item_details, salesperson_id, employee_details,
-            customer_id, contact_id
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            customer_id, contact_id,
+            delivery_type_override, delivery_days_override
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
           RETURNING *
         `, [
           q.user_id, q.total_sum, q.status,
           JSON.stringify(q.customer_details), JSON.stringify(q.item_details), q.salesperson_id, JSON.stringify(q.employee_details),
           q.customer_id,
-          q.contact_id
+          q.contact_id,
+          q.delivery_type_override,
+          q.delivery_days_override
         ]);
         if (res.rows[0]) rows.push(res.rows[0]);
       }
@@ -1912,6 +1960,8 @@ export async function enrichQuotationData(quoteDb: any): Promise<any> {
       contact_address: customerDetails.address || '',
       delivery_address: customerDetails.address || '',
       payment_terms: customerDetails.payment_terms || '',
+      // null = เครดิตข้างบนคือของลูกค้าจริง ๆ · มีค่า = คนออกใบสั่งทับไว้ (ใบของ LINE เป็น null เสมอ)
+      payment_terms_override: customerDetails.payment_terms_override ?? null,
       salesperson_name: employeeDetails.saleperson || '',
       salesperson_phone: employeeDetails.sale_phone || '',
       salesperson_employee_code: salespersonId || null,

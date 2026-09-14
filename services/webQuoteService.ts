@@ -20,7 +20,7 @@
 import { pool } from '../config/db.js';
 import {
   getCustomerById, getContactById, getSalespersonByUserId,
-  insertMessage, getMessageMetaById,
+  insertMessage, getMessageMetaById, listCustomerPaymentTerms,
 } from '../db/repositories.js';
 import { KeyedTaskQueue, runWithDeadline } from './webhookQueue.js';
 import { extractQuoteFromText, buildResolvedItem, type QuoteSlot } from './quoteExtraction.js';
@@ -33,9 +33,14 @@ import {
   resolveQuoteCompany,
   buildItemSnapshots,
   resolveQuotationDeliveryDays,
+  parseDeliveryDaysOverride,
   type Violation,
+  type DraftQuoteOverrides,
 } from './quotationService.js';
-import { resolveDeliveryTerms, deliveryDisplayText } from '../utils/deliveryTerms.js';
+import {
+  resolveDeliveryTerms, deliveryDisplayText, deliveryTypeLabel,
+  parseDeliveryTypeOverride, DELIVERY_TYPES, type DeliveryTypeKey,
+} from '../utils/deliveryTerms.js';
 import { buildThaiAddress } from '../utils/address.js';
 import { round2, calcNetPrice } from '../utils/pricing.js';
 import { loadActiveQuotation } from './quotationAgent.js';
@@ -390,6 +395,66 @@ export async function proposeFromText(params: {
 
 // ── 2) ฟอร์มที่แอดมินเคาะแล้ว → ร่างจริงใน DB ────────────────────────────────
 
+// ── ค่าที่คนออกใบตั้งทับ: เครดิต + กำหนดส่ง (2026-09-14) ──────────────────────
+//
+//  พรีวิวกับการสร้างร่างต้องอ่าน body ชุดเดียวกันและตีความเหมือนกันเป๊ะ ⇒ แปลงที่นี่ที่เดียว
+//  ไม่งั้นสองเส้นจะตีความคำว่า "ว่าง" คนละแบบ แล้วสิ่งที่แอดมินเห็นก่อนกดจะไม่ใช่สิ่งที่บันทึก
+//  ซึ่งเป็นข้อเดียวที่หัวไฟล์ของ previewDraft ยกให้เป็นเหตุผลของการมีอยู่ของพรีวิว
+
+export interface WebQuoteDeliveryInput {
+  /** 'PM' | 'THT' — ใบที่ค่านี้เป็นของ (สองใบมีสต๊อกคนละชุด ค่าอัตโนมัติจึงไม่เท่ากัน) */
+  quote_company?: string | null;
+  delivery_type_override?: any;
+  delivery_days_override?: any;
+}
+
+/** ยาวกว่านี้คือวางข้อความผิดช่อง ไม่ใช่เครดิต — ค่ายาวสุดที่มีจริงในฐานคือ 18 ตัวอักษร */
+const PAYMENT_TERMS_MAX = 60;
+
+/**
+ * เครดิตที่ตั้งทับ — `null` = ไม่ได้ตั้ง ให้ใช้ของลูกค้าตามเดิม
+ *
+ * ช่องว่างล้วนนับเป็น "ไม่ได้ตั้ง" ไม่ใช่ "ใบนี้ไม่มีเครดิต" เพราะหน้าจอมี `Cash` กับ
+ * `Immediate Payment` ให้เลือกอยู่แล้วเมื่อจะสั่งว่าไม่มีเครดิตจริง ๆ ⇒ ช่องว่างที่หลุดมา
+ * มีทางเดียวคือพลาด และการเดาว่า "ตั้งใจล้างเครดิต" จะทำให้ใบมีค่าบริการโผล่มาโดยไม่มีใครสั่ง
+ */
+export function parsePaymentTermsOverride(raw: any): string | null {
+  if (raw === undefined || raw === null) return null;
+  const s = String(raw).trim();
+  if (s === '') return null;
+  if (s.length > PAYMENT_TERMS_MAX) {
+    throw new WebQuoteError('BAD_REQUEST', `เครดิตยาวเกิน ${PAYMENT_TERMS_MAX} ตัวอักษร`, 400);
+  }
+  return s;
+}
+
+/**
+ * กำหนดส่งที่ตั้งทับรายใบ — ใช้ตัวตรวจตัวเดียวกับ `PUT /api/quotation/:id` ของหน้า LIFF
+ * (`parseDeliveryTypeOverride` / `parseDeliveryDaysOverride`) ⇒ ค่าที่หน้าหนึ่งรับ อีกหน้าก็รับ
+ *
+ * ใบที่ไม่รู้จักต้อง **ตอบ 400** ไม่ใช่ทิ้งเงียบ — ทิ้งเงียบแปลว่าแอดมินตั้ง 14 วันแล้วได้ใบ 3 วัน
+ * โดยไม่มีอะไรบอกสักบรรทัด
+ */
+export function parseDeliveryOverrides(raw: any): DraftQuoteOverrides['delivery'] {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const out: NonNullable<DraftQuoteOverrides['delivery']> = {};
+  for (const entry of raw) {
+    const company = String(entry?.quote_company ?? '').trim().toUpperCase();
+    if (company !== 'PM' && company !== 'THT') {
+      throw new WebQuoteError('BAD_REQUEST', `ใบที่ไม่รู้จักในกำหนดส่ง: ${company || '(ว่าง)'}`, 400);
+    }
+    try {
+      out[company] = {
+        type: parseDeliveryTypeOverride(entry?.delivery_type_override) ?? null,
+        days: parseDeliveryDaysOverride(entry?.delivery_days_override) ?? null,
+      };
+    } catch (err: any) {
+      throw new WebQuoteError('BAD_REQUEST', String(err?.message || 'กำหนดส่งไม่ถูกต้อง'), 400);
+    }
+  }
+  return out;
+}
+
 export interface WebQuoteItemInput {
   /** ชี้สินค้าด้วย product_template_id เป็นหลัก (มาจาก candidates / product-search) */
   product_template_id?: number | string | null;
@@ -515,6 +580,10 @@ export async function createDraft(params: {
    * ขั้น revise จึงส่งรายการกลับเข้าฟอร์มแล้วมาออกใบจริงที่นี่ ไม่ได้ยืนยันร่างที่ revise สร้างไว้
    */
   reviseFrom?: string | null;
+  /** เครดิตที่แอดมินเขียนทับเฉพาะชุดใบนี้ — ว่าง/ไม่ส่ง = ใช้ของลูกค้า */
+  paymentTermsOverride?: any;
+  /** กำหนดส่งที่ตั้งเอง แยกรายใบ — ไม่ส่ง = ให้ระบบคิดเองทุกใบ */
+  delivery?: WebQuoteDeliveryInput[] | null;
 }): Promise<CreateDraftResult> {
   if (!Array.isArray(params.items) || params.items.length === 0) {
     throw new WebQuoteError('BAD_REQUEST', 'ต้องมีรายการสินค้าอย่างน้อย 1 รายการ (items)', 400);
@@ -536,6 +605,12 @@ export async function createDraft(params: {
 
   // ว่าง = ร่างปกติ ไม่ใช่ error — เส้นทางเดิมไม่ส่งฟิลด์นี้มาเลยและต้องทำงานเหมือนเดิมทุกประการ
   const reviseFrom = String(params.reviseFrom ?? '').trim().toUpperCase();
+
+  // ตรวจค่าที่ตั้งทับก่อนแตะ DB — ค่าผิดต้องเป็น 400 ตั้งแต่ปากทาง ไม่ใช่ไปตายกลาง INSERT
+  const overrides: DraftQuoteOverrides = {
+    paymentTerms: parsePaymentTermsOverride(params.paymentTermsOverride),
+    delivery: parseDeliveryOverrides(params.delivery),
+  };
 
   const webUserId = await resolveWebUserId(params.adminId, params.spUserId);
 
@@ -566,7 +641,7 @@ export async function createDraft(params: {
     const plainName = `${customer.display_name} | ${contact.name}`;
     const customerName = reviseFrom ? appendReviseFrom(plainName, reviseFrom) : plainName;
     const quotes = await insertDraftQuotations(
-      webUserId, customerName, expanded, 'draft', resolvedCustomerId, contactId
+      webUserId, customerName, expanded, 'draft', resolvedCustomerId, contactId, false, overrides
     );
     if (!quotes || quotes.length === 0) {
       throw new WebQuoteError('INSERT_FAILED', 'ไม่สามารถบันทึกข้อมูลใบเสนอราคาได้', 500);
@@ -587,6 +662,9 @@ export async function createDraft(params: {
       meta: {
         propose_msg_id: proposeMsgId,
         revise_from: reviseFrom || null,
+        // ค่าที่คนกดตั้งทับระบบ — ต้องตอบได้ย้อนหลังว่า "เครดิตในใบนี้ไม่ตรงกับลูกค้าเพราะใคร"
+        payment_terms_override: overrides.paymentTerms,
+        delivery_overrides: overrides.delivery ?? null,
         chosen_customer_id: resolvedCustomerId,
         chosen_contact_id: contactId,
         chosen_rank: await resolveChosenRank(proposeMsgId, resolvedCustomerId, customerIdIn),
@@ -646,9 +724,17 @@ export interface WebQuotePreviewQuote {
   company_label: string;
   items: WebQuotePreviewItem[];
   subtotal: number;
+  /** ข้อความที่จะขึ้นจริงบนใบ — resolve แล้ว (ค่าที่ตั้งเองชนะค่าอัตโนมัติ) */
   delivery_text: string;
   delivery_days: number;
   delivery_all_in_stock: boolean;
+  /** ค่าที่ตั้งเองมากับคำขอนี้ — null = ยังใช้ค่าอัตโนมัติ */
+  delivery_type_override: DeliveryTypeKey | null;
+  delivery_days_override: number | null;
+  /** ค่าที่ระบบคำนวณได้จากสต๊อก + กฎ ณ ตอนนี้ — ไว้ขึ้นบรรทัด "ค่าอัตโนมัติคือ …" ให้คนเทียบ */
+  delivery_type_auto: DeliveryTypeKey;
+  delivery_days_auto: number;
+  delivery_auto_label: string;
 }
 
 export interface WebQuotePreviewResult {
@@ -658,13 +744,26 @@ export interface WebQuotePreviewResult {
     display_name: string;
     reference: string;
     tax_id: string;
+    /** เครดิตที่ **จะถูกบันทึกลงใบ** — คือค่าที่ตั้งทับถ้ามี ไม่ใช่ค่าของลูกค้าเสมอไป */
     payment_terms: string;
+    /** เครดิตจริงของลูกค้าจาก Odoo — ไว้ให้หน้าจอบอกว่ากำลังทับค่าอะไรอยู่ */
+    customer_payment_terms: string;
+    payment_terms_overridden: boolean;
+    /** ระบบอ่านค่าที่ใช้จริงออกว่าเป็น "มีเครดิต" ไหม (กฎค่าบริการใช้คำตอบนี้) */
+    has_credit_terms: boolean;
     contact_name: string;
     contact_phone: string;
     contact_email: string;
     address: string;
   };
   quotes: WebQuotePreviewQuote[];
+  /**
+   * ประเภทการจัดส่งทั้งหมดที่เลือกได้ — มาจาก `DELIVERY_TYPES` ตัวจริง
+   *
+   * ส่งมาให้แทนที่จะให้หน้าจอถือตารางคำของตัวเอง เพราะ `utils/deliveryTerms.ts` เขียนไว้ว่า
+   * คำพวกนี้ต้องตรงกับ dropdown ของ Odoo ทุกอักขระ ⇒ มีสำเนาที่สองเมื่อไหร่ก็เพี้ยนเมื่อนั้น
+   */
+  delivery_types: { key: DeliveryTypeKey; label: string }[];
   /** ยอดสินค้าก่อน VAT (ไม่รวมบรรทัดค่าบริการ) — ฐานเดียวกับที่กฎค่าขนส่งใช้ตัดสิน */
   goods_total: number;
   grand_total: number;
@@ -686,6 +785,9 @@ export async function previewDraft(params: {
   customerId: number | string;
   contactId: number | string;
   items: WebQuoteItemInput[];
+  /** ค่าที่แอดมินตั้งทับ — ต้องเดินทางมาถึงพรีวิวด้วย ไม่งั้นจอกับใบจริงคนละเรื่อง */
+  paymentTermsOverride?: any;
+  delivery?: WebQuoteDeliveryInput[] | null;
 }): Promise<WebQuotePreviewResult> {
   if (!Array.isArray(params.items) || params.items.length === 0) {
     throw new WebQuoteError('BAD_REQUEST', 'ต้องมีรายการสินค้าอย่างน้อย 1 รายการ (items)', 400);
@@ -706,9 +808,16 @@ export async function previewDraft(params: {
   const customer = await getCustomerById(resolvedCustomerId);
   if (!customer) throw new WebQuoteError('BAD_REQUEST', `ไม่พบบริษัท id=${resolvedCustomerId}`, 400);
 
+  // ตรวจค่าที่ตั้งทับด้วยตัวตรวจชุดเดียวกับ createDraft — พรีวิวที่รับค่าที่ /drafts จะปฏิเสธ
+  // คือพรีวิวที่โกหก · เครดิตที่ใช้จริงในรอบนี้ = ค่าที่ตั้งทับ ถ้าไม่มีจึงตกมาที่ของลูกค้า
+  const paymentTermsOverride = parsePaymentTermsOverride(params.paymentTermsOverride);
+  const deliveryOverrides = parseDeliveryOverrides(params.delivery);
+  const customerPaymentTerms = String(customer.customer_payment_terms || '');
+  const effectivePaymentTerms = paymentTermsOverride ?? customerPaymentTerms;
+
   const {
     isShippingFeeItem, loadShippingFeeConfig, buildShippingFeeSnapshot,
-    shouldHaveShippingFee, goodsSubtotal,
+    shouldHaveShippingFee, goodsSubtotal, hasCreditTerms,
   } = await import('./shippingFee.js');
   const cfg = await loadShippingFeeConfig();
 
@@ -797,10 +906,20 @@ export async function previewDraft(params: {
       stock: stockMap[String(it.model || it.product_code || '')] ?? 0,
     }));
     const summary = resolveQuotationDeliveryDays(withStock, snaps);
-    const terms = resolveDeliveryTerms({
+    const autoOnly = {
       delivery_all_in_stock: summary.all_in_stock,
       delivery_days_auto: summary.days,
+    };
+    // ค่าที่ตั้งเองต้องผ่าน resolveDeliveryTerms ตัวเดียวกับที่ใบจริงใช้ — ลำดับความสำคัญ
+    // (ตรึง > ตั้งเอง > อัตโนมัติ) เป็นของโมดูลนั้น หน้านี้ห้ามตัดสินใหม่เอง
+    const typeOverride = deliveryOverrides?.[company]?.type ?? null;
+    const daysOverride = deliveryOverrides?.[company]?.days ?? null;
+    const terms = resolveDeliveryTerms({
+      ...autoOnly,
+      delivery_type_override: typeOverride,
+      delivery_days_override: daysOverride,
     });
+    const auto = resolveDeliveryTerms(autoOnly);
 
     quotes.push({
       quote_company: company,
@@ -810,6 +929,11 @@ export async function previewDraft(params: {
       delivery_text: deliveryDisplayText(terms),
       delivery_days: terms.days,
       delivery_all_in_stock: terms.all_in_stock,
+      delivery_type_override: typeOverride,
+      delivery_days_override: daysOverride,
+      delivery_type_auto: auto.type,
+      delivery_days_auto: auto.days,
+      delivery_auto_label: deliveryTypeLabel(auto.type),
     });
   }
 
@@ -819,7 +943,9 @@ export async function previewDraft(params: {
     goods: goodsTotal,
     // พรีวิวเกิดหลังแอดมินเลือกบริษัท+ผู้ติดต่อแล้วเสมอ = "ผูกลูกค้าแล้ว" ในความหมายของกฎ
     bound: true,
-    paymentTerms: customer.customer_payment_terms,
+    // เครดิตที่ตั้งทับมีผลกับกฎนี้ด้วย (เจ้าของเลือกไว้ 2026-09-14) — ค่าเดียวกับที่จะถูก
+    // บันทึกลง customer_details แล้ว applyShippingFeeToQuoteGroup อ่านซ้ำหลัง INSERT
+    paymentTerms: effectivePaymentTerms,
     prevFee: incomingFee,
   });
   if (keepFee && quotes.length > 0) {
@@ -838,13 +964,17 @@ export async function previewDraft(params: {
       display_name: String(customer.display_name || ''),
       reference: String(customer.reference || ''),
       tax_id: String(customer.tax_id || ''),
-      payment_terms: String(customer.customer_payment_terms || ''),
+      payment_terms: effectivePaymentTerms,
+      customer_payment_terms: customerPaymentTerms,
+      payment_terms_overridden: paymentTermsOverride !== null,
+      has_credit_terms: hasCreditTerms(effectivePaymentTerms),
       contact_name: String(contact.name || ''),
       contact_phone: String(contact.phone || contact.mobile || ''),
       contact_email: String(contact.email || ''),
       address: buildThaiAddress(contact),
     },
     quotes,
+    delivery_types: DELIVERY_TYPES.map((t) => ({ key: t.key, label: t.label })),
     goods_total: goodsTotal,
     grand_total: grandTotal,
     violations,
@@ -997,6 +1127,31 @@ export async function reviseQuotation(params: {
  */
 export async function listSalespersonsForWeb(): Promise<PickedSalesperson[]> {
   return dedupeActingSalespersons(await listActingSalespersons());
+}
+
+// ── รายการเครดิตสำหรับช่อง "เขียนทับเครดิต" ──────────────────────────────────
+
+/** อายุแคช — เทอมใหม่จาก Odoo โผล่ช้าได้ 5 นาที แต่ห้ามยิง GROUP BY 82k แถวทุกครั้งที่เปิดหน้า */
+const PAYMENT_TERMS_TTL_MS = 5 * 60_000;
+let paymentTermsCache: { at: number; rows: { value: string; count: number }[] } | null = null;
+
+/**
+ * ตัวเลือกเครดิตที่ "มีจริง" — คนละเรื่องกับ "เครดิตที่ระบบนับว่าเป็นเครดิต"
+ *
+ * ⚠️ รายการนี้รวม `Cash` / `Immediate Payment` ด้วย ซึ่ง `hasCreditTerms()` ตอบว่า *ไม่มี*
+ *    เครดิต — และนั่นถูกแล้ว เพราะแอดมินต้องเลือก "ลูกค้ารายนี้จ่ายสด" ได้เหมือนกัน
+ *    ⇒ ห้ามกรองรายการนี้ด้วย hasCreditTerms() เด็ดขาด
+ *
+ * ล้มแล้วคืนรายการว่าง ไม่ throw — ช่องนี้เป็นของเสริม หน้าจอต้องยังกรอกใบได้ถ้ามันหาย
+ */
+export async function listPaymentTermOptions(): Promise<{ value: string; count: number }[]> {
+  if (paymentTermsCache && Date.now() - paymentTermsCache.at < PAYMENT_TERMS_TTL_MS) {
+    return paymentTermsCache.rows;
+  }
+  const rows = await listCustomerPaymentTerms();
+  // ว่างเปล่า = query ล้ม (ฐานจริงไม่มีทางไม่มีเครดิตสักค่า) ⇒ อย่าแคชความล้มเหลวไว้ 5 นาที
+  if (rows.length > 0) paymentTermsCache = { at: Date.now(), rows };
+  return rows;
 }
 
 export type { Violation };

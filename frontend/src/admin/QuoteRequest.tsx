@@ -164,6 +164,12 @@ interface DraftQuote {
   company_name?: string;
   contact_name?: string;
   items: QuoteItem[];
+  /** ── ฟิลด์ที่ใช้ตอน revise เท่านั้น: ค่าที่คนออกใบต้นทางตั้งทับไว้ ต้องตามมากับใบแก้ไข ── */
+  quote_company?: 'PM' | 'THT';
+  /** null = เครดิตของใบต้นทางคือของลูกค้าจริง ๆ ไม่ได้ถูกทับ */
+  payment_terms_override?: string | null;
+  delivery_type_override?: string | null;
+  delivery_days_override?: number | null;
 }
 
 // ── ผลตรวจก่อนสร้างร่าง (POST /api/admin/webquote/preview) ───────────────────
@@ -199,6 +205,9 @@ interface PreviewItem {
   violations: PreviewViolation[];
 }
 
+/** คีย์ประเภทการจัดส่ง — คำที่จะขึ้นจริงมาจาก `delivery_types` ของ server ไม่ได้เขียนไว้ที่นี่ */
+type DeliveryTypeKey = 'in_stock' | 'make_to_order' | 'import' | 'install';
+
 interface PreviewQuote {
   quote_company: 'PM' | 'THT';
   company_label: string;
@@ -207,6 +216,11 @@ interface PreviewQuote {
   delivery_text: string;
   delivery_days: number;
   delivery_all_in_stock: boolean;
+  delivery_type_override: DeliveryTypeKey | null;
+  delivery_days_override: number | null;
+  delivery_type_auto: DeliveryTypeKey;
+  delivery_days_auto: number;
+  delivery_auto_label: string;
 }
 
 interface PreviewResult {
@@ -216,13 +230,19 @@ interface PreviewResult {
     display_name: string;
     reference: string;
     tax_id: string;
+    /** เครดิตที่จะถูกบันทึกลงใบ (= ค่าที่ตั้งทับ ถ้ามี) */
     payment_terms: string;
+    /** เครดิตจริงของลูกค้าจาก Odoo */
+    customer_payment_terms: string;
+    payment_terms_overridden: boolean;
+    has_credit_terms: boolean;
     contact_name: string;
     contact_phone: string;
     contact_email: string;
     address: string;
   };
   quotes: PreviewQuote[];
+  delivery_types: { key: DeliveryTypeKey; label: string }[];
   goods_total: number;
   grand_total: number;
   violations: PreviewViolation[];
@@ -341,6 +361,223 @@ const CustField: React.FC<{
     </span>
   </div>
 );
+
+// ── เครดิตที่แอดมินเขียนทับได้เฉพาะใบนี้ (2026-09-14) ────────────────────────
+//
+//  ค่าจริงมาจาก Odoo และแก้ที่นี่ไม่ได้ — แต่ "ใบนี้ตกลงเครดิตกันไว้แบบไหน" เป็นข้อเท็จจริง
+//  ของใบ ไม่ใช่ของลูกค้า · เขียนทับแล้ว **กฎค่าบริการเปลี่ยนตามด้วย** (เจ้าของเลือกไว้ว่าให้
+//  "มีผลทุกอย่าง") จึงต้องขึ้นบรรทัดบอกทุกครั้งว่ากำลังทับค่าอะไรอยู่ ไม่ใช่เปลี่ยนเงียบ ๆ
+
+/** ข้อความมีตัวเลข = คนน่าจะตั้งใจพิมพ์เครดิต — ใช้เลือกถ้อยคำของคำเตือนเท่านั้น
+ *  คำตอบจริงว่า "นับเป็นเครดิตไหม" มาจาก server ในฟิลด์ has_credit_terms */
+const looksLikeTerms = (s: string) => /\d/.test(s);
+
+const CreditField: React.FC<{
+  effective: string;
+  customerValue: string;
+  overridden: boolean;
+  hasCredit: boolean;
+  options: string[];
+  onChange: (v: string | null) => void;
+}> = ({ effective, customerValue, overridden, hasCredit, options, onChange }) => {
+  /** โหมด "พิมพ์เอง" — เป็น state ของหน้าจอ ไม่ใช่ของค่า เพราะคนกดเลือกแล้วยังไม่ได้พิมพ์อะไร */
+  const [other, setOther] = useState(false);
+  const custom = other || (overridden && !options.includes(effective));
+
+  return (
+    <>
+      <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+        <CreditCard className="w-3 h-3 shrink-0 text-slate-400" />
+        <span className="text-slate-500 shrink-0">เครดิต</span>
+        <select
+          value={!overridden ? '' : custom ? '__other' : effective}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === '__other') { setOther(true); onChange(effective || customerValue); return; }
+            setOther(false);
+            onChange(v === '' ? null : v);
+          }}
+          aria-label="เครดิตของใบนี้"
+          className={`h-7 pl-2 pr-6 rounded-lg border bg-card text-[11px] font-semibold text-slate-800 outline-none max-w-[10rem] ${
+            overridden ? 'border-blue-600' : 'border-slate-300'
+          }`}
+        >
+          <option value="">{customerValue || 'ไม่มีข้อมูล'} (ของลูกค้า)</option>
+          {options.map((t) => (
+            <option key={t} value={t}>{t}</option>
+          ))}
+          <option value="__other">อื่น ๆ (พิมพ์เอง)…</option>
+        </select>
+        {custom && (
+          <input
+            value={effective}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder="พิมพ์เครดิตเอง"
+            aria-label="เครดิตที่พิมพ์เอง"
+            className="h-7 w-32 px-2 rounded-lg border border-blue-600 bg-card text-[11px] font-semibold text-slate-800 outline-none"
+          />
+        )}
+        {overridden && (
+          <>
+            <button
+              type="button"
+              onClick={() => { setOther(false); onChange(null); }}
+              title="ใช้เครดิตของลูกค้า"
+              aria-label="ใช้เครดิตของลูกค้า"
+              className="h-7 w-7 grid place-items-center rounded-lg border border-slate-300 bg-card text-slate-600 hover:bg-slate-50"
+            >
+              <RotateCcw className="w-3 h-3" />
+            </button>
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full border border-blue-600 text-blue-700">
+              ตั้งเอง
+            </span>
+          </>
+        )}
+      </div>
+      {overridden && (
+        <p className="sm:col-span-2 lg:col-span-3 text-[10.5px] text-slate-500 leading-relaxed">
+          ค่าจริงของลูกค้า: <span className="font-semibold">{customerValue || 'ไม่มีข้อมูล'}</span> —
+          ใบนี้จะบันทึกเป็น “{effective || '(ว่าง)'}”
+          {/* คำเตือนสำคัญกว่าเรื่องกฎค่าบริการ: ค่านี้ไหลตรงเข้าคอลัมน์ payment_term_id ของไฟล์
+              นำเข้า Odoo (services/odooSaleOrderExport.ts) ค่าที่ Odoo ไม่รู้จัก = แถวนั้น
+              นำเข้าไม่ผ่านทั้งแถว ⇒ ต้องเตือนทุกครั้งที่พิมพ์ค่านอกรายการ ไม่ใช่เฉพาะตอนอ่านไม่ออก */}
+          {options.length > 0 && !options.includes(effective) && (
+            <span className="text-amber-800 font-semibold">
+              {' '}· ⚠️ ค่านี้ไม่มีอยู่ในข้อมูลลูกค้ารายไหนเลย — ถ้า Odoo ไม่รู้จัก ไฟล์นำเข้าของใบนี้จะถูกปฏิเสธทั้งแถว
+            </span>
+          )}
+          {looksLikeTerms(effective) && !hasCredit && (
+            <span className="text-amber-800 font-semibold">
+              {' '}· ⚠️ ระบบอ่านคำนี้ไม่ออกว่าเป็นเครดิต จะถือว่า “ไม่มีเครดิต” (รูปแบบที่อ่านออกคือ “30 Days” หรือ “เช็คล่วงหน้า30วัน”)
+            </span>
+          )}
+        </p>
+      )}
+    </>
+  );
+};
+
+// ── กำหนดส่งของใบ — ย้ายจากหัวการ์ดลงมาอยู่แถวเดียวกับยอดรวม (2026-09-14) ────
+//
+//  ทำไมย้าย: มันคือ "เงื่อนไขของทั้งใบ" เหมือนยอดรวม ไม่ใช่ป้ายกำกับของกลุ่มสินค้า —
+//  และตั้งแต่วันนี้มันแก้ได้ จึงต้องอยู่ในระยะที่มือไปถึง พร้อมกับตัวเลขที่ต้องอ่านคู่กัน
+//
+//  ชุดควบคุม (ตัวเลือกประเภท · ภายใน N วัน · ปุ่มกลับไปอัตโนมัติ · บรรทัด "ตั้งเอง")
+//  ยกมาจาก `liff_pages/quote-edit.html` ทั้งชุด รวมทั้งกติกา "กดรีเซ็ตล้างทั้งประเภทและวัน"
+//  — เซลส์คนเดียวกันใช้ทั้งสองหน้า ถ้าปุ่มเดียวกันทำคนละอย่างเขาจะเชื่อหน้าที่เปิดอยู่
+//
+//  ⚠️ คำของประเภทมาจาก `delivery_types` ที่ server ส่งมา (DELIVERY_TYPES ตัวจริง ซึ่งต้องตรงกับ
+//     dropdown ของ Odoo ทุกอักขระ) — ห้ามเขียนตารางคำชุดที่สองไว้ในไฟล์นี้
+
+type DeliveryOv = { type: DeliveryTypeKey | null; days: number | null };
+
+/** สีของกำหนดส่ง = สถานะสต๊อก ไม่ใช่สถานะ "ตั้งเองหรือเปล่า" (มีไอคอนกำกับด้วยเสมอ) */
+const deliveryTone = (allInStock: boolean) =>
+  allInStock
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+    : 'border-amber-200 bg-amber-50 text-amber-800';
+
+/** ป้ายอ่านอย่างเดียว — ขั้นใบร่างเป็นจอ "อ่านแล้วยืนยัน" การแก้อยู่ที่ขั้นฟอร์มที่เดียว */
+const DeliveryBadge: React.FC<{ quote: PreviewQuote }> = ({ quote }) => (
+  <span className="flex flex-wrap items-center gap-1.5">
+    <span
+      className={`flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-lg border ${deliveryTone(
+        quote.delivery_all_in_stock,
+      )}`}
+    >
+      {quote.delivery_all_in_stock ? (
+        <CheckCircle2 className="w-3 h-3 shrink-0" />
+      ) : (
+        <AlertTriangle className="w-3 h-3 shrink-0" />
+      )}
+      กำหนดส่ง: {quote.delivery_text}
+    </span>
+    {(quote.delivery_type_override !== null || quote.delivery_days_override !== null) && (
+      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full border border-blue-600 text-blue-700">
+        ตั้งเอง
+      </span>
+    )}
+  </span>
+);
+
+const DeliveryStrip: React.FC<{
+  quote: PreviewQuote;
+  types: { key: DeliveryTypeKey; label: string }[];
+  ov: DeliveryOv | undefined;
+  onChange: (v: DeliveryOv | undefined) => void;
+}> = ({ quote, types, ov, onChange }) => {
+  /** ตัวเลขที่ "กำลังพิมพ์อยู่" — null = ไม่ได้พิมพ์ ให้แสดงค่าที่ใช้จริง (กันเลขกระโดดกลางคัน) */
+  const [typing, setTyping] = useState<string | null>(null);
+  const on = !!ov && (ov.type !== null || ov.days !== null);
+  // อ่านจาก state ของหน้า ไม่ใช่จากผลตรวจ — ผลตรวจตามมาทีหลัง 700ms ช่องจะกระพริบกลับค่าเก่า
+  const shown = typing ?? String(ov?.days ?? quote.delivery_days_auto);
+
+  const patch = (p: Partial<DeliveryOv>) => {
+    const next: DeliveryOv = { type: ov?.type ?? null, days: ov?.days ?? null, ...p };
+    onChange(next.type === null && next.days === null ? undefined : next);
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <Truck className="w-3.5 h-3.5 shrink-0 text-slate-400" />
+      <select
+        value={ov?.type ?? ''}
+        onChange={(e) => patch({ type: (e.target.value || null) as DeliveryTypeKey | null })}
+        aria-label={`ประเภทการจัดส่งของใบ ${quote.quote_company}`}
+        className={`h-8 pl-2 pr-6 rounded-lg border text-[11px] font-semibold outline-none ${deliveryTone(
+          quote.delivery_all_in_stock,
+        )} ${ov?.type ? 'ring-1 ring-blue-600' : ''}`}
+      >
+        <option value="">อัตโนมัติ ({quote.delivery_auto_label})</option>
+        {types.map((t) => (
+          <option key={t.key} value={t.key}>{t.label}</option>
+        ))}
+      </select>
+      <span className="text-[11px] text-slate-500">ภายใน</span>
+      <input
+        type="number"
+        min={0}
+        max={3650}
+        step={1}
+        inputMode="numeric"
+        value={shown}
+        aria-label={`จำนวนวันจัดส่งของใบ ${quote.quote_company}`}
+        onChange={(e) => {
+          const raw = e.target.value;
+          setTyping(raw);
+          const t = raw.trim();
+          // ลบจนว่าง = กลับไปใช้ค่าอัตโนมัติ (เติมเลขคืนให้ตอนเลิกพิมพ์) — ท่าเดียวกับ quote-edit
+          if (t === '') { patch({ days: null }); return; }
+          const n = Math.round(Number(t));
+          if (!Number.isFinite(n)) return;
+          patch({ days: Math.max(0, Math.min(3650, n)) });
+        }}
+        onBlur={() => setTyping(null)}
+        className={`h-8 w-16 px-2 text-center rounded-lg border bg-card text-[11px] font-semibold text-slate-800 tabular-nums outline-none ${
+          ov?.days !== null && ov?.days !== undefined ? 'border-blue-600' : 'border-slate-300'
+        }`}
+      />
+      <span className="text-[11px] text-slate-500">วัน</span>
+      {on && (
+        <button
+          type="button"
+          onClick={() => { setTyping(null); onChange(undefined); }}
+          title="ใช้ค่าอัตโนมัติ"
+          aria-label={`ใช้กำหนดส่งอัตโนมัติของใบ ${quote.quote_company}`}
+          className="h-8 w-8 grid place-items-center rounded-lg border border-slate-300 bg-card text-slate-600 hover:bg-slate-50"
+        >
+          <RotateCcw className="w-3.5 h-3.5" />
+        </button>
+      )}
+      {on && (
+        <span className="basis-full text-[10.5px] text-blue-700">
+          ✏️ ตั้งเอง — ค่าอัตโนมัติคือ {quote.delivery_auto_label} {quote.delivery_days_auto} วัน
+          (จะไม่เปลี่ยนตามสินค้าที่แก้ทีหลัง)
+        </span>
+      )}
+    </div>
+  );
+};
 
 // ── แถวในตารางสินค้าของฟอร์ม (ก่อนสร้างร่าง) ────────────────────────────────
 
@@ -770,6 +1007,19 @@ export const QuoteRequest: React.FC = () => {
   const [custOpen, setCustOpen] = useState(true);
   const [svcCfg, setSvcCfg] = useState<ServiceCfg | null>(null);
 
+  // ── ค่าที่แอดมินตั้งทับของที่ระบบหามาให้ (2026-09-14) ──
+  //
+  //  ทั้งสองตัวอยู่ในลายเซ็นของพรีวิว ⇒ แก้แล้วหน้าจะตรวจใหม่เอง และตัวเลขที่เห็นคือตัวเลข
+  //  ที่จะถูกบันทึก · เก็บเป็น state ของหน้า ไม่ใช่ของ `preview` เพราะ `preview` ถูกเขียนทับ
+  //  ทุกครั้งที่ผลตรวจกลับมา ถ้าเก็บไว้ในนั้นค่าที่เพิ่งตั้งจะหายทุกครั้งที่ตรวจเสร็จ
+  /** `null` = ใช้เครดิตของลูกค้าตามเดิม */
+  const [paymentTerms, setPaymentTerms] = useState<string | null>(null);
+  const [paymentTermOpts, setPaymentTermOpts] = useState<string[]>([]);
+  /** กำหนดส่งที่ตั้งเอง แยกตามใบ — ใบที่ไม่มีคีย์ = ยังใช้ค่าอัตโนมัติ */
+  const [deliveryOv, setDeliveryOv] = useState<
+    Partial<Record<'PM' | 'THT', { type: DeliveryTypeKey | null; days: number | null }>>
+  >({});
+
   // ── ยืนยัน / ผลลัพธ์ ──
   const [confirming, setConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState('');
@@ -812,6 +1062,8 @@ export const QuoteRequest: React.FC = () => {
     setPreviewError('');
     setPreviewSig('');
     setPreviewAt('');
+    setPaymentTerms(null);
+    setDeliveryOv({});
   };
 
   /** อ่าน error ที่ backend ส่งมาเป็นข้อความจริง ไม่ใช่ "HTTP 400" ลอย ๆ */
@@ -934,6 +1186,9 @@ export const QuoteRequest: React.FC = () => {
       setCustomerId(autoId);
       setContactId(autoId !== null && data.contact_candidates.length === 1 ? data.contact_candidates[0].item.id : null);
       setCustomerQuery('');
+      // ร่างชุดใหม่จากข้อความใหม่ = ลูกค้าคนใหม่ ⇒ ค่าที่ตั้งทับของชุดก่อนต้องไม่ติดมาด้วย
+      setPaymentTerms(null);
+      setDeliveryOv({});
     } catch (e) {
       setProposeError(e instanceof Error ? e.message : 'สร้างร่างไม่สำเร็จ');
     } finally {
@@ -1008,10 +1263,25 @@ export const QuoteRequest: React.FC = () => {
     [rows],
   );
 
+  /** กำหนดส่งที่ตั้งเอง ในรูปที่ทั้ง /preview และ /drafts รับ — ใบที่ไม่ได้ตั้งไม่ต้องส่งไป */
+  const deliveryPayload = useMemo(
+    () =>
+      (['PM', 'THT'] as const)
+        .filter((co) => deliveryOv[co])
+        .map((co) => ({
+          quote_company: co,
+          delivery_type_override: deliveryOv[co]?.type ?? null,
+          delivery_days_override: deliveryOv[co]?.days ?? null,
+        })),
+    [deliveryOv],
+  );
+
   const unresolved = rows.filter((r) => r.status !== 'ok').length;
+  // ค่าที่ตั้งทับอยู่ในลายเซ็นด้วย — ไม่งั้นแก้กำหนดส่ง/เครดิตแล้วหน้าจะบอกว่า "ตรวจแล้ว"
+  // ทั้งที่ผลที่เห็นคิดจากค่าชุดก่อน (และกฎค่าบริการขึ้นกับเครดิตโดยตรง)
   const sig = useMemo(
-    () => JSON.stringify([customerId, contactId, itemsPayload]),
-    [customerId, contactId, itemsPayload],
+    () => JSON.stringify([customerId, contactId, itemsPayload, paymentTerms, deliveryPayload]),
+    [customerId, contactId, itemsPayload, paymentTerms, deliveryPayload],
   );
   const canPreview =
     rows.length > 0 && unresolved === 0 && customerId !== null && contactId !== null;
@@ -1028,7 +1298,13 @@ export const QuoteRequest: React.FC = () => {
       const res = await fetch('/api/admin/webquote/preview', {
         method: 'POST',
         headers: { ...authHeaders, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ customer_id: customerId, contact_id: contactId, items: itemsPayload }),
+        body: JSON.stringify({
+          customer_id: customerId,
+          contact_id: contactId,
+          items: itemsPayload,
+          payment_terms_override: paymentTerms,
+          delivery: deliveryPayload,
+        }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -1052,7 +1328,7 @@ export const QuoteRequest: React.FC = () => {
     } finally {
       setPreviewing(false);
     }
-  }, [canPreview, sig, itemsPayload, customerId, contactId, authHeaders]);
+  }, [canPreview, sig, itemsPayload, customerId, contactId, authHeaders, paymentTerms, deliveryPayload]);
 
   useEffect(() => {
     if (!canPreview || sig === previewSig) return;
@@ -1083,6 +1359,24 @@ export const QuoteRequest: React.FC = () => {
     })();
     return () => { cancelled = true; };
   }, []);
+
+  // ตัวเลือกของช่อง "เครดิต" — เอาค่าที่มีจริงในฐานมาเรียงตามความถี่ ไม่ใช่รายการที่เขียนค้างไว้
+  // ในโค้ด (เครดิตเป็นข้อมูลที่ sync มาจาก Odoo · ฝังไว้เมื่อไหร่ก็ล้าสมัยเงียบ ๆ เมื่อนั้น)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/admin/webquote/payment-terms', { headers: authHeaders });
+        if (!res.ok) return;
+        const d = await res.json();
+        if (cancelled || !Array.isArray(d?.terms)) return;
+        setPaymentTermOpts(d.terms.map((t: { value: string }) => String(t.value)));
+      } catch {
+        /* อ่านไม่ได้ = เหลือเฉพาะช่องพิมพ์เอง ซึ่งยังออกใบได้ครบ */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [authHeaders]);
 
   /** ค่าบริการมีได้บรรทัดเดียวต่อการเสนอราคา — ทั้งที่แอดมินเพิ่มเองและที่กฎเติมให้ */
   const serviceRow = rows.find((r) => r.isService) ?? null;
@@ -1295,6 +1589,9 @@ export const QuoteRequest: React.FC = () => {
           // ใบนี้เกิดจากการแก้ใบเดิม ⇒ ให้หลังบ้านติด revise_from ไว้ด้วยตัวต่อสตริงของมันเอง
           revise_from: reviseFrom || undefined,
           items: itemsPayload,
+          // ค่าชุดเดียวกับที่ส่งให้ /preview — ถ้าสองที่ส่งไม่เท่ากัน ใบที่ออกจะไม่ใช่ใบที่เห็น
+          payment_terms_override: paymentTerms,
+          delivery: deliveryPayload,
         }),
       });
       if (!res.ok) throw new Error(await readError(res, 'ออกใบเสนอราคาไม่สำเร็จ'));
@@ -1373,6 +1670,23 @@ export const QuoteRequest: React.FC = () => {
       setCustomerOptions(cid ? [{ id: cid, display_name: q?.company_name ?? '' }] : []);
       setCustomerId(cid);
       setContactId(q?.contact_id ?? null);
+      // ค่าที่คนออกใบต้นทางตั้งทับไว้ต้องตามมา ไม่งั้น "แก้ใบเดิม" จะเงียบ ๆ คืนกำหนดส่งกับ
+      // เครดิตกลับเป็นค่าอัตโนมัติ ทั้งที่ใบที่ลูกค้าถืออยู่ไม่ได้เขียนแบบนั้น
+      // อ่านจากธง `payment_terms_override` ตรง ๆ ไม่ใช่เดาจากการเทียบค่า — ใบที่ลูกค้ามีเครดิต
+      // 30 Days อยู่แล้วและไม่มีใครแก้ ต้องไม่ขึ้นป้าย "ตั้งเอง" ให้คนอ่านสับสน
+      setPaymentTerms(String(q?.payment_terms_override ?? '').trim() || null);
+      setDeliveryOv(
+        ((data.quotes ?? []) as DraftQuote[]).reduce<
+          Partial<Record<'PM' | 'THT', { type: DeliveryTypeKey | null; days: number | null }>>
+        >((acc, dq) => {
+          const co = dq.quote_company;
+          if (!co) return acc;
+          const type = (dq.delivery_type_override ?? null) as DeliveryTypeKey | null;
+          const days = dq.delivery_days_override ?? null;
+          if (type !== null || days !== null) acc[co] = { type, days };
+          return acc;
+        }, {}),
+      );
       setProposeMsgId(null);
       setPreview(null);
       setPreviewSig('');
@@ -1505,6 +1819,9 @@ export const QuoteRequest: React.FC = () => {
                 onPick={(o) => {
                   setCustomerId(Number(o.id));
                   setContactId(null);
+                  // เครดิตเป็นของ "บริษัทนี้" — เปลี่ยนบริษัทแล้วค่าที่ตั้งทับไว้หมดความหมาย
+                  // (กติกาเดียวกับ quote-edit.html ที่เขียนเครดิตใหม่ทุกครั้งที่เปลี่ยนบริษัท)
+                  setPaymentTerms(null);
                 }}
                 onQueryChange={setCustomerQuery}
                 placeholder="— เลือกบริษัท —"
@@ -1586,7 +1903,14 @@ export const QuoteRequest: React.FC = () => {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-1.5 px-3 pb-3 text-[11px]">
                   <CustField icon={Hash} label="Ref" value={preview.customer.reference} />
                   <CustField icon={Receipt} label="เลขเสียภาษี" value={preview.customer.tax_id} />
-                  <CustField icon={CreditCard} label="เครดิต" value={preview.customer.payment_terms} />
+                  <CreditField
+                    effective={paymentTerms ?? preview.customer.payment_terms}
+                    customerValue={preview.customer.customer_payment_terms}
+                    overridden={paymentTerms !== null}
+                    hasCredit={preview.customer.has_credit_terms}
+                    options={paymentTermOpts}
+                    onChange={setPaymentTerms}
+                  />
                   <CustField icon={Phone} label="โทร" value={preview.customer.contact_phone} />
                   <CustField icon={Mail} label="อีเมล" value={preview.customer.contact_email} />
                   <CustField icon={MapPin} label="ที่อยู่" value={preview.customer.address} />
@@ -1606,33 +1930,8 @@ export const QuoteRequest: React.FC = () => {
                 <span className="text-[11px] text-slate-500">
                   {g.rows.length + g.extras.length} รายการ
                 </span>
-                <span className="ml-auto">
-                  {previewing ? (
-                    <span className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-lg border border-slate-200 bg-card text-slate-500">
-                      <Loader2 className="w-3 h-3 animate-spin shrink-0" />
-                      กำลังคำนวณกำหนดส่ง...
-                    </span>
-                  ) : g.quote ? (
-                    <span
-                      className={`flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-lg border ${
-                        g.quote.delivery_all_in_stock
-                          ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                          : 'border-amber-200 bg-amber-50 text-amber-800'
-                      }`}
-                    >
-                      {g.quote.delivery_all_in_stock ? (
-                        <CheckCircle2 className="w-3 h-3 shrink-0" />
-                      ) : (
-                        <AlertTriangle className="w-3 h-3 shrink-0" />
-                      )}
-                      กำหนดส่ง: {g.quote.delivery_text}
-                    </span>
-                  ) : (
-                    <span className="text-[11px] px-2 py-0.5 rounded-lg border border-slate-200 bg-card text-slate-500">
-                      ยังไม่ได้ตรวจ
-                    </span>
-                  )}
-                </span>
+                {/* กำหนดส่งไม่อยู่ตรงนี้แล้ว — ย้ายลงไปอยู่แถวเดียวกับยอดรวมท้ายการ์ด
+                    เพราะมันเป็นเงื่อนไขของทั้งใบ และตอนนี้แก้ได้ (2026-09-14) */}
               </div>
 
               <div className="overflow-x-auto">
@@ -1848,7 +2147,33 @@ export const QuoteRequest: React.FC = () => {
                 </table>
               </div>
 
+              {/* แถวท้ายการ์ด: กำหนดส่ง (ชิดซ้าย แก้ได้) คู่กับยอดรวมของใบนี้ (ชิดขวา)
+                  จอแคบแล้ว flex-wrap พาชุดกำหนดส่งขึ้นบรรทัดบน ยอดรวมตกลงบรรทัดล่างชิดขวา */}
               <div className="flex flex-wrap items-center gap-2 px-3 py-2 bg-slate-50 border-t border-slate-200">
+                {previewing ? (
+                  <span className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-lg border border-slate-200 bg-card text-slate-500">
+                    <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+                    กำลังคำนวณกำหนดส่ง...
+                  </span>
+                ) : g.quote && preview ? (
+                  <DeliveryStrip
+                    quote={g.quote}
+                    types={preview.delivery_types}
+                    ov={deliveryOv[g.quote.quote_company]}
+                    onChange={(v) =>
+                      setDeliveryOv((cur) => {
+                        const next = { ...cur };
+                        if (v) next[g.quote!.quote_company] = v;
+                        else delete next[g.quote!.quote_company];
+                        return next;
+                      })
+                    }
+                  />
+                ) : (
+                  <span className="text-[11px] px-2 py-0.5 rounded-lg border border-slate-200 bg-card text-slate-500">
+                    กำหนดส่ง: ยังไม่ได้ตรวจ
+                  </span>
+                )}
                 <span className="ml-auto text-[11px] text-slate-500">รวมใบนี้ (ก่อน VAT)</span>
                 <span className="text-sm font-extrabold text-slate-900 tabular-nums">
                   ฿{money(g.subtotal)}
@@ -2020,7 +2345,16 @@ export const QuoteRequest: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-1.5 text-[11px]">
               <CustField icon={Hash} label="Ref" value={preview.customer.reference} />
               <CustField icon={Receipt} label="เลขเสียภาษี" value={preview.customer.tax_id} />
-              <CustField icon={CreditCard} label="เครดิต" value={preview.customer.payment_terms} />
+              {/* ขั้นใบร่างอ่านอย่างเดียว — แต่ต้องเห็นว่าเครดิตนี้ "ตั้งเอง" ไม่ใช่ของลูกค้า
+                  ไม่งั้นคนกดยืนยันจะอ่านค่าที่ถูกทับว่าเป็นข้อมูลจริงจาก Odoo */}
+              <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                <CustField icon={CreditCard} label="เครดิต" value={preview.customer.payment_terms} />
+                {preview.customer.payment_terms_overridden && (
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full border border-blue-600 text-blue-700">
+                    ตั้งเอง (ของลูกค้า: {preview.customer.customer_payment_terms || 'ไม่มีข้อมูล'})
+                  </span>
+                )}
+              </div>
               <CustField icon={Phone} label="โทร" value={preview.customer.contact_phone} />
               <CustField icon={Mail} label="อีเมล" value={preview.customer.contact_email} />
               <CustField icon={MapPin} label="ที่อยู่" value={preview.customer.address} />
@@ -2033,20 +2367,8 @@ export const QuoteRequest: React.FC = () => {
                 <Factory className="w-[18px] h-[18px] shrink-0" style={{ color: BRAND }} />
                 <h3 className="text-sm font-bold text-slate-800">ใบร่าง ({q.quote_company})</h3>
                 <span className="text-xs text-slate-500">{q.company_label}</span>
-                <span
-                  className={`ml-auto flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-lg border ${
-                    q.delivery_all_in_stock
-                      ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                      : 'border-amber-200 bg-amber-50 text-amber-800'
-                  }`}
-                >
-                  {q.delivery_all_in_stock ? (
-                    <CheckCircle2 className="w-3 h-3 shrink-0" />
-                  ) : (
-                    <AlertTriangle className="w-3 h-3 shrink-0" />
-                  )}
-                  กำหนดส่ง: {q.delivery_text}
-                </span>
+                {/* กำหนดส่งย้ายลงไปอยู่แถวยอดรวมเหมือนขั้นฟอร์ม — ตำแหน่งเดียวกันทั้งสองขั้น
+                    แต่ขั้นนี้อ่านอย่างเดียว การแก้อยู่ที่ขั้นฟอร์มที่เดียว (ปุ่ม "แก้ไข") */}
               </div>
 
               <div className="overflow-x-auto -mx-4 px-4">
@@ -2104,6 +2426,7 @@ export const QuoteRequest: React.FC = () => {
               </div>
 
               <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-200">
+                <DeliveryBadge quote={q} />
                 <span className="ml-auto text-[11px] text-slate-500">รวมใบนี้ (ก่อน VAT)</span>
                 <span className="text-sm font-extrabold text-slate-900 tabular-nums">฿{money(q.subtotal)}</span>
               </div>

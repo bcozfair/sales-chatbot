@@ -170,6 +170,18 @@ npm run logworker                                          # worker เขีย
   `getRecentConfirmedQuotations` ต้องใช้ `updated_at` — สองข้อนี้เป็นคู่กัน ผิดข้อใดข้อหนึ่ง
   แล้ว fallback ของ LIFF round-trip พังเงียบ ๆ · gate: `npm run diag:confirm-race`
 
+- **`customer_details.payment_terms` ไม่ได้แปลว่า "เครดิตของลูกค้ารายนี้" เสมอไป** (ตั้งแต่
+  2026-09-14) — หน้าเว็บขอใบเสนอราคาให้แอดมินเขียนทับเครดิต **เฉพาะใบนั้น** ได้ ⇒ ค่าในใบกับ
+  `customers_data_view.customer_payment_terms` ต่างกันได้โดยไม่ใช่บั๊ก **ห้ามเอาคอลัมน์นี้ไปรวม
+  เป็นยอดลูกหนี้หรือสรุปว่าลูกค้ารายไหนมีเครดิต** — ถามฐานลูกค้าเสมอ
+  ตัวแยกคือ **`customer_details.payment_terms_override`**: `null` = ค่านี้มาจากลูกค้าจริง ·
+  มีค่า = คนออกใบสั่งทับ (ใบจาก LINE เป็น `null` ทุกใบ)
+  ⚠️ ธงนี้ไม่ใช่ของประดับ — **ทุกจุดที่บันทึกใบประกอบ `customer_details` ใหม่ทั้งก้อนจาก
+  `customers_data_view`** (`insertDraftQuotations` และ `PUT /api/quotation/:id`) ใครเพิ่ม
+  จุดบันทึกใหม่แล้วไม่หยิบธงนี้กลับมาใส่ เครดิตที่แอดมินตั้งจะหายเงียบ ๆ ตอนกดบันทึกครั้งถัดไป
+  · เครดิตที่ทับ **มีผลกับกฎค่าบริการด้วย** (`hasCreditTerms`) แต่ **ไม่ปลดด่าน blacklist/credit
+  hold** ซึ่งอ่านจากฐานลูกค้าไม่ใช่จากใบ · gate: `npm run diag:web-quote` ข้อ 7
+
 - **กฎระงับสต็อกเทียบ `unreserved` กับ "จำนวนที่สั่ง" ไม่ใช่ `actual_quantity <= 0`** และ
   **สินค้าที่ไม่มีแถวใน `product_stock_rules` ต้องเพิ่ม/ปรับจำนวนได้เสมอแม้ของว่าง** —
   client (`product-search.html` / `quote-edit.html`) **ห้ามบล็อกจากสต็อกดิบเด็ดขาด** เพราะ client

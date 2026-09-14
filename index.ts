@@ -102,6 +102,7 @@ import {
 import {
   WebQuoteError,
   listSalespersonsForWeb,
+  listPaymentTermOptions,
   proposeFromText,
   createDraft as createWebQuoteDraft,
   previewDraft as previewWebQuoteDraft,
@@ -1150,6 +1151,12 @@ app.put('/api/quotation/:id', express.json(), async (req: any, res: any) => {
         if (customMeta.address) contactAddress = customMeta.address;
       }
 
+      // เครดิตที่คนออกใบสั่งทับไว้ตอนสร้างใบ ต้องอยู่ยงข้ามการบันทึกซ้ำ — บล็อกข้างบนเพิ่ง
+      // ประกอบ customer_details ใหม่จาก customers_data_view ทั้งก้อน ถ้าไม่หยิบธงของเดิมกลับมา
+      // ใส่ การกดบันทึกในหน้าแก้ไขใบจะคืนเครดิตเป็นของลูกค้าเงียบ ๆ (plan-web-quote-request §4.1)
+      const paymentTermsOverride = quote.customer_details?.payment_terms_override ?? null;
+      if (paymentTermsOverride !== null) paymentTerms = paymentTermsOverride;
+
       customerDetailsPayload = {
         customer_name: companyName,
         customer_code: customerCode,
@@ -1159,6 +1166,7 @@ app.put('/api/quotation/:id', express.json(), async (req: any, res: any) => {
         email: contactEmail,
         address: contactAddress,
         payment_terms: paymentTerms,
+        payment_terms_override: paymentTermsOverride,
         revise_from: reviseFrom,
         custom_meta: customMetaStr
       };
@@ -2495,6 +2503,20 @@ app.get('/api/admin/webquote/salespersons', adminAuthMiddleware, requireRole('ad
 });
 
 /**
+ * เครดิตทุกแบบที่ลูกค้าจริงใช้อยู่ — ตัวเลือกของช่อง "เขียนทับเครดิต" ในฟอร์มขอใบเสนอราคา
+ *
+ * เป็น endpoint แยกแทนที่จะแปะไปกับพรีวิว เพราะมันเป็นรายการระดับระบบที่โหลดครั้งเดียวตอน
+ * เปิดหน้า ไม่ได้ขึ้นกับใบที่กำลังกรอก · แคช 5 นาทีอยู่ในเซอร์วิส
+ */
+app.get('/api/admin/webquote/payment-terms', adminAuthMiddleware, requireRole('admin', 'subadmin'), async (req: any, res: any) => {
+  try {
+    res.json({ terms: await listPaymentTermOptions() });
+  } catch (err: any) {
+    sendWebQuoteError(res, 'GET /api/admin/webquote/payment-terms', err);
+  }
+});
+
+/**
  * วางข้อความ → คืน slots + candidates ให้ฟอร์มเรนเดอร์ — **ยังไม่เขียน DB สักแถว**
  *
  * ยังไม่ลบร่างที่ค้างอยู่ด้วย (`purgePending: false` ใน service) เพราะแค่วางข้อความผิด
@@ -2525,6 +2547,9 @@ app.post('/api/admin/webquote/preview', adminAuthMiddleware, requireRole('admin'
       customerId: req.body?.customer_id,
       contactId: req.body?.contact_id,
       items: req.body?.items,
+      // ค่าที่แอดมินตั้งทับต้องมาถึงพรีวิวด้วย ไม่งั้นตัวเลขบนจอกับใบที่ออกจริงคนละชุด
+      paymentTermsOverride: req.body?.payment_terms_override,
+      delivery: req.body?.delivery,
     }));
   } catch (err: any) {
     sendWebQuoteError(res, 'POST /api/admin/webquote/preview', err);
@@ -2547,6 +2572,8 @@ app.post('/api/admin/webquote/drafts', adminAuthMiddleware, requireRole('admin',
       items: req.body?.items,
       proposeMsgId: req.body?.propose_msg_id,
       reviseFrom: req.body?.revise_from,
+      paymentTermsOverride: req.body?.payment_terms_override,
+      delivery: req.body?.delivery,
     }));
   } catch (err: any) {
     sendWebQuoteError(res, 'POST /api/admin/webquote/drafts', err);

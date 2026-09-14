@@ -217,6 +217,29 @@ export async function getContactNamesByCustomerIds(customerIds: any[]): Promise<
   } catch (err) { logErr('getContactNamesByCustomerIds', err); return []; }
 }
 
+/**
+ * เครดิตทุกแบบที่ลูกค้าจริงใช้อยู่ เรียงจากที่พบมากไปน้อย
+ *
+ * มีไว้ให้หน้าจอที่ยอมให้ "เขียนทับเครดิตเฉพาะใบ" หยิบไปทำตัวเลือก — **ห้ามฝังรายการนี้เป็น
+ * ค่าคงที่ในโค้ดฝั่งหน้าจอ** เพราะมันเป็นข้อมูลที่ sync มาจาก Odoo ไม่ใช่ค่าที่เราตั้งเอง
+ * วันที่ฝั่งนั้นเพิ่มเทอมใหม่ รายการที่ฝังไว้จะเงียบและผิดพร้อมกัน
+ *
+ * นับแถว = นับ "ผู้ติดต่อ" ไม่ใช่ "บริษัท" (1 แถว = 1 ผู้ติดต่อ) ซึ่งพอสำหรับการเรียงลำดับ
+ * ตัวเลือก และไม่ต้องจ่ายค่า DISTINCT ของ company_id · ค่าว่าง/NULL ถูกตัดทิ้ง เพราะ
+ * "ไม่รู้ว่าเครดิตเท่าไหร่" ไม่ใช่ตัวเลือกที่คนจะตั้งใจเลือก (วัด 2026-09-14: 19 ค่า)
+ */
+export async function listCustomerPaymentTerms(): Promise<{ value: string; count: number }[]> {
+  try {
+    const { rows } = await pool.query(
+      `SELECT TRIM(customer_payment_terms) AS value, COUNT(*)::int AS count
+         FROM customers_data_view
+        WHERE customer_payment_terms IS NOT NULL AND TRIM(customer_payment_terms) <> ''
+        GROUP BY 1
+        ORDER BY count DESC, value`);
+    return rows;
+  } catch (err) { logErr('listCustomerPaymentTerms', err); return []; }
+}
+
 /** เพดานแถวของ reverse lookup — ILIKE สแกนทั้งตารางอยู่แล้ว การขยับเพดานจึงแทบไม่มีผลกับเวลา
  *  (วัดจริง: limit 50 vs 500 vs ไม่จำกัด ต่างกันอยู่ในช่วง noise)
  *  ที่ยังต้องมีเพดานเพราะกันฝั่ง Node — pattern กว้างตรงได้เป็นหมื่นแถวแล้วไปหนักที่ Fuse.js */
