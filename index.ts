@@ -2546,6 +2546,7 @@ app.post('/api/admin/webquote/drafts', adminAuthMiddleware, requireRole('admin',
       contactId: req.body?.contact_id,
       items: req.body?.items,
       proposeMsgId: req.body?.propose_msg_id,
+      reviseFrom: req.body?.revise_from,
     }));
   } catch (err: any) {
     sendWebQuoteError(res, 'POST /api/admin/webquote/drafts', err);

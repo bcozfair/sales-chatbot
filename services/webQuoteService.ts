@@ -507,6 +507,14 @@ export async function createDraft(params: {
   items: WebQuoteItemInput[];
   /** id ของแถว `web_propose` ที่ฟอร์มได้มาจากขั้นก่อนหน้า — ไม่ส่งมาก็สร้างร่างได้ตามปกติ */
   proposeMsgId?: number | string | null;
+  /**
+   * เลขที่ใบต้นทางเมื่อร่างนี้เกิดจากการ "แก้ใบเดิม" — ติดไว้ใน `customer_name` ด้วยตัวต่อสตริง
+   * ตัวเดียวกับ reviseQuotation() (`appendReviseFrom`) ⇒ รูปแบบ `revise_from=` ของสองเส้นไม่เพี้ยนกัน
+   *
+   * มีพารามิเตอร์นี้เพราะหน้าเว็บ **ไม่เขียนใบร่างลง DB จนกว่าจะกดยืนยัน** (2026-09-14) —
+   * ขั้น revise จึงส่งรายการกลับเข้าฟอร์มแล้วมาออกใบจริงที่นี่ ไม่ได้ยืนยันร่างที่ revise สร้างไว้
+   */
+  reviseFrom?: string | null;
 }): Promise<CreateDraftResult> {
   if (!Array.isArray(params.items) || params.items.length === 0) {
     throw new WebQuoteError('BAD_REQUEST', 'ต้องมีรายการสินค้าอย่างน้อย 1 รายการ (items)', 400);
@@ -525,6 +533,9 @@ export async function createDraft(params: {
   // ไม่ใช่ตัวเลข = ไม่มีการอ้างอิง ไม่ใช่ error — ร่างต้องสร้างได้แม้ log ของขั้นก่อนหน้าจะหาย
   const proposeMsgIdRaw = Number(params.proposeMsgId);
   const proposeMsgId = Number.isFinite(proposeMsgIdRaw) && proposeMsgIdRaw > 0 ? proposeMsgIdRaw : null;
+
+  // ว่าง = ร่างปกติ ไม่ใช่ error — เส้นทางเดิมไม่ส่งฟิลด์นี้มาเลยและต้องทำงานเหมือนเดิมทุกประการ
+  const reviseFrom = String(params.reviseFrom ?? '').trim().toUpperCase();
 
   const webUserId = await resolveWebUserId(params.adminId, params.spUserId);
 
@@ -552,7 +563,8 @@ export async function createDraft(params: {
       throw new WebQuoteError('RULE_VIOLATION', buildViolationText(violations), 422, { violations });
     }
 
-    const customerName = `${customer.display_name} | ${contact.name}`;
+    const plainName = `${customer.display_name} | ${contact.name}`;
+    const customerName = reviseFrom ? appendReviseFrom(plainName, reviseFrom) : plainName;
     const quotes = await insertDraftQuotations(
       webUserId, customerName, expanded, 'draft', resolvedCustomerId, contactId
     );
@@ -574,6 +586,7 @@ export async function createDraft(params: {
         `📄 รหัสร่าง: ${quotes.map((q: any) => q.id).join(', ')}`,
       meta: {
         propose_msg_id: proposeMsgId,
+        revise_from: reviseFrom || null,
         chosen_customer_id: resolvedCustomerId,
         chosen_contact_id: contactId,
         chosen_rank: await resolveChosenRank(proposeMsgId, resolvedCustomerId, customerIdIn),

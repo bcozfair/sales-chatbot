@@ -7,6 +7,7 @@
 //  2. proposeFromText() ต้อง **ไม่เขียน quotations** และ **ไม่ลบร่างที่ค้างอยู่**      [เฟส D]
 //  3. createDraft() → PUT /api/quotation/:id → confirm ครบวงจรด้วย webUserId          [เฟส D]
 //  4. reviseQuotation() — ใบที่ยืนยันแล้ว → ได้ร่าง revision · เลขที่ไม่มีจริง → ปฏิเสธ [เฟส D]
+//     + เส้นทางของหน้าเว็บ: รายการกลับเข้าฟอร์ม → createDraft({reviseFrom}) → confirm
 //  5. ประวัติลง `messages` ครบ 4 ชนิด · chosen_rank คำนวณถูก · แถวของ LINE ไม่ปนเปื้อน
 //     (docs/plan-web-quote-logging.md §7)
 //  6. previewDraft() — dry-run ที่ต้องไม่เขียน DB · แบ่งใบ PM/THT · คืนกำหนดส่ง
@@ -300,6 +301,65 @@ async function case4(quotationNo: string | null) {
   try { await reviseQuotation({ adminId, spUserId: TEST_SP_USER, quotationNo: '  ' }); }
   catch (e: any) { blankCode = e instanceof WebQuoteError ? e.code : `(${e?.name}) ${e?.message}`; }
   ok('ไม่ส่งเลขที่ → BAD_REQUEST', blankCode === 'BAD_REQUEST', blankCode || '(ไม่ throw)');
+
+
+  // ── เส้นทางจริงของหน้าเว็บตั้งแต่ 2026-09-14 ────────────────────────────────
+  //  หน้าเว็บ *ไม่* ยืนยันร่างที่ reviseQuotation สร้างไว้ — มันเอารายการกลับเข้าฟอร์มให้แก้
+  //  แล้วออกใบจริงผ่าน createDraft({ reviseFrom }) เส้นเดียวกับทางปกติ ⇒ ด่านนี้เดินตามนั้นเป๊ะ
+  //  รวมถึงการกรองบรรทัดที่กฎเติมให้เอง ซึ่งถ้าพลาดจะได้สินค้าพ่วงซ้ำสองชุดในใบใหม่
+  const rq: any = revised.quotes?.[0];
+  const formItems = (rq?.items ?? [])
+    .filter((it: any) => !it.is_optional && (!it.is_shipping_fee || it.is_manual_service === true))
+    .map((it: any) => ({
+      product_template_id: it.product_id,
+      quantity: it.quantity,
+      price: it.price,
+      discount_1: it.discount_1,
+      discount_2: it.discount_2,
+      ...(it.is_manual_service ? { name: it.name } : {}),
+    }));
+
+  const redraft = await createDraft({
+    adminId,
+    spUserId: TEST_SP_USER,
+    customerId: rq?.customer_id,
+    contactId: rq?.contact_id,
+    items: formItems,
+    reviseFrom: quotationNo,
+  });
+  ok('createDraft({reviseFrom}) คืนใบร่าง', (redraft.quotes?.length ?? 0) > 0, `${redraft.quotes?.length ?? 0} ใบ`);
+
+  const leftover = Number((await pool.query(
+    'SELECT COUNT(*)::int AS n FROM quotations WHERE id = $1', [revised.draft_quote_id]
+  )).rows[0].n);
+  ok('ร่างที่ revise เตรียมไว้ถูกล้างตอนออกใบจริง (ไม่มีร่างซ้อน)', leftover === 0, `เหลือ ${leftover} แถว`);
+
+  const newQuote: any = redraft.quotes?.[0];
+  // ธง revise_from อยู่ใน customer_details.revise_from — คอลัมน์ customer_name ไม่มีจริง
+  // (enrichQuotationData เป็นคนประกอบกลับมาให้ตอนอ่าน) — นี่คือค่าที่ cancelOldRevision อ่านจริงตอนยืนยัน
+  const nameRow = (await pool.query(
+    `SELECT customer_details->>'revise_from' AS revise_from FROM quotations WHERE id = $1`, [newQuote?.id]
+  )).rows[0];
+  ok('ใบใหม่ติดธง revise_from ของใบต้นทาง',
+    nameRow?.revise_from === quotationNo, String(nameRow?.revise_from ?? '(ไม่มี)'));
+
+  const reConfirm = await fetch(`${BASE}/api/quotation/${newQuote?.id}/confirm`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId: webUserId }),
+  });
+  ok('ยืนยันใบ revision ด้วย webUserId → 200', reConfirm.status === 200, `HTTP ${reConfirm.status}`);
+
+  const after = (await pool.query(
+    'SELECT status, quotation_no FROM quotations WHERE id = $1', [newQuote?.id]
+  )).rows[0];
+  ok('ใบ revision ได้เลขที่ของตัวเอง', after?.status === 'confirmed' && !!after?.quotation_no,
+    `${after?.status} / ${after?.quotation_no ?? '(ไม่มีเลข)'}`);
+
+  const origin = (await pool.query(
+    'SELECT status FROM quotations WHERE quotation_no = $1', [quotationNo]
+  )).rows[0];
+  ok('ใบต้นทางถูกยกเลิกอัตโนมัติตอนยืนยัน', origin?.status === 'cancelled', String(origin?.status));
 
   console.log(`  ${DIM}หมายเหตุ: กิ่ง QUOTATION_NOT_CONFIRMED เป็นด่านกันเหนียวที่ยกมาจาก`);
   console.log(`  handleQuotationEditRequest() — ผ่านทางค้นด้วยเลขที่จะไปไม่ถึง เพราะใบร่างไม่มีเลข${RESET}`);
