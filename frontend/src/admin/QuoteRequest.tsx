@@ -6,8 +6,12 @@
 //  มีแค่ 3 ส่วนเรียงลงมาในหน้าเดียว ไม่มีการเปลี่ยนหน้า:
 //    ส่วนที่ 0  แถบตัวตนของใบ            → QuoteIssuerProfile.tsx
 //    ส่วนที่ 1  ช่องวางข้อความ            → POST /api/admin/webquote/propose  (ยังไม่เขียน DB)
-//    ส่วนที่ 2  ฟอร์มร่าง (หัวใจของ v5)   → POST /api/admin/webquote/drafts   → โหมดแก้ใบร่าง
+//    ส่วนที่ 2  ร่างใบเสนอราคา            → POST /api/admin/webquote/drafts   → โหมดแก้ใบร่าง
 //    ส่วนที่ 3  revise จากเลขที่ใบ        → POST /api/admin/webquote/revise
+//
+//  **ส่วนที่ 2 เปิดค้างไว้ตั้งแต่โหลดหน้า แม้ยังไม่มีรายการสักบรรทัด** (2026-09-14) — การวางข้อความ
+//  เป็นทางเข้า *ทางหนึ่ง* ไม่ใช่ทางเดียว แอดมินกรอกทั้งใบเองได้ ⇒ `rows` เป็น `Row[]` ที่ว่างได้
+//  ไม่ใช่ `null` ที่แปลว่า "ยังไม่มีฟอร์ม" และการ์ดซ่อนตัวเฉพาะตอนเข้าโหมดแก้ใบร่างแล้วเท่านั้น
 //
 //  ความกำกวมทั้งหมด (บริษัทซ้ำ · รุ่นกำกวม · รุ่นพิมพ์ผิด) ถูกเคาะในฟอร์ม **ก่อน** สร้างร่าง
 //  ⇒ ไม่มี state `pending_product`/`pending_company` ใน DB จากเส้นทางนี้เลย
@@ -696,7 +700,9 @@ export const QuoteRequest: React.FC = () => {
   // ประวัติของขั้น propose — ไม่มีผลกับสิ่งที่แสดงบนหน้าจอ ใช้ผูกแถว web_draft กลับไปหาแถว
   // web_propose เท่านั้น (docs/plan-web-quote-logging.md §5)
   const [proposeMsgId, setProposeMsgId] = useState<number | null>(null);
-  const [rows, setRows] = useState<Row[] | null>(null);
+  // `[]` ไม่ใช่ `null` — การ์ดร่างเปิดค้างไว้ตั้งแต่โหลดหน้า แอดมินกรอกเองได้โดยไม่ต้องวางข้อความ
+  // ⇒ "ว่าง" กับ "ยังไม่มีฟอร์ม" ไม่ใช่สถานะเดียวกันอีกต่อไป
+  const [rows, setRows] = useState<Row[]>([]);
   const [aiMessage, setAiMessage] = useState('');
   const [customerOptions, setCustomerOptions] = useState<CustomerRow[]>([]);
   const [customerId, setCustomerId] = useState<number | null>(null);
@@ -736,7 +742,7 @@ export const QuoteRequest: React.FC = () => {
 
   const resetAll = () => {
     setText('');
-    setRows(null);
+    setRows([]);
     setAiMessage('');
     setCustomerOptions([]);
     setCustomerId(null);
@@ -828,14 +834,14 @@ export const QuoteRequest: React.FC = () => {
       setResults([]);
       setReviseFrom('');
 
+      // สองเคสล่างนี้ไม่แตะ rows โดยตั้งใจ — ฟอร์มอาจมีของที่แอดมินกรอกเองอยู่แล้ว
+      // การล้างทิ้งเพราะ "สกัดข้อความไม่สำเร็จ" คือการลบงานที่ไม่เกี่ยวกับข้อความนั้นเลย
       if (data.extraction_failed) {
         // ไม่ล้างข้อความที่พิมพ์ไว้ — ผู้ใช้ต้องกดลองใหม่ได้ทันทีโดยไม่ต้องวางใหม่
         setSystemBusy(true);
-        setRows(null);
         return;
       }
       if (!data.slots || data.slots.length === 0) {
-        setRows(null);
         setAiMessage(data.reply_message || 'ระบบอ่านข้อความนี้เป็นคำสั่งขอใบเสนอราคาไม่ได้');
         return;
       }
@@ -919,7 +925,7 @@ export const QuoteRequest: React.FC = () => {
   //  สิ่งที่เห็นตรงกับฟอร์ม ณ ตอนนี้หรือเปล่า (ไม่ใช่แค่ "เคยตรวจแล้ว")
   const itemsPayload = useMemo(
     () =>
-      (rows ?? []).map((r) => ({
+      rows.map((r) => ({
         product_template_id: r.productTemplateId,
         model: r.model,
         quantity: num(r.quantity) || 1,
@@ -932,13 +938,15 @@ export const QuoteRequest: React.FC = () => {
     [rows],
   );
 
-  const unresolved = (rows ?? []).filter((r) => r.status !== 'ok').length;
+  const unresolved = rows.filter((r) => r.status !== 'ok').length;
   const sig = useMemo(
     () => JSON.stringify([customerId, contactId, itemsPayload]),
     [customerId, contactId, itemsPayload],
   );
   const canPreview =
-    !!rows && rows.length > 0 && unresolved === 0 && customerId !== null && contactId !== null;
+    rows.length > 0 && unresolved === 0 && customerId !== null && contactId !== null;
+  /** ฟอร์มเปล่ายังไม่ใช่ฟอร์มที่กรอกผิด — ป้ายสีเหลืองจึงขึ้นต่อเมื่อมีของจะเสนอแล้วเท่านั้น */
+  const mustPick = rows.length > 0;
   const staleNow = !!preview && sig !== previewSig;
 
   const runPreview = useCallback(async () => {
@@ -1007,7 +1015,7 @@ export const QuoteRequest: React.FC = () => {
   }, []);
 
   /** ค่าบริการมีได้บรรทัดเดียวต่อการเสนอราคา — ทั้งที่แอดมินเพิ่มเองและที่กฎเติมให้ */
-  const serviceRow = (rows ?? []).find((r) => r.isService) ?? null;
+  const serviceRow = rows.find((r) => r.isService) ?? null;
   const autoFeeShown = preview?.service_line.auto_applied === true;
 
   const addServiceRow = () => {
@@ -1041,7 +1049,7 @@ export const QuoteRequest: React.FC = () => {
     const extras: { co: 'PM' | 'THT'; item: PreviewItem }[] = [];
     if (!preview) return { byRow, coByRow, extras };
     const used = new Set<PreviewItem>();
-    for (const r of rows ?? []) {
+    for (const r of rows) {
       for (const q of preview.quotes) {
         const hit = q.items.find((it) => !used.has(it) && it.model === r.model);
         if (hit) {
@@ -1059,7 +1067,7 @@ export const QuoteRequest: React.FC = () => {
   }, [preview, rows]);
 
   const groups = useMemo(() => {
-    const all = rows ?? [];
+    const all = rows;
     const sumRows = (rs: Row[]) => rs.reduce((s, r) => s + (r.status === 'ok' ? rowTotal(r) : 0), 0);
     // ก่อนตรวจครั้งแรกยังไม่รู้ว่าแถวไหนไปใบไหน — resolveQuoteCompany อยู่ฝั่ง server เท่านั้น
     if (!preview) {
@@ -1145,12 +1153,13 @@ export const QuoteRequest: React.FC = () => {
 
   // ติดกฎ = กดสร้างไปก็ถูกทิ้งทั้งใบ ⇒ ปิดปุ่มไว้ · แต่ถ้าตรวจไม่สำเร็จ/ยังไม่ได้ตรวจ ปล่อยให้กดได้
   // เพราะ createDraft ฝั่ง server เป็นด่านจริงอยู่แล้ว การปิดปุ่มตอนพรีวิวล่มคือการล็อกงานไว้เฉย ๆ
+  // `spUserId` เคยรับประกันมาเองเพราะฟอร์มเกิดจาก propose เท่านั้น — พอกรอกเองได้ ต้องเช็คตรง ๆ
   const canCreateDraft =
-    !!rows && rows.length > 0 && unresolved === 0 && customerId !== null && contactId !== null &&
+    rows.length > 0 && unresolved === 0 && customerId !== null && contactId !== null && !!spUserId &&
     !creatingDraft && !previewing && (staleNow || !preview || preview.can_create_draft);
 
   const createDraft = async () => {
-    if (!canCreateDraft || !rows) return;
+    if (!canCreateDraft) return;
     setCreatingDraft(true);
     setDraftError('');
     try {
@@ -1169,7 +1178,7 @@ export const QuoteRequest: React.FC = () => {
       const data = await res.json();
       setWebUserId(data.web_user_id);
       setQuotes(data.quotes as Quote[]);
-      setRows(null);
+      setRows([]);
     } catch (e) {
       setDraftError(e instanceof Error ? e.message : 'สร้างร่างไม่สำเร็จ');
     } finally {
@@ -1278,7 +1287,7 @@ export const QuoteRequest: React.FC = () => {
       setWebUserId(data.web_user_id);
       setQuotes(data.quotes as Quote[]);
       setReviseFrom(data.revise_from);
-      setRows(null);
+      setRows([]);
       setResults([]);
       setText('');
     } catch (e) {
@@ -1289,11 +1298,15 @@ export const QuoteRequest: React.FC = () => {
   };
 
   const blocked = !profileReady;
+  /** เข้าโหมดแก้ใบร่างแล้ว — ต้องเช็คความยาวด้วย ไม่งั้น `quotes = []` จะซ่อนทั้งฟอร์มและใบร่างพร้อมกัน */
+  const editing = !!quotes && quotes.length > 0;
+  /** มีอะไรให้ล้างไหม — การ์ดร่างที่เปิดค้างไว้เปล่า ๆ ไม่ใช่ "งานที่เริ่มแล้ว" */
+  const hasWork = rows.length > 0 || !!quotes || text.trim().length > 0 || customerId !== null;
 
   return (
     <div className="space-y-5">
-      <PageHeader icon={FilePlus2} title="ขอใบเสนอราคา" description="วางข้อความ → เคาะในฟอร์ม → ยืนยัน">
-        {(rows || quotes) && (
+      <PageHeader icon={FilePlus2} title="ขอใบเสนอราคา" description="วางข้อความหรือกรอกเอง → เคาะในฟอร์ม → ยืนยัน">
+        {hasWork && (
           <button
             onClick={resetAll}
             className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
@@ -1332,6 +1345,9 @@ export const QuoteRequest: React.FC = () => {
           </button>
           {!spUserId && <span className="text-xs text-amber-700">เลือกพนักงานขายที่จะออกใบในนามก่อน</span>}
           {proposing && <span className="text-xs text-slate-400">ระบบมีเวลาสกัดสูงสุด 60 วินาที</span>}
+          <p className="basis-full text-[11px] text-slate-400">
+            ไม่มีข้อความก็ได้ — กรอกเองในฟอร์ม “ร่างใบเสนอราคา” ด้านล่างได้เลย
+          </p>
         </div>
 
         {systemBusy && (
@@ -1357,10 +1373,15 @@ export const QuoteRequest: React.FC = () => {
         )}
       </div>
 
-      {/* ── ส่วนที่ 2 — ฟอร์มร่าง ── */}
-      {rows && (
-        <div className="bg-card border border-slate-200 rounded-2xl shadow-sm p-4 space-y-4">
-          <h3 className="text-sm font-bold text-slate-800">ตรวจและเคาะรายละเอียด</h3>
+      {/* ── ส่วนที่ 2 — ฟอร์มร่าง ──
+          เปิดค้างไว้ตั้งแต่โหลดหน้า แม้ยังไม่มีรายการสักบรรทัด เพราะการวางข้อความเป็นทางเข้า
+          *ทางหนึ่ง* ไม่ใช่ทางเดียว — แอดมินกรอกทั้งใบเองได้ · ซ่อนเฉพาะตอนเข้าโหมดแก้ใบร่างแล้ว */}
+      {!editing && (
+        <div className={`bg-card border border-slate-200 rounded-2xl shadow-sm p-4 space-y-4 ${blocked ? 'opacity-50 pointer-events-none' : ''}`}>
+          <div className="flex items-center gap-2">
+            <FilePlus2 className="w-[18px] h-[18px]" style={{ color: BRAND }} />
+            <h3 className="text-sm font-bold text-slate-800">ร่างใบเสนอราคา</h3>
+          </div>
 
           {/* หัวฟอร์ม */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1376,7 +1397,7 @@ export const QuoteRequest: React.FC = () => {
                   setContactId(null);
                 }}
                 className={`w-full h-11 px-3 rounded-xl border text-sm outline-none ${
-                  customerId === null ? 'border-amber-400 bg-amber-50' : 'border-slate-200 bg-slate-50'
+                  customerId === null && mustPick ? 'border-amber-400 bg-amber-50' : 'border-slate-200 bg-slate-50'
                 }`}
               >
                 <option value="">— เลือกบริษัท —</option>
@@ -1392,12 +1413,19 @@ export const QuoteRequest: React.FC = () => {
                 <input
                   value={customerQuery}
                   onChange={(e) => setCustomerQuery(e.target.value)}
-                  placeholder="ค้นหาบริษัทเพิ่มเติม..."
+                  aria-label="ค้นหาบริษัท"
+                  placeholder={
+                    customerOptions.length > 0 ? 'ค้นหาบริษัทเพิ่มเติม...' : 'ค้นหาบริษัท — พิมพ์ชื่อหรือรหัสลูกค้า'
+                  }
                   className="flex-1 bg-transparent outline-none text-xs text-slate-800 placeholder:text-slate-400 min-w-0"
                 />
               </div>
               {customerId === null && (
-                <p className="text-[11px] text-amber-700">พบบริษัทใกล้เคียงหลายราย — ต้องเลือกก่อนสร้างร่าง</p>
+                <p className={`text-[11px] ${mustPick ? 'text-amber-700' : 'text-slate-500'}`}>
+                  {customerOptions.length > 0
+                    ? 'พบบริษัทใกล้เคียงหลายราย — ต้องเลือกก่อนสร้างใบร่าง'
+                    : 'ค้นหาบริษัทจากช่องด้านบน แล้วเลือกจากรายการ'}
+                </p>
               )}
             </div>
 
@@ -1409,7 +1437,7 @@ export const QuoteRequest: React.FC = () => {
                 onChange={(e) => setContactId(e.target.value ? Number(e.target.value) : null)}
                 disabled={customerId === null}
                 className={`w-full h-11 px-3 rounded-xl border text-sm outline-none disabled:opacity-50 ${
-                  contactId === null ? 'border-amber-400 bg-amber-50' : 'border-slate-200 bg-slate-50'
+                  contactId === null && mustPick ? 'border-amber-400 bg-amber-50' : 'border-slate-200 bg-slate-50'
                 }`}
               >
                 <option value="">— เลือกผู้ติดต่อ —</option>
@@ -1422,8 +1450,9 @@ export const QuoteRequest: React.FC = () => {
               </select>
               {/* ก่อนตรวจครั้งแรกยังมีแค่ค่าที่ติดมากับ candidates ซึ่งว่างได้บ่อย — พอผลตรวจมาถึง
                   แถบข้อมูลลูกค้ากับชิปกำหนดส่งของแต่ละใบเป็นของจริงกว่า จึงเลิกโชว์บรรทัดนี้
-                  ไม่งั้นหน้าจอเดียวกันจะบอกเครดิตสองค่าที่ไม่ตรงกัน */}
-              {!preview && (
+                  ไม่งั้นหน้าจอเดียวกันจะบอกเครดิตสองค่าที่ไม่ตรงกัน · ยังไม่เลือกบริษัทก็ไม่โชว์
+                  เพราะ "เครดิต: —" ของลูกค้าที่ยังไม่มีตัวตน อ่านได้เป็น "ลูกค้ารายนี้ไม่มีเครดิต" */}
+              {!preview && customerId !== null && (
                 <p className="text-[11px] text-slate-500">
                   เครดิต:{' '}
                   <span className="font-semibold text-slate-700">
@@ -1727,6 +1756,18 @@ export const QuoteRequest: React.FC = () => {
             </div>
           ))}
 
+          {/* ว่างเปล่าต้องบอกว่าทำไมถึงว่าง (docs/design.md §8) — การ์ดนี้เปิดค้างไว้ตั้งแต่หน้าโหลด
+              คนที่เพิ่งเข้ามาจึงต้องอ่านออกทันทีว่ามีสองทางเข้า ไม่ใช่เห็นกล่องเปล่าแล้วเดาว่าพัง */}
+          {groups.length === 0 && (
+            <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center">
+              <FileText className="w-5 h-5 mx-auto text-slate-400" />
+              <p className="mt-1.5 text-xs font-semibold text-slate-600">ยังไม่มีรายการในใบ</p>
+              <p className="mt-0.5 text-[11px] text-slate-500">
+                เพิ่มสินค้าจากช่องด้านล่างได้เลย — หรือวางข้อความที่ลูกค้าส่งมาไว้ด้านบน แล้วกด “สร้างร่าง” ให้ระบบเคาะรายการให้
+              </p>
+            </div>
+          )}
+
           {/* แถบเพิ่มสินค้า — พิมพ์แล้ว Enter ได้แถวที่เคาะเสร็จทันที โฟกัสค้างไว้ให้พิมพ์ตัวถัดไปต่อ
               ปุ่ม "แถวเปล่า" คือของเดิม เก็บไว้สำหรับกรณีที่ยังไม่รู้ว่าจะใส่รุ่นอะไร */}
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-2">
@@ -1779,12 +1820,14 @@ export const QuoteRequest: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="ml-auto text-sm">
-              <span className="text-slate-500">ยอดรวมทุกใบ (ก่อน VAT): </span>
-              <span className="font-extrabold text-slate-900 tabular-nums">฿{money(grandTotal)}</span>
+          {groups.length > 0 && (
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="ml-auto text-sm">
+                <span className="text-slate-500">ยอดรวมทุกใบ (ก่อน VAT): </span>
+                <span className="font-extrabold text-slate-900 tabular-nums">฿{money(grandTotal)}</span>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* ── แถบสถานะการตรวจ — บอกว่าสิ่งที่เห็นตรงกับข้อมูลล่าสุดแค่ไหน ── */}
           {previewError ? (
@@ -1864,20 +1907,25 @@ export const QuoteRequest: React.FC = () => {
             </div>
           )}
 
-          <button
-            onClick={createDraft}
-            disabled={!canCreateDraft}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-40 disabled:cursor-not-allowed"
-            style={{ backgroundColor: BRAND }}
-          >
-            {creatingDraft ? <Loader2 className="w-4 h-4 animate-spin" /> : <FilePlus2 className="w-4 h-4" />}
-            สร้างใบร่าง
-          </button>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              onClick={createDraft}
+              disabled={!canCreateDraft}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-40 disabled:cursor-not-allowed"
+              style={{ backgroundColor: BRAND }}
+            >
+              {creatingDraft ? <Loader2 className="w-4 h-4 animate-spin" /> : <FilePlus2 className="w-4 h-4" />}
+              สร้างใบร่าง
+            </button>
+            {!spUserId && (
+              <span className="text-xs text-amber-700">เลือกพนักงานขายที่จะออกใบในนามก่อน</span>
+            )}
+          </div>
         </div>
       )}
 
       {/* ── โหมดแก้ใบร่าง ── */}
-      {quotes && quotes.length > 0 && (
+      {editing && (
         <div className="space-y-4">
           {reviseFrom && (
             <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-600">
