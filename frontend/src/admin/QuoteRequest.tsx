@@ -1045,10 +1045,9 @@ export const QuoteRequest: React.FC = () => {
                           </select>
                         </div>
                       ) : (
+                        // คำเตือนอยู่ "ใต้" ช่องค้น ไม่ใช่เหนือ — ของที่ต้องลงมือทำมาก่อน
+                        // คำอธิบายว่าทำไมถึงต้องทำ เพราะสายตาไล่จากบนลงล่างแล้วหยุดที่ช่องกรอก
                         <div className="space-y-1">
-                          <p className="text-[11px] text-red-700">
-                            {r.model ? `ไม่พบรุ่น “${r.model}” ในระบบ` : 'ยังไม่ได้เลือกสินค้า'}
-                          </p>
                           <ProductSearchBox
                             initialQuery={r.model}
                             placeholder="ค้นหารุ่นที่ถูกต้อง..."
@@ -1064,6 +1063,9 @@ export const QuoteRequest: React.FC = () => {
                               })
                             }
                           />
+                          <p className="text-[11px] text-red-700">
+                            {r.model ? `ไม่พบรุ่น “${r.model}” ในระบบ` : 'ยังไม่ได้เลือกสินค้า'}
+                          </p>
                         </div>
                       )}
                     </td>
