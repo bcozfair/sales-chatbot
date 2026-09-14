@@ -489,6 +489,17 @@ npm --prefix frontend run lint     # eslint ของ admin
 npm --prefix frontend run build    # typecheck + build admin
 ```
 
+**อยู่ใน worktree ต้อง `npm --prefix frontend install` ก่อน ไม่งั้นสองคำสั่งล่างรันไม่ได้** —
+`frontend/` เป็น npm project ของตัวเองที่มี `node_modules` **แยกจากรากคนละตัว** และทั้งคู่
+git-ignore ไว้ ⇒ `git worktree add` ไม่พาไปให้ตาม A5 · **junction ของ `node_modules` ราก
+ไม่ครอบถึงตัวนี้** เพราะมันลิงก์แค่โฟลเดอร์เดียว
+อาการ (เจอจริง 2026-09-14): `frontend/tsconfig.app.json` ตั้ง `"types": ["vite/client"]` แล้ว TS ฟ้อง
+`Cannot find type definition file for 'vite/client'` ทั้งที่ทรีหลักผ่านสะอาด
+
+**ถ้า path ใน error ชี้ไปที่ `.claude/worktrees/<ชื่อ>` ที่ปิดไปแล้ว นั่นคือ error ค้างของ TS server
+ใน VSCode ไม่ใช่ปัญหาในโค้ด** — ยืนยันด้วย `git worktree list` ว่าทรีนั้นไม่มีแล้ว แล้วสั่ง
+`TypeScript: Restart TS Server` ก็หาย ห้ามไล่แก้ `tsconfig` ตามข้อความ error
+
 **ไม่มี unit test suite** (`npm test` เป็น stub) — typecheck + `scripts/diag/*` คือด่านตรวจหลัก
 กฎ "รันทั้งก่อนและหลังแล้วเทียบผล" อยู่ที่ A7.6
 
