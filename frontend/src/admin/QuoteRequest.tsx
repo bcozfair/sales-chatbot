@@ -35,6 +35,8 @@ import { createPortal } from 'react-dom';
 import { useAuth } from '../context/AuthContext';
 import { PageHeader } from './PageHeader';
 import { QuoteIssuerProfile } from './QuoteIssuerProfile';
+import { Button } from './Button';
+import { ComboBox, type ComboOption } from './PersonComboBox';
 import {
   AlertCircle,
   AlertTriangle,
@@ -103,6 +105,16 @@ interface CustomerRow {
   // อ่านตัวเดียวจะได้ "—" ครึ่งหนึ่งของเคส จึงต้องรับทั้งสองชื่อ
   payment_terms?: string | null;
   customer_payment_terms?: string | null;
+  // สองธงนี้ `/api/customers/search` ส่งมาให้ตั้งแต่แรกแต่หน้าจอไม่เคยหยิบมาใช้ ⇒ แอดมินรู้ว่า
+  // เลือกบริษัทที่ออกใบไม่ได้ ก็ต่อเมื่อกดตรวจไปแล้วทั้งใบ (candidates จาก /propose ไม่มีสองตัวนี้
+  // จึงเป็น optional — ไม่มีธง = ไม่ขึ้นป้าย ไม่ใช่ "ผ่าน")
+  is_blacklisted?: boolean;
+  is_credit_hold?: boolean;
+}
+
+/** บริษัทในรูปแบบที่ ComboBox ใช้ได้ — พก CustomerRow ตัวเต็มไปด้วยเพื่อเรนเดอร์ป้ายท้ายบรรทัด */
+interface CustomerOpt extends ComboOption {
+  row: CustomerRow;
 }
 
 interface ContactRow {
@@ -424,6 +436,49 @@ interface SearchHit {
   stock?: number | string;
 }
 
+/**
+ * ข้อเท็จจริงท้ายบรรทัดของบริษัท — รหัสลูกค้า + สถานะที่ทำให้ออกใบไม่ได้
+ * แยกสีและไอคอนคนละตัวระหว่าง "ห้ามเสนอราคา" (บล็อกแน่นอน) กับ "ติดเครดิต" (บล็อกตามกฎ)
+ * เพราะสองอย่างนี้คนละความรุนแรง — และทั้งคู่มีทั้งคำและไอคอน ไม่ได้สื่อด้วยสีอย่างเดียว
+ */
+const CustomerFacts: React.FC<{ row: CustomerRow }> = ({ row }) => {
+  const terms = row.payment_terms || row.customer_payment_terms || '';
+  return (
+    <span className="flex items-center gap-2 shrink-0 text-[11px] whitespace-nowrap">
+      {row.reference && <span className="text-slate-500">{row.reference}</span>}
+      {row.is_blacklisted ? (
+        <span className="flex items-center gap-1 font-semibold px-2 py-0.5 rounded-full border border-red-200 bg-red-50 text-red-700">
+          <Ban className="w-3 h-3 shrink-0" />
+          ห้ามเสนอราคา
+        </span>
+      ) : row.is_credit_hold ? (
+        <span className="flex items-center gap-1 font-semibold px-2 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-800">
+          <AlertTriangle className="w-3 h-3 shrink-0" />
+          ติดเครดิต
+        </span>
+      ) : terms ? (
+        <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">{terms}</span>
+      ) : null}
+    </span>
+  );
+};
+
+/**
+ * ป้ายสต็อกของรายการสินค้า — สามสถานะเดียวกับ `liff_pages/product-search.html` เป๊ะ
+ * (`out` / `low` / `ok`) เพราะเซลส์คนเดียวกันสลับไปมาระหว่างสองพื้นผิว ถ้าคำหรือเกณฑ์
+ * ไม่ตรงกัน เขาจะเชื่อหน้าที่เปิดอยู่ตอนนั้นแล้วสรุปว่าอีกหน้าผิด
+ * `need` = จำนวนที่ขอ ⇒ ช่อง "เพิ่มสินค้า" ที่ยังไม่รู้จำนวนถือว่าขอ 1 ชิ้น
+ */
+const StockBadge: React.FC<{ stock: number; need: number }> = ({ stock, need }) => {
+  const [cls, text] =
+    stock <= 0
+      ? ['border-red-200 bg-red-50 text-red-700', 'สินค้าหมด']
+      : stock < need
+        ? ['border-amber-200 bg-amber-50 text-amber-800', `ไม่พอ (เหลือ ${money(stock)})`]
+        : ['border-emerald-200 bg-emerald-50 text-emerald-700', `พร้อมส่ง ${money(stock)}`];
+  return <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${cls}`}>{text}</span>;
+};
+
 /** พิกัดของรายการผลค้นบนจอ — คำนวณใหม่ทุกครั้งที่เปิด/เลื่อนจอ/ปรับขนาดหน้าต่าง */
 interface PopPos {
   left: number;
@@ -441,8 +496,10 @@ const ProductSearchBox: React.FC<{
   tone: 'danger' | 'plain';
   /** แถบเพิ่มสินค้าต้องล้างคำค้นหลังเลือก เพื่อพิมพ์ตัวถัดไปต่อได้ทันที */
   clearOnPick?: boolean;
+  /** จำนวนที่แถวนั้นขอ — ใช้ตัดสินว่าสต็อก "ไม่พอ" · ช่องเพิ่มสินค้ายังไม่รู้จำนวน ถือว่า 1 */
+  needQty?: number;
   onPick: (hit: SearchHit) => void;
-}> = ({ initialQuery = '', placeholder, tone, clearOnPick, onPick }) => {
+}> = ({ initialQuery = '', placeholder, tone, clearOnPick, needQty = 1, onPick }) => {
   const [query, setQuery] = useState(initialQuery);
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [loading, setLoading] = useState(false);
@@ -639,14 +696,21 @@ const ProductSearchBox: React.FC<{
                     ref={(el) => {
                       if (i === active) el?.scrollIntoView({ block: 'nearest' });
                     }}
-                    className={`w-full text-left px-3 py-2 flex flex-col gap-0.5 ${
-                      i === active ? 'bg-slate-100' : 'hover:bg-slate-50'
-                    }`}
+                    className={`w-full text-left px-3 py-2 flex items-center gap-3 ${
+                      num(h.stock) <= 0 ? 'bg-red-50/40 ' : ''
+                    }${i === active ? 'bg-slate-100' : 'hover:bg-slate-50'}`}
                   >
-                    <span className="text-xs font-semibold text-slate-800">{h.model}</span>
-                    <span className="text-[11px] text-slate-500 line-clamp-1">{h.name}</span>
-                    <span className="text-[11px] text-slate-400">
-                      ฿{money(h.price)} · คงเหลือ {money(h.stock ?? 0)}
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-xs font-semibold text-slate-800 truncate">{h.model}</span>
+                      <span className="block text-[11px] text-slate-500 truncate">{h.name}</span>
+                    </span>
+                    {/* ราคาและสต็อกชิดขวาเป็นคอลัมน์ของตัวเอง — สองค่านี้คือสิ่งที่คนกวาดตาหา
+                        ตอนเลือกรุ่น การวางไว้ท้ายบรรทัดที่สามทำให้ต้องอ่านทั้งการ์ดก่อนถึงจะเจอ */}
+                    <span className="flex flex-col items-end gap-1 shrink-0">
+                      <span className="text-xs font-bold tabular-nums" style={{ color: BRAND }}>
+                        ฿{money(h.price)}
+                      </span>
+                      <StockBadge stock={num(h.stock)} need={needQty} />
                     </span>
                   </button>
                 ))}
@@ -687,6 +751,7 @@ export const QuoteRequest: React.FC = () => {
   const [customerOptions, setCustomerOptions] = useState<CustomerRow[]>([]);
   const [customerId, setCustomerId] = useState<number | null>(null);
   const [customerQuery, setCustomerQuery] = useState('');
+  const [custSearching, setCustSearching] = useState(false);
   const [contacts, setContacts] = useState<ContactRow[]>([]);
   const [contactId, setContactId] = useState<number | null>(null);
   /**
@@ -782,6 +847,9 @@ export const QuoteRequest: React.FC = () => {
     const q = customerQuery.trim();
     if (!q) return;
     const timer = setTimeout(async () => {
+      // ตั้งธงในตัว timer ไม่ใช่ในตัว effect — กฎ react-hooks/set-state-in-effect ปฏิเสธอย่างหลัง
+      // และผลที่ได้ดีกว่าด้วย: สปินเนอร์ขึ้นตอนยิงจริง ไม่ใช่กะพริบทุกตัวอักษรที่พิมพ์
+      setCustSearching(true);
       try {
         const res = await fetch(`/api/customers/search?q=${encodeURIComponent(q)}`);
         const data = res.ok ? await res.json() : [];
@@ -794,10 +862,24 @@ export const QuoteRequest: React.FC = () => {
         });
       } catch {
         /* ค้นไม่ได้ = คงรายการเดิมไว้ ไม่ล้างของที่ผู้ใช้กำลังดูอยู่ */
+      } finally {
+        setCustSearching(false);
       }
     }, 300);
     return () => clearTimeout(timer);
   }, [customerQuery]);
+
+  // รูปแบบที่ ComboBox กิน — id เป็นสตริงเพราะโครงกลางเทียบ id ด้วย === ไม่ใช่ ==
+  const customerOpts = useMemo<CustomerOpt[]>(
+    () => customerOptions.map((c) => ({ id: String(c.id), name: c.display_name, row: c })),
+    [customerOptions],
+  );
+  const customerOpt = customerOpts.find((o) => o.id === String(customerId)) ?? null;
+  const contactOpts = useMemo(
+    () => contacts.map((c) => ({ id: String(c.id), name: c.name, phone: c.phone ?? '' })),
+    [contacts],
+  );
+  const contactOpt = contactOpts.find((o) => o.id === String(contactId)) ?? null;
 
   // ── ส่วนที่ 1: วางข้อความ → ร่าง ──
   const propose = async () => {
@@ -1317,13 +1399,9 @@ export const QuoteRequest: React.FC = () => {
     <div className="space-y-5">
       <PageHeader icon={FilePlus2} title="ขอใบเสนอราคา" description="วางข้อความหรือกรอกเอง → เคาะในฟอร์ม → ยืนยัน">
         {hasWork && (
-          <button
-            onClick={resetAll}
-            className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
+          <Button variant="neutral" tone="soft" icon={RotateCcw} onClick={resetAll}>
             เริ่มใหม่
-          </button>
+          </Button>
         )}
       </PageHeader>
 
@@ -1345,15 +1423,16 @@ export const QuoteRequest: React.FC = () => {
             className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3 text-sm text-slate-800 outline-none focus:border-[var(--brand-fg)] focus:bg-card resize-y font-mono"
           />
           <div className="flex flex-wrap items-center gap-3">
-            <button
+            <Button
+              variant="primary"
+              size="md"
+              icon={ArrowRight}
+              busy={proposing}
+              disabled={!text.trim() || !spUserId}
               onClick={propose}
-              disabled={!text.trim() || !spUserId || proposing}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-40 disabled:cursor-not-allowed"
-              style={{ backgroundColor: BRAND }}
             >
-              {proposing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
               {proposing ? 'กำลังสกัดคำสั่ง...' : 'สร้างร่าง'}
-            </button>
+            </Button>
             {!spUserId && <span className="text-xs text-amber-700">เลือกพนักงานขายที่จะออกใบในนามก่อน</span>}
             {proposing && <span className="text-xs text-slate-400">ระบบมีเวลาสกัดสูงสุด 60 วินาที</span>}
             <p className="basis-full text-[11px] text-slate-400">
@@ -1404,12 +1483,9 @@ export const QuoteRequest: React.FC = () => {
                 ใบนี้จะออกเป็น <span className="font-semibold text-slate-800">revision ของ {reviseFrom}</span>
                 {' '}— ยืนยันแล้วใบเดิมจะถูกยกเลิกให้อัตโนมัติ
               </span>
-              <button
-                onClick={() => setReviseFrom('')}
-                className="font-semibold px-2.5 py-1 rounded-lg border border-slate-200 bg-card text-slate-600 hover:bg-slate-100"
-              >
+              <Button variant="neutral" tone="soft" onClick={() => setReviseFrom('')}>
                 ออกเป็นใบใหม่แทน
-              </button>
+              </Button>
             </div>
           )}
 
@@ -1419,65 +1495,59 @@ export const QuoteRequest: React.FC = () => {
               <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider">
                 บริษัท / ลูกค้า
               </label>
-              <select
-                value={customerId ?? ''}
-                aria-label="บริษัท / ลูกค้า"
-                onChange={(e) => {
-                  setCustomerId(e.target.value ? Number(e.target.value) : null);
+              {/* ช่องเดียวจบ: กดแล้วกลายเป็นช่องค้น — เลิกมี <select> คู่กับช่องค้นแยกใบ
+                  ซึ่งบังคับให้พิมพ์ที่หนึ่งแล้วไปเลือกอีกที่ · โครงเดียวกับช่องเลือกชื่อแอดมิน
+                  `onQueryChange` = ผู้เรียกเป็นคนค้นเอง (ยิง /api/customers/search) ⇒ ComboBox
+                  ต้องไม่กรองผลซ้ำด้วยคำเดิม ไม่งั้นชื่อที่สะกดต่างจากคำค้นจะหายไปทั้งที่ server ส่งมา */}
+              <ComboBox<CustomerOpt>
+                value={customerOpt}
+                options={customerOpts}
+                onPick={(o) => {
+                  setCustomerId(Number(o.id));
                   setContactId(null);
                 }}
-                className={`w-full h-11 px-3 rounded-xl border text-sm outline-none ${
-                  customerId === null && mustPick ? 'border-amber-400 bg-amber-50' : 'border-slate-200 bg-slate-50'
-                }`}
-              >
-                <option value="">— เลือกบริษัท —</option>
-                {customerOptions.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.display_name}
-                    {c.reference ? ` [${c.reference}]` : ''}
-                  </option>
-                ))}
-              </select>
-              <div className="flex items-center gap-1.5 h-9 px-2.5 rounded-lg border border-slate-200 bg-card">
-                <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                <input
-                  value={customerQuery}
-                  onChange={(e) => setCustomerQuery(e.target.value)}
-                  aria-label="ค้นหาบริษัท"
-                  placeholder={
-                    customerOptions.length > 0 ? 'ค้นหาบริษัทเพิ่มเติม...' : 'ค้นหาบริษัท — พิมพ์ชื่อหรือรหัสลูกค้า'
-                  }
-                  className="flex-1 bg-transparent outline-none text-xs text-slate-800 placeholder:text-slate-400 min-w-0"
-                />
-              </div>
+                onQueryChange={setCustomerQuery}
+                placeholder="— เลือกบริษัท —"
+                emptyText={
+                  customerQuery.trim()
+                    ? `ไม่พบบริษัทที่ตรงกับ “${customerQuery.trim()}”`
+                    : 'พิมพ์ชื่อหรือรหัสลูกค้าเพื่อค้นหา'
+                }
+                ariaLabel="บริษัท / ลูกค้า"
+                searchPlaceholder="พิมพ์ชื่อหรือรหัสลูกค้าเพื่อค้นหา..."
+                invalid={customerId === null && mustPick}
+                busy={custSearching}
+                facts={(o) => <CustomerFacts row={o.row} />}
+              />
               {customerId === null && (
                 <p className={`text-[11px] ${mustPick ? 'text-amber-700' : 'text-slate-500'}`}>
                   {customerOptions.length > 0
                     ? 'พบบริษัทใกล้เคียงหลายราย — ต้องเลือกก่อนไปขั้นใบร่าง'
-                    : 'ค้นหาบริษัทจากช่องด้านบน แล้วเลือกจากรายการ'}
+                    : 'กดที่ช่องแล้วพิมพ์ชื่อหรือรหัสลูกค้าเพื่อค้นหา'}
                 </p>
               )}
             </div>
 
             <div className="space-y-1.5">
               <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider">ผู้ติดต่อ</label>
-              <select
-                value={contactId ?? ''}
-                aria-label="ผู้ติดต่อ"
-                onChange={(e) => setContactId(e.target.value ? Number(e.target.value) : null)}
+              {/* ผู้ติดต่อเป็นรายชื่อในเครื่อง (โหลดมาทั้งชุดตอนเลือกบริษัท) ⇒ ไม่ส่ง onQueryChange
+                  ให้ ComboBox กรองเองได้เลย · ไม่ใช้ PersonComboBox เพราะตัวนั้นบังคับเตือน
+                  "ไม่มีเบอร์" ซึ่งเป็นกติกาของคนที่ไปเซ็นบน PDF ไม่ใช่ของผู้ติดต่อฝั่งลูกค้า */}
+              <ComboBox
+                value={contactOpt}
+                options={contactOpts}
+                onPick={(o) => setContactId(Number(o.id))}
+                placeholder={customerId === null ? '— เลือกบริษัทก่อน —' : '— เลือกผู้ติดต่อ —'}
+                emptyText="บริษัทนี้ยังไม่มีผู้ติดต่อในระบบ"
+                ariaLabel="ผู้ติดต่อ"
+                searchPlaceholder="พิมพ์ชื่อหรือเบอร์เพื่อค้นหา..."
+                invalid={contactId === null && mustPick}
                 disabled={customerId === null}
-                className={`w-full h-11 px-3 rounded-xl border text-sm outline-none disabled:opacity-50 ${
-                  contactId === null && mustPick ? 'border-amber-400 bg-amber-50' : 'border-slate-200 bg-slate-50'
-                }`}
-              >
-                <option value="">— เลือกผู้ติดต่อ —</option>
-                {contacts.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                    {c.phone ? ` · ${c.phone}` : ''}
-                  </option>
-                ))}
-              </select>
+                searchText={(o) => `${o.name} ${o.phone}`}
+                facts={(o) => (
+                  <span className="shrink-0 text-[11px] text-slate-500 whitespace-nowrap">{o.phone || '—'}</span>
+                )}
+              />
               {/* ก่อนตรวจครั้งแรกยังมีแค่ค่าที่ติดมากับ candidates ซึ่งว่างได้บ่อย — พอผลตรวจมาถึง
                   แถบข้อมูลลูกค้ากับชิปกำหนดส่งของแต่ละใบเป็นของจริงกว่า จึงเลิกโชว์บรรทัดนี้
                   ไม่งั้นหน้าจอเดียวกันจะบอกเครดิตสองค่าที่ไม่ตรงกัน · ยังไม่เลือกบริษัทก็ไม่โชว์
@@ -1651,6 +1721,7 @@ export const QuoteRequest: React.FC = () => {
                                   initialQuery={r.model}
                                   placeholder="ค้นหารุ่นที่ถูกต้อง..."
                                   tone="danger"
+                                  needQty={num(r.quantity) || 1}
                                   onPick={(h) =>
                                     patchRow(r.key, {
                                       productTemplateId: h.product_id,
@@ -1810,12 +1881,9 @@ export const QuoteRequest: React.FC = () => {
                 onPick={addProductRow}
               />
             </div>
-            <button
-              onClick={addRow}
-              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg border border-slate-200 bg-card text-slate-600 hover:bg-slate-100"
-            >
+            <Button variant="neutral" tone="soft" onClick={addRow}>
               แถวเปล่า
-            </button>
+            </Button>
             {justAdded && (
               <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-700">
                 <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
@@ -1830,14 +1898,14 @@ export const QuoteRequest: React.FC = () => {
                 ใช้สินค้าระบบตัวเดียวกับกฎค่าขนส่งอัตโนมัติ ⇒ ปุ่มต้องปิดตัวเองเมื่อบรรทัดนั้น
                 มีอยู่แล้ว ไม่ว่าจะมาจากกฎหรือจากที่แอดมินกดเพิ่ม */}
             <div className="basis-full border-t border-slate-200 pt-2 flex flex-wrap items-center gap-2">
-              <button
-                onClick={addServiceRow}
+              <Button
+                variant="secondary"
+                icon={Wrench}
                 disabled={!svcCfg || !!serviceRow || autoFeeShown}
-                className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg border border-slate-200 bg-card text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                onClick={addServiceRow}
               >
-                <Wrench className="w-3.5 h-3.5 shrink-0" />
                 เพิ่มค่าบริการ
-              </button>
+              </Button>
               <span className="flex-1 min-w-[200px] text-[11px] text-slate-400">
                 {!svcCfg
                   ? 'ยังอ่านค่าตั้งต้นของค่าบริการไม่ได้ — ลองรีเฟรชหน้า'
@@ -1866,13 +1934,9 @@ export const QuoteRequest: React.FC = () => {
               <span className="flex-1 min-w-[180px]">
                 ตรวจรายละเอียดไม่สำเร็จ — {previewError} · ข้อมูลในฟอร์มยังอยู่ครบ กดตรวจใหม่ได้เลย
               </span>
-              <button
-                onClick={() => void runPreview()}
-                className="flex items-center gap-1.5 font-semibold px-3 py-1.5 rounded-lg border border-red-200 bg-card text-red-700 hover:bg-red-50"
-              >
-                <Eye className="w-3.5 h-3.5" />
+              <Button variant="danger" tone="soft" icon={Eye} onClick={() => void runPreview()}>
                 ตรวจใหม่
-              </button>
+              </Button>
             </div>
           ) : previewing ? (
             <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-600">
@@ -1885,13 +1949,9 @@ export const QuoteRequest: React.FC = () => {
               <span className="flex-1 min-w-[180px]">
                 ฟอร์มถูกแก้หลังตรวจครั้งล่าสุด — สต็อกและกฎที่เห็นอาจไม่ใช่ของล่าสุด
               </span>
-              <button
-                onClick={() => void runPreview()}
-                className="flex items-center gap-1.5 font-semibold px-3 py-1.5 rounded-lg border border-amber-200 bg-card text-amber-800 hover:bg-amber-50"
-              >
-                <Eye className="w-3.5 h-3.5" />
+              <Button variant="warning" tone="soft" icon={Eye} onClick={() => void runPreview()}>
                 ตรวจใหม่
-              </button>
+              </Button>
             </div>
           ) : preview ? (
             <div className="flex flex-wrap items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-600">
@@ -1899,13 +1959,9 @@ export const QuoteRequest: React.FC = () => {
               <span className="flex-1 min-w-[180px]">
                 ตรวจกับข้อมูลล่าสุดเมื่อ {previewAt} น. — ทั้งหน้ายังไม่เขียนอะไรลงฐานข้อมูลจนกว่าจะกด “ยืนยัน”
               </span>
-              <button
-                onClick={() => void runPreview()}
-                className="flex items-center gap-1.5 font-semibold px-3 py-1.5 rounded-lg border border-slate-200 bg-card text-slate-600 hover:bg-slate-100"
-              >
-                <Eye className="w-3.5 h-3.5" />
+              <Button variant="neutral" tone="soft" icon={Eye} onClick={() => void runPreview()}>
                 ตรวจใหม่
-              </button>
+              </Button>
             </div>
           ) : null}
 
@@ -1931,15 +1987,9 @@ export const QuoteRequest: React.FC = () => {
             </div>
           )}
           <div className="flex flex-wrap items-center gap-3">
-            <button
-              onClick={() => setStage('review')}
-              disabled={!canReview}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-40 disabled:cursor-not-allowed"
-              style={{ backgroundColor: BRAND }}
-            >
-              <ArrowRight className="w-4 h-4" />
+            <Button variant="primary" size="md" icon={ArrowRight} disabled={!canReview} onClick={() => setStage('review')}>
               ดูใบร่าง
-            </button>
+            </Button>
             {/* ปุ่มนี้ไม่ได้เขียนอะไรลงฐาน มันพาไปหน้าตรวจก่อนยืนยันเท่านั้น — ปุ่มที่จางอยู่เฉย ๆ
                 โดยไม่บอกว่าติดอะไร คือปุ่มที่ผู้ใช้สรุปเองว่าระบบพัง */}
             {!canReview && <span className="text-xs text-amber-700">{reviewBlockedBecause()}</span>}
@@ -2098,14 +2148,9 @@ export const QuoteRequest: React.FC = () => {
                 กด “ยกเลิก” ได้ — ร่างที่ค้างจะถูกล้างเองตอนออกใบครั้งถัดไปในนามพนักงานขายคนเดิม
               </p>
               <div className="pl-6">
-                <button
-                  onClick={retryStranded}
-                  disabled={confirming}
-                  className="flex items-center gap-1.5 font-semibold px-3 py-1.5 rounded-lg border border-amber-300 bg-card text-amber-800 hover:bg-amber-50 disabled:opacity-50"
-                >
-                  {confirming ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                <Button variant="warning" tone="soft" icon={CheckCircle2} busy={confirming} onClick={retryStranded}>
                   ยืนยันใบที่เหลืออีกครั้ง
-                </button>
+                </Button>
               </div>
             </div>
           )}
@@ -2132,41 +2177,26 @@ export const QuoteRequest: React.FC = () => {
 
           <div className="flex flex-wrap items-center justify-end gap-2">
             {issued ? (
-              <button
-                onClick={resetAll}
-                className="flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-xl text-white"
-                style={{ backgroundColor: BRAND }}
-              >
-                <FilePlus2 className="w-4 h-4" />
+              <Button variant="primary" size="md" icon={FilePlus2} onClick={resetAll}>
                 เริ่มใบใหม่
-              </button>
+              </Button>
             ) : (
               <>
-                <button
-                  onClick={() => setStage('form')}
-                  disabled={confirming}
-                  className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                >
-                  <Pencil className="w-3.5 h-3.5" />
+                <Button variant="neutral" tone="soft" icon={Pencil} disabled={confirming} onClick={() => setStage('form')}>
                   แก้ไข
-                </button>
-                <button
-                  onClick={resetAll}
-                  disabled={confirming}
-                  className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50"
-                >
-                  <Ban className="w-3.5 h-3.5" />
+                </Button>
+                <Button variant="danger" tone="soft" icon={Ban} disabled={confirming} onClick={resetAll}>
                   ยกเลิก
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="primary"
+                  icon={CheckCircle2}
+                  busy={confirming}
+                  disabled={!canReview || strandedIds.length > 0}
                   onClick={confirmAll}
-                  disabled={confirming || !canReview || strandedIds.length > 0}
-                  className="flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-lg text-white disabled:opacity-50"
-                  style={{ backgroundColor: BRAND }}
                 >
-                  {confirming ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
                   {confirming ? 'กำลังออกใบ...' : 'ยืนยัน'}
-                </button>
+                </Button>
               </>
             )}
           </div>
@@ -2187,14 +2217,17 @@ export const QuoteRequest: React.FC = () => {
               placeholder="เลขที่ใบ เช่น QP-260705030"
               className="h-10 px-3 rounded-xl border border-slate-200 bg-slate-50 text-sm text-slate-800 outline-none focus:border-[var(--brand-fg)] focus:bg-card w-64"
             />
-            <button
+            <Button
+              variant="neutral"
+              tone="soft"
+              size="md"
+              icon={ArrowRight}
+              busy={revising}
+              disabled={!reviseNo.trim() || !spUserId}
               onClick={doRevise}
-              disabled={!reviseNo.trim() || !spUserId || revising}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-40"
             >
-              {revising ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
               เตรียมใบแก้ไข
-            </button>
+            </Button>
             <span className="text-xs text-slate-400">ใบที่ยังไม่มีเลขที่ (ร่าง) แก้แบบ revision ไม่ได้</span>
           </div>
           {reviseError && (

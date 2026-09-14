@@ -44,6 +44,27 @@
   --brand-soft-strong: rgba(47, 207, 114, 0.18);
   --brand-border: rgba(47, 207, 114, 0.28);
   --brand-border-strong: rgba(47, 207, 114, 0.45);
+
+  /* ── ปุ่มพื้นทึบ: คู่ "พื้น + หมึก" ที่ผ่าน contrast แล้ว ──
+     ทำไมต้องจับคู่: หมึกของปุ่มขึ้นกับ "ความสว่างของพื้น" ไม่ใช่กับธีม
+     ธีมมืดใช้พื้นสีสว่างจึงต้องหมึกเข้ม · ธีมสว่างใช้พื้นสีเข้มจึงต้องหมึกขาว
+     เขียนแยกเป็นโทเคนคู่ เพราะคนเขียนปุ่มไม่ควรต้องมานั่งคิดว่าธีมไหนต้องหมึกสีอะไร — วัดมาแล้ว
+     (2026-09-14 มืด 9.35/5.19/5.65/10.24 · สว่าง 5.43/5.17/4.83/8.89 เกณฑ์ 4.5)
+     ของเดิมที่ใช้หมึกขาวบน --brand-fg ในธีมมืดได้ 2.04 ซึ่งตกเกณฑ์อย่างแรง
+     สีเหลืองใช้หมึกเข้มทั้งสองธีม เพราะหมึกขาวบนเหลืองไม่เคยผ่านในธีมไหน (ขาวบน amber-400 = 2.15) */
+  --btn-ink-dark: #07120b;
+  --btn-primary-bg: var(--brand-fg);
+  --btn-primary-bg-hover: #4fdc8a;
+  --btn-primary-ink: var(--btn-ink-dark);
+  --btn-secondary-bg: #3b82f6;
+  --btn-secondary-bg-hover: #60a5fa;
+  --btn-secondary-ink: var(--btn-ink-dark);
+  --btn-danger-bg: #f2555a;
+  --btn-danger-bg-hover: #ff7075;
+  --btn-danger-ink: var(--btn-ink-dark);
+  --btn-warning-bg: #f0b429;
+  --btn-warning-bg-hover: #ffc94d;
+  --btn-warning-ink: var(--btn-ink-dark);
 }
 
 @theme {
@@ -159,6 +180,22 @@
   --brand-soft-strong: rgba(0, 144, 50, 0.16);
   --brand-border: rgba(0, 144, 50, 0.24);
   --brand-border-strong: rgba(0, 144, 50, 0.45);
+
+  /* ธีมสว่าง: พื้นเข้ม → หมึกขาว (ยกเว้นเหลือง) · ดูเหตุผลที่บล็อกธีมมืด
+     พื้นปุ่มหลักใช้ --brand-hover (#007b2b) ไม่ใช่ --brand (#009032)
+     เพราะตัวหลังกับหมึกขาวได้ 4.17 ซึ่งตกเกณฑ์ 4.5 อยู่นิดเดียว */
+  --btn-primary-bg: #007b2b;
+  --btn-primary-bg-hover: #006423;
+  --btn-primary-ink: #ffffff;
+  --btn-secondary-bg: #2563eb;
+  --btn-secondary-bg-hover: #1d4ed8;
+  --btn-secondary-ink: #ffffff;
+  --btn-danger-bg: #dc2626;
+  --btn-danger-bg-hover: #b91c1c;
+  --btn-danger-ink: #ffffff;
+  --btn-warning-bg: #f59e0b;
+  --btn-warning-bg-hover: #d97706;
+  --btn-warning-ink: var(--btn-ink-dark);
 
   --color-slate-950: #020617;
 
