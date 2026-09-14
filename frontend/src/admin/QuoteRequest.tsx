@@ -95,6 +95,8 @@ interface ProposeResult {
   contact_candidates: Scored<ContactRow>[];
   /** id แถวประวัติของขั้น propose — ส่งกลับตอนสร้างร่างเพื่อให้หลังบ้านวัดได้ว่าเคาะอันดับไหน */
   propose_msg_id: number | null;
+  /** บริษัทที่หลังบ้านชั่งคะแนนแล้วชี้ขาดได้ — `null` = ต้องให้แอดมินเคาะเอง */
+  auto_customer_id: number | null;
 }
 
 interface QuoteItem {
@@ -639,11 +641,15 @@ export const QuoteRequest: React.FC = () => {
       const seen = new Set<number>();
       const uniq = custs.filter((c) => (seen.has(c.id) ? false : (seen.add(c.id), true)));
       setCustomerOptions(uniq);
-      // เจอตัวเดียว = เลือกให้เลย · หลายตัว = ปล่อยว่างแล้วไฮไลต์ว่าต้องเคาะ (ขั้น 9′)
-      setCustomerId(uniq.length === 1 ? uniq[0].id : null);
-      setContactId(
-        uniq.length === 1 && data.contact_candidates.length === 1 ? data.contact_candidates[0].item.id : null
-      );
+      // ระบบชั่งคะแนนแล้วชี้ตัวได้ = เลือกให้เลย · ชี้ไม่ได้ = ปล่อยว่างแล้วไฮไลต์ว่าต้องเคาะ (ขั้น 9′)
+      // auto_customer_id มาจากกฎเดียวกับที่ LINE ใช้ (decideCustomerSelection) ไม่ใช่การนับจำนวน
+      // เช็คว่ามีอยู่ใน uniq จริงก่อนใช้ — กัน dropdown ถือค่าที่ไม่มี option รองรับ
+      const autoId =
+        data.auto_customer_id != null && uniq.some((c) => c.id === data.auto_customer_id)
+          ? data.auto_customer_id
+          : null;
+      setCustomerId(autoId);
+      setContactId(autoId !== null && data.contact_candidates.length === 1 ? data.contact_candidates[0].item.id : null);
       setCustomerQuery('');
     } catch (e) {
       setProposeError(e instanceof Error ? e.message : 'สร้างร่างไม่สำเร็จ');

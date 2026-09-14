@@ -501,6 +501,7 @@ npm --prefix frontend run build    # typecheck + build admin
 | กฎเครดิต | `npm run diag:credit-hold` (read-only รันกับ prod ได้) |
 | `prompt` ของการสกัด / Flex | `npm run diag:line-parity` |
 | หน้าเว็บขอใบเสนอราคา | `npm run diag:web-quote` · `diag:pdf-issuer` · `diag:sp-dedupe` |
+| ชั้นตัดสินใจ "ต้องให้คนเลือกไหม" | `npm run diag:web-decision` (`--ai` = pipeline เต็ม) — กฎ auto-select มี **สองสำเนาโดยตั้งใจ** (`quotationService.ts` ของ LINE ห้ามแตะ · `decideCustomerSelection()` ของเว็บ) ด่านนี้อ่านซอร์สมาเทียบให้ว่ายังตรงกัน |
 | สินค้าพ่วง / กฎบล็อก | `npm run diag:optional-pair` · `diag:block-rule` · `diag:block-parity` |
 | คิว / งบเวลาตอบ | `npm run diag:queue-sim` · `diag:load-probe` · `diag:abort-check` · `diag:shutdown-check` |
 | PDF | `npm run diag:pdf-render` · `diag:pdf-cache` |

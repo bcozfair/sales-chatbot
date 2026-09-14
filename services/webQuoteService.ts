@@ -24,7 +24,7 @@ import {
 } from '../db/repositories.js';
 import { KeyedTaskQueue, runWithDeadline } from './webhookQueue.js';
 import { extractQuoteFromText, buildResolvedItem, type QuoteSlot } from './quoteExtraction.js';
-import { findCustomerCandidates, findContactCandidates } from './customerService.js';
+import { findCustomerCandidates, findContactCandidates, decideCustomerSelection } from './customerService.js';
 import { getProductById, findProduct } from './productService.js';
 import {
   validateQuotationItems,
@@ -229,7 +229,13 @@ function buildProposeReplyText(r: ProposeResult, customerQuery: string): string 
   const n = r.customer_candidates.length;
   if (customerQuery === '') lines.push(`⚠️ ไม่ได้ระบุชื่อบริษัท/ลูกค้า`);
   else if (n === 0) lines.push(`❌ ไม่พบชื่อบริษัท "${customerQuery}" ในระบบ`);
-  else if (n === 1) lines.push(`🏢 ${r.customer_candidates[0]?.item?.display_name ?? '-'}`);
+  else if (r.auto_customer_id != null) {
+    // ระบบชี้ขาดได้ → บรรทัด 🏢 ต้องเป็น "ชื่อบริษัทล้วน" เหมือนของ LINE เป๊ะ ๆ
+    // เพราะ evalCustomerSearch ขุดเฉลยด้วย /🏢 (.+)/ — แถวเว็บจึงกลายเป็นชุดข้อสอบได้ฟรีในอนาคต
+    // (§3.2) · จำนวนตัวเลือกไปอยู่บรรทัด 📦 แทน ห้ามต่อท้ายบรรทัดนี้
+    const picked = r.customer_candidates.find((c: any) => Number(c?.item?.id) === r.auto_customer_id);
+    lines.push(`🏢 ${picked?.item?.display_name ?? '-'}`);
+  }
   else lines.push(`🏢 พบชื่อบริษัทใกล้เคียงกับ "${customerQuery}" ${n} ราย — รอเคาะ`);
 
   lines.push(`📦 รายการ ${r.slots.length} · ยังไม่ระบุรุ่นได้ ${r.unresolved_count}`);
@@ -257,6 +263,15 @@ export interface ProposeResult {
    * (docs/plan-web-quote-logging.md §5) · `null` = เขียน log ไม่สำเร็จ ซึ่งไม่ใช่เหตุให้งานล้ม
    */
   propose_msg_id: number | null;
+  /**
+   * บริษัทที่ระบบตัดสินให้เองได้ (`decideCustomerSelection` — กฎเดียวกับที่ LINE ใช้อยู่)
+   * `null` = หลักฐานไม่พอ ต้องให้แอดมินเคาะเอง
+   *
+   * ฟอร์ม **ยังได้ `customer_candidates` ครบทุกตัวเหมือนเดิม** — ค่านี้บอกแค่ว่าจะ preselect
+   * ตัวไหน ไม่ได้ตัดตัวเลือกอื่นทิ้ง แอดมินเปลี่ยนเองได้เสมอ (ต่างจาก LINE ที่ auto-select
+   * แล้วปิดทางเลือกไปเลย — บนหน้าจอมี dropdown อยู่แล้วจึงไม่ต้องยอมแลกแบบนั้น)
+   */
+  auto_customer_id: number | null;
 }
 
 /**
@@ -300,6 +315,7 @@ export async function proposeFromText(params: {
       customer_candidates: [],
       contact_candidates: [],
       propose_msg_id: null,
+      auto_customer_id: null,
     };
 
     /** เขียนประวัติแล้วติด id กลับเข้า result — เรียกที่ทางออกทุกทางของฟังก์ชันนี้ */
@@ -312,6 +328,10 @@ export async function proposeFromText(params: {
         meta: {
           intent: base.intent,
           outcome,
+          // บริษัทที่ระบบชี้ขาดเอง — คู่กับ `outcome` ไม่ใช่แทนที่: outcome บอก "รูปร่างของผลค้น"
+          // (กี่ราย) ส่วนตัวนี้บอก "ตัดสินได้ไหม" ⇒ แถว outcome='ambiguous' ที่มีค่านี้
+          // คือเคสที่ชั้นตัดสินใจทำงาน ซึ่งเป็นตัวเลขที่ต้องเฝ้าหลังเปลี่ยนกฎ
+          auto_customer_id: base.auto_customer_id,
           extracted: base.quote_data,
           cust_candidates: slimCustomerCandidates(base.customer_candidates),
           contact_candidates: slimContactCandidates(base.contact_candidates),
@@ -337,11 +357,19 @@ export async function proposeFromText(params: {
       base.customer_candidates = await findCustomerCandidates(customerQuery, realSp, contactQuery);
     }
 
-    // ผู้ติดต่อค้นได้ก็ต่อเมื่อรู้บริษัทแน่นอนแล้ว — บริษัทกำกวมให้ฟอร์มเคาะก่อน แล้วค่อยเรียก
+    // ชั้นตัดสินใจ — กฎเดียวกับที่ LINE ใช้ (decideCustomerSelection ใน customerService.ts)
+    // ก่อน 2026-09-14 ตรงนี้นับจำนวน candidate ล้วน: เจอ 2 ตัวขึ้นไปก็ให้แอดมินเคาะทุกครั้ง
+    // ทั้งที่คะแนนชี้ขาดอยู่แล้ว — วัดได้ 38/56 เคสของชุดข้อสอบ (npm run diag:web-decision)
+    const decision = decideCustomerSelection(base.customer_candidates);
+    const decidedCustomerId = decision.auto ? Number(decision.winner?.item?.id) || null : null;
+    base.auto_customer_id = decidedCustomerId;
+
+    // ผู้ติดต่อค้นได้ก็ต่อเมื่อรู้บริษัทแน่นอนแล้ว — บริษัทที่ยังกำกวมให้ฟอร์มเคาะก่อน แล้วค่อยเรียก
     // `GET /api/customer/:id/contacts` เดิมเอง (endpoint นั้นไม่ผูก LINE — §0.3)
-    if (base.customer_candidates.length === 1 && contactQuery) {
-      const customerId = base.customer_candidates[0]?.item?.id;
-      if (customerId) base.contact_candidates = await findContactCandidates(customerId, contactQuery);
+    // เงื่อนไขนี้เคยเป็น `candidates.length === 1` ซึ่งเป็นข้อจำกัดที่ §5.1 ของแผน log เขียนไว้ว่า
+    // "งานแก้ parity จะเปลี่ยน" — ตอนนี้ผูกกับผลการตัดสินแทนการนับ จึงได้ผู้ติดต่อในเคส auto ด้วย
+    if (decidedCustomerId && contactQuery) {
+      base.contact_candidates = await findContactCandidates(decidedCustomerId, contactQuery);
     }
 
     return finish(

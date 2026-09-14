@@ -18,6 +18,7 @@ import { pool } from '../../config/db.js';
 import { insertMessage } from '../../db/repositories.js';
 import { extractQuoteFromText, buildResolvedItem } from '../../services/quoteExtraction.js';
 import { validateQuotationItems } from '../../services/quotationService.js';
+import { decideCustomerSelection } from '../../services/customerService.js';
 import {
   proposeFromText,
   createDraft,
@@ -188,6 +189,26 @@ async function case2() {
   ok('นับ slot ที่ยังไม่ resolve ให้', proposed.unresolved_count === 2, `ได้ ${proposed.unresolved_count}`);
   ok('คืน customer_candidates มาให้เคาะ', Array.isArray(proposed.customer_candidates),
     `${proposed.customer_candidates.length} ตัว`);
+
+  // ── ชั้นตัดสินใจ (2026-09-14) ──────────────────────────────────────────────
+  // ตารางความจริงของ decideCustomerSelection เขียนไว้ตรง ๆ ตรงนี้ ไม่ได้คำนวณจากตัวมันเอง
+  // ⇒ ใครขยับเกณฑ์ 0.05 หรือเผลอเปลี่ยนเป็นนับจำนวน ด่านนี้ล้มทันที · ไม่แตะ DB ไม่แตะ LLM
+  const s = (...scores: number[]) => scores.map(v => ({ item: { id: 1 }, score: v }));
+  ok('gate: ไม่มี candidate → ไม่ตัดสิน', decideCustomerSelection([]).auto === false);
+  ok('gate: candidate เดียว → ตัดสินได้', decideCustomerSelection(s(0.4)).auto === true);
+  ok('gate: 0 vs 0.06 → ตัดสินได้ (ห่างเกิน 0.05)', decideCustomerSelection(s(0, 0.06)).auto === true);
+  ok('gate: 0 vs 0.05 → ไม่ตัดสิน (ห่างไม่ถึง)', decideCustomerSelection(s(0, 0.05)).auto === false);
+  ok('gate: 0.06 vs 0.5 → ไม่ตัดสิน (ตัวนำคะแนนแย่เกิน)', decideCustomerSelection(s(0.06, 0.5)).auto === false);
+  ok('gate: คะแนนเท่ากัน → ไม่ตัดสิน', decideCustomerSelection(s(0, 0)).auto === false);
+
+  // สัญญาที่ฟอร์มพึ่งพา — ตรวจแบบไม่ผูกกับข้อมูลจริง (ชื่อบริษัทใน SAMPLE_TEXT มี/ไม่มีใน DB ก็ผ่าน)
+  const expectAuto = decideCustomerSelection(proposed.customer_candidates);
+  ok('auto_customer_id ตรงกับผลของ gate',
+    proposed.auto_customer_id === (expectAuto.auto ? Number(expectAuto.winner?.item?.id) || null : null),
+    `ได้ ${proposed.auto_customer_id}`);
+  ok('auto_customer_id ที่ไม่ null ต้องอยู่ในลิสต์ที่ส่งให้ฟอร์มจริง',
+    proposed.auto_customer_id === null
+    || proposed.customer_candidates.some((c: any) => Number(c?.item?.id) === proposed.auto_customer_id));
 
   await pool.query('DELETE FROM quotations WHERE id = $1', [survivorId]);
 }
