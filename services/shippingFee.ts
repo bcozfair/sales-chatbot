@@ -4,6 +4,15 @@
 //  กฎ: ลูกค้าที่ "ไม่มีเครดิต" และยอดสินค้าก่อน VAT (หลังหักส่วนลด) รวมทุกใบในกลุ่มร่าง
 //      < เกณฑ์ที่ตั้งไว้ → ระบบเติมบรรทัดค่าขนส่ง 1 บรรทัดให้เอง และถอดออกเองเมื่อยอดถึงเกณฑ์
 //
+//  **บรรทัดค่าบริการมีได้บรรทัดเดียวต่อกลุ่มร่าง** (เจ้าของเคาะ 2026-09-14) และมีสองที่มา:
+//      · กฎเติมให้เอง            — ถอดออกเองเมื่อเงื่อนไขไม่เข้าแล้ว
+//      · แอดมินกดเพิ่มเองจากหน้าเว็บ — `is_manual_service: true` ⇒ **กฎห้ามถอดทิ้ง**
+//    ธงนี้จำเป็นเพราะกฎเดิมถอด "ทุกบรรทัดที่เข้าเงื่อนไข" ออกก่อนเสมอ ⇒ ค่าบริการที่คนตั้งใจใส่
+//    หายเงียบทุกครั้งที่บันทึก สำหรับลูกค้าเครดิตทุกราย (ซึ่งเป็นเคสส่วนใหญ่)
+//    ⚠️ ธงเดินทางข้าม round-trip ได้เพราะถูกเพิ่มใน whitelist **ทั้งสองชั้น** แล้ว —
+//       ฝั่งเขียน buildItemSnapshots() (ผ่าน buildShippingFeeSnapshot ตัวนี้) และฝั่งอ่าน
+//       legacyItems ใน enrichQuotationData() ลืมชั้นใดชั้นหนึ่งแล้วธงหายถาวร (CLAUDE.md)
+//
 //  ⚠️ liff_pages/quote-edit.html จำลองกฎชุดเดียวกันนี้ไว้ฝั่ง client เพื่อให้เซลล์เห็นบรรทัด
 //     ทันทีระหว่างแก้ (vanilla JS ไม่มี bundler ตาม AGENTS.md) — เป็น duplication ที่ยอมรับ
 //     โดยตั้งใจแบบเดียวกับสูตรราคาใน utils/pricing.ts แก้ที่นี่ต้องไปแก้ที่นั่นด้วยมือ
@@ -47,6 +56,9 @@ export interface ShippingFeeConfig {
   productId: number | null;
   /** products.model — กุญแจที่ทุก query ในระบบใช้อ้างถึงสินค้าตัวนี้ */
   productModel: string;
+  /** products.name ของแถวนั้น (ชื่อกลางฝั่ง Odoo) — ใช้บอกที่มาของบรรทัดบนหน้าจอเท่านั้น
+   *  ไม่ใช่ชื่อที่จะขึ้นในใบ (ชื่อในใบคือ name ของบรรทัด ซึ่งแอดมิน/เซลส์ตั้งเอง) */
+  productName: string;
 }
 
 /** ปิดกฎไว้ก่อนเมื่ออ่านค่าไม่ได้ — fail-safe: ยอมไม่คิดค่าขนส่ง ดีกว่าคิดมั่ว */
@@ -58,7 +70,8 @@ const DISABLED_CONFIG: ShippingFeeConfig = {
   defaultItemName: 'ค่าขนส่ง',
   productInternalReference: '',
   productId: null,
-  productModel: ''
+  productModel: '',
+  productName: ''
 };
 
 /**
@@ -76,10 +89,11 @@ export async function loadShippingFeeConfig(executor: DbExecutor = pool): Promis
         c.default_item_name,
         c.product_internal_reference,
         p.product_template_id,
-        p.model
+        p.model,
+        p.name AS product_name
       FROM shipping_fee_config c
       LEFT JOIN LATERAL (
-        SELECT product_template_id, model
+        SELECT product_template_id, model, name
           FROM products
          WHERE internal_reference = c.product_internal_reference
            AND is_system_item = true
@@ -110,7 +124,8 @@ export async function loadShippingFeeConfig(executor: DbExecutor = pool): Promis
       defaultItemName: String(row.default_item_name || 'ค่าขนส่ง'),
       productInternalReference: String(row.product_internal_reference || ''),
       productId: Number(row.product_template_id),
-      productModel: String(row.model || '')
+      productModel: String(row.model || ''),
+      productName: String(row.product_name || '')
     }];
   });
 
@@ -143,7 +158,8 @@ export function goodsSubtotal(items: any[] | null | undefined, cfg: ShippingFeeC
  * ตั้งใจไม่เรียก buildItemSnapshots ใหม่ทั้งใบ เพราะจะไป resolve กฎรับประกัน/วันจัดส่ง
  * ของสินค้าทุกบรรทัดใหม่หมด แล้วละลายค่าที่ freeze ไว้ตอนสร้างใบ
  *
- * @param prev บรรทัดเดิม (ถ้ามี) — ชื่อและราคาที่เซลล์แก้ไว้ต้องอยู่รอดทุกครั้งที่กฎรันซ้ำ
+ * @param prev บรรทัดเดิม (ถ้ามี) — ชื่อ ราคา และธง "คนใส่เอง" ที่เซลล์/แอดมินตั้งไว้
+ *             ต้องอยู่รอดทุกครั้งที่กฎรันซ้ำ
  */
 export function buildShippingFeeSnapshot(cfg: ShippingFeeConfig, prev?: any): any {
   const prevName = String(prev?.name ?? '').trim();
@@ -169,8 +185,39 @@ export function buildShippingFeeSnapshot(cfg: ShippingFeeConfig, prev?: any): an
     delivery_in_stock_days: 0,
     delivery_out_of_stock_days: 0,
     delivery_source: 'shipping_fee',
-    is_optional: false
+    is_optional: false,
+    // ธงเดียวที่แยก "บรรทัดที่แอดมินกดเพิ่มเอง" ออกจาก "บรรทัดที่กฎเติมให้" — ดูหัวไฟล์
+    is_manual_service: isManualServiceItem(prev)
   };
+}
+
+/** บรรทัดค่าบริการนี้เป็นของที่คนกดเพิ่มเองหรือไม่ — ที่เดียวที่อ่านธงนี้ */
+export function isManualServiceItem(item: any): boolean {
+  return item?.is_manual_service === true;
+}
+
+/**
+ * ใบนี้ควรมีบรรทัดค่าบริการอยู่หรือไม่ — **จุดเดียวที่ตัดสิน**
+ *
+ * แยกออกมาจาก applyShippingFeeToQuoteGroup เพราะหน้าเว็บต้องตอบคำถามเดียวกันนี้ *ก่อน*
+ * มีแถวใน DB ให้อ่าน (พรีวิวก่อนกดสร้างใบร่าง) — ถ้าไม่แยก ฝั่งเว็บจะต้องก๊อปกฎไปไว้เอง
+ * ซึ่ง CLAUDE.md ห้ามไว้ตรง ๆ ("ตรรกะธุรกิจเรียกของเดิม ห้ามก๊อปมาไว้ฝั่งเว็บ")
+ */
+export function shouldHaveShippingFee(
+  cfg: ShippingFeeConfig,
+  opts: { goods: number; bound: boolean; paymentTerms: string | null | undefined; prevFee?: any }
+): boolean {
+  const auto =
+    cfg.isActive &&
+    opts.bound &&
+    opts.goods > 0 &&
+    opts.goods < cfg.thresholdBeforeVat &&
+    !hasCreditTerms(opts.paymentTerms);
+
+  // บรรทัดที่แอดมินกดเพิ่มเองอยู่ต่อเสมอ ไม่ว่ากฎอัตโนมัติจะเข้าเงื่อนไขหรือไม่ —
+  // คนที่ใส่มันเข้ามาตั้งใจให้มันอยู่ ส่วนคนที่อยากเอาออกก็กดลบแถวนั้นได้เอง
+  // (มีได้บรรทัดเดียว ⇒ ถ้ามีของคนใส่เองแล้ว กฎไม่เติมซ้อนอีกใบ)
+  return auto || isManualServiceItem(opts.prevFee);
 }
 
 /**
@@ -183,8 +230,15 @@ export function buildShippingFeeSnapshot(cfg: ShippingFeeConfig, prev?: any): an
  * เพราะเป็นค่าขนส่งของออเดอร์เดียวกัน ไม่ใช่ของแต่ละนิติบุคคล
  *
  * ไม่โยน error — ค่าขนส่งพลาดต้องไม่ทำให้การบันทึก/ยืนยันใบทั้งใบล้ม
+ *
+ * @param incomingFee บรรทัดค่าบริการที่เพิ่งมากับคำขอ แต่ยังไม่ทันได้ลง DB —
+ *        insertDraftQuotations ตัดบรรทัดนี้ออกก่อนแบ่ง PM/THT (ไม่มี production ให้ตัดสิน)
+ *        ถ้าไม่ส่งต่อมาที่นี่ ค่าบริการที่แอดมินเพิ่มจากหน้าเว็บจะหายตั้งแต่ตอนสร้างร่าง
  */
-export async function applyShippingFeeToQuoteGroup(userId: string | null | undefined): Promise<void> {
+export async function applyShippingFeeToQuoteGroup(
+  userId: string | null | undefined,
+  incomingFee?: any
+): Promise<void> {
   if (!userId) return;
 
   let cfg: ShippingFeeConfig;
@@ -223,6 +277,9 @@ export async function applyShippingFeeToQuoteGroup(userId: string | null | undef
         return { row, items, goodsItems };
       });
 
+      // บรรทัดที่มากับคำขอแต่ยังไม่ได้ลง DB — ใช้ต่อเมื่อในใบไม่มีบรรทัดค่าบริการอยู่แล้ว
+      if (!prevFee && incomingFee) prevFee = incomingFee;
+
       const goods = quotes.reduce((sum, q) => sum + sumLineTotals(q.goodsItems), 0);
 
       // ยังไม่ผูกลูกค้า = ยังไม่รู้เครดิต → ยังไม่ใส่ (จะใส่ให้เองตอนเซลล์เลือกลูกค้าแล้วบันทึก)
@@ -231,17 +288,12 @@ export async function applyShippingFeeToQuoteGroup(userId: string | null | undef
         .map(q => q.row.customer_details?.payment_terms)
         .find((t: any) => t !== undefined && t !== null && String(t).trim() !== '') ?? '';
 
-      const shouldHave =
-        cfg.isActive &&
-        bound &&
-        goods > 0 &&
-        goods < cfg.thresholdBeforeVat &&
-        !hasCreditTerms(paymentTerms);
+      const keepFee = shouldHaveShippingFee(cfg, { goods, bound, paymentTerms, prevFee });
 
       // ใบเป้าหมาย = ใบ PM ใบแรก ไม่มีก็ใบแรกที่มีสินค้า
       let targetIdx = quotes.findIndex(q => q.goodsItems.length > 0);
       if (targetIdx === -1) targetIdx = 0;
-      if (shouldHave && quotes.length > 1) {
+      if (keepFee && quotes.length > 1) {
         for (let i = 0; i < quotes.length; i++) {
           const first = quotes[i].goodsItems[0];
           if (!first) continue;
@@ -254,7 +306,7 @@ export async function applyShippingFeeToQuoteGroup(userId: string | null | undef
 
       for (let i = 0; i < quotes.length; i++) {
         const q = quotes[i];
-        const nextItems = (shouldHave && i === targetIdx)
+        const nextItems = (keepFee && i === targetIdx)
           ? [...q.goodsItems, buildShippingFeeSnapshot(cfg, prevFee)]
           : q.goodsItems;
         const nextSum = round2(sumLineTotals(nextItems));

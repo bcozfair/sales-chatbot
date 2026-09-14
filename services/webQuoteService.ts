@@ -30,8 +30,14 @@ import {
   validateQuotationItems,
   insertDraftQuotations,
   buildViolationText,
+  resolveQuoteCompany,
+  buildItemSnapshots,
+  resolveQuotationDeliveryDays,
   type Violation,
 } from './quotationService.js';
+import { resolveDeliveryTerms, deliveryDisplayText } from '../utils/deliveryTerms.js';
+import { buildThaiAddress } from '../utils/address.js';
+import { round2, calcNetPrice } from '../utils/pricing.js';
 import { loadActiveQuotation } from './quotationAgent.js';
 import { appendReviseFrom } from '../utils/flexTemplates.js';
 import {
@@ -394,6 +400,11 @@ export interface WebQuoteItemInput {
   price?: number | string | null;
   discount_1?: number | string | null;
   discount_2?: number | string | null;
+  /**
+   * ชื่อรายการที่แอดมินตั้งเอง — **ใช้กับบรรทัดค่าบริการเท่านั้น**
+   * สินค้าจริงเอาชื่อจาก products เสมอ (ดูกติกาในหัวข้อ resolveItems)
+   */
+  name?: string | null;
 }
 
 export interface CreateDraftResult {
@@ -420,6 +431,8 @@ export interface CreateDraftResult {
  *   แล้วค่อยทับราคาต่อหน่วยทีหลังถ้าแอดมินตั้งมา
  */
 async function resolveItems(items: WebQuoteItemInput[]): Promise<any[]> {
+  const { isShippingFeeItem, loadShippingFeeConfig } = await import('./shippingFee.js');
+  const shippingCfg = await loadShippingFeeConfig();
   const out: any[] = [];
   for (const [i, raw] of items.entries()) {
     const tplId = raw?.product_template_id;
@@ -457,6 +470,22 @@ async function resolveItems(items: WebQuoteItemInput[]): Promise<any[]> {
 
     const price = Number(raw?.price);
     if (Number.isFinite(price) && price > 0) itemForDb.price = price;
+
+    // ── ข้อยกเว้นข้อเดียวของกฎ "ชื่อสินค้ามาจาก DB เสมอ": บรรทัดค่าบริการ ──
+    // สินค้าตัวนี้เป็น is_system_item ตัวเดียวที่ทุกบรรทัดใช้ร่วมกัน (model = N/A) ชื่อใน products
+    // จึงเป็นแค่ "ค่าบริการ" กลาง ๆ ส่วนสิ่งที่ต้องขึ้นในใบคือชื่อที่แอดมินตั้ง (ค่าติดตั้งหน้างาน ฯลฯ)
+    // ⇒ ชื่อของบรรทัดนี้เป็นข้อมูลของ *ใบ* ไม่ใช่ของ *สินค้า* · จำนวนกับส่วนลดยังถูกล็อกตามกฎ
+    // เพราะ buildShippingFeeSnapshot เขียนทับด้วย fee_quantity และ 0 ทุกครั้งอยู่ดี
+    if (isShippingFeeItem(itemForDb, shippingCfg)) {
+      const customName = String(raw?.name ?? '').trim();
+      itemForDb.name = customName || shippingCfg.defaultItemName;
+      itemForDb.internal_reference = shippingCfg.productInternalReference;
+      itemForDb.quantity = shippingCfg.feeQuantity;
+      itemForDb.discount_1 = 0;
+      itemForDb.discount_2 = 0;
+      itemForDb.is_manual_service = true;
+    }
+
     out.push(itemForDb);
   }
   return out;
@@ -562,6 +591,260 @@ export async function createDraft(params: {
       quotes,
     };
   });
+}
+
+// ── 3) พรีวิวก่อนกดสร้างร่าง — dry-run ของ createDraft ที่ไม่เขียนอะไรลง DB เลย ─────
+//
+//  ทำไมต้องมี: เส้นเว็บ (ต่างจาก LINE) **ทิ้งร่างทั้งใบ** เมื่อติดกฎข้อใดข้อหนึ่ง — createDraft
+//  โยน RULE_VIOLATION ก่อนถึง insertDraftQuotations ⇒ แอดมินรู้ว่าติดอะไรก็ต่อเมื่อกดปุ่มไปแล้ว
+//  (ฝั่ง LINE สร้างร่างไว้ก่อนแล้วค่อยซ่อนปุ่มยืนยัน จึงไม่เจ็บเท่ากัน)
+//
+//  ทุกคำตอบในนี้มาจากฟังก์ชันของจริงที่เส้น LINE ใช้ — validateQuotationItems ·
+//  resolveQuoteCompany · buildItemSnapshots · resolveQuotationDeliveryDays ·
+//  shouldHaveShippingFee · resolveDeliveryTerms — ห้ามคิดเลขเองซ้ำแม้แต่ข้อเดียว
+//  ไม่งั้นสิ่งที่แอดมินเห็นก่อนกด กับสิ่งที่ถูกบันทึกจริง จะเริ่มเพี้ยนออกจากกันโดยไม่มีใครรู้
+//
+//  **ไม่เรียก resolveWebUserId** โดยตั้งใจ — ensureWebProxy() เขียนแถวพร็อกซีลง salesperson
+//  ซึ่งเป็นการเขียน DB · พรีวิวต้องอ่านอย่างเดียวจริง ๆ เพื่อให้คำว่า "ยังไม่บันทึกอะไร" เป็นจริง
+
+export interface WebQuotePreviewItem {
+  product_template_id: number | null;
+  model: string;
+  name: string;
+  quantity: number;
+  price: number;
+  discount_1: number;
+  discount_2: number;
+  line_total: number;
+  /** ของว่างขายได้จริง ณ ตอนพรีวิว — badge เตือนเท่านั้น server เป็นด่านจริงเสมอ */
+  stock: number;
+  is_optional: boolean;
+  /** รุ่นของสินค้าหลักที่บรรทัดนี้พ่วงมา — null = ไม่ใช่สินค้าพ่วง */
+  linked_to_model: string | null;
+  is_shipping_fee: boolean;
+  is_manual_service: boolean;
+  warranty_display: string;
+  /** ข้อกฎที่บรรทัดนี้ติด (จับคู่ด้วยรหัสรุ่น — ถ้อยคำมาจาก buildViolationDisplay ฝั่ง server) */
+  violations: Violation[];
+}
+
+export interface WebQuotePreviewQuote {
+  quote_company: 'PM' | 'THT';
+  company_label: string;
+  items: WebQuotePreviewItem[];
+  subtotal: number;
+  delivery_text: string;
+  delivery_days: number;
+  delivery_all_in_stock: boolean;
+}
+
+export interface WebQuotePreviewResult {
+  customer: {
+    customer_id: number;
+    contact_id: number;
+    display_name: string;
+    reference: string;
+    tax_id: string;
+    payment_terms: string;
+    contact_name: string;
+    contact_phone: string;
+    contact_email: string;
+    address: string;
+  };
+  quotes: WebQuotePreviewQuote[];
+  /** ยอดสินค้าก่อน VAT (ไม่รวมบรรทัดค่าบริการ) — ฐานเดียวกับที่กฎค่าขนส่งใช้ตัดสิน */
+  goods_total: number;
+  grand_total: number;
+  violations: Violation[];
+  can_create_draft: boolean;
+  /** ค่าที่ฟอร์มต้องใช้ตอนกดปุ่ม "เพิ่มค่าบริการ" — มาจาก shipping_fee_config + products */
+  service_line: {
+    product_template_id: number | null;
+    model: string;
+    internal_reference: string;
+    default_item_name: string;
+    default_price: number;
+    /** บรรทัดนี้มาจากกฎอัตโนมัติหรือไม่ — ถ้าใช่ แอดมินลบเองไม่ได้ ระบบถอดให้เมื่อยอดถึงเกณฑ์ */
+    auto_applied: boolean;
+  };
+}
+
+export async function previewDraft(params: {
+  customerId: number | string;
+  contactId: number | string;
+  items: WebQuoteItemInput[];
+}): Promise<WebQuotePreviewResult> {
+  if (!Array.isArray(params.items) || params.items.length === 0) {
+    throw new WebQuoteError('BAD_REQUEST', 'ต้องมีรายการสินค้าอย่างน้อย 1 รายการ (items)', 400);
+  }
+  const customerIdIn = Number(params.customerId);
+  const contactId = Number(params.contactId);
+  if (!Number.isFinite(customerIdIn) || customerIdIn <= 0) {
+    throw new WebQuoteError('BAD_REQUEST', 'ต้องระบุบริษัท (customer_id) เป็นตัวเลข', 400);
+  }
+  if (!Number.isFinite(contactId) || contactId <= 0) {
+    throw new WebQuoteError('BAD_REQUEST', 'ต้องระบุผู้ติดต่อ (contact_id) เป็นตัวเลข', 400);
+  }
+
+  const contact = await getContactById(contactId);
+  if (!contact) throw new WebQuoteError('BAD_REQUEST', `ไม่พบผู้ติดต่อ id=${contactId}`, 400);
+  // กติกาเดียวกับ createDraft — ผูกตามบริษัทของผู้ติดต่อที่เลือกจริง ไม่ใช่ที่กดใน dropdown
+  const resolvedCustomerId = Number(contact.customer_id ?? customerIdIn);
+  const customer = await getCustomerById(resolvedCustomerId);
+  if (!customer) throw new WebQuoteError('BAD_REQUEST', `ไม่พบบริษัท id=${resolvedCustomerId}`, 400);
+
+  const {
+    isShippingFeeItem, loadShippingFeeConfig, buildShippingFeeSnapshot,
+    shouldHaveShippingFee, goodsSubtotal,
+  } = await import('./shippingFee.js');
+  const cfg = await loadShippingFeeConfig();
+
+  const itemsForDb = await resolveItems(params.items);
+  const { items: expanded, violations } = await validateQuotationItems(itemsForDb, {
+    stage: 'draft',
+    customerName: customer.display_name,
+    customerId: resolvedCustomerId,
+    contactId,
+  });
+
+  // บรรทัดค่าบริการไม่เข้าการแบ่ง PM/THT — เหมือนที่ insertDraftQuotations ตัดออกก่อนแบ่งใบ
+  const goodsItems = expanded.filter((it: any) => !isShippingFeeItem(it, cfg));
+  const incomingFee = expanded.find((it: any) => isShippingFeeItem(it, cfg)) ?? null;
+
+  // สต๊อกสด — badge เตือนเท่านั้น (CLAUDE.md: client ห้ามบล็อกจากสต็อกดิบ)
+  const stockMap: Record<string, number> = {};
+  const codes = goodsItems.map((it: any) => String(it.model || it.product_code || '')).filter(Boolean);
+  if (codes.length > 0) {
+    try {
+      const { rows } = await pool.query(
+        'SELECT model AS code, quantity_on_hand_unreserved AS stock FROM products WHERE model = ANY($1)',
+        [codes]
+      );
+      for (const row of rows) {
+        const n = Number(row.stock) || 0;
+        if (stockMap[row.code] === undefined || n > stockMap[row.code]) stockMap[row.code] = n;
+      }
+    } catch (err) {
+      console.error('[previewDraft] อ่านสต๊อกไม่สำเร็จ — แสดงเป็น 0 ไปก่อน', err);
+    }
+  }
+
+  // รุ่นของสินค้าหลักของบรรทัดพ่วง (linked_to_product_id เก็บเป็น product_template_id)
+  const modelByProductId = new Map<number, string>();
+  for (const it of goodsItems) {
+    const pid = Number((it as any).product_id);
+    if (Number.isFinite(pid)) modelByProductId.set(pid, String((it as any).model || ''));
+  }
+
+  const byCompany: Record<'PM' | 'THT', any[]> = { PM: [], THT: [] };
+  for (const it of goodsItems) {
+    const company = await resolveQuoteCompany(it);
+    byCompany[company === 'THT' ? 'THT' : 'PM'].push(it);
+  }
+
+  const violationsOf = (model: string) =>
+    violations.filter((v) => v.model && v.model !== '-' && v.model === model);
+
+  const toPreviewItem = (it: any, snap: any): WebQuotePreviewItem => {
+    const model = String(it.model || it.product_code || '');
+    const linkedId = Number(it.linked_to_product_id);
+    const qty = Number(it.quantity) || 0;
+    const price = Number(it.price) || 0;
+    const d1 = Number(it.discount_1) || 0;
+    const d2 = Number(it.discount_2) || 0;
+    return {
+      product_template_id: Number.isFinite(Number(it.product_id)) ? Number(it.product_id) : null,
+      model,
+      name: String(snap?.name || it.name || ''),
+      quantity: qty,
+      price,
+      discount_1: d1,
+      discount_2: d2,
+      // สูตรเดียวกับ calcNetPrice ฝั่ง pricing — ยอดจริงที่บันทึกคิดจากฟังก์ชันนั้นเสมอ
+      line_total: round2(qty * calcNetPrice(price, d1, d2)),
+      stock: stockMap[model] ?? 0,
+      is_optional: !!it.is_optional,
+      linked_to_model: Number.isFinite(linkedId) ? (modelByProductId.get(linkedId) ?? null) : null,
+      is_shipping_fee: isShippingFeeItem(it, cfg),
+      is_manual_service: it.is_manual_service === true,
+      warranty_display: String(snap?.warranty_display || ''),
+      violations: violationsOf(model),
+    };
+  };
+
+  const quotes: WebQuotePreviewQuote[] = [];
+  for (const company of ['PM', 'THT'] as const) {
+    const mine = byCompany[company];
+    if (mine.length === 0) continue;
+
+    // snapshot ตัวเดียวกับที่จะถูก freeze ลงใบจริง ⇒ กำหนดส่ง/รับประกันที่เห็นคือของจริง
+    const snaps = await buildItemSnapshots(mine);
+    const withStock = mine.map((it: any) => ({
+      ...it,
+      stock: stockMap[String(it.model || it.product_code || '')] ?? 0,
+    }));
+    const summary = resolveQuotationDeliveryDays(withStock, snaps);
+    const terms = resolveDeliveryTerms({
+      delivery_all_in_stock: summary.all_in_stock,
+      delivery_days_auto: summary.days,
+    });
+
+    quotes.push({
+      quote_company: company,
+      company_label: company === 'PM' ? 'Primus (PM)' : 'Themtech (THT)',
+      items: mine.map((it: any, i: number) => toPreviewItem(it, snaps[i])),
+      subtotal: 0,
+      delivery_text: deliveryDisplayText(terms),
+      delivery_days: terms.days,
+      delivery_all_in_stock: terms.all_in_stock,
+    });
+  }
+
+  // ── บรรทัดค่าบริการ: ถามกฎตัวจริง แล้ววางในใบ PM ตามที่ applyShippingFeeToQuoteGroup ทำ ──
+  const goodsTotal = round2(goodsSubtotal(expanded, cfg));
+  const keepFee = shouldHaveShippingFee(cfg, {
+    goods: goodsTotal,
+    // พรีวิวเกิดหลังแอดมินเลือกบริษัท+ผู้ติดต่อแล้วเสมอ = "ผูกลูกค้าแล้ว" ในความหมายของกฎ
+    bound: true,
+    paymentTerms: customer.customer_payment_terms,
+    prevFee: incomingFee,
+  });
+  if (keepFee && quotes.length > 0) {
+    const feeSnap = buildShippingFeeSnapshot(cfg, incomingFee ?? undefined);
+    const target = quotes.find((q) => q.quote_company === 'PM') ?? quotes[0];
+    target.items.push(toPreviewItem(feeSnap, feeSnap));
+  }
+
+  for (const q of quotes) q.subtotal = round2(q.items.reduce((sum, it) => sum + it.line_total, 0));
+  const grandTotal = round2(quotes.reduce((sum, q) => sum + q.subtotal, 0));
+
+  return {
+    customer: {
+      customer_id: resolvedCustomerId,
+      contact_id: contactId,
+      display_name: String(customer.display_name || ''),
+      reference: String(customer.reference || ''),
+      tax_id: String(customer.tax_id || ''),
+      payment_terms: String(customer.customer_payment_terms || ''),
+      contact_name: String(contact.name || ''),
+      contact_phone: String(contact.phone || contact.mobile || ''),
+      contact_email: String(contact.email || ''),
+      address: buildThaiAddress(contact),
+    },
+    quotes,
+    goods_total: goodsTotal,
+    grand_total: grandTotal,
+    violations,
+    can_create_draft: violations.length === 0,
+    service_line: {
+      product_template_id: cfg.productId,
+      model: cfg.productModel,
+      internal_reference: cfg.productInternalReference,
+      default_item_name: cfg.defaultItemName,
+      default_price: cfg.feePrice,
+      auto_applied: keepFee && incomingFee?.is_manual_service !== true,
+    },
+  };
 }
 
 /**

@@ -25,15 +25,29 @@ import {
   AlertTriangle,
   ArrowRight,
   Ban,
+  Building2,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  CreditCard,
+  Eye,
+  Factory,
   FilePlus2,
   FileText,
+  Hash,
+  Link2,
   Loader2,
+  Mail,
+  MapPin,
+  Phone,
   Plus,
+  Receipt,
   RotateCcw,
   Save,
   Search,
   Trash2,
+  Truck,
+  Wrench,
   X,
 } from 'lucide-react';
 
@@ -122,6 +136,181 @@ interface Quote {
   items: QuoteItem[];
 }
 
+// ── ผลตรวจก่อนสร้างร่าง (POST /api/admin/webquote/preview) ───────────────────
+//  เป็น dry-run ของ /drafts ที่ไม่เขียน DB — มีเพราะเส้นเว็บ **ทิ้งร่างทั้งใบ** เมื่อติดกฎ
+//  ถ้าไม่มีตัวนี้ แอดมินจะรู้ว่าติดอะไรก็ต่อเมื่อกดสร้างไปแล้ว (ดูหัวข้อ previewDraft ฝั่ง server)
+
+interface PreviewViolation {
+  type: string;
+  model: string;
+  display_message: string;
+  warn_msg?: string;
+  price?: number;
+  min_price?: number;
+  min_order_qty?: number;
+  qty?: number;
+}
+
+interface PreviewItem {
+  product_template_id: number | null;
+  model: string;
+  name: string;
+  quantity: number;
+  price: number;
+  discount_1: number;
+  discount_2: number;
+  line_total: number;
+  stock: number;
+  is_optional: boolean;
+  linked_to_model: string | null;
+  is_shipping_fee: boolean;
+  is_manual_service: boolean;
+  warranty_display: string;
+  violations: PreviewViolation[];
+}
+
+interface PreviewQuote {
+  quote_company: 'PM' | 'THT';
+  company_label: string;
+  items: PreviewItem[];
+  subtotal: number;
+  delivery_text: string;
+  delivery_days: number;
+  delivery_all_in_stock: boolean;
+}
+
+interface PreviewResult {
+  customer: {
+    customer_id: number;
+    contact_id: number;
+    display_name: string;
+    reference: string;
+    tax_id: string;
+    payment_terms: string;
+    contact_name: string;
+    contact_phone: string;
+    contact_email: string;
+    address: string;
+  };
+  quotes: PreviewQuote[];
+  goods_total: number;
+  grand_total: number;
+  violations: PreviewViolation[];
+  can_create_draft: boolean;
+  service_line: {
+    product_template_id: number | null;
+    model: string;
+    internal_reference: string;
+    default_item_name: string;
+    default_price: number;
+    auto_applied: boolean;
+  };
+}
+
+/** ค่าตั้งต้นของบรรทัดค่าบริการ — มาจาก GET /api/shipping-fee/config (สินค้าระบบตัวเดียวของทั้งระบบ) */
+interface ServiceCfg {
+  product_id: number | null;
+  model: string;
+  internal_reference: string;
+  odoo_name: string;
+  default_item_name: string;
+  default_price: number;
+}
+
+// ── ป้ายกำกับใต้ชื่อสินค้าในแต่ละแถว ────────────────────────────────────────
+//  ถ้อยคำของ violation มาจาก server (buildViolationDisplay) แต่ในแถวใช้คำสั้นกว่าเพื่อไม่ให้
+//  ตารางบวม — ข้อความเต็มอยู่ในกล่องสรุปด้านล่างซึ่งเป็นที่เดียวที่ต้องอ่านครบ
+
+type TagTone = 'ok' | 'warn' | 'bad' | 'info';
+type TagKind = 'check' | 'alert' | 'ban' | 'link' | 'truck' | 'wrench';
+interface RowTag {
+  tone: TagTone;
+  kind: TagKind;
+  text: string;
+}
+
+const VIOLATION_LABEL: Record<string, string> = {
+  BLOCKED: 'ถูกระงับการเสนอราคา',
+  OUT_OF_STOCK: 'ระงับเมื่อสต็อกไม่พอ',
+  MOQ_VIOLATION: 'ต่ำกว่าจำนวนสั่งขั้นต่ำ',
+  MIN_PRICE_VIOLATION: 'ราคาต่ำกว่าขั้นต่ำ',
+  CUSTOMER_BLACKLISTED: 'ลูกค้าถูกห้ามเสนอราคา',
+  CUSTOMER_CREDIT_HOLD: 'ติดเงื่อนไขเครดิต',
+  SYSTEM_ERROR: 'ตรวจกฎไม่สำเร็จ',
+};
+
+const shortViolation = (v: PreviewViolation): string => {
+  const base = VIOLATION_LABEL[v.type] ?? 'ติดกฎ';
+  if (v.type === 'MIN_PRICE_VIOLATION' && v.min_price !== undefined) {
+    return `${base} ฿${money(v.min_price)}`;
+  }
+  if (v.type === 'MOQ_VIOLATION' && v.min_order_qty !== undefined) {
+    return `${base} ${money(v.min_order_qty)}`;
+  }
+  return v.warn_msg ? `${base} — ${v.warn_msg}` : base;
+};
+
+const TAG_ICON: Record<TagKind, React.ComponentType<{ className?: string }>> = {
+  check: CheckCircle2,
+  alert: AlertTriangle,
+  ban: Ban,
+  link: Link2,
+  truck: Truck,
+  wrench: Wrench,
+};
+
+const TAG_CLASS: Record<TagTone, string> = {
+  ok: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+  warn: 'border-amber-200 bg-amber-50 text-amber-800',
+  bad: 'border-red-200 bg-red-50 text-red-700',
+  info: 'border-slate-200 bg-slate-50 text-slate-600',
+};
+
+const RowTags: React.FC<{ tags: RowTag[]; dim: boolean; checking: boolean }> = ({ tags, dim, checking }) => {
+  if (checking) {
+    return (
+      <div className="flex flex-wrap gap-1 mt-1">
+        <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md border border-slate-200 bg-slate-50 text-slate-500">
+          <Loader2 className="w-3 h-3 shrink-0 animate-spin" />
+          กำลังตรวจ...
+        </span>
+      </div>
+    );
+  }
+  if (tags.length === 0) return null;
+  return (
+    <div className={`flex flex-wrap gap-1 mt-1 ${dim ? 'opacity-50' : ''}`}>
+      {tags.map((t, i) => {
+        const Icon = TAG_ICON[t.kind];
+        return (
+          <span
+            key={`${t.kind}-${i}`}
+            className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md border ${TAG_CLASS[t.tone]}`}
+          >
+            <Icon className="w-3 h-3 shrink-0" />
+            {t.text}
+          </span>
+        );
+      })}
+    </div>
+  );
+};
+
+/** หนึ่งช่องในแถบข้อมูลลูกค้า — ไอคอน + ป้าย + ค่า (ว่างแล้วบอกว่าว่าง ไม่ปล่อยเป็นช่องเปล่า) */
+const CustField: React.FC<{
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: string;
+}> = ({ icon: Icon, label, value }) => (
+  <div className="flex items-start gap-1.5 min-w-0">
+    <Icon className="w-3 h-3 shrink-0 mt-0.5 text-slate-400" />
+    <span className="text-slate-500 shrink-0">{label}</span>
+    <span className={`font-semibold break-words ${value ? 'text-slate-800' : 'text-slate-400'}`}>
+      {value || 'ไม่มีข้อมูล'}
+    </span>
+  </div>
+);
+
 // ── แถวในตารางสินค้าของฟอร์ม (ก่อนสร้างร่าง) ────────────────────────────────
 
 type RowStatus = 'ok' | 'ambiguous' | 'notfound';
@@ -138,6 +327,10 @@ interface Row {
   disc2: string;
   candidates: Candidate[];
   status: RowStatus;
+  /** บรรทัดค่าบริการ (สินค้าระบบตัวเดียวของทั้งระบบ) — ชื่อแก้ได้ จำนวน/ส่วนลดถูกล็อก */
+  isService?: boolean;
+  /** ใบที่แถวนี้จะไปอยู่ตามผลตรวจครั้งล่าสุด — จำไว้เพื่อไม่ให้กลุ่มกระโดดระหว่างรอผลรอบใหม่ */
+  company?: 'PM' | 'THT';
 }
 
 const num = (v: unknown): number => {
@@ -513,6 +706,16 @@ export const QuoteRequest: React.FC = () => {
   const [creatingDraft, setCreatingDraft] = useState(false);
   const [draftError, setDraftError] = useState('');
 
+  // ── ผลตรวจก่อนสร้างร่าง ──
+  const [preview, setPreview] = useState<PreviewResult | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const [previewError, setPreviewError] = useState('');
+  const [previewAt, setPreviewAt] = useState('');
+  /** ลายเซ็นของข้อมูลที่ถูกตรวจไปแล้ว — ต่างจากของปัจจุบันเมื่อไหร่ = ผลที่เห็นเก่าแล้ว */
+  const [previewSig, setPreviewSig] = useState('');
+  const [custOpen, setCustOpen] = useState(true);
+  const [svcCfg, setSvcCfg] = useState<ServiceCfg | null>(null);
+
   // ── โหมดแก้ใบร่าง / ผลลัพธ์ ──
   const [quotes, setQuotes] = useState<Quote[] | null>(null);
   const [busyQuoteId, setBusyQuoteId] = useState<string | null>(null);
@@ -547,6 +750,10 @@ export const QuoteRequest: React.FC = () => {
     setDraftError('');
     setQuoteError('');
     setSystemBusy(false);
+    setPreview(null);
+    setPreviewError('');
+    setPreviewSig('');
+    setPreviewAt('');
   };
 
   /** อ่าน error ที่ backend ส่งมาเป็นข้อความจริง ไม่ใช่ "HTTP 400" ลอย ๆ */
@@ -706,10 +913,241 @@ export const QuoteRequest: React.FC = () => {
     addedTimer.current = window.setTimeout(() => setJustAdded(null), 2500);
   };
 
+  // ── ตรวจรายละเอียดก่อนสร้างร่าง ─────────────────────────────────────────────
+  //  ฟอร์มนี้เป็นที่เดียวที่ทั้ง "ตรวจ" และ "แก้" ⇒ ผลตรวจต้องตามการแก้ให้ทัน แต่ต้องไม่ยิงทุก
+  //  ตัวอักษร · หน่วง 700ms หลังหยุดพิมพ์ แล้วจำลายเซ็นของสิ่งที่ตรวจไว้ เพื่อบอกได้ว่า
+  //  สิ่งที่เห็นตรงกับฟอร์ม ณ ตอนนี้หรือเปล่า (ไม่ใช่แค่ "เคยตรวจแล้ว")
+  const itemsPayload = useMemo(
+    () =>
+      (rows ?? []).map((r) => ({
+        product_template_id: r.productTemplateId,
+        model: r.model,
+        quantity: num(r.quantity) || 1,
+        price: num(r.price) || null,
+        discount_1: num(r.disc1) || 0,
+        discount_2: num(r.disc2) || 0,
+        // ชื่อส่งไปเฉพาะบรรทัดค่าบริการ — สินค้าจริงเอาชื่อจาก DB เสมอ (กติกาของ resolveItems)
+        ...(r.isService ? { name: r.name } : {}),
+      })),
+    [rows],
+  );
+
   const unresolved = (rows ?? []).filter((r) => r.status !== 'ok').length;
-  const formTotal = (rows ?? []).reduce((sum, r) => sum + (r.status === 'ok' ? rowTotal(r) : 0), 0);
+  const sig = useMemo(
+    () => JSON.stringify([customerId, contactId, itemsPayload]),
+    [customerId, contactId, itemsPayload],
+  );
+  const canPreview =
+    !!rows && rows.length > 0 && unresolved === 0 && customerId !== null && contactId !== null;
+  const staleNow = !!preview && sig !== previewSig;
+
+  const runPreview = useCallback(async () => {
+    if (!canPreview) return;
+    const mySig = sig;
+    setPreviewing(true);
+    setPreviewError('');
+    try {
+      const res = await fetch('/api/admin/webquote/preview', {
+        method: 'POST',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customer_id: customerId, contact_id: contactId, items: itemsPayload }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(String(body?.error || 'ตรวจรายละเอียดไม่สำเร็จ'));
+      }
+      const data: PreviewResult = await res.json();
+      setPreview(data);
+      setPreviewSig(mySig);
+      setPreviewAt(new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }));
+      // จำใบของแต่ละแถวไว้ ไม่งั้นกลุ่มจะกระโดดไปมาระหว่างที่ผลตรวจรอบถัดไปยังไม่กลับมา
+      setRows((rs) =>
+        rs
+          ? rs.map((r) => {
+              const co = data.quotes.find((q) => q.items.some((it) => it.model === r.model))?.quote_company;
+              return co ? { ...r, company: co } : r;
+            })
+          : rs,
+      );
+    } catch (e) {
+      setPreviewError(e instanceof Error ? e.message : 'ตรวจรายละเอียดไม่สำเร็จ');
+    } finally {
+      setPreviewing(false);
+    }
+  }, [canPreview, sig, itemsPayload, customerId, contactId, authHeaders]);
+
+  useEffect(() => {
+    if (!canPreview || sig === previewSig) return;
+    const timer = setTimeout(() => { void runPreview(); }, 700);
+    return () => clearTimeout(timer);
+  }, [canPreview, sig, previewSig, runPreview]);
+
+  // ค่าตั้งต้นของบรรทัดค่าบริการ — endpoint เดียวกับที่หน้า LIFF ใช้ (ไม่ต้องมีสิทธิ์แอดมิน)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/shipping-fee/config');
+        if (!res.ok) return;
+        const d = await res.json();
+        if (cancelled || !d?.product_id) return;
+        setSvcCfg({
+          product_id: Number(d.product_id),
+          model: String(d.product_model ?? ''),
+          internal_reference: String(d.internal_reference ?? ''),
+          odoo_name: String(d.product_name ?? ''),
+          default_item_name: String(d.default_item_name ?? ''),
+          default_price: num(d.fee_price),
+        });
+      } catch {
+        /* อ่านไม่ได้ = ปุ่มเพิ่มค่าบริการปิดไว้ พร้อมบอกเหตุผลบนหน้าจอ */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  /** ค่าบริการมีได้บรรทัดเดียวต่อการเสนอราคา — ทั้งที่แอดมินเพิ่มเองและที่กฎเติมให้ */
+  const serviceRow = (rows ?? []).find((r) => r.isService) ?? null;
+  const autoFeeShown = preview?.service_line.auto_applied === true;
+
+  const addServiceRow = () => {
+    if (!svcCfg || serviceRow || autoFeeShown) return;
+    setRows((rs) => [
+      ...(rs ?? []),
+      {
+        key: newKey(),
+        productTemplateId: svcCfg.product_id,
+        model: svcCfg.model,
+        name: svcCfg.default_item_name,
+        quantity: '1',
+        price: String(svcCfg.default_price),
+        disc1: '',
+        disc2: '',
+        candidates: [],
+        status: 'ok' as RowStatus,
+        isService: true,
+        // กฎวางบรรทัดนี้ไว้ในใบ PM เสมอ (applyShippingFeeToQuoteGroup) — แสดงให้ตรงกันตั้งแต่แรก
+        company: 'PM' as const,
+      },
+    ]);
+  };
+
+  // ── จับคู่แถวในฟอร์มกับผลตรวจ แล้วแตกเป็นกลุ่มตามใบที่จะออกจริง ──────────────
+  //  จับคู่ด้วยรหัสรุ่น (ตัวแรกที่ยังไม่ถูกจอง) เพราะ server เรียงใหม่และเติมสินค้าพ่วงเข้ามา
+  //  รายการที่ไม่มีแถวรองรับ = ของที่ระบบเติมให้เอง (สินค้าพ่วง · ค่าขนส่งอัตโนมัติ)
+  const matched = useMemo(() => {
+    const byRow = new Map<string, PreviewItem>();
+    const coByRow = new Map<string, 'PM' | 'THT'>();
+    const extras: { co: 'PM' | 'THT'; item: PreviewItem }[] = [];
+    if (!preview) return { byRow, coByRow, extras };
+    const used = new Set<PreviewItem>();
+    for (const r of rows ?? []) {
+      for (const q of preview.quotes) {
+        const hit = q.items.find((it) => !used.has(it) && it.model === r.model);
+        if (hit) {
+          used.add(hit);
+          byRow.set(r.key, hit);
+          coByRow.set(r.key, q.quote_company);
+          break;
+        }
+      }
+    }
+    for (const q of preview.quotes) {
+      for (const it of q.items) if (!used.has(it)) extras.push({ co: q.quote_company, item: it });
+    }
+    return { byRow, coByRow, extras };
+  }, [preview, rows]);
+
+  const groups = useMemo(() => {
+    const all = rows ?? [];
+    const sumRows = (rs: Row[]) => rs.reduce((s, r) => s + (r.status === 'ok' ? rowTotal(r) : 0), 0);
+    // ก่อนตรวจครั้งแรกยังไม่รู้ว่าแถวไหนไปใบไหน — resolveQuoteCompany อยู่ฝั่ง server เท่านั้น
+    if (!preview) {
+      return all.length === 0
+        ? []
+        : [{
+            co: 'PM' as const,
+            label: 'รายการทั้งหมด',
+            rows: all,
+            extras: [] as PreviewItem[],
+            quote: undefined as PreviewQuote | undefined,
+            subtotal: sumRows(all),
+          }];
+    }
+    const out: {
+      co: 'PM' | 'THT';
+      label: string;
+      rows: Row[];
+      extras: PreviewItem[];
+      quote: PreviewQuote | undefined;
+      subtotal: number;
+    }[] = [];
+    for (const co of ['PM', 'THT'] as const) {
+      const rs = all.filter((r) => (matched.coByRow.get(r.key) ?? r.company ?? 'PM') === co);
+      const ex = matched.extras.filter((e) => e.co === co).map((e) => e.item);
+      if (rs.length === 0 && ex.length === 0) continue;
+      const quote = preview.quotes.find((q) => q.quote_company === co);
+      out.push({
+        co,
+        label: quote?.company_label ?? (co === 'PM' ? 'Primus (PM)' : 'Themtech (THT)'),
+        rows: rs,
+        extras: ex,
+        quote,
+        subtotal: sumRows(rs) + ex.reduce((s, it) => s + num(it.line_total), 0),
+      });
+    }
+    return out;
+  }, [preview, rows, matched]);
+
+  const grandTotal = groups.reduce((s, g) => s + g.subtotal, 0);
+  const blockers = staleNow ? [] : (preview?.violations ?? []);
+
+  const rowTagsOf = (r: Row, hit: PreviewItem | null): RowTag[] => {
+    if (r.isService) {
+      return [{ tone: 'info', kind: 'wrench', text: 'ค่าบริการของใบนี้ · ตั้งชื่อและราคาได้ — มีได้บรรทัดเดียว' }];
+    }
+    if (!hit) return [];
+    const tags: RowTag[] = hit.violations.map((v) => ({
+      tone: 'bad' as TagTone,
+      kind: (v.type === 'BLOCKED' ? 'ban' : 'alert') as TagKind,
+      text: shortViolation(v),
+    }));
+    if (hit.linked_to_model) tags.push({ tone: 'info', kind: 'link', text: `พ่วงกับ ${hit.linked_to_model}` });
+    tags.push(
+      hit.stock >= hit.quantity
+        ? { tone: 'ok', kind: 'check', text: `พร้อมส่ง คงเหลือ ${money(hit.stock)}` }
+        : { tone: 'warn', kind: 'alert', text: `ของไม่พอ คงเหลือ ${money(hit.stock)}` },
+    );
+    return tags;
+  };
+
+  const extraTagsOf = (it: PreviewItem): RowTag[] => {
+    if (it.is_shipping_fee) {
+      return [{ tone: 'info', kind: 'truck', text: 'ระบบเติมให้เอง — ถอดออกเองเมื่อยอดถึงเกณฑ์' }];
+    }
+    const tags: RowTag[] = it.violations.map((v) => ({
+      tone: 'bad' as TagTone,
+      kind: (v.type === 'BLOCKED' ? 'ban' : 'alert') as TagKind,
+      text: shortViolation(v),
+    }));
+    tags.push({
+      tone: 'info',
+      kind: 'link',
+      text: it.linked_to_model ? `สินค้าพ่วงของ ${it.linked_to_model} — ระบบเพิ่มให้เอง` : 'ระบบเพิ่มให้เอง',
+    });
+    tags.push(
+      it.stock >= it.quantity
+        ? { tone: 'ok', kind: 'check', text: `พร้อมส่ง คงเหลือ ${money(it.stock)}` }
+        : { tone: 'warn', kind: 'alert', text: `ของไม่พอ คงเหลือ ${money(it.stock)}` },
+    );
+    return tags;
+  };
+
+  // ติดกฎ = กดสร้างไปก็ถูกทิ้งทั้งใบ ⇒ ปิดปุ่มไว้ · แต่ถ้าตรวจไม่สำเร็จ/ยังไม่ได้ตรวจ ปล่อยให้กดได้
+  // เพราะ createDraft ฝั่ง server เป็นด่านจริงอยู่แล้ว การปิดปุ่มตอนพรีวิวล่มคือการล็อกงานไว้เฉย ๆ
   const canCreateDraft =
-    !!rows && rows.length > 0 && unresolved === 0 && customerId !== null && contactId !== null && !creatingDraft;
+    !!rows && rows.length > 0 && unresolved === 0 && customerId !== null && contactId !== null &&
+    !creatingDraft && !previewing && (staleNow || !preview || preview.can_create_draft);
 
   const createDraft = async () => {
     if (!canCreateDraft || !rows) return;
@@ -724,14 +1162,7 @@ export const QuoteRequest: React.FC = () => {
           customer_id: customerId,
           contact_id: contactId,
           propose_msg_id: proposeMsgId,
-          items: rows.map((r) => ({
-            product_template_id: r.productTemplateId,
-            model: r.model,
-            quantity: num(r.quantity) || 1,
-            price: num(r.price) || null,
-            discount_1: num(r.disc1) || 0,
-            discount_2: num(r.disc2) || 0,
-          })),
+          items: itemsPayload,
         }),
       });
       if (!res.ok) throw new Error(await readError(res, 'สร้างร่างไม่สำเร็จ'));
@@ -939,6 +1370,7 @@ export const QuoteRequest: React.FC = () => {
               </label>
               <select
                 value={customerId ?? ''}
+                aria-label="บริษัท / ลูกค้า"
                 onChange={(e) => {
                   setCustomerId(e.target.value ? Number(e.target.value) : null);
                   setContactId(null);
@@ -973,6 +1405,7 @@ export const QuoteRequest: React.FC = () => {
               <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider">ผู้ติดต่อ</label>
               <select
                 value={contactId ?? ''}
+                aria-label="ผู้ติดต่อ"
                 onChange={(e) => setContactId(e.target.value ? Number(e.target.value) : null)}
                 disabled={customerId === null}
                 className={`w-full h-11 px-3 rounded-xl border text-sm outline-none disabled:opacity-50 ${
@@ -987,141 +1420,312 @@ export const QuoteRequest: React.FC = () => {
                   </option>
                 ))}
               </select>
-              <p className="text-[11px] text-slate-500">
-                เครดิต:{' '}
-                <span className="font-semibold text-slate-700">
-                  {selectedCustomer?.payment_terms || selectedCustomer?.customer_payment_terms || '—'}
-                </span>
-                <span className="text-slate-300 mx-1.5">·</span>
-                เงื่อนไขจัดส่ง: <span className="text-slate-600">ระบบคำนวณให้ตอนบันทึกร่าง</span>
-              </p>
+              {/* ก่อนตรวจครั้งแรกยังมีแค่ค่าที่ติดมากับ candidates ซึ่งว่างได้บ่อย — พอผลตรวจมาถึง
+                  แถบข้อมูลลูกค้ากับชิปกำหนดส่งของแต่ละใบเป็นของจริงกว่า จึงเลิกโชว์บรรทัดนี้
+                  ไม่งั้นหน้าจอเดียวกันจะบอกเครดิตสองค่าที่ไม่ตรงกัน */}
+              {!preview && (
+                <p className="text-[11px] text-slate-500">
+                  เครดิต:{' '}
+                  <span className="font-semibold text-slate-700">
+                    {selectedCustomer?.payment_terms || selectedCustomer?.customer_payment_terms || '—'}
+                  </span>
+                  <span className="text-slate-300 mx-1.5">·</span>
+                  เงื่อนไขจัดส่ง: <span className="text-slate-600">ระบบคำนวณให้ตอนตรวจรายละเอียด</span>
+                </p>
+              )}
             </div>
           </div>
 
-          {/* ตารางสินค้า — 1 แถวต่อ 1 slot เรียงตามที่พิมพ์เสมอ */}
-          <div className="overflow-x-auto -mx-4 px-4">
-            <table className="w-full min-w-[820px] text-sm">
-              <thead>
-                <tr className="text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
-                  <th className="text-left py-2 w-8">#</th>
-                  <th className="text-left py-2">สินค้า</th>
-                  <th className="text-right py-2 w-20">จำนวน</th>
-                  <th className="text-right py-2 w-28">ราคา/หน่วย</th>
-                  <th className="text-right py-2 w-20">ลด 1 %</th>
-                  <th className="text-right py-2 w-20">ลด 2 %</th>
-                  <th className="text-right py-2 w-28">รวม</th>
-                  <th className="w-10"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {rows.map((r, i) => (
-                  <tr key={r.key} className={r.status === 'notfound' ? 'bg-red-50/60' : r.status === 'ambiguous' ? 'bg-amber-50/60' : ''}>
-                    <td className="py-2 text-xs text-slate-400 align-top pt-4">{i + 1}</td>
-                    <td className="py-2 pr-3 align-top">
-                      {r.status === 'ok' ? (
-                        <div className="pt-1.5">
-                          <p className="font-semibold text-slate-800 text-sm">{r.model}</p>
-                          <p className="text-[11px] text-slate-500 line-clamp-1">{r.name}</p>
-                        </div>
-                      ) : r.status === 'ambiguous' ? (
-                        <div className="space-y-1">
-                          <p className="text-[11px] text-amber-800">
-                            “{r.model}” ตรงกับหลายรุ่น — เลือกรุ่นที่ถูกต้อง
-                          </p>
-                          <select
-                            defaultValue=""
-                            onChange={(e) => {
-                              const c = r.candidates.find((x) => String(x.product_template_id) === e.target.value);
-                              if (c) pickCandidate(r.key, c);
-                            }}
-                            className="w-full h-9 px-2.5 rounded-lg border border-amber-400 bg-card text-xs outline-none"
-                          >
-                            <option value="">— เลือกรุ่น —</option>
-                            {r.candidates.map((c) => (
-                              <option key={c.product_template_id} value={c.product_template_id}>
-                                {c.model} · ฿{money(c.sales_price)} · คงเหลือ {money(c.quantity_on_hand_unreserved)}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
+          {/* ── ข้อมูลลูกค้าที่จะถูกบันทึกลงใบ — พับได้ เพราะคนดูซ้ำแค่ตอนสงสัย ── */}
+          {preview && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setCustOpen((v) => !v)}
+                aria-expanded={custOpen}
+                className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-700"
+              >
+                <Building2 className="w-3.5 h-3.5 shrink-0" style={{ color: BRAND }} />
+                ข้อมูลลูกค้าที่จะถูกบันทึกลงใบ
+                {custOpen ? (
+                  <ChevronUp className="w-3.5 h-3.5 ml-auto shrink-0" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5 ml-auto shrink-0" />
+                )}
+              </button>
+              {custOpen && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-1.5 px-3 pb-3 text-[11px]">
+                  <CustField icon={Hash} label="Ref" value={preview.customer.reference} />
+                  <CustField icon={Receipt} label="เลขเสียภาษี" value={preview.customer.tax_id} />
+                  <CustField icon={CreditCard} label="เครดิต" value={preview.customer.payment_terms} />
+                  <CustField icon={Phone} label="โทร" value={preview.customer.contact_phone} />
+                  <CustField icon={Mail} label="อีเมล" value={preview.customer.contact_email} />
+                  <CustField icon={MapPin} label="ที่อยู่" value={preview.customer.address} />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── ตารางสินค้า แยกกลุ่มตาม "ใบที่จะออกจริง" ──
+              ก่อนตรวจครั้งแรกยังไม่รู้ว่าแถวไหนไปใบไหน (resolveQuoteCompany อยู่ฝั่ง server)
+              จึงรวมเป็นกลุ่มเดียวไว้ก่อน แล้วค่อยแตกเป็น PM/THT เมื่อผลตรวจกลับมา */}
+          {groups.map((g) => (
+            <div key={g.co} className="rounded-xl border border-slate-200 overflow-hidden">
+              <div className="flex flex-wrap items-center gap-2 px-3 py-2 bg-slate-50 border-b border-slate-200">
+                <Factory className="w-3.5 h-3.5 shrink-0" style={{ color: BRAND }} />
+                <span className="text-xs font-bold text-slate-800">{g.label}</span>
+                <span className="text-[11px] text-slate-500">
+                  {g.rows.length + g.extras.length} รายการ
+                </span>
+                <span className="ml-auto">
+                  {previewing ? (
+                    <span className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-lg border border-slate-200 bg-card text-slate-500">
+                      <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+                      กำลังคำนวณกำหนดส่ง...
+                    </span>
+                  ) : g.quote ? (
+                    <span
+                      className={`flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-lg border ${
+                        g.quote.delivery_all_in_stock
+                          ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                          : 'border-amber-200 bg-amber-50 text-amber-800'
+                      }`}
+                    >
+                      {g.quote.delivery_all_in_stock ? (
+                        <CheckCircle2 className="w-3 h-3 shrink-0" />
                       ) : (
-                        // คำเตือนอยู่ "ใต้" ช่องค้น ไม่ใช่เหนือ — ของที่ต้องลงมือทำมาก่อน
-                        // คำอธิบายว่าทำไมถึงต้องทำ เพราะสายตาไล่จากบนลงล่างแล้วหยุดที่ช่องกรอก
-                        <div className="space-y-1">
-                          <ProductSearchBox
-                            initialQuery={r.model}
-                            placeholder="ค้นหารุ่นที่ถูกต้อง..."
-                            tone="danger"
-                            onPick={(h) =>
-                              patchRow(r.key, {
-                                productTemplateId: h.product_id,
-                                model: h.model,
-                                name: h.name,
-                                price: String(num(h.price)),
-                                status: 'ok',
-                                candidates: [],
-                              })
-                            }
-                          />
-                          <p className="text-[11px] text-red-700">
-                            {r.model ? `ไม่พบรุ่น “${r.model}” ในระบบ` : 'ยังไม่ได้เลือกสินค้า'}
-                          </p>
-                        </div>
+                        <AlertTriangle className="w-3 h-3 shrink-0" />
                       )}
-                    </td>
-                    <td className="py-2 align-top">
-                      <input
-                        value={r.quantity}
-                        onChange={(e) => patchRow(r.key, { quantity: e.target.value })}
-                        inputMode="decimal"
-                        className="w-full h-9 px-2 rounded-lg border border-slate-200 bg-card text-xs text-right outline-none"
-                      />
-                    </td>
-                    <td className="py-2 pl-2 align-top">
-                      <input
-                        value={r.price}
-                        onChange={(e) => patchRow(r.key, { price: e.target.value })}
-                        inputMode="decimal"
-                        placeholder="ราคาตั้ง"
-                        disabled={r.status !== 'ok'}
-                        className="w-full h-9 px-2 rounded-lg border border-slate-200 bg-card text-xs text-right outline-none disabled:bg-slate-100"
-                      />
-                    </td>
-                    <td className="py-2 pl-2 align-top">
-                      <input
-                        value={r.disc1}
-                        onChange={(e) => patchRow(r.key, { disc1: e.target.value })}
-                        inputMode="decimal"
-                        disabled={r.status !== 'ok'}
-                        className="w-full h-9 px-2 rounded-lg border border-slate-200 bg-card text-xs text-right outline-none disabled:bg-slate-100"
-                      />
-                    </td>
-                    <td className="py-2 pl-2 align-top">
-                      <input
-                        value={r.disc2}
-                        onChange={(e) => patchRow(r.key, { disc2: e.target.value })}
-                        inputMode="decimal"
-                        disabled={r.status !== 'ok'}
-                        className="w-full h-9 px-2 rounded-lg border border-slate-200 bg-card text-xs text-right outline-none disabled:bg-slate-100"
-                      />
-                    </td>
-                    <td className="py-2 pl-2 text-right align-top pt-4 tabular-nums text-slate-800 font-semibold">
-                      {r.status === 'ok' ? money(rowTotal(r)) : '—'}
-                    </td>
-                    <td className="py-2 text-right align-top pt-3">
-                      <button
-                        onClick={() => removeRow(r.key)}
-                        className="w-7 h-7 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 flex items-center justify-center"
-                        aria-label="ลบแถว"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                      กำหนดส่ง: {g.quote.delivery_text}
+                    </span>
+                  ) : (
+                    <span className="text-[11px] px-2 py-0.5 rounded-lg border border-slate-200 bg-card text-slate-500">
+                      ยังไม่ได้ตรวจ
+                    </span>
+                  )}
+                </span>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[820px] text-sm">
+                  <thead>
+                    <tr className="text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
+                      <th className="text-left py-2 pl-3 w-8">#</th>
+                      <th className="text-left py-2">รายการ</th>
+                      <th className="text-right py-2 w-20">จำนวน</th>
+                      <th className="text-right py-2 w-28">ราคา/หน่วย</th>
+                      <th className="text-right py-2 w-20">ลด 1 %</th>
+                      <th className="text-right py-2 w-20">ลด 2 %</th>
+                      <th className="text-right py-2 w-28">รวม</th>
+                      <th className="w-10 pr-3"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {g.rows.map((r, i) => {
+                      const hit = matched.byRow.get(r.key) ?? null;
+                      const vios = staleNow ? [] : (hit?.violations ?? []);
+                      const bad = vios.length > 0;
+                      return (
+                        <tr
+                          key={r.key}
+                          className={
+                            bad
+                              ? 'bg-red-50/60 border-l-[3px] border-l-red-500'
+                              : r.status === 'notfound'
+                                ? 'bg-red-50/60'
+                                : r.status === 'ambiguous'
+                                  ? 'bg-amber-50/60'
+                                  : ''
+                          }
+                        >
+                          <td className="py-2 pl-3 text-xs text-slate-400 align-top pt-4">{i + 1}</td>
+                          <td className="py-2 pr-3 align-top">
+                            {r.isService ? (
+                              <div className="space-y-1 pt-1">
+                                <input
+                                  value={r.name}
+                                  onChange={(e) => patchRow(r.key, { name: e.target.value })}
+                                  placeholder="ชื่อรายการที่จะขึ้นในใบ เช่น ค่าติดตั้งหน้างาน"
+                                  aria-label="ชื่อรายการค่าบริการ"
+                                  className="w-full max-w-xs h-9 px-2.5 rounded-lg border border-slate-200 bg-card text-xs text-slate-800 outline-none"
+                                />
+                                <p className="text-[11px] text-slate-400">
+                                  {r.model} · {svcCfg?.internal_reference} · {svcCfg?.odoo_name} (Odoo)
+                                </p>
+                              </div>
+                            ) : r.status === 'ok' ? (
+                              <div className="pt-1.5">
+                                <p className="font-semibold text-slate-800 text-sm">{r.model}</p>
+                                <p className="text-[11px] text-slate-500 line-clamp-1">{r.name}</p>
+                              </div>
+                            ) : r.status === 'ambiguous' ? (
+                              // คำเตือนอยู่ "ใต้" ตัวเลือก เหมือนแถวที่หาสินค้าไม่เจอ —
+                              // ของที่ต้องลงมือทำมาก่อน คำอธิบายว่าทำไมตามหลัง
+                              <div className="space-y-1">
+                                <select
+                                  defaultValue=""
+                                  onChange={(e) => {
+                                    const c = r.candidates.find(
+                                      (x) => String(x.product_template_id) === e.target.value,
+                                    );
+                                    if (c) pickCandidate(r.key, c);
+                                  }}
+                                  className="w-full h-9 px-2.5 rounded-lg border border-amber-400 bg-card text-xs outline-none"
+                                >
+                                  <option value="">— เลือกรุ่น —</option>
+                                  {r.candidates.map((c) => (
+                                    <option key={c.product_template_id} value={c.product_template_id}>
+                                      {c.model} · ฿{money(c.sales_price)} · คงเหลือ{' '}
+                                      {money(c.quantity_on_hand_unreserved)}
+                                    </option>
+                                  ))}
+                                </select>
+                                <p className="text-[11px] text-amber-800">
+                                  “{r.model}” ตรงกับหลายรุ่น — เลือกรุ่นที่ถูกต้อง
+                                </p>
+                              </div>
+                            ) : (
+                              // คำเตือนอยู่ "ใต้" ช่องค้น ไม่ใช่เหนือ — ของที่ต้องลงมือทำมาก่อน
+                              // คำอธิบายว่าทำไมถึงต้องทำ เพราะสายตาไล่จากบนลงล่างแล้วหยุดที่ช่องกรอก
+                              <div className="space-y-1">
+                                <ProductSearchBox
+                                  initialQuery={r.model}
+                                  placeholder="ค้นหารุ่นที่ถูกต้อง..."
+                                  tone="danger"
+                                  onPick={(h) =>
+                                    patchRow(r.key, {
+                                      productTemplateId: h.product_id,
+                                      model: h.model,
+                                      name: h.name,
+                                      price: String(num(h.price)),
+                                      status: 'ok',
+                                      candidates: [],
+                                    })
+                                  }
+                                />
+                                <p className="text-[11px] text-red-700">
+                                  {r.model ? `ไม่พบรุ่น “${r.model}” ในระบบ` : 'ยังไม่ได้เลือกสินค้า'}
+                                </p>
+                              </div>
+                            )}
+                            <RowTags
+                              tags={rowTagsOf(r, hit)}
+                              dim={staleNow}
+                              checking={previewing && !preview}
+                            />
+                          </td>
+                          <td className="py-2 align-top">
+                            <input
+                              value={r.quantity}
+                              onChange={(e) => patchRow(r.key, { quantity: e.target.value })}
+                              inputMode="decimal"
+                              aria-label="จำนวน"
+                              disabled={r.isService}
+                              className="w-full h-9 px-2 rounded-lg border border-slate-200 bg-card text-xs text-right outline-none disabled:bg-slate-100"
+                            />
+                          </td>
+                          <td className="py-2 pl-2 align-top">
+                            <input
+                              value={r.price}
+                              onChange={(e) => patchRow(r.key, { price: e.target.value })}
+                              inputMode="decimal"
+                              placeholder="ราคาตั้ง"
+                              aria-label="ราคาต่อหน่วย"
+                              disabled={r.status !== 'ok'}
+                              className="w-full h-9 px-2 rounded-lg border border-slate-200 bg-card text-xs text-right outline-none disabled:bg-slate-100"
+                            />
+                          </td>
+                          <td className="py-2 pl-2 align-top">
+                            <input
+                              value={r.disc1}
+                              onChange={(e) => patchRow(r.key, { disc1: e.target.value })}
+                              inputMode="decimal"
+                              aria-label="ส่วนลดที่ 1"
+                              disabled={r.status !== 'ok' || r.isService}
+                              className="w-full h-9 px-2 rounded-lg border border-slate-200 bg-card text-xs text-right outline-none disabled:bg-slate-100"
+                            />
+                          </td>
+                          <td className="py-2 pl-2 align-top">
+                            <input
+                              value={r.disc2}
+                              onChange={(e) => patchRow(r.key, { disc2: e.target.value })}
+                              inputMode="decimal"
+                              aria-label="ส่วนลดที่ 2"
+                              disabled={r.status !== 'ok' || r.isService}
+                              className="w-full h-9 px-2 rounded-lg border border-slate-200 bg-card text-xs text-right outline-none disabled:bg-slate-100"
+                            />
+                          </td>
+                          <td className="py-2 pl-2 text-right align-top pt-4 tabular-nums text-slate-800 font-semibold">
+                            {r.status === 'ok' ? money(rowTotal(r)) : '—'}
+                          </td>
+                          <td className="py-2 pr-3 text-right align-top pt-3">
+                            <button
+                              onClick={() => removeRow(r.key)}
+                              className="w-7 h-7 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 flex items-center justify-center"
+                              aria-label="ลบแถว"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+
+                    {/* บรรทัดที่ระบบเติมให้เอง (สินค้าพ่วง · ค่าขนส่งอัตโนมัติ) — แก้ในฟอร์มนี้ไม่ได้
+                        เพราะเจ้าของมันคือกฎฝั่ง server แต่ต้องเห็น ไม่งั้นยอดรวมจะอธิบายไม่ได้ */}
+                    {g.extras.map((it, i) => (
+                      <tr key={`x-${g.co}-${i}`} className="bg-slate-50/60">
+                        <td className="py-2 pl-3 text-xs text-slate-400 align-top pt-4">
+                          {g.rows.length + i + 1}
+                        </td>
+                        <td className="py-2 pr-3 align-top">
+                          {/* บรรทัดค่าบริการใช้ model ร่วมกันทั้งระบบ (N/A) ⇒ ตัวที่คนอ่านต้องเห็นคือ
+                              "ชื่อรายการ" ส่วนรหัสสินค้าเป็นแค่ที่มา — สลับลำดับให้ตรงกับแถวที่แก้ได้ */}
+                          {it.is_shipping_fee ? (
+                            <div className="pt-1.5">
+                              <p className="font-semibold text-slate-800 text-sm">{it.name}</p>
+                              <p className="text-[11px] text-slate-400">
+                                {it.model} · {svcCfg?.internal_reference} · {svcCfg?.odoo_name} (Odoo)
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="pt-1.5">
+                              <p className="font-semibold text-slate-800 text-sm">{it.model}</p>
+                              <p className="text-[11px] text-slate-500 line-clamp-1">{it.name}</p>
+                            </div>
+                          )}
+                          <RowTags tags={extraTagsOf(it)} dim={staleNow} checking={false} />
+                        </td>
+                        <td className="py-2 pl-2 text-right align-top pt-4 text-xs text-slate-500 tabular-nums">
+                          {money(it.quantity)}
+                        </td>
+                        <td className="py-2 pl-2 text-right align-top pt-4 text-xs text-slate-500 tabular-nums">
+                          {money(it.price)}
+                        </td>
+                        <td className="py-2 pl-2 text-right align-top pt-4 text-xs text-slate-400 tabular-nums">
+                          {it.discount_1 ? money(it.discount_1) : '—'}
+                        </td>
+                        <td className="py-2 pl-2 text-right align-top pt-4 text-xs text-slate-400 tabular-nums">
+                          {it.discount_2 ? money(it.discount_2) : '—'}
+                        </td>
+                        <td className="py-2 pl-2 text-right align-top pt-4 tabular-nums text-slate-800 font-semibold">
+                          {money(it.line_total)}
+                        </td>
+                        <td className="py-2 pr-3"></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 px-3 py-2 bg-slate-50 border-t border-slate-200">
+                <span className="ml-auto text-[11px] text-slate-500">รวมใบนี้ (ก่อน VAT)</span>
+                <span className="text-sm font-extrabold text-slate-900 tabular-nums">
+                  ฿{money(g.subtotal)}
+                </span>
+              </div>
+            </div>
+          ))}
 
           {/* แถบเพิ่มสินค้า — พิมพ์แล้ว Enter ได้แถวที่เคาะเสร็จทันที โฟกัสค้างไว้ให้พิมพ์ตัวถัดไปต่อ
               ปุ่ม "แถวเปล่า" คือของเดิม เก็บไว้สำหรับกรณีที่ยังไม่รู้ว่าจะใส่รุ่นอะไร */}
@@ -1147,19 +1751,110 @@ export const QuoteRequest: React.FC = () => {
                 เพิ่ม {justAdded} แล้ว
               </span>
             )}
+            <p className="basis-full text-[11px] text-slate-400">
+              ระบบวางแถวลงใบของบริษัทผู้ผลิตให้เอง — ไม่ต้องเลือกว่าจะไปใบไหน
+            </p>
+
+            {/* ── ค่าบริการ: มีได้บรรทัดเดียวต่อการเสนอราคา (ข้อตกลง 2026-09-14) ──
+                ใช้สินค้าระบบตัวเดียวกับกฎค่าขนส่งอัตโนมัติ ⇒ ปุ่มต้องปิดตัวเองเมื่อบรรทัดนั้น
+                มีอยู่แล้ว ไม่ว่าจะมาจากกฎหรือจากที่แอดมินกดเพิ่ม */}
+            <div className="basis-full border-t border-slate-200 pt-2 flex flex-wrap items-center gap-2">
+              <button
+                onClick={addServiceRow}
+                disabled={!svcCfg || !!serviceRow || autoFeeShown}
+                className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg border border-slate-200 bg-card text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Wrench className="w-3.5 h-3.5 shrink-0" />
+                เพิ่มค่าบริการ
+              </button>
+              <span className="flex-1 min-w-[200px] text-[11px] text-slate-400">
+                {!svcCfg
+                  ? 'ยังอ่านค่าตั้งต้นของค่าบริการไม่ได้ — ลองรีเฟรชหน้า'
+                  : autoFeeShown
+                    ? 'ระบบเติมบรรทัดค่าขนส่งให้แล้ว — ค่าบริการมีได้บรรทัดเดียว จึงเพิ่มอีกไม่ได้'
+                    : serviceRow
+                      ? 'มีบรรทัดค่าบริการแล้ว 1 บรรทัด — แก้ชื่อและราคาได้ที่แถวนั้น ลบก่อนจึงเพิ่มใหม่ได้'
+                      : `ใช้สินค้าระบบ ${svcCfg.internal_reference} (${svcCfg.odoo_name}) · ตั้งชื่อรายการเองได้ · มีได้บรรทัดเดียว และอยู่ในใบ Primus (PM) เสมอ`}
+              </span>
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
             <div className="ml-auto text-sm">
-              <span className="text-slate-500">ยอดรวม (ก่อน VAT/ค่าขนส่ง): </span>
-              <span className="font-extrabold text-slate-900 tabular-nums">฿{money(formTotal)}</span>
+              <span className="text-slate-500">ยอดรวมทุกใบ (ก่อน VAT): </span>
+              <span className="font-extrabold text-slate-900 tabular-nums">฿{money(grandTotal)}</span>
             </div>
           </div>
+
+          {/* ── แถบสถานะการตรวจ — บอกว่าสิ่งที่เห็นตรงกับข้อมูลล่าสุดแค่ไหน ── */}
+          {previewError ? (
+            <div className="flex flex-wrap items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2 text-xs text-red-700">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-px" />
+              <span className="flex-1 min-w-[180px]">
+                ตรวจรายละเอียดไม่สำเร็จ — {previewError} · ข้อมูลในฟอร์มยังอยู่ครบ กดตรวจใหม่ได้เลย
+              </span>
+              <button
+                onClick={() => void runPreview()}
+                className="flex items-center gap-1.5 font-semibold px-3 py-1.5 rounded-lg border border-red-200 bg-card text-red-700 hover:bg-red-50"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                ตรวจใหม่
+              </button>
+            </div>
+          ) : previewing ? (
+            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-600">
+              <Loader2 className="w-4 h-4 shrink-0 animate-spin" />
+              <span>กำลังตรวจสต็อก กฎระงับ ราคาขั้นต่ำ ค่าบริการ และกำหนดส่ง...</span>
+            </div>
+          ) : staleNow ? (
+            <div className="flex flex-wrap items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs text-amber-800">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span className="flex-1 min-w-[180px]">
+                ฟอร์มถูกแก้หลังตรวจครั้งล่าสุด — สต็อกและกฎที่เห็นอาจไม่ใช่ของล่าสุด
+              </span>
+              <button
+                onClick={() => void runPreview()}
+                className="flex items-center gap-1.5 font-semibold px-3 py-1.5 rounded-lg border border-amber-200 bg-card text-amber-800 hover:bg-amber-50"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                ตรวจใหม่
+              </button>
+            </div>
+          ) : preview ? (
+            <div className="flex flex-wrap items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-600">
+              <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+              <span className="flex-1 min-w-[180px]">
+                ตรวจกับข้อมูลล่าสุดเมื่อ {previewAt} น. — ยังไม่บันทึกอะไรลงฐานข้อมูลจนกว่าจะกดสร้างใบร่าง
+              </span>
+              <button
+                onClick={() => void runPreview()}
+                className="flex items-center gap-1.5 font-semibold px-3 py-1.5 rounded-lg border border-slate-200 bg-card text-slate-600 hover:bg-slate-100"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                ตรวจใหม่
+              </button>
+            </div>
+          ) : null}
 
           {unresolved > 0 && (
             <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs text-amber-800">
               <AlertTriangle className="w-4 h-4 shrink-0 mt-px" />
               <span>ยังมี {unresolved} รายการที่ยังไม่ได้เลือกสินค้า — เคาะให้ครบก่อนสร้างร่าง</span>
+            </div>
+          )}
+
+          {/* ติดกฎ = สร้างร่างไม่ได้เลย (createDraft ทิ้งทั้งใบ) ⇒ ต้องเห็นตั้งแต่ยังไม่กด */}
+          {blockers.length > 0 && !staleNow && (
+            <div className="bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 text-xs text-red-700">
+              <p className="flex items-center gap-2 font-bold">
+                <Ban className="w-4 h-4 shrink-0" />
+                สร้างใบร่างไม่ได้ — ติดด่านตรวจ {blockers.length} ข้อ
+              </p>
+              <ul className="mt-1 pl-6 list-disc space-y-0.5">
+                {blockers.map((v, i) => (
+                  <li key={`${v.type}-${v.model}-${i}`}>{v.display_message}</li>
+                ))}
+              </ul>
             </div>
           )}
           {draftError && (
