@@ -20,7 +20,10 @@ docker-compose.override.yml
 dist/
 
 # Database dumps — มี PII ลูกค้าและ password hash ห้าม commit
-backup/
+# `/backup/` มี `/` นำหน้าโดยตั้งใจ = เฉพาะโฟลเดอร์ที่รากเท่านั้น
+# เขียนว่า `backup/` เฉย ๆ จะกลืน **ทุก** โฟลเดอร์ชื่อนี้ทุกระดับ รวมถึง scripts/backup/
+# ที่เป็นซอร์สโค้ด (เกิดจริง 2026-09-15: สคริปต์ autobackup ถูก ignore เงียบ ๆ ไม่เข้า repo)
+/backup/
 *.dump
 
 # สำเนาทดสอบที่ scripts/diag/customerSearchEval.ts สร้างตอนรันแล้วลบทิ้ง

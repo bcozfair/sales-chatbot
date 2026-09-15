@@ -422,6 +422,7 @@ docker compose exec -T db psql -U "$PG_USER" -d "$PG_DATABASE" -c "SELECT …"  
 | `tsx scripts/runMigration.ts` | เปลี่ยน schema ของฐานจริง |
 | `npm run db:restore` | **เขียนทับทั้งฐาน** — ท่าที่อันตรายที่สุดในรีโปนี้ |
 | `npm run db:dump` | ปลอดภัยต่อข้อมูล แต่ได้ไฟล์ที่มี PII ลูกค้า + password hash ⇒ ห้ามให้ออกนอกเครื่อง |
+| `npm run backup:auto` | เหมือน `db:dump` แต่ยืม pg_dump ในกล่อง (host ไม่มี pg client) — อ่านอย่างเดียวต่อฐาน แต่เขียนดิสก์ ~72MB/ครั้ง · cron เรียกเองทุกวันตี 3 อยู่แล้ว |
 
 **`scripts/diag/*` ไม่ได้ read-only ทั้งหมด และชื่อไฟล์ไม่ใช่เครื่องบอก** — วัดครบทั้ง 46 ไฟล์
 เมื่อ 2026-09-12 ได้สี่กลุ่ม:
@@ -444,8 +445,8 @@ docker compose exec -T db psql -U "$PG_USER" -d "$PG_DATABASE" -c "SELECT …"  
 **ไม่แน่ใจว่าตัวไหนเขียน = ยังไม่ใช่ตัวที่รันบนนี้ได้**
 
 **ไฟล์ที่เพิ่มเข้ามาหลังวันที่วัด** (ตารางข้างบนยังเป็นตัวเลขของ 2026-09-12 ไม่ได้วัดใหม่ทั้งชุด) —
-วัดรายตัวด้วย grep ข้างบนเมื่อ 2026-09-15 ได้ 0 ทั้งสามตัว ⇒ อยู่กลุ่ม "SELECT อย่างเดียว" รันบน PMSV ได้:
-`webDecisionParity.ts` · `salespersonDedupeSmoke.ts` · `migrationsAudit.mjs`
+วัดรายตัวด้วย grep ข้างบนเมื่อ 2026-09-15 ได้ 0 ทั้งสี่ตัว ⇒ รันบน PMSV ได้ (`backupHealth.mjs` ไม่แตะ DB เลย):
+`webDecisionParity.ts` · `salespersonDedupeSmoke.ts` · `migrationsAudit.mjs` · `backupHealth.mjs`
 
 **ก่อนทำอะไรที่เขียน DB บน PMSV: `npm run db:dump` ก่อนเสมอ** และบอกเจ้าของว่า dump อยู่ไหน
 
@@ -578,10 +579,11 @@ TS ไต่ `node_modules` ขึ้นไปตามลำดับ ⇒ `<ท
 | คิว / งบเวลาตอบ | `npm run diag:queue-sim` · `diag:load-probe` · `diag:abort-check` · `diag:shutdown-check` |
 | PDF | `npm run diag:pdf-render` · `diag:pdf-cache` |
 | ค่าขนส่ง · api_logs · sync API · `APP_URL` | `diag:shipping-fee` · `diag:api-log` · `diag:sync-api` · `diag:app-url` |
+| ระบบสำรองฐานข้อมูลอัตโนมัติ | `npm run diag:backup` (`-- --deep` = เปิด TOC ของไฟล์ล่าสุดจริง) — **รันบน host ไม่ใช่ในกล่อง** (crontab/`backup/`/ดิสก์ที่ต้องตรวจอยู่บน host ทั้งหมด) |
 | เพิ่ม migration ใหม่ · ก่อน deploy | `npm run diag:migrations` — **รันบน host ไม่ใช่ในกล่อง** (ในกล่องจะอ่านรายชื่อ migration ของ image เก่าแล้วตอบว่าครบเสมอ) |
 
-รายการเต็มอยู่ใน `package.json` (วัด 2026-09-15: 48 รายการใน `scripts/diag/` — 44 `.ts` ·
-1 `.mjs` · 2 `.sql` · โฟลเดอร์ `fixtures`)
+รายการเต็มอยู่ใน `package.json` (วัด 2026-09-15: 49 รายการใน `scripts/diag/` — 44 `.ts` ·
+2 `.mjs` · 2 `.sql` · โฟลเดอร์ `fixtures`)
 
 **ด่าน verify ของงานทดลอง/แล็บ รันบน Windows local ผ่านก็พอ** — ไม่ต้องยก
 `docker compose exec app …` ขึ้นมาเป็นเงื่อนไขปิดงานของเฟสที่ยังไม่ deploy แยกด่านเป็นสองชั้น:

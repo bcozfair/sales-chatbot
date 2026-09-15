@@ -99,7 +99,8 @@ npm --prefix frontend run lint     # eslint ของ admin
 npm --prefix frontend run build    # typecheck + build admin (ผลลง public/)
 
 npm run sync:products · sync:customers · sync:saleorders   # ดึงจาก Odoo
-npm run db:dump · db:restore                               # ถ่ายฐานข้อมูล
+npm run db:dump · db:restore                               # ถ่ายฐานข้อมูลด้วยมือ (ต้องมี pg_dump บน host)
+npm run backup:auto · backup:cron · diag:backup            # สำรองอัตโนมัติ (cron ตี 3 เก็บ 7 ชุด) — runbook ใน DEPLOY.md
 tsx scripts/runMigration.ts                                # รัน migration ที่ยังไม่ได้รัน
 npm run diag:migrations                                    # ไล่เทียบ migrations/changes/ กับฐานจริง (รันบน host)
 npm run backfill:contacts · backfill:delivery-terms · backfill:print-snapshot
@@ -107,7 +108,7 @@ npm run logworker                                          # worker เขีย
 ```
 
 `npm test` เป็น stub (`exit 1`) โดยตั้งใจ — **ด่านตรวจของโปรเจคนี้คือ typecheck + `scripts/diag/*`**
-(วัด 2026-09-15: 48 รายการใน `scripts/diag/` · 30+ npm script) ดูรายการเต็มใน `package.json`
+(วัด 2026-09-15: 49 รายการใน `scripts/diag/` · 30+ npm script) ดูรายการเต็มใน `package.json`
 และดูว่าตัวไหนเป็น gate ใน `AGENTS.md` ข้อ 6
 
 ---
