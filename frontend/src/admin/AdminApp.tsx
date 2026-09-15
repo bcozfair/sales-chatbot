@@ -10,6 +10,7 @@ import { Promotions } from './Promotions';
 import { Salespersons } from './Salespersons';
 import { Quotations } from './Quotations';
 import { QuoteRequest } from './QuoteRequest';
+import { PriceApprovals } from './PriceApprovals';
 import { PageHeaderProvider, PageHeaderOutlet } from './PageHeader';
 import { ThemeToggle } from './ThemeToggle';
 import { QuotationRules } from './QuotationRules';
@@ -43,6 +44,7 @@ import {
   Ban,
   ClipboardList,
   FilePlus2,
+  BadgeCheck,
 } from 'lucide-react';
 
 // MainTab / SubTab ย้ายไป navHash.ts แล้ว เพราะชื่อแท็บกลายเป็นส่วนหนึ่งของ URL (ดูเหตุผลในไฟล์นั้น)
@@ -66,8 +68,10 @@ const BRAND_BORDER = 'var(--brand-border)';
 // roles = สิทธิ์ที่เห็นเมนูนี้ — เป็นแค่การซ่อน UI เท่านั้น ตัวบังคับจริงคือ requireRole ฝั่ง backend
 const NAV_ITEMS: { key: MainTab; label: string; icon: typeof LayoutDashboard; roles: Role[] }[] = [
   { key: 'dashboard', label: 'แผงควบคุม', icon: LayoutDashboard, roles: ['admin'] },
-  { key: 'quoterequest', label: 'ขอใบเสนอราคา', icon: FilePlus2, roles: ['admin', 'subadmin'] },
-  { key: 'quotations', label: 'ประวัติใบเสนอราคา', icon: FileText, roles: ['admin', 'subadmin'] },
+  { key: 'quoterequest', label: 'ขอใบเสนอราคา', icon: FilePlus2, roles: ['admin', 'approver', 'subadmin'] },
+  // subadmin เห็นเมนูนี้ด้วย แต่เห็น "คำขอของตัวเอง" เท่านั้น — server เป็นคนกรอง ไม่ใช่หน้าจอ
+  { key: 'approvals', label: 'อนุมัติราคา', icon: BadgeCheck, roles: ['admin', 'approver', 'subadmin'] },
+  { key: 'quotations', label: 'ประวัติใบเสนอราคา', icon: FileText, roles: ['admin', 'approver', 'subadmin'] },
   { key: 'promotions', label: 'จัดการโปรโมชันส่วนลด', icon: Tag, roles: ['admin'] },
   { key: 'salespersons', label: 'จัดการข้อมูลพนักงาน', icon: UserCheck, roles: ['admin'] },
   { key: 'users', label: 'จัดการผู้ใช้งานระบบ', icon: UsersIcon, roles: ['admin'] },
@@ -98,6 +102,7 @@ const SETTINGS_SUBITEMS: { key: SubTab; label: string }[] = [
 const PAGE_TITLES: Record<MainTab, string> = {
   dashboard: 'แผงควบคุม',
   quoterequest: 'ขอใบเสนอราคา',
+  approvals: 'อนุมัติราคา',
   quotations: 'ประวัติใบเสนอราคา',
   promotions: 'จัดการโปรโมชันส่วนลด',
   salespersons: 'จัดการข้อมูลพนักงาน',
@@ -135,6 +140,30 @@ function AdminContent() {
 
   const isAdmin = user?.role === 'admin';
   const visibleNavItems = NAV_ITEMS.filter((item) => !!user && item.roles.includes(user.role));
+
+  /**
+   * ตัวเลขข้างเมนู "อนุมัติราคา" — **แทนการแจ้งเตือน** เพราะระบบนี้ห้ามใช้ LINE push
+   * (กฎเหล็กของ CLAUDE.md) ⇒ ถ้าไม่มีตัวเลขตรงนี้ คำขอที่รออยู่จะไม่มีอะไรบอกใครเลย
+   * · ผู้อนุมัติได้ "รออนุมัติกี่ชุด" · คนขอได้ "ของฉันถูกตีกลับกี่ชุด" (server เป็นคนตัดสินว่าใครเห็นอะไร)
+   */
+  const [approvalBadge, setApprovalBadge] = useState(0);
+  const showsApprovals = visibleNavItems.some((item) => item.key === 'approvals');
+  useEffect(() => {
+    if (!token || !showsApprovals) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/admin/approvals/count', { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok) return;
+        const data = await res.json();
+        const n = Number(data?.pending ?? 0) + Number(data?.rejected ?? 0);
+        if (!cancelled) setApprovalBadge(Number.isFinite(n) ? n : 0);
+      } catch {
+        // นับไม่ได้ไม่ใช่เหตุให้ทั้งเมนูพัง — ไม่มีตัวเลขก็ยังกดเข้าไปดูได้
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token, showsApprovals, activeTab]);
 
   // แท็บที่แสดงจริง — activeTab ตั้งต้นเป็น 'dashboard' ซึ่ง role 'user' ไม่มีสิทธิ์เห็น
   // คำนวณตอน render แทนการ setState ใน effect: ไม่มี re-render รอบพิเศษ และครอบเคสถูกลดสิทธิ์
@@ -303,6 +332,15 @@ function AdminContent() {
             >
               <Icon className="w-[18px] h-[18px] shrink-0" />
               {!collapsed && <span className="whitespace-nowrap">{label}</span>}
+              {key === 'approvals' && approvalBadge > 0 && (
+                <span
+                  className={`ml-auto px-1.5 min-w-5 text-center rounded-lg text-[11px] font-bold bg-violet-100 text-violet-700 ${
+                    collapsed ? 'hidden' : ''
+                  }`}
+                >
+                  {approvalBadge}
+                </span>
+              )}
             </button>
           );
         })}
@@ -504,6 +542,10 @@ function AdminContent() {
           ) : effectiveTab === 'quoterequest' ? (
             <div className="animate-fade-in">
               <QuoteRequest />
+            </div>
+          ) : effectiveTab === 'approvals' ? (
+            <div className="animate-fade-in">
+              <PriceApprovals />
             </div>
           ) : effectiveTab === 'quotations' ? (
             <div className="animate-fade-in">

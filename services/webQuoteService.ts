@@ -22,6 +22,7 @@ import {
   getCustomerById, getContactById, getSalespersonByUserId,
   insertMessage, getMessageMetaById, listCustomerPaymentTerms,
   saveQuotationRuleOverrides,
+  savePriceApproval,
 } from '../db/repositories.js';
 import { KeyedTaskQueue, runWithDeadline } from './webhookQueue.js';
 import { extractQuoteFromText, buildResolvedItem, type QuoteSlot } from './quoteExtraction.js';
@@ -39,9 +40,16 @@ import {
   violationKey,
   isBypassableViolation,
   blockingViolations,
+  requiresPriceApproval,
   type Violation,
   type DraftQuoteOverrides,
 } from './quotationService.js';
+import {
+  buildApprovalItems,
+  buildApprovalPayload,
+  newApprovalRequestId,
+  type ApprovalItem,
+} from './priceApprovalService.js';
 import {
   resolveDeliveryTerms, deliveryDisplayText, deliveryTypeLabel,
   parseDeliveryTypeOverride, DELIVERY_TYPES, type DeliveryTypeKey,
@@ -92,6 +100,7 @@ export type WebQuoteErrorCode =
   | 'QUOTATION_NOT_CONFIRMED'
   | 'PRODUCT_NOT_FOUND'
   | 'RULE_VIOLATION'
+  | 'NEEDS_APPROVAL'            // ติดราคาขั้นต่ำ ⇒ ต้องส่งให้ผู้อนุมัติ ไม่ใช่ติ๊กรับทราบเอง
   | 'INSERT_FAILED'
   | 'TIMEOUT';
 
@@ -503,6 +512,16 @@ export interface CreateDraftResult {
   contact_id: number;
   customer_name: string;
   quotes: any[];
+  /**
+   * มีค่า = ร่างชุดนี้ **ยังไม่ใช่ใบเสนอราคา** มันถูกส่งเข้าคิวอนุมัติราคาแล้วรออยู่
+   * ⇒ หน้าจอห้ามยิง `/confirm` ต่อ (จะได้ 422) ให้บอกคนกดว่ารอผู้อนุมัติ
+   */
+  approval: {
+    request_id: string;
+    status: 'pending';
+    items: ApprovalItem[];
+    violations: Violation[];
+  } | null;
 }
 
 /**
@@ -618,6 +637,19 @@ export async function createDraft(params: {
   acknowledgedViolations?: unknown;
   /** ชื่อผู้ใช้ของแอดมินที่กดรับทราบ — เก็บลงใบเพื่อตอบได้ย้อนหลังว่าใครเป็นคนปล่อยผ่าน */
   adminUsername?: string | null;
+  /** ชื่อเต็มของแอดมิน — ขึ้นในคิวของผู้อนุมัติว่าใครเป็นคนขอ */
+  adminName?: string | null;
+  /**
+   * หน้าจอรู้ตัวว่ากำลัง "ส่งขออนุมัติ" ไม่ใช่ "ออกใบ" — ต้องส่งมาเมื่อใบติดกฎราคาขั้นต่ำ
+   *
+   * มีธงนี้เพราะผลของสองอย่างต่างกันคนละเรื่องสำหรับคนกด (ได้ใบเลย vs ต้องรอคนอื่น)
+   * ถ้าปล่อยให้ server เดาเอง client เก่า/สคริปต์ที่ยิงตรงจะสร้างคำขอค้างไว้โดยไม่มีใครรู้ว่ามี
+   */
+  requestApproval?: boolean;
+  /** เหตุผลที่ขอขายต่ำกว่าขั้นต่ำ — ผู้อนุมัติอ่านอันนี้ก่อนตัดสิน */
+  approvalNote?: string | null;
+  /** คำขอเดิมที่ถูกตีกลับแล้วแก้มาส่งใหม่ — ใบเก่าถูกยกเลิก *หลัง* ใบใหม่สร้างสำเร็จเท่านั้น */
+  replacesRequestId?: string | null;
 }): Promise<CreateDraftResult> {
   if (!Array.isArray(params.items) || params.items.length === 0) {
     throw new WebQuoteError('BAD_REQUEST', 'ต้องมีรายการสินค้าอย่างน้อย 1 รายการ (items)', 400);
@@ -674,8 +706,23 @@ export async function createDraft(params: {
     //  ให้ **ปฏิเสธและให้ดูใหม่** ไม่ใช่ปล่อยผ่านเพราะ "ก็กดยืนยันมาแล้ว"
     const acknowledgedKeys = parseAcknowledgedKeys(params.acknowledgedViolations);
     const blockers = blockingViolations(violations, acknowledgedKeys);
-    if (blockers.length > 0) {
-      throw new WebQuoteError('RULE_VIOLATION', buildViolationText(blockers), 422, { violations: blockers });
+
+    // ── ราคาต่ำกว่าขั้นต่ำ: ติ๊กเองไม่ได้ ต้องเข้าคิวอนุมัติ (2026-09-15) ────────
+    //  แยกกองก่อนตัดสิน เพราะสองกองนี้จบคนละแบบ:
+    //    needApproval → ยังสร้างร่างได้ แต่ร่างนั้น "รออนุมัติ" และยังไม่ใช่ใบเสนอราคา
+    //    hardBlockers → ปฏิเสธเหมือนเดิมทุกประการ (SYSTEM_ERROR หรือข้อที่เพิ่งโผล่)
+    const needApproval = blockers.filter(requiresPriceApproval);
+    const hardBlockers = blockers.filter((v) => !requiresPriceApproval(v));
+    if (hardBlockers.length > 0) {
+      throw new WebQuoteError('RULE_VIOLATION', buildViolationText(hardBlockers), 422, { violations: hardBlockers });
+    }
+    if (needApproval.length > 0 && params.requestApproval !== true) {
+      throw new WebQuoteError(
+        'NEEDS_APPROVAL',
+        `${buildViolationText(needApproval)}\n\nรายการนี้ต้องส่งให้ผู้มีสิทธิ์อนุมัติราคาก่อน จึงจะออกใบเสนอราคาได้`,
+        422,
+        { violations: needApproval }
+      );
     }
 
     const plainName = `${customer.display_name} | ${contact.name}`;
@@ -707,13 +754,60 @@ export async function createDraft(params: {
           await saveQuotationRuleOverrides(pool, String(q.id), {
             acknowledged_by: acknowledgedBy,
             acknowledged_at: acknowledgedAt,
-            acknowledged_keys: mine.filter(isBypassableViolation).map(violationKey),
+            // ข้อที่ต้องอนุมัติไม่ใช่ "ข้อที่คนออกใบรับทราบ" — มันปลดด้วยคีย์นี้ไม่ได้อยู่แล้ว
+            // (blockingViolations มองข้าม ack ของมัน) แต่ถ้าเขียนลงไปด้วย ประวัติจะอ่านได้ว่า
+            // "คนออกใบปล่อยผ่านราคาต่ำกว่าขั้นต่ำเอง" ซึ่งไม่จริงและเป็นคนละคนกับที่อนุมัติ
+            acknowledged_keys: mine.filter((v) => isBypassableViolation(v) && !requiresPriceApproval(v)).map(violationKey),
             violations: mine,
           });
         } catch (err) {
           // เขียนไม่ลงไม่ใช่เหตุให้ทิ้งร่างที่ INSERT สำเร็จไปแล้ว — ใบจะไปติดด่านตอนกดยืนยันเอง
           // (ไม่มี acknowledged_keys = ไม่มีอะไรถูกปล่อยผ่าน) ซึ่งเป็นทางที่ปลอดภัยกว่าอยู่แล้ว
           console.error('[webQuote] บันทึก rule_overrides ไม่สำเร็จ:', err);
+        }
+      }
+    }
+
+    // ── เปิดคำขออนุมัติราคา (ถ้ามีรายการต่ำกว่าขั้นต่ำ) ────────────────────────
+    //  ทุกใบในชุด (PM/THT) ใช้ `request_id` เดียวกัน — ผู้อนุมัติกดครั้งเดียวออกทั้งชุด
+    //  เพราะค่าขนส่งอัตโนมัติคิดจากยอดรวมของทุกใบในกลุ่ม ถ้าอนุมัติทีละใบจะได้สภาพ
+    //  "ออกใบ PM ไปแล้ว ส่วน THT ยังรออยู่" ซึ่งอธิบายกับลูกค้าไม่ได้ (แผน §3.3)
+    //
+    //  ⚠️ เขียนให้ครบทุกใบก่อนคืนค่า — ใบที่พลาดไปจะไม่มีคำขอผูกอยู่ แปลว่ามันจะถูกลบทิ้ง
+    //     ตอน insertDraftQuotations รอบหน้า และจะไม่โผล่ในคิวของใครเลย
+    let approval: CreateDraftResult['approval'] = null;
+    if (needApproval.length > 0) {
+      const requestId = newApprovalRequestId();
+      const approvalItems: ApprovalItem[] = buildApprovalItems(needApproval, expanded);
+      for (const q of quotes) {
+        const models = new Set((q.items || []).map((it: any) => String(it?.model ?? '')));
+        const payload = buildApprovalPayload({
+          requestId,
+          actor: { id: params.adminId, username: params.adminUsername ?? null, name: params.adminName ?? null },
+          violations: needApproval.filter((v) => models.has(v.model)),
+          // ใบที่ไม่มีรายการต่ำกว่าขั้นต่ำก็อยู่ในคำขอด้วย (items ว่าง) — มันต้องรอออกพร้อมกัน
+          items: approvalItems.filter((it) => models.has(it.model)),
+          note: params.approvalNote ?? null,
+        });
+        await savePriceApproval(pool, String(q.id), payload);
+      }
+      approval = {
+        request_id: requestId,
+        status: 'pending',
+        items: approvalItems,
+        violations: needApproval,
+      };
+
+      // คำขอเดิมที่ถูกตีกลับแล้วแก้มาส่งใหม่ — ยกเลิก *หลัง* ใบใหม่ถูกสร้างและผูกคำขอเรียบร้อย
+      // ถ้ายกเลิกก่อน แล้วขั้นใดขั้นหนึ่งล้ม คนขอจะเหลือมือเปล่าทั้งที่ยังไม่ได้อะไรใหม่เลย
+      const replaces = String(params.replacesRequestId ?? '').trim();
+      if (replaces !== '') {
+        try {
+          await pool.query(
+            `UPDATE quotations SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
+              WHERE price_approval->>'request_id' = $1 AND status = 'draft'`, [replaces]);
+        } catch (err) {
+          console.error('[webQuote] ยกเลิกคำขอเดิมไม่สำเร็จ:', err);
         }
       }
     }
@@ -738,6 +832,10 @@ export async function createDraft(params: {
         delivery_overrides: overrides.delivery ?? null,
         // กฎที่คนกดรับทราบเพื่อออกใบทั้งที่ติดด่าน — ตอบได้ย้อนหลังว่า "ใครปล่อยผ่านข้อไหน เมื่อไหร่"
         acknowledged_violations: acknowledgedKeys,
+        // คำขออนุมัติราคา — ตอบได้ย้อนหลังว่า "ใบนี้เคยถูกส่งไปขออนุมัติด้วยคำขอไหน"
+        approval_request_id: approval?.request_id ?? null,
+        approval_items: approval?.items ?? null,
+        replaces_request_id: params.replacesRequestId ?? null,
         chosen_customer_id: resolvedCustomerId,
         chosen_contact_id: contactId,
         chosen_rank: await resolveChosenRank(proposeMsgId, resolvedCustomerId, customerIdIn),
@@ -753,6 +851,7 @@ export async function createDraft(params: {
       contact_id: contactId,
       customer_name: customerName,
       quotes,
+      approval,
     };
   });
 }
@@ -856,6 +955,15 @@ export interface WebQuotePreviewResult {
    * คำรับทราบจะ "ไม่ตรงกับข้อไหนเลย" แล้ว server ปฏิเสธทั้งที่คนกดรับทราบไปแล้ว
    */
   override_keys: string[];
+  /**
+   * ข้อที่ **ติ๊กรับทราบเองไม่ได้ ต้องให้ผู้อนุมัติราคาตัดสิน** (วันนี้มีแต่ราคาต่ำกว่าขั้นต่ำ)
+   *
+   * แยกออกมาจาก `override_keys` เพราะปุ่มบนหน้าจอเปลี่ยนความหมายไปเลยเมื่อมีข้อพวกนี้:
+   * จาก "ยืนยันออกใบ" กลายเป็น "ส่งขออนุมัติราคา" — ใบจะยังไม่ถูกออกจนกว่าจะมีคนอนุมัติ
+   * (docs/plan-quote-price-approval.md)
+   */
+  approval_required: Violation[];
+  needs_approval: boolean;
   /**
    * เหตุที่ใบชุดนี้จะ **ต้องแก้มือใน Odoo ก่อนนำเข้า** — คนละแกนกับ `violations` โดยสิ้นเชิง
    *
@@ -1076,7 +1184,11 @@ export async function previewDraft(params: {
     grand_total: grandTotal,
     violations,
     can_create_draft: violations.every(isBypassableViolation),
-    override_keys: violations.filter(isBypassableViolation).map(violationKey),
+    // คำรับทราบใช้กับกฎที่ "ติ๊กเองได้" เท่านั้น — ราคาขั้นต่ำถูกตัดออกตั้งแต่ตรงนี้ เพราะมันต้อง
+    // ผ่านผู้อนุมัติ ถ้ายังส่งคีย์ของมันไปให้หน้าจอ คนจะเข้าใจว่าติ๊กแล้วจบ แล้วไปเจอ 422 ตอนกด
+    override_keys: violations.filter((v) => isBypassableViolation(v) && !requiresPriceApproval(v)).map(violationKey),
+    approval_required: violations.filter(requiresPriceApproval),
+    needs_approval: violations.some(requiresPriceApproval),
     odoo_manual_reasons:
       buildOdooManualReview({ customer_details: { payment_terms_override: paymentTermsOverride } })?.reasons ?? [],
     service_line: {
@@ -1172,8 +1284,11 @@ export async function reviseQuotation(params: {
     // ยกเลิกร่างที่ค้างของ "คู่ (แอดมิน × เซลส์) นี้เท่านั้น" — ไม่แตะร่างของเซลส์ตัวจริง
     // และไม่แตะร่างที่แอดมินคนเดียวกันทำค้างไว้ในนามเซลส์คนอื่น
     try {
+      // `price_approval IS NULL` — ร่างที่รออนุมัติราคาไม่ใช่ "ร่างค้าง" ของคู่นี้ที่ทิ้งได้
+      // มันคือคำขอที่มีคนอื่นกำลังรอตัดสินอยู่ (docs/plan-quote-price-approval.md §2.3)
       await pool.query(
-        "UPDATE quotations SET status = 'cancelled' WHERE user_id = $1 AND status = ANY($2)",
+        `UPDATE quotations SET status = 'cancelled'
+          WHERE user_id = $1 AND status = ANY($2) AND price_approval IS NULL`,
         [webUserId, ['pending_company', 'pending_contact', 'draft']]
       );
     } catch (err) {

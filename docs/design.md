@@ -176,12 +176,12 @@
 | `PageHeader` / `PageHeaderOutlet` | `admin/PageHeader.tsx` | **16 หน้า import จริง** — ตัวอย่างของร่วมที่ใช้ได้ผล |
 | `ThemeToggle` | `admin/ThemeToggle.tsx` | ใช้ร่วมได้ วางตรงไหนก็ได้ |
 | `SettingToggle` · `DateInput` · `ProductComboBox` · `ScopeComboBox` | `admin/*.tsx` | ใช้ร่วมได้ |
-| `Button` | `admin/Button.tsx` | **ใหม่ 2026-09-14** — บทบาท×tone ตามหัวข้อ 2.1 · ใช้แล้ว 1 หน้า (`QuoteRequest`) |
+| `Button` | `admin/Button.tsx` | **ใหม่ 2026-09-14** — บทบาท×tone ตามหัวข้อ 2.1 · ใช้แล้ว 2 หน้า (`QuoteRequest` · `PriceApprovals`) |
 | `ComboBox` (โครงกลาง) + `PersonComboBox` (ชั้น "คน") | `admin/PersonComboBox.tsx` | โครงกลางแยกออกมา 2026-09-14 ตอนทำช่องบริษัท/ผู้ติดต่อ — รองรับทั้งรายการในเครื่องและค้นจาก server (`onQueryChange`) |
 | ชุดคอมโพเนนต์ตาราง/ตัวกรอง (`TableCard` `SortHeader` `Pagination` `EmptyState` `SkeletonRows` `StatusPill` `FilterCard` …) | `admin/logs/ui.tsx` | **มีอยู่จริงและดีมาก แต่ใช้แค่ 5 หน้า** (4 หน้าในกลุ่มบันทึก + `ApiLogs`) |
 | ตัวช่วยแสดงผล (`formatDateTime` `relativeTime` `errMsg`) | `admin/logs/format.ts` | เดิมเป็นสำเนาจาก `ApiLogs.tsx` แล้วยุบกลับมาที่เดียว |
 | `SettingsStatus` · `SettingsSaveBar` | `admin/SettingsSaveBar.tsx` | ท้ายฟอร์มตั้งค่าที่ "แก้แล้วกดบันทึก" — ใช้ 2 หน้า (`CreditPolicy` · `ShippingFee`) ตั้งแต่ 2026-09-12 |
-| `Modal` (เปลือกกล่องโต้ตอบ) | `admin/Modal.tsx` | **ใหม่ 2026-09-15** — portal + ฉากหลัง + หัวกล่อง + แถบปุ่มท้าย · ใช้ 2 กล่อง (`ChangePasswordModal` · `ConfirmIssueModal`) · **ไม่ปิดเมื่อคลิกฉากหลัง** โดยตั้งใจ |
+| `Modal` (เปลือกกล่องโต้ตอบ) | `admin/Modal.tsx` | **ใหม่ 2026-09-15** — portal + ฉากหลัง + หัวกล่อง + แถบปุ่มท้าย · ใช้ 3 กล่อง (`ChangePasswordModal` · `ConfirmIssueModal` · กล่อง "ไม่อนุมัติ" ใน `PriceApprovals`) · **ไม่ปิดเมื่อคลิกฉากหลัง** โดยตั้งใจ |
 
 **ของจริงที่ต้องรู้: มี 15 ไฟล์ที่เขียน `<table>` ของตัวเอง** ทั้งที่ `TableCard` + `SortHeader` +
 `Pagination` มีอยู่แล้วใน `logs/ui.tsx`
@@ -213,7 +213,7 @@
 **ตั้งชื่อใหม่ให้กับสิ่งที่มีชื่ออยู่แล้ว คือการสร้างของสองอย่างที่เป็นอันเดียวกัน** ในหัวของคนใช้
 
 **ชื่อหน้า** (จาก `NAV_ITEMS` ใน `AdminApp.tsx` ซึ่งเป็นรายการเดียวของแอป):
-แผงควบคุม · ขอใบเสนอราคา · ประวัติใบเสนอราคา · จัดการโปรโมชันส่วนลด · จัดการข้อมูลพนักงาน ·
+แผงควบคุม · ขอใบเสนอราคา · อนุมัติราคา · ประวัติใบเสนอราคา · จัดการโปรโมชันส่วนลด · จัดการข้อมูลพนักงาน ·
 จัดการผู้ใช้งานระบบ · บัญชีห้ามเสนอราคา · และกลุ่มบันทึกและรายงาน (บันทึกการเรียก API ·
 บันทึกการแก้ไข · บันทึกระบบ · traffic)
 

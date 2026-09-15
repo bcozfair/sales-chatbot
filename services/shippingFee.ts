@@ -235,9 +235,22 @@ export function shouldHaveShippingFee(
  *        insertDraftQuotations ตัดบรรทัดนี้ออกก่อนแบ่ง PM/THT (ไม่มี production ให้ตัดสิน)
  *        ถ้าไม่ส่งต่อมาที่นี่ ค่าบริการที่แอดมินเพิ่มจากหน้าเว็บจะหายตั้งแต่ตอนสร้างร่าง
  */
+/**
+ * `requestId` = ขอบเขตของ "กลุ่มใบ" เมื่อเจ้าของใบมีหลายชุดค้างอยู่พร้อมกัน (2026-09-15)
+ *
+ * เดิมกลุ่ม = "ร่างทั้งหมดของ user นี้" ซึ่งถูกเสมอ เพราะร่างของหน้าเว็บอยู่ไม่ถึงสองวินาที
+ * และร่างของ LINE มีชุดเดียวต่อคน · พอมีคิวอนุมัติราคา **ร่างเริ่มค้างอยู่ข้ามวัน** แอดมินคนเดิม
+ * จึงมีได้ทั้ง "ชุดที่รออนุมัติ" กับ "ชุดที่กำลังทำอยู่" พร้อมกัน ⇒ ถ้ายังรวมเป็นกลุ่มเดียว
+ * ยอดสินค้าของสองชุดจะถูกบวกกันเพื่อตัดสินค่าขนส่ง และใบที่รออนุมัติจะถูกแก้ยอดใต้มือ
+ * คนอนุมัติทั้งที่เขากำลังอ่านมันอยู่
+ *
+ * ไม่ส่งมา = กลุ่มของ "ใบที่ไม่ได้อยู่ในคำขออนุมัติ" — ซึ่งคือทุกใบของเส้น LINE และ LIFF
+ * ⇒ พฤติกรรมเดิมทุกประการ (`price_approval` เป็น NULL ทั้งตารางก่อนฟีเจอร์นี้)
+ */
 export async function applyShippingFeeToQuoteGroup(
   userId: string | null | undefined,
-  incomingFee?: any
+  incomingFee?: any,
+  requestId?: string | null
 ): Promise<void> {
   if (!userId) return;
 
@@ -256,9 +269,10 @@ export async function applyShippingFeeToQuoteGroup(
         `SELECT id, status, customer_id, customer_details, item_details, total_sum
            FROM quotations
           WHERE user_id = $1 AND status = ANY($2)
+            AND price_approval->>'request_id' IS NOT DISTINCT FROM $3
           ORDER BY created_at, id
           FOR UPDATE`,
-        [userId, DRAFT_STATUSES]
+        [userId, DRAFT_STATUSES, requestId ?? null]
       );
       if (rows.length === 0) return;
 

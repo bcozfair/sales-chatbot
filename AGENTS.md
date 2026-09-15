@@ -432,9 +432,9 @@ docker compose exec -T db psql -U "$PG_USER" -d "$PG_DATABASE" -c "SELECT …"  
 | ไม่แตะ DB เลย | 11 | รันได้ |
 | แตะ DB แต่ SELECT อย่างเดียว | 26 | รันได้ |
 | เขียนจริงแล้ว **ROLLBACK** ทุกกรณี — `apiLogSmoke` (เฉพาะ `--write`) · `dateFilterSmoke` · `exportTrackingSmoke` | 3 | รันได้ · **ห้ามแก้เป็น `COMMIT`** (กฎเหล็ก) |
-| **เขียนจริง commit ลงฐาน แล้วลบทิ้งใน `finally`** — `companyNameConsistencySmoke` · `confirmRaceDiag` · `lineFlexParity` · `pdfIssuerSmoke` · `shippingFeeSmoke` · `webQuoteSmoke` | 6 | **ต้องขอเจ้าของก่อน** |
+| **เขียนจริง commit ลงฐาน แล้วลบทิ้งใน `finally`** — `companyNameConsistencySmoke` · `confirmRaceDiag` · `lineFlexParity` · `pdfIssuerSmoke` · `priceApprovalSmoke` · `shippingFeeSmoke` · `webQuoteSmoke` | 7 | **ต้องขอเจ้าของก่อน** |
 
-หกไฟล์กลุ่มสุดท้าย **ไม่ได้อยู่ในทรานแซกชัน** — มันสร้างแถวจริงใน `quotations` / `salesperson` /
+เจ็ดไฟล์กลุ่มสุดท้าย **ไม่ได้อยู่ในทรานแซกชัน** — มันสร้างแถวจริงใน `quotations` / `salesperson` /
 `admin_users` / `messages` / `quotation_counters` แล้วค่อย `DELETE` ตอนจบ ⇒ **ฆ่ากลางคัน
 (Ctrl-C, timeout, เครื่องดับ) = แถวทดสอบค้างอยู่ในฐานของร้าน** และ `npm run diag:line-parity`
 ซึ่งเป็นด่านประจำของงาน prompt/Flex ก็อยู่ในกลุ่มนี้
@@ -574,6 +574,7 @@ TS ไต่ `node_modules` ขึ้นไปตามลำดับ ⇒ `<ท
 | กฎเครดิต | `npm run diag:credit-hold` (read-only รันกับ prod ได้) |
 | `prompt` ของการสกัด / Flex | `npm run diag:line-parity` |
 | หน้าเว็บขอใบเสนอราคา | `npm run diag:web-quote` · `diag:pdf-issuer` · `diag:sp-dedupe` |
+| คิวอนุมัติราคา / role `approver` | `npm run diag:price-approval` — **ข้อ 1 ห้ามล้มเด็ดขาด** (ใบจาก LINE ที่ติดราคาขั้นต่ำต้องยังออกไม่ได้) · ต้องรัน migration `2026-09-15_02_*` ก่อน ไม่งั้น `admin_users_role_check` ปฏิเสธตั้งแต่ setup |
 | ชั้นตัดสินใจ "ต้องให้คนเลือกไหม" | `npm run diag:web-decision` (`--ai` = pipeline เต็ม) — กฎ auto-select มี **สองสำเนาโดยตั้งใจ** (`quotationService.ts` ของ LINE ห้ามแตะ · `decideCustomerSelection()` ของเว็บ) ด่านนี้อ่านซอร์สมาเทียบให้ว่ายังตรงกัน |
 | สินค้าพ่วง / กฎบล็อก | `npm run diag:optional-pair` · `diag:block-rule` · `diag:block-parity` |
 | คิว / งบเวลาตอบ | `npm run diag:queue-sim` · `diag:load-probe` · `diag:abort-check` · `diag:shutdown-check` |

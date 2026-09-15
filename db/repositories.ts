@@ -699,6 +699,127 @@ export async function getAcknowledgedViolationKeys(
   return Array.isArray(keys) ? keys.map((k: any) => String(k)) : null;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  คำขออนุมัติราคาต่ำกว่าขั้นต่ำ — คอลัมน์ `quotations.price_approval` (2026-09-15)
+//  docs/plan-quote-price-approval.md · SQL ทั้งหมดของเรื่องนี้อยู่ตรงนี้ที่เดียวตามกฎ layer
+//
+//  "คิว" = มีคำขอ + ยังเป็นร่าง ⇒ ใบที่ออกเลขแล้ว/ถูกยกเลิก หลุดจากคิวเอง ไม่มีปุ่มปิดงาน
+//  ให้ใครลืมกด (กติกาเดียวกับคิวแก้มือใน Odoo ข้างบน)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * เงื่อนไข "อยู่ในหน้าคิว" — ต้องมี alias ตาราง `q` อยู่ก่อนหน้า
+ *
+ * `status <> 'cancelled'` ไม่ใช่ `= 'draft'` เพราะคำขอที่ **อนุมัติแล้ว** จะกลายเป็นใบจริง
+ * (`confirmed`) ทันทีในธุรกรรมเดียวกัน — ถ้ากรองแค่ร่าง แท็บ "อนุมัติแล้ว" จะว่างตลอดกาล
+ * ส่วนคำขอที่ถูกยกเลิกคือของที่จบไปแล้วจริง ๆ ไม่ต้องให้ใครเห็นอีก
+ */
+export const PRICE_APPROVAL_OPEN_SQL = `q.price_approval IS NOT NULL AND q.status <> 'cancelled'`;
+
+/** เขียนคำขอลงใบ — เรียกหลัง INSERT ร่างเสร็จแล้วเท่านั้น (นอกทรานแซกชันของ insertDraftQuotations) */
+export async function savePriceApproval(
+  db: DbExecutor, quoteId: string, payload: unknown
+): Promise<void> {
+  await db.query(
+    `UPDATE quotations SET price_approval = $2::jsonb WHERE id = $1`,
+    [quoteId, JSON.stringify(payload)]);
+}
+
+/** คำขอของใบนี้ — `null` = ใบนี้ไม่มีคำขอ (ใบจาก LINE ทุกใบ) */
+export async function getPriceApproval(db: DbExecutor, quoteId: string): Promise<any | null> {
+  const { rows } = await db.query(
+    `SELECT price_approval FROM quotations WHERE id = $1`, [quoteId]);
+  return rows[0]?.price_approval ?? null;
+}
+
+/**
+ * ทุกใบของคำขอหนึ่งชุด (PM/THT อยู่ในชุดเดียวกัน) — คืนแถวเต็มเพราะฝั่งอนุมัติต้องเอาไป
+ * enrich + ตรวจกฎ + ออกใบต่อ · เรียงตามเวลาสร้างเพื่อให้ลำดับใบคงที่ทุกครั้งที่เปิดดู
+ */
+export async function getQuotationsByApprovalRequest(
+  db: DbExecutor, requestId: string
+): Promise<any[]> {
+  const { rows } = await db.query(
+    `SELECT * FROM quotations
+      WHERE price_approval->>'request_id' = $1
+      ORDER BY created_at ASC, id ASC`, [requestId]);
+  return rows;
+}
+
+/**
+ * รายการคำขอสำหรับหน้าจอ — หนึ่งแถวต่อ **หนึ่งใบ** (ฝั่ง service เป็นคนยุบเป็นชุดตาม
+ * `request_id`) เพราะการยุบด้วย SQL ต้อง aggregate jsonb ซึ่งอ่านยากกว่าที่ได้ประโยชน์
+ *
+ * `requestedById` = ดูเฉพาะคำขอของตัวเอง (คิวของ subadmin) · ไม่ส่ง = เห็นทุกคำขอ (ผู้อนุมัติ)
+ */
+export async function listPriceApprovalQuotations(
+  db: DbExecutor, opts: { status?: string; requestedById?: number | null; limit?: number }
+): Promise<any[]> {
+  const conds = [PRICE_APPROVAL_OPEN_SQL];
+  const params: any[] = [];
+  if (opts.status) {
+    params.push(opts.status);
+    conds.push(`q.price_approval->>'status' = $${params.length}`);
+  }
+  if (opts.requestedById !== undefined && opts.requestedById !== null) {
+    params.push(String(opts.requestedById));
+    conds.push(`q.price_approval->>'requested_by_id' = $${params.length}`);
+  }
+  params.push(Math.min(Math.max(Number(opts.limit) || 100, 1), 500));
+  const { rows } = await db.query(
+    `SELECT q.id, q.user_id, q.status, q.quotation_no, q.total_sum, q.created_at, q.updated_at,
+            q.customer_details->>'customer_name' AS customer_name,
+            q.customer_details->>'contact_name'  AS contact_name,
+            q.item_details, q.price_approval,
+            COALESCE(s.name, q.employee_details->>'saleperson') AS salesperson_name
+       FROM quotations q
+       LEFT JOIN salesperson s ON q.user_id = s.user_id
+      WHERE ${conds.join(' AND ')}
+      ORDER BY q.created_at DESC
+      LIMIT $${params.length}`, params);
+  return rows;
+}
+
+/**
+ * เขียนผลการตัดสิน (อนุมัติ/ไม่อนุมัติ) ลง **ทุกใบในชุด** พร้อมกัน — `jsonb ||` merge ทับเฉพาะ
+ * คีย์ที่ส่งมา ของเดิม (ผู้ขอ · รายการที่อนุมัติ · violations) จึงอยู่ครบเป็นประวัติ
+ *
+ * `expectedStatus` = กันสองคนกดพร้อมกัน: แถวที่สถานะไม่ใช่ค่าที่คาดไว้จะไม่ถูกแตะ
+ * และผู้เรียกรู้ได้จากจำนวนแถวที่คืนมา (0 = มีคนตัดสินไปก่อนแล้ว)
+ */
+export async function decidePriceApprovalRequest(
+  db: DbExecutor, requestId: string, expectedStatus: string, patch: Record<string, unknown>
+): Promise<string[]> {
+  const { rows } = await db.query(
+    `UPDATE quotations
+        SET price_approval = price_approval || $3::jsonb,
+            updated_at = CURRENT_TIMESTAMP
+      WHERE price_approval->>'request_id' = $1
+        AND price_approval->>'status' = $2
+        AND status = 'draft'
+      RETURNING id`,
+    [requestId, expectedStatus, JSON.stringify(patch)]);
+  return rows.map((r: any) => String(r.id));
+}
+
+/** จำนวนคำขอ (นับเป็น "ชุด" ไม่ใช่ "ใบ") ที่ยังรออยู่ — ตัวเลขข้างเมนู */
+export async function countPriceApprovalRequests(
+  db: DbExecutor, opts: { status: string; requestedById?: number | null }
+): Promise<number> {
+  const params: any[] = [opts.status];
+  let extra = '';
+  if (opts.requestedById !== undefined && opts.requestedById !== null) {
+    params.push(String(opts.requestedById));
+    extra = ` AND q.price_approval->>'requested_by_id' = $${params.length}`;
+  }
+  const { rows } = await db.query(
+    `SELECT COUNT(DISTINCT q.price_approval->>'request_id')::int AS c
+       FROM quotations q
+      WHERE ${PRICE_APPROVAL_OPEN_SQL}
+        AND q.price_approval->>'status' = $1${extra}`, params);
+  return Number(rows[0]?.c ?? 0);
+}
+
 /**
  * "กลุ่ม" ของใบที่ต้องแก้มือ — หนึ่งใบอยู่ได้กลุ่มเดียวเสมอ แม้จะติดหลายเหตุ
  *
