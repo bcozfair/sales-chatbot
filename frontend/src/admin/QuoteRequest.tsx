@@ -42,6 +42,7 @@ import {
   AlertCircle,
   AlertTriangle,
   ArrowRight,
+  BadgeCheck,
   Ban,
   Building2,
   CheckCircle2,
@@ -63,6 +64,7 @@ import {
   Receipt,
   RotateCcw,
   Search,
+  Send,
   ShieldCheck,
   Trash2,
   Truck,
@@ -70,6 +72,49 @@ import {
 } from 'lucide-react';
 
 const BRAND = 'var(--brand-fg)';
+
+/**
+ * กุญแจของ sessionStorage ที่หน้า "อนุมัติราคา" ใช้ส่งคำขอที่ถูกตีกลับมาให้ฟอร์มนี้เปิดต่อ
+ * — ประกาศคู่กับชนิดของมันที่นี่ เพราะฝั่งเขียนกับฝั่งอ่านต้องเห็นรูปร่างเดียวกัน
+ */
+export const APPROVAL_RELOAD_KEY = 'price-approval-reload';
+
+/**
+ * หยิบก้อนที่หน้า "อนุมัติราคา" ฝากไว้ แล้วลบทิ้งทันที (เปิดได้ครั้งเดียว ไม่ค้างข้ามการรีเฟรช)
+ *
+ * เป็น `async` ทั้งที่อ่าน sessionStorage เป็นงาน sync — เพื่อให้ `setState` ทุกตัวในเอฟเฟกต์
+ * เกิด **หลัง** `await` ตามกฎ `react-hooks/set-state-in-effect` ของรีโปนี้
+ */
+async function takeApprovalReload(): Promise<ApprovalReloadPayload | null> {
+  try {
+    const raw = sessionStorage.getItem(APPROVAL_RELOAD_KEY);
+    if (!raw) return null;
+    sessionStorage.removeItem(APPROVAL_RELOAD_KEY);
+    return JSON.parse(raw) as ApprovalReloadPayload;
+  } catch {
+    // เบราว์เซอร์ที่ปิด storage หรือก้อนที่พังแล้ว — ไม่ใช่เหตุให้หน้าพัง แค่ไม่มีของให้เปิดต่อ
+    return null;
+  }
+}
+
+export interface ApprovalReloadPayload {
+  request_id: string;
+  customer_id: number | null;
+  contact_id: number | null;
+  company_name: string | null;
+  payment_terms_override: string | null;
+  note: string | null;
+  items: {
+    product_id?: number | null;
+    model: string;
+    name: string;
+    quantity: number;
+    price: number;
+    discount_1?: number;
+    discount_2?: number;
+    is_manual_service?: boolean;
+  }[];
+}
 
 // ── รูปร่างข้อมูลที่ backend ส่งมา ───────────────────────────────────────────
 
@@ -254,6 +299,12 @@ interface PreviewResult {
   can_create_draft: boolean;
   /** คีย์ของกฎที่ต้องส่งกลับไปเป็น "คำรับทราบ" ตอนกดออกใบ — server เป็นคนประกอบคีย์ให้ */
   override_keys: string[];
+  /**
+   * ข้อที่ **ติ๊กรับทราบเองไม่ได้ ต้องให้ผู้อนุมัติราคาตัดสิน** (ราคาต่ำกว่าขั้นต่ำ)
+   * มีข้อเดียวก็เปลี่ยนความหมายของปุ่มทั้งปุ่ม: จาก "ออกใบ" เป็น "ส่งขออนุมัติ"
+   */
+  approval_required: PreviewViolation[];
+  needs_approval: boolean;
   /** เหตุที่ใบชุดนี้จะถูกกันออกจากไฟล์ export ปกติ — คนละแกนกับ violations ทั้งหมด */
   odoo_manual_reasons: { kind: string; field: string; value: string | null; display_message: string }[];
   service_line: {
@@ -1038,6 +1089,14 @@ export const QuoteRequest: React.FC = () => {
    * ต้องเก็บไว้และบอกออกไป ไม่งั้นหน้าจอจะพูดว่า "ไม่ได้บันทึกอะไร" ทั้งที่บันทึกไปแล้วครึ่งทาง
    */
   const [strandedIds, setStrandedIds] = useState<string[]>([]);
+  /** เหตุผลที่ขอขายต่ำกว่าขั้นต่ำ — เดินทางไปกับคำขอ ผู้อนุมัติอ่านก่อนตัดสิน */
+  const [approvalNote, setApprovalNote] = useState('');
+  /**
+   * คำขอที่เพิ่งส่งไป — มีค่าแล้วแปลว่า **ใบยังไม่ออก** หน้าจอต้องพูดเรื่องรอคน ไม่ใช่เรื่อง PDF
+   */
+  const [approvalSent, setApprovalSent] = useState<{ request_id: string; count: number } | null>(null);
+  /** คำขอเดิมที่ถูกตีกลับแล้วกำลังแก้อยู่ — ส่งไปกับคำขอใหม่เพื่อให้หลังบ้านยกเลิกใบเก่าให้ */
+  const [replacesRequestId, setReplacesRequestId] = useState<string | null>(null);
 
   // ── ส่วนที่ 3 ──
   const [reviseNo, setReviseNo] = useState('');
@@ -1073,7 +1132,49 @@ export const QuoteRequest: React.FC = () => {
     setPreviewAt('');
     setPaymentTerms(null);
     setDeliveryOv({});
+    setApprovalSent(null);
+    setApprovalNote('');
+    setReplacesRequestId(null);
   };
+
+  // ── คำขอที่ถูกตีกลับ → เปิดกลับเข้าฟอร์ม ───────────────────────────────────
+  //  หน้า "อนุมัติราคา" เขียนก้อนนี้ลง sessionStorage แล้วเปลี่ยนแท็บมาที่นี่ — ส่งผ่าน
+  //  sessionStorage ไม่ใช่ query string เพราะมันเป็นรายการสินค้าทั้งใบ ไม่ใช่ id ตัวเดียว
+  //  และมันเป็นของชั่วคราวของแท็บนั้น ไม่ควรติดไปกับลิงก์ที่ใครก๊อปส่งต่อ
+  //
+  //  **ใบเดิมยังไม่ถูกยกเลิกตอนนี้** — มันจะถูกยกเลิกก็ต่อเมื่อคำขอใหม่ถูกสร้างสำเร็จแล้ว
+  //  (`replaces_request_id`) ไม่งั้นคนที่กดแก้แล้วปิดจอไปจะเหลือมือเปล่า
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const data = await takeApprovalReload();
+      if (cancelled || !data) return;
+      setRows(
+        (data.items ?? []).map((it) => ({
+          key: newKey(),
+          productTemplateId: it.product_id ?? null,
+          model: it.model,
+          name: it.name,
+          quantity: String(num(it.quantity)),
+          price: String(num(it.price)),
+          disc1: num(it.discount_1) ? String(num(it.discount_1)) : '',
+          disc2: num(it.discount_2) ? String(num(it.discount_2)) : '',
+          candidates: [],
+          status: 'ok' as RowStatus,
+          isService: it.is_manual_service === true,
+        })),
+      );
+      // บริษัทที่เลือกไว้ต้องมีอยู่ในลิสต์ ไม่งั้น dropdown โชว์ "ยังไม่เลือก" ทั้งที่ id ตั้งอยู่แล้ว
+      setCustomerOptions(data.customer_id ? [{ id: data.customer_id, display_name: data.company_name ?? '' }] : []);
+      setCustomerId(data.customer_id ?? null);
+      setContactId(data.contact_id ?? null);
+      setPaymentTerms(String(data.payment_terms_override ?? '').trim() || null);
+      setApprovalNote(String(data.note ?? ''));
+      setReplacesRequestId(String(data.request_id));
+      setStage('form');
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   /** อ่าน error ที่ backend ส่งมาเป็นข้อความจริง ไม่ใช่ "HTTP 400" ลอย ๆ */
   const readError = async (res: Response, fallback: string) => {
@@ -1481,7 +1582,16 @@ export const QuoteRequest: React.FC = () => {
   }, [preview, rows, matched]);
 
   const grandTotal = groups.reduce((s, g) => s + g.subtotal, 0);
-  const blockers = staleNow ? [] : (preview?.violations ?? []);
+  /**
+   * ข้อที่ต้องให้ผู้อนุมัติตัดสิน — **แยกออกจาก `blockers` ตั้งแต่ต้นทาง** (2026-09-15)
+   * เพราะสองกองนี้จบคนละแบบ: กองนี้ส่งคำขอแล้วรอคน · อีกกองติ๊กรับทราบแล้วออกใบได้เลย
+   */
+  const approvalRequired = staleNow ? [] : (preview?.approval_required ?? []);
+  const needsApproval = approvalRequired.length > 0;
+  /** ข้อที่ยัง "ติ๊กรับทราบเองได้" เท่านั้น — server ตัดข้อที่ต้องอนุมัติออกให้แล้วใน override_keys */
+  const blockers = staleNow
+    ? []
+    : (preview?.violations ?? []).filter((v) => !approvalRequired.some((a) => a.type === v.type && a.model === v.model));
   /**
    * เหตุที่ใบชุดนี้จะถูกกันออกจากไฟล์ export ปกติ — **คนละแกนกับ `blockers` โดยสิ้นเชิง**
    * ใบที่ติดกฎยังอยู่ในไฟล์ปกติ (ข้อมูลตรงฐาน Odoo) ส่วนใบในรายการนี้คือใบที่ค่าในไฟล์ไม่มีในฐาน
@@ -1596,7 +1706,7 @@ export const QuoteRequest: React.FC = () => {
    */
   const requestConfirm = () => {
     if (!canReview || confirming) return;
-    if (blockers.length > 0 || manualReasons.length > 0) { setConfirmOpen(true); return; }
+    if (needsApproval || blockers.length > 0 || manualReasons.length > 0) { setConfirmOpen(true); return; }
     void confirmAll();
   };
 
@@ -1623,13 +1733,27 @@ export const QuoteRequest: React.FC = () => {
           // คำรับทราบจากโมดัล — คีย์มาจาก server (ไม่ประกอบเอง) และ server ตรวจกฎใหม่แล้วเทียบอีกที
           // ⇒ ข้อที่เพิ่งโผล่หลังจากคนกดรับทราบ (ของหมดระหว่างทาง) ยังตอบ 422 เหมือนเดิม
           acknowledged_violations: preview?.override_keys ?? [],
+          // ติดราคาขั้นต่ำ = ส่งคำขอ ไม่ใช่ออกใบ — ธงนี้ทำให้ server ปฏิเสธ (NEEDS_APPROVAL)
+          // ถ้าหน้าจอยังคิดว่ากำลังออกใบอยู่ แทนที่จะสร้างคำขอค้างไว้โดยไม่มีใครรู้ว่ามี
+          request_approval: needsApproval,
+          approval_note: needsApproval ? approvalNote.trim() || null : null,
+          replaces_request_id: needsApproval ? replacesRequestId : null,
         }),
       });
-      if (!res.ok) throw new Error(await readError(res, 'ออกใบเสนอราคาไม่สำเร็จ'));
+      if (!res.ok) throw new Error(await readError(res, needsApproval ? 'ส่งขออนุมัติไม่สำเร็จ' : 'ออกใบเสนอราคาไม่สำเร็จ'));
       const data = await res.json();
       const webId = String(data.web_user_id ?? webUserId);
       setWebUserId(webId);
       const created = (data.quotes ?? []) as DraftQuote[];
+
+      // ── ส่งขออนุมัติ: ร่างถูกบันทึกแล้วแต่ **ห้ามยิง confirm ต่อ** ────────────
+      //  ยิงไปก็ได้ 422 เพราะด่านตรวจอ่านคำอนุมัติจากแถวของใบ ซึ่งยังเป็น pending อยู่
+      if (data.approval) {
+        setApprovalSent({ request_id: String(data.approval.request_id), count: created.length });
+        setReplacesRequestId(null);
+        return;
+      }
+
       const { done, left, errors } = await confirmMany(created.map((q) => String(q.id)), webId);
       setResults(done);
       setStrandedIds(left);
@@ -1737,8 +1861,10 @@ export const QuoteRequest: React.FC = () => {
   const reviewing = stage === 'review';
   /** ออกใบไปแล้ว — ไม่มีอะไรให้ยืนยันซ้ำ เหลือแค่ลิงก์ PDF กับทางเริ่มใบใหม่ */
   const issued = results.length > 0;
+  /** ส่งคำขอไปแล้ว — เหมือน issued ตรงที่ "จบรอบแล้ว" แต่ไม่มีเลขใบให้โชว์ */
+  const requested = approvalSent !== null;
   /** มีอะไรให้ล้างไหม — การ์ดร่างที่เปิดค้างไว้เปล่า ๆ ไม่ใช่ "งานที่เริ่มแล้ว" */
-  const hasWork = rows.length > 0 || text.trim().length > 0 || customerId !== null || issued;
+  const hasWork = rows.length > 0 || text.trim().length > 0 || customerId !== null || issued || requested;
 
   return (
     <div className="space-y-5">
@@ -2332,6 +2458,23 @@ export const QuoteRequest: React.FC = () => {
           {/* ติดกฎ = **ออกใบได้ แต่ต้องยืนยันอีกชั้น** (2026-09-15) — คำเตือนยังอยู่ครบเหมือนเดิม
               เปลี่ยนแค่บทสรุปบรรทัดแรกให้ตรงกับสิ่งที่ปุ่มทำจริง ไม่งั้นจอบอกว่า "ออกไม่ได้"
               แล้วปุ่มออกใบได้ ซึ่งคือจอที่ไม่มีใครเชื่ออีกเลยหลังจากนั้น */}
+          {/* ราคาต่ำกว่าขั้นต่ำ = **ติ๊กเองไม่ได้** ต้องส่งให้คนอื่นตัดสิน ⇒ กล่องคนละใบกับกล่องแดง
+              ไม่งั้นคนอ่านรวมกันว่า "ติดกฎ แต่กดผ่านได้" ซึ่งเป็นสิ่งที่ปุ่มไม่ทำแล้ว */}
+          {needsApproval && !staleNow && (
+            <div className="bg-violet-50 border border-violet-200 rounded-xl px-3 py-2.5 text-xs text-violet-800">
+              <p className="flex items-center gap-2 font-bold">
+                <BadgeCheck className="w-4 h-4 shrink-0" />
+                ต้องขออนุมัติราคา {approvalRequired.length} รายการ — ออกใบเองไม่ได้
+              </p>
+              <ul className="mt-1 pl-6 list-disc space-y-0.5">
+                {approvalRequired.map((v, i) => (
+                  <li key={`${v.type}-${v.model}-${i}`}>{v.display_message}</li>
+                ))}
+              </ul>
+              <p className="mt-1.5 pl-6">กด “ยืนยัน” จะเป็นการ<b>ส่งคำขอ</b>ให้ผู้มีสิทธิ์อนุมัติ — ใบจะออกเมื่อได้รับอนุมัติแล้วเท่านั้น</p>
+            </div>
+          )}
+
           {blockers.length > 0 && !staleNow && (
             <div className="bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 text-xs text-red-700">
               <p className="flex items-center gap-2 font-bold">
@@ -2497,7 +2640,11 @@ export const QuoteRequest: React.FC = () => {
           {!issued && (
             <div className="flex items-start gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-600">
               <FileText className="w-4 h-4 shrink-0 mt-px" />
-              <span>ใบร่างนี้ยังไม่ถูกบันทึกลงระบบ — กด “ยืนยัน” เมื่อไหร่จึงจะออกเลขที่และบันทึกจริง</span>
+              <span>
+                {needsApproval
+                  ? 'ใบร่างนี้ยังไม่ถูกบันทึกลงระบบ — กด “ยืนยัน” จะเป็นการส่งคำขออนุมัติราคา ยังไม่ออกเลขที่ใบ'
+                  : 'ใบร่างนี้ยังไม่ถูกบันทึกลงระบบ — กด “ยืนยัน” เมื่อไหร่จึงจะออกเลขที่และบันทึกจริง'}
+              </span>
             </div>
           )}
 
@@ -2528,6 +2675,21 @@ export const QuoteRequest: React.FC = () => {
             </div>
           )}
 
+          {/* ส่งคำขอแล้ว = ใบถูกบันทึกเป็นร่างจริงในระบบ แต่ยังไม่ใช่ใบเสนอราคา —
+              ต้องพูดสองเรื่องนี้พร้อมกัน ไม่งั้นคนกดจะไปตามหา PDF ที่ยังไม่มี */}
+          {approvalSent && (
+            <div className="bg-violet-50 border border-violet-200 rounded-2xl p-4 space-y-2 text-sm">
+              <p className="flex items-center gap-2 font-bold text-violet-800">
+                <BadgeCheck className="w-4 h-4 shrink-0" />
+                ส่งขออนุมัติราคาแล้ว {approvalSent.count} ใบ — รอผู้อนุมัติ
+              </p>
+              <p className="text-xs text-violet-800">
+                ใบชุดนี้ถูกบันทึกเป็นร่างที่รออนุมัติ <b>ยังไม่มีเลขที่ใบและยังไม่มี PDF</b> ·
+                ติดตามสถานะได้ที่เมนู “อนุมัติราคา”
+              </p>
+            </div>
+          )}
+
           {issued && (
             <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 space-y-2">
               <p className="text-sm font-bold text-emerald-800">ออกใบเสนอราคาสำเร็จ {results.length} ใบ</p>
@@ -2549,7 +2711,7 @@ export const QuoteRequest: React.FC = () => {
           )}
 
           <div className="flex flex-wrap items-center justify-end gap-2">
-            {issued ? (
+            {issued || requested ? (
               <Button variant="primary" size="md" icon={FilePlus2} onClick={resetAll}>
                 เริ่มใบใหม่
               </Button>
@@ -2564,13 +2726,15 @@ export const QuoteRequest: React.FC = () => {
                 {/* ใบที่ติดอะไรอยู่ ปุ่มเป็นสีแดง ไม่ใช่เขียว — สีของปุ่มต้องตรงกับผลของการกด
                     (docs/design.md หัวข้อสีปุ่ม: แดง = ของที่ย้อนยาก) */}
                 <Button
-                  variant={blockers.length > 0 || manualReasons.length > 0 ? 'danger' : 'primary'}
-                  icon={CheckCircle2}
+                  variant={needsApproval ? 'warning' : (blockers.length > 0 || manualReasons.length > 0 ? 'danger' : 'primary')}
+                  icon={needsApproval ? Send : CheckCircle2}
                   busy={confirming}
                   disabled={!canReview || strandedIds.length > 0}
                   onClick={requestConfirm}
                 >
-                  {confirming ? 'กำลังออกใบ...' : 'ยืนยัน'}
+                  {confirming
+                    ? (needsApproval ? 'กำลังส่งคำขอ...' : 'กำลังออกใบ...')
+                    : (needsApproval ? 'ส่งขออนุมัติราคา' : 'ยืนยัน')}
                 </Button>
               </>
             )}
@@ -2583,6 +2747,9 @@ export const QuoteRequest: React.FC = () => {
         <ConfirmIssueModal
           violations={blockers}
           manualReasons={manualReasons}
+          approvalRequired={approvalRequired}
+          note={approvalNote}
+          onNoteChange={setApprovalNote}
           quoteLabels={groups.map((g) => g.label)}
           busy={confirming}
           onCancel={() => setConfirmOpen(false)}

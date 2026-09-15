@@ -53,6 +53,7 @@
     "diag:block-rule": "tsx scripts/diag/blockRuleSmoke.ts",
     "diag:line-parity": "tsx scripts/diag/lineFlexParity.ts",
     "diag:web-quote": "tsx scripts/diag/webQuoteSmoke.ts",
+    "diag:price-approval": "tsx scripts/diag/priceApprovalSmoke.ts",
     "diag:web-decision": "tsx scripts/diag/webDecisionParity.ts",
     "diag:sp-dedupe": "tsx scripts/diag/salespersonDedupeSmoke.ts",
     "diag:migrations": "node scripts/diag/migrationsAudit.mjs",

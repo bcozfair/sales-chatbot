@@ -19,7 +19,7 @@ import { readHash } from './logs/useHashState';
  */
 
 export type MainTab =
-  | 'dashboard' | 'quoterequest' | 'quotations' | 'salespersons' | 'promotions' | 'users' | 'blacklist'
+  | 'dashboard' | 'quoterequest' | 'approvals' | 'quotations' | 'salespersons' | 'promotions' | 'users' | 'blacklist'
   // กลุ่ม "บันทึกและรายงาน" — 4 หน้าที่อยู่ใต้หัวข้อพับได้อันเดียวกัน
   | 'traffic' | 'apilogs' | 'auditlogs' | 'systemlogs'
   | 'settings';
@@ -44,6 +44,7 @@ export const DEFAULT_ROUTE: AdminRoute = { tab: 'dashboard', sub: 'quotation' };
 export const TAB_SLUG: Record<MainTab, string> = {
   dashboard: 'dashboard',
   quoterequest: 'quoterequest',
+  approvals: 'approvals',
   quotations: 'quotations',
   salespersons: 'salespersons',
   promotions: 'promotions',

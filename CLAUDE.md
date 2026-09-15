@@ -209,6 +209,22 @@ npm run logworker                                          # worker เขีย
   **ทะลุไม่ได้ทุกกรณี** เพราะมันแปลว่า *ยังไม่รู้ว่าผิดหรือไม่* ไม่ใช่ *ผิดข้อนี้*
   · gate: `npm run diag:web-quote` ข้อ 8
 
+- **ราคาต่ำกว่าขั้นต่ำจากหน้าเว็บ ติ๊กรับทราบเองไม่ได้แล้ว ต้องมีคนอนุมัติ** (2026-09-15) —
+  กฎมีสามชั้นแทนสอง: ติ๊กเองได้ (ของหมด/MOQ/ระงับ/blacklist/เครดิตค้าง) · **ต้องอนุมัติ**
+  (`MIN_PRICE_VIOLATION`) · ทะลุไม่ได้ (`SYSTEM_ERROR`) — ทั้งสามอยู่ที่ `blockingViolations()`
+  ที่เดียวเหมือนเดิม ตัวปลดชั้นกลางคือคอลัมน์ **`quotations.price_approval`** (ใบจาก LINE เป็น
+  `NULL` ⇒ **ถูกบล็อกเหมือนเดิมทุกประการ ไม่ได้เข้าคิว**)
+  **คำอนุมัติผูกกับ "ราคาที่อนุมัติ" ไม่ใช่แค่ชื่อรุ่น** — `violationKey()` เป็น `type|model` ที่ไม่มี
+  ตัวเลข ถ้าใช้คีย์นั้นปลดตรง ๆ คนที่อนุมัติ ฿100 จะกลายเป็นอนุมัติ ฿10 ให้ด้วย ⇒
+  `approvedViolationKeys()` เทียบราคาปัจจุบันกับที่อนุมัติทุกครั้ง (ถูกลงกว่าเดิม = ต้องขอใหม่)
+  ⚠️ ร่างที่รออนุมัติ **ค้างอยู่ใน DB จริง** ต่างจากร่างปกติของหน้าเว็บที่อยู่ไม่ถึงสองวินาที ⇒
+  ทุกจุดที่กวาดร่างเก่าทิ้ง (`insertDraftQuotations` · `reviseQuotation`) ต้องมี
+  `AND price_approval IS NULL` ไม่งั้นคำขอที่รออยู่หายทั้งใบเงียบ ๆ · และ "กลุ่มใบ" ของค่าขนส่ง
+  อัตโนมัติไม่ใช่ "ร่างทั้งหมดของ user" อีกแล้ว — `applyShippingFeeToQuoteGroup()` รับ `requestId`
+  มาเป็นขอบเขต ไม่งั้นยอดของชุดที่รออนุมัติกับชุดที่กำลังทำจะถูกบวกกัน
+  · ออกใบหลังอนุมัติใช้ `services/quotationConfirm.ts` ตัวเดียวกับปุ่มยืนยันปกติ
+  · gate: `npm run diag:price-approval`
+
 - **กฎระงับสต็อกเทียบ `unreserved` กับ "จำนวนที่สั่ง" ไม่ใช่ `actual_quantity <= 0`** และ
   **สินค้าที่ไม่มีแถวใน `product_stock_rules` ต้องเพิ่ม/ปรับจำนวนได้เสมอแม้ของว่าง** —
   client (`product-search.html` / `quote-edit.html`) **ห้ามบล็อกจากสต็อกดิบเด็ดขาด** เพราะ client
@@ -361,6 +377,7 @@ chatbot/
 - **`README.md`** — โครงสร้างละเอียด: endpoint ทั้งหมด, schema, business logic รายบริการ
 - **`docs/SYNC_API.md`** — API ให้ระบบภายนอกดึงข้อมูล (3 โหมด sync และเกณฑ์เลือก)
 - **`docs/plan-web-quote-request.md`** — หน้าเว็บขอใบเสนอราคา เฟส A–D (แผนยาว อ่านเฉพาะหัวข้อที่ตรงงาน)
+- **`docs/plan-quote-price-approval.md`** — คิวอนุมัติราคาต่ำกว่าขั้นต่ำ + role `approver`
 - **`docs/plan-web-quote-logging.md`** — ประวัตของหน้าเว็บใน `messages` (`web_*` + `meta`) และวิธีวัด `chosen_rank`
 - **`docs/plan-product-block-rules.md`** — กฎบล็อกสินค้า
 - **`docs/plan-logging-audit-compliance.md`** — ระบบ log / audit / ข้อกำหนดตามกฎหมาย

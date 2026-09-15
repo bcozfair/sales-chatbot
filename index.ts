@@ -33,6 +33,7 @@ import {
   odooManualBucketCondition,
   getOdooManualReviewCounts,
   getAcknowledgedViolationKeys,
+  getPriceApproval,
   createdAtFromThaiDayCondition,
   createdAtToThaiDayCondition,
   claimQuotationsForExport,
@@ -50,8 +51,19 @@ import {
 } from './db/repositories.js';
 import {
   confirmQuotationAtomic, enrichQuotationData, buildItemSnapshots, buildViolationDisplay,
-  blockingViolations, ODOO_MANUAL_REASON_KINDS,
+  blockingViolations, approvedViolationKeys, ODOO_MANUAL_REASON_KINDS,
 } from './services/quotationService.js';
+import { confirmQuotationById } from './services/quotationConfirm.js';
+import {
+  listApprovalRequests,
+  getApprovalRequest,
+  approveRequest,
+  rejectRequest,
+  cancelRequest,
+  countOpenRequests,
+  loadRequestIntoForm,
+  PriceApprovalError,
+} from './services/priceApprovalService.js';
 import { pdfCacheKey, getCachedPdf, setCachedPdf, isPrintFrozen, invalidatePdfCache } from './services/pdfCache.js';
 import {
   listBlacklist,
@@ -941,6 +953,15 @@ app.put('/api/quotation/:id', express.json(), async (req: any, res: any) => {
     const { enrichQuotationData } = await import('./services/quotationService.js');
     const quote = await enrichQuotationData(quoteRes.rows[0]);
 
+    // ใบที่ "รออนุมัติราคา" แก้ไม่ได้ — ไม่งั้นสิ่งที่ผู้อนุมัติกำลังอ่านอยู่กับสิ่งที่เขากดอนุมัติ
+    // จะเป็นคนละใบกัน · เงื่อนไขอ่านจาก **แถวของใบ** ไม่ใช่จาก endpoint ⇒ ใบจาก LINE (NULL)
+    // ไม่ได้รับผลกระทบ (docs/plan-quote-price-approval.md §2.2)
+    if (quoteRes.rows[0]?.price_approval?.status === 'pending') {
+      return res.status(409).json({
+        error: 'ใบเสนอราคานี้กำลังรอการอนุมัติราคา แก้ไขไม่ได้จนกว่าผู้อนุมัติจะตัดสิน — ยกเลิกคำขอก่อนถ้าต้องการแก้',
+      });
+    }
+
     // ยืนยัน/ยกเลิกไปแล้วแก้ไม่ได้ — ตอบ 409 พร้อมสถานะล่าสุด ให้ฝั่ง LIFF reload แทนค้างหน้าเดิม
     if (quote.status === 'confirmed' || quote.status === 'cancelled') {
       return res.status(409).json({
@@ -1006,7 +1027,9 @@ app.put('/api/quotation/:id', express.json(), async (req: any, res: any) => {
     // ⚠️ อ่านคำรับทราบจาก **แถวของใบ** ไม่ใช่จาก body — endpoint นี้หน้า LIFF ใช้ร่วมกันอยู่
     //    ใบจาก LINE ไม่มีคอลัมน์นี้ (NULL) ⇒ ได้พฤติกรรมเดิมทุกประการ ไม่มีทางทะลุกฎ
     const putBlockers = blockingViolations(
-      putViolations, await getAcknowledgedViolationKeys(pool, quoteId)
+      putViolations,
+      await getAcknowledgedViolationKeys(pool, quoteId),
+      approvedViolationKeys(await getPriceApproval(pool, quoteId), putViolations)
     );
     if (putBlockers.length > 0) {
       return res.status(422).json({ error: 'VALIDATION_ERROR', violations: putBlockers });
@@ -1227,7 +1250,9 @@ app.put('/api/quotation/:id', express.json(), async (req: any, res: any) => {
     // ค่าขนส่งอัตโนมัติ — คิดจากยอดรวมทุกใบในกลุ่ม จึงต้องทำหลังใบนี้ถูกเขียนลงไปแล้ว
     // (หน้า LIFF บันทึกทีละใบ ใบสุดท้ายที่บันทึกจะเป็นตัวสรุปค่าที่ถูกต้อง)
     const { applyShippingFeeToQuoteGroup } = await import('./services/shippingFee.js');
-    await applyShippingFeeToQuoteGroup(quoteRes.rows[0].user_id);
+    await applyShippingFeeToQuoteGroup(
+      quoteRes.rows[0].user_id, undefined, quoteRes.rows[0].price_approval?.request_id ?? null
+    );
 
     res.json({ success: true });
   } catch (err: any) {
@@ -1250,120 +1275,15 @@ function isQuotationOwner(quoteRaw: any, userId: string | undefined): boolean {
 // --- API: ยืนยันใบเสนอราคา (ออกเลขที่ + เปลี่ยนสถานะ) ---
 app.post('/api/quotation/:id/confirm', express.json(), async (req: any, res: any) => {
   try {
-    const quoteId = req.params.id;
-    const { userId } = req.body;
-
-    const quoteRes = await pool.query('SELECT * FROM quotations WHERE id = $1', [quoteId]);
-    const quoteRaw = quoteRes.rows[0];
-
-    if (!quoteRaw) {
-      return res.status(404).json({ error: 'Quotation not found' });
+    // ลำดับขั้นทั้งหมดอยู่ที่ services/quotationConfirm.ts ที่เดียว — คิวอนุมัติราคาเรียกตัวเดียวกันนี้
+    // (ห้ามก๊อปไปไว้ฝั่งอนุมัติ ไม่งั้นใบที่ออกจากสองทางจะค่อย ๆ ต่างกันโดยไม่มีอะไรฟ้อง)
+    const result = await confirmQuotationById({ quoteId: req.params.id, userId: req.body?.userId });
+    if (!result.ok) {
+      const body: any = { error: result.error };
+      if (result.violations) body.violations = result.violations;
+      return res.status(result.status).json(body);
     }
-
-    if (!isQuotationOwner(quoteRaw, userId)) {
-      return res.status(403).json({ error: 'ไม่มีสิทธิ์เข้าถึงใบเสนอราคานี้' });
-    }
-
-    if (quoteRaw.status === 'cancelled') {
-      return res.status(400).json({ error: 'Cannot confirm a cancelled quotation' });
-    }
-
-    // ค่าขนส่งอัตโนมัติ — กันเหนียวก่อนออกเลขจริง เผื่อยอดเปลี่ยนหลังบันทึกครั้งสุดท้าย
-    // ไม่แตะใบที่ยืนยัน/ยกเลิกไปแล้ว จึงไม่กระทบ idempotency ของ endpoint นี้
-    const { applyShippingFeeToQuoteGroup: applyShippingFeeOnConfirm } = await import('./services/shippingFee.js');
-    await applyShippingFeeOnConfirm(quoteRaw.user_id);
-    const refreshedRes = await pool.query('SELECT * FROM quotations WHERE id = $1', [quoteId]);
-    const quoteAfterFee = refreshedRes.rows[0] || quoteRaw;
-
-    // Enrich ก่อนเพื่อให้ quote.items มีข้อมูลสำหรับตรวจราคาขั้นต่ำและ allocateQuotationNo
-    const quote = await enrichQuotationData(quoteAfterFee);
-
-    // กันการยืนยันใบเสนอราคาที่ไม่มีสินค้า (defense-in-depth เผื่อ frontend ถูก bypass)
-    if (!quote.items || !Array.isArray(quote.items) || quote.items.length === 0) {
-      return res.status(400).json({ error: 'ไม่สามารถยืนยันใบเสนอราคาที่ไม่มีสินค้าได้' });
-    }
-
-    // พ่วงสินค้าเสริม (optional) ก่อน validate — กันเคสร่างที่ยังไม่เคยผ่าน expand (เช่น chat revise เก่า)
-    // expandOptionalProducts มี de-dupe อยู่แล้ว จึงรันซ้ำกับใบที่พ่วงมาแล้วได้ ไม่เพิ่มซ้ำ
-    // ใช้ผลนี้กับทั้ง check ราคาขั้นต่ำ/สต็อก และ allocateQuotationNo (items[0]=หลัก คงเดิม พ่วงต่อท้าย)
-    // หมายเหตุ: confirmQuotationAtomic ไม่เขียน items ลง DB (แค่ออกเลข+เปลี่ยน status) จึงเป็น validation-only
-    try {
-      const { expandOptionalProducts } = await import('./services/productService.js');
-      quote.items = await expandOptionalProducts(quote.items);
-    } catch (expandErr) {
-      console.error('Error expanding optional products on confirm:', expandErr);
-      // ล้มเหลว → ใช้ items เดิมต่อ ไม่ปิดกั้นการยืนยัน (ยังตรวจกฎด้วยรายการที่มี)
-    }
-
-    // กันการยืนยันใบที่ยังไม่ได้ผูกลูกค้า — เลขที่เอกสารเดินหน้าแล้วย้อนคืนไม่ได้
-    // (ใบที่ยืนยันไปแล้วต้องปล่อยผ่านเพื่อคง idempotency ของ endpoint นี้)
-    if (quote.status !== 'confirmed' && isCustomerInfoIncomplete(quote)) {
-      return res.status(400).json({ error: 'ไม่สามารถยืนยันใบเสนอราคาที่ยังไม่ได้ระบุลูกค้าได้ กรุณาเลือกบริษัทและผู้ติดต่อก่อน' });
-    }
-
-    // ด่านตรวจกฎรวมก่อนออกเลข (fail-closed) — blocked/stock/MOQ/min-price
-    const { validateQuotationItems: validateOnConfirm } = await import('./services/quotationService.js');
-    const { violations: confirmViolations } = await validateOnConfirm(quote.items, {
-      customerName: quote.customer_name, stage: 'confirm',
-      customerId: quote.customer_id, contactId: quote.contact_id
-    });
-    // คำรับทราบผูกกับใบ (คอลัมน์ rule_overrides) ไม่ใช่กับ endpoint — เหตุผลเดียวกับ PUT ข้างบน
-    // ข้อที่ **เพิ่งโผล่** หลังคนกดรับทราบ (ของหมดระหว่างทาง) ยังตอบ 422 เหมือนเดิม
-    // เพราะเจ้าของเลือกไว้ว่า "ปฏิเสธและให้ดูใหม่" ไม่ใช่ปล่อยผ่านเพราะกดยืนยันมาแล้ว
-    const confirmBlockers = blockingViolations(
-      confirmViolations, await getAcknowledgedViolationKeys(pool, quoteId)
-    );
-    if (confirmBlockers.length > 0) {
-      return res.status(422).json({ error: 'VALIDATION_ERROR', violations: confirmBlockers });
-    }
-
-    // ห้ามกลับไปเดาจาก req.get('host') — ดูเหตุผลที่ /callback และ config/appUrl.ts
-    const reqUrl = getAppUrl();
-    // ยืนยันแบบ atomic + idempotent (ออกเลข + เปลี่ยน status ใน transaction เดียวพร้อม row lock
-    // cancelOldRevision กรณี revision อยู่ใน tx เดียวกัน และไม่เขียนทับ created_at เพราะเลขคำนวณจากมัน)
-    let confirmResult;
-    try {
-      confirmResult = await confirmQuotationAtomic(quoteId, quote);
-    } catch (updateError: any) {
-      console.error("Confirm quotation error:", updateError);
-      return res.status(500).json({ error: updateError.message });
-    }
-
-    if (confirmResult.outcome === 'not_found') {
-      return res.status(404).json({ error: 'Quotation not found' });
-    }
-    if (confirmResult.outcome === 'cancelled') {
-      return res.status(400).json({ error: 'Cannot confirm a cancelled quotation' });
-    }
-
-    // confirmed / already_confirmed → success เหมือนกัน (idempotent)
-    // ลิงก์ต้องสร้างหลังตรงนี้ เพราะเลขใบเสนอราคาเพิ่งถูกออกใน confirmQuotationAtomic
-    const pdfLink = buildPdfLink(reqUrl, quoteId, confirmResult.quotationNo);
-    console.log(`[Push Disabled] Confirm quotation no: ${confirmResult.quotationNo} for user: ${userId}`);
-
-    // ประวัติของหน้าเว็บแอดมิน — docs/plan-web-quote-logging.md §4
-    //
-    // route นี้ใช้ร่วมกับ LIFF ของเซลส์ ⇒ เขียนเฉพาะขา `web:%` เท่านั้น ถ้าเขียนทุกขา
-    // ใบที่เซลส์ยืนยันผ่าน LIFF จะเริ่มมีแถวใหม่ใน messages ซึ่งไปเปลี่ยนความหมายของประวัติ
-    // ที่ quoteExtraction อ่านอยู่ (ตัดหน้าต่าง 15 นาทีด้วยคำว่า "ยืนยันสำเร็จ")
-    //
-    // อยู่หลัง confirmQuotationAtomic ที่ COMMIT ไปแล้ว — ห้ามขยับขึ้นไปอยู่ในทรานแซกชัน
-    if (parseWebUserId(userId)) {
-      await insertMessage({
-        user_id: userId,
-        message_id: `web_confirm_${Date.now()}`,
-        type: 'web_confirm',
-        content: 'ยืนยัน',
-        reply_token: null,
-        reply_content: `✅ ยืนยันสำเร็จ!\n📄 ใบเสนอราคาเลขที่: ${confirmResult.quotationNo}`,
-        meta: {
-          quotation_no: confirmResult.quotationNo,
-          quotation_id: String(quoteId),
-          outcome: confirmResult.outcome,
-        },
-      });
-    }
-    res.json({ success: true, quotation_no: confirmResult.quotationNo, pdf_link: pdfLink });
+    res.json({ success: true, quotation_no: result.quotationNo, pdf_link: result.pdfLink });
   } catch (err: any) {
     console.error("API POST confirm error:", err);
     res.status(500).json({ error: err.message });
@@ -1798,7 +1718,7 @@ app.get('/api/admin/verify', adminAuthMiddleware, (req: any, res: any) => {
 
 const BCRYPT_COST = 10;
 const MIN_PASSWORD_LENGTH = 8;
-const VALID_ROLES: Role[] = ['admin', 'subadmin', 'user'];
+const VALID_ROLES: Role[] = ['admin', 'approver', 'subadmin', 'user'];
 
 /** คอลัมน์ที่ส่งออก API ได้ — ระบุชื่อชัดเจนเพื่อไม่ให้ password_hash หลุดออกไปโดยไม่ตั้งใจ */
 const USER_PUBLIC_COLUMNS = 'id, username, name, role, created_at, updated_at';
@@ -2382,7 +2302,7 @@ app.delete('/api/admin/salespersons/:userId', adminAuthMiddleware, requireRole('
  * รายชื่อผู้จัดทำที่ Odoo รู้จักจริง — ให้ dropdown ฝั่งหน้าเว็บใช้เลือก (ห้ามพิมพ์เอง)
  * แต่ละรายการมี `phone` ที่ระบบเลือกให้แล้ว (เบอร์ในใบล่าสุดของชื่อนั้น · null ได้) — §2.5b
  */
-app.get('/api/admin/webquote/makers', adminAuthMiddleware, requireRole('admin', 'subadmin'), async (req: any, res: any) => {
+app.get('/api/admin/webquote/makers', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), async (req: any, res: any) => {
   try {
     res.json({ makers: await listOdooQuotationMakers() });
   } catch (err: any) {
@@ -2398,7 +2318,7 @@ app.get('/api/admin/webquote/makers', adminAuthMiddleware, requireRole('admin', 
  * ใบจะไม่มีลายเซ็นในช่องผู้เสนอราคา เท่ากับพฤติกรรมของเซลส์ที่ยังไม่มีลายเซ็นวันนี้เป๊ะ
  * ⇒ หน้าเว็บใช้ `has_signature === false` ขึ้นป้ายเตือนค้างไว้ แต่ห้ามใช้บล็อก
  */
-app.get('/api/admin/webquote/me', adminAuthMiddleware, requireRole('admin', 'subadmin'), async (req: any, res: any) => {
+app.get('/api/admin/webquote/me', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), async (req: any, res: any) => {
   try {
     const admin = req.admin;
     const profile = await getAdminIssuerProfile(admin.id);
@@ -2430,7 +2350,7 @@ app.get('/api/admin/webquote/me', adminAuthMiddleware, requireRole('admin', 'sub
  *    `employee_quotation_phone` มาด้วยจะถูก **เพิกเฉย** ไม่ใช่ตอบ error
  *    (ไม่มี field ให้กรอกเบอร์อยู่แล้ว การส่งมาจึงเป็นความเข้าใจผิดของ client ไม่ใช่การโจมตี)
  */
-app.put('/api/admin/webquote/me', adminAuthMiddleware, requireRole('admin', 'subadmin'), express.json(), async (req: any, res: any) => {
+app.put('/api/admin/webquote/me', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), express.json(), async (req: any, res: any) => {
   try {
     const raw = req.body?.employee_quotation_id;
     if (typeof raw !== 'string' || raw.trim() === '') {
@@ -2461,7 +2381,7 @@ app.put('/api/admin/webquote/me', adminAuthMiddleware, requireRole('admin', 'sub
  * ⇒ ชื่อไฟล์ที่เดาได้ = ลายเซ็นถูกดูดออกไปได้ด้วยการไล่เลข (§2.5)
  * อัปโหลดทับใช้ token เดิม ⇒ ใบเก่าที่พิมพ์ซ้ำได้ลายเซ็นอันใหม่ (ตรงกับพฤติกรรม sale_sigs วันนี้)
  */
-app.post('/api/admin/webquote/me/signature', adminAuthMiddleware, requireRole('admin', 'subadmin'), express.json({ limit: '10mb' }), async (req: any, res: any) => {
+app.post('/api/admin/webquote/me/signature', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), express.json({ limit: '10mb' }), async (req: any, res: any) => {
   try {
     const image = req.body?.image;
     if (typeof image !== 'string' || image.trim() === '') {
@@ -2482,7 +2402,7 @@ app.post('/api/admin/webquote/me/signature', adminAuthMiddleware, requireRole('a
 });
 
 /** ลบลายเซ็นของตัวเอง — ลบแล้วยังออกใบได้ปกติ ใบจะไม่มีลายเซ็นช่องผู้เสนอราคา */
-app.delete('/api/admin/webquote/me/signature', adminAuthMiddleware, requireRole('admin', 'subadmin'), async (req: any, res: any) => {
+app.delete('/api/admin/webquote/me/signature', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), async (req: any, res: any) => {
   try {
     const deleted = await deleteAdminSignature(req.admin.id);
     res.json({ success: true, deleted, has_signature: false });
@@ -2513,7 +2433,7 @@ function sendWebQuoteError(res: any, where: string, err: any) {
  * รายชื่อเซลส์ที่เลือกเป็น "ออกในนาม" ได้ + สถานะ/URL ลายเซ็นของแต่ละคน
  * แถวพร็อกซี `web:%` ถูกกรองออกตั้งแต่ใน listActingSalespersons() (§2.3b · ด่าน pdf-issuer เคส 7)
  */
-app.get('/api/admin/webquote/salespersons', adminAuthMiddleware, requireRole('admin', 'subadmin'), async (req: any, res: any) => {
+app.get('/api/admin/webquote/salespersons', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), async (req: any, res: any) => {
   try {
     res.json({ salespersons: await listSalespersonsForWeb() });
   } catch (err: any) {
@@ -2527,7 +2447,7 @@ app.get('/api/admin/webquote/salespersons', adminAuthMiddleware, requireRole('ad
  * เป็น endpoint แยกแทนที่จะแปะไปกับพรีวิว เพราะมันเป็นรายการระดับระบบที่โหลดครั้งเดียวตอน
  * เปิดหน้า ไม่ได้ขึ้นกับใบที่กำลังกรอก · แคช 5 นาทีอยู่ในเซอร์วิส
  */
-app.get('/api/admin/webquote/payment-terms', adminAuthMiddleware, requireRole('admin', 'subadmin'), async (req: any, res: any) => {
+app.get('/api/admin/webquote/payment-terms', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), async (req: any, res: any) => {
   try {
     res.json({ terms: await listPaymentTermOptions() });
   } catch (err: any) {
@@ -2541,7 +2461,7 @@ app.get('/api/admin/webquote/payment-terms', adminAuthMiddleware, requireRole('a
  * ยังไม่ลบร่างที่ค้างอยู่ด้วย (`purgePending: false` ใน service) เพราะแค่วางข้อความผิด
  * ก็ไม่ควรทำลายงานที่แอดมินทำค้างไว้ — ต่างจากแชทที่ไม่มีจังหวะ "ดูก่อนแล้วค่อยกด"
  */
-app.post('/api/admin/webquote/propose', adminAuthMiddleware, requireRole('admin', 'subadmin'), express.json({ limit: '1mb' }), async (req: any, res: any) => {
+app.post('/api/admin/webquote/propose', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), express.json({ limit: '1mb' }), async (req: any, res: any) => {
   try {
     res.json(await proposeFromText({
       adminId: req.admin.id,
@@ -2560,7 +2480,7 @@ app.post('/api/admin/webquote/propose', adminAuthMiddleware, requireRole('admin'
  * กดสร้างไปแล้ว · ไม่รับ `sp_user_id` โดยตั้งใจ เพราะพรีวิวไม่ต้องมีตัวตนผู้ออกใบ
  * และการ resolve ตัวตนจะไปเขียนแถวพร็อกซีลง salesperson (ดูหัวข้อ previewDraft)
  */
-app.post('/api/admin/webquote/preview', adminAuthMiddleware, requireRole('admin', 'subadmin'), express.json({ limit: '2mb' }), async (req: any, res: any) => {
+app.post('/api/admin/webquote/preview', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), express.json({ limit: '2mb' }), async (req: any, res: any) => {
   try {
     res.json(await previewWebQuoteDraft({
       customerId: req.body?.customer_id,
@@ -2581,7 +2501,7 @@ app.post('/api/admin/webquote/preview', adminAuthMiddleware, requireRole('admin'
  * `web_user_id` ต้องส่งกลับไปด้วยเสมอ เพราะขั้นถัดไป (PUT /api/quotation/:id · confirm · cancel)
  * เป็น endpoint เดิมที่ตรวจสิทธิ์ด้วย `isQuotationOwner()` จาก `userId` ใน body (ขั้น 8′)
  */
-app.post('/api/admin/webquote/drafts', adminAuthMiddleware, requireRole('admin', 'subadmin'), express.json({ limit: '2mb' }), async (req: any, res: any) => {
+app.post('/api/admin/webquote/drafts', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), express.json({ limit: '2mb' }), async (req: any, res: any) => {
   try {
     res.json(await createWebQuoteDraft({
       adminId: req.admin.id,
@@ -2596,14 +2516,107 @@ app.post('/api/admin/webquote/drafts', adminAuthMiddleware, requireRole('admin',
       // คำรับทราบจากโมดัล — server ตรวจกฎใหม่เองแล้วเทียบ ไม่ได้เชื่อว่า "ส่งมาแปลว่าผ่าน"
       acknowledgedViolations: req.body?.acknowledged_violations,
       adminUsername: req.admin?.username ?? null,
+      adminName: req.admin?.name ?? null,
+      // ติดราคาขั้นต่ำ = ส่งขออนุมัติ ไม่ใช่ออกใบ ⇒ หน้าจอต้องรู้ตัวและส่งธงนี้มาเอง
+      // (ไม่ส่ง = server ปฏิเสธด้วย NEEDS_APPROVAL แทนที่จะสร้างคำขอค้างไว้เงียบ ๆ)
+      requestApproval: req.body?.request_approval === true,
+      approvalNote: req.body?.approval_note ?? null,
+      replacesRequestId: req.body?.replaces_request_id ?? null,
     }));
   } catch (err: any) {
     sendWebQuoteError(res, 'POST /api/admin/webquote/drafts', err);
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  คิวอนุมัติราคาต่ำกว่าขั้นต่ำ — /api/admin/approvals/*  (docs/plan-quote-price-approval.md)
+//
+//  ตรรกะทั้งหมดอยู่ที่ services/priceApprovalService.ts · route ทำแค่สองอย่าง:
+//  ส่ง `req.admin` เข้าไปเป็น "คนกด" แล้วแปลง PriceApprovalError เป็น HTTP status
+//
+//  สิทธิ์: อ่านได้ทุก role ที่ออกใบได้ (แต่คนที่ไม่ใช่ผู้อนุมัติเห็นเฉพาะคำขอของตัวเอง —
+//  กติกาอยู่ในตัว service ไม่ใช่ที่นี่ เพราะมันเป็นกฎของข้อมูล ไม่ใช่ของ endpoint)
+//  ส่วนการอนุมัติ/ไม่อนุมัติจำกัดที่ชั้น requireRole อีกชั้นหนึ่ง
+// ─────────────────────────────────────────────────────────────────────────────
+
+function actorOf(req: any) {
+  return { id: req.admin.id, username: req.admin.username, name: req.admin.name, role: req.admin.role };
+}
+
+function sendApprovalError(res: any, where: string, err: any) {
+  if (err instanceof PriceApprovalError) {
+    if (err.status >= 500) console.error(`${where} error:`, err);
+    return res.status(err.status).json({ error: err.message, code: err.code });
+  }
+  console.error(`${where} error:`, err);
+  return res.status(500).json({ error: 'ระบบไม่ว่างชั่วคราว รบกวนลองใหม่อีกครั้ง' });
+}
+
+/** คิวคำขอ — `?status=pending|rejected|approved` (ไม่ส่ง = ทุกสถานะที่ยังเป็นร่าง) */
+app.get('/api/admin/approvals', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), async (req: any, res: any) => {
+  try {
+    res.json({ requests: await listApprovalRequests({ actor: actorOf(req), status: req.query?.status }) });
+  } catch (err: any) {
+    sendApprovalError(res, 'GET /api/admin/approvals', err);
+  }
+});
+
+/** ตัวเลขข้างเมนู — ผู้อนุมัติได้ "รออนุมัติกี่ชุด" · คนขอได้ "ของฉันถูกตีกลับกี่ชุด" */
+app.get('/api/admin/approvals/count', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), async (req: any, res: any) => {
+  try {
+    res.json(await countOpenRequests(actorOf(req)));
+  } catch (err: any) {
+    sendApprovalError(res, 'GET /api/admin/approvals/count', err);
+  }
+});
+
+/** รายละเอียดคำขอ 1 ชุด — รวมทุกบรรทัดของทุกใบ + ผลตรวจกฎ "สด" ณ ตอนเปิดดู */
+app.get('/api/admin/approvals/:requestId', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), async (req: any, res: any) => {
+  try {
+    res.json(await getApprovalRequest({ requestId: req.params.requestId, actor: actorOf(req) }));
+  } catch (err: any) {
+    sendApprovalError(res, 'GET /api/admin/approvals/:requestId', err);
+  }
+});
+
+/** รายการของคำขอที่ถูกตีกลับ เพื่อเปิดกลับเข้าฟอร์มขอใบเสนอราคาแล้วแก้ต่อ */
+app.get('/api/admin/approvals/:requestId/form', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), async (req: any, res: any) => {
+  try {
+    res.json(await loadRequestIntoForm({ requestId: req.params.requestId, actor: actorOf(req) }));
+  } catch (err: any) {
+    sendApprovalError(res, 'GET /api/admin/approvals/:requestId/form', err);
+  }
+});
+
+/** อนุมัติ แล้วออกใบทันที (เจ้าของเลือกไว้ — ไม่มีใบค้างเพราะคนลืมกลับมากด) */
+app.post('/api/admin/approvals/:requestId/approve', adminAuthMiddleware, requireRole('admin', 'approver'), express.json(), async (req: any, res: any) => {
+  try {
+    res.json(await approveRequest({ requestId: req.params.requestId, actor: actorOf(req), note: req.body?.note ?? null }));
+  } catch (err: any) {
+    sendApprovalError(res, 'POST /api/admin/approvals/:requestId/approve', err);
+  }
+});
+
+/** ไม่อนุมัติ — ต้องมีเหตุผลเสมอ เพราะคนที่รับใบกลับไปต้องรู้ว่าจะแก้อะไร */
+app.post('/api/admin/approvals/:requestId/reject', adminAuthMiddleware, requireRole('admin', 'approver'), express.json(), async (req: any, res: any) => {
+  try {
+    res.json(await rejectRequest({ requestId: req.params.requestId, actor: actorOf(req), reason: req.body?.reason }));
+  } catch (err: any) {
+    sendApprovalError(res, 'POST /api/admin/approvals/:requestId/reject', err);
+  }
+});
+
+/** คนขอยกเลิกคำขอของตัวเอง (หรือ admin ยกเลิกให้) — ใบกลายเป็น cancelled ด้วยกลไกเดิม */
+app.post('/api/admin/approvals/:requestId/cancel', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), express.json(), async (req: any, res: any) => {
+  try {
+    res.json(await cancelRequest({ requestId: req.params.requestId, actor: actorOf(req) }));
+  } catch (err: any) {
+    sendApprovalError(res, 'POST /api/admin/approvals/:requestId/cancel', err);
+  }
+});
+
 /** เลขที่ใบที่ยืนยันแล้ว → ร่าง revision · คืน `draft_quote_id` ให้ฟอร์มเปิดต่อในหน้าเดิม */
-app.post('/api/admin/webquote/revise', adminAuthMiddleware, requireRole('admin', 'subadmin'), express.json(), async (req: any, res: any) => {
+app.post('/api/admin/webquote/revise', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), express.json(), async (req: any, res: any) => {
   try {
     res.json(await reviseWebQuotation({
       adminId: req.admin.id,
@@ -3466,7 +3479,7 @@ const SP_CODE_SQL = `COALESCE(s.salesperson_id, q.employee_details->>'salesperso
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // --- API Endpoint: Admin Quotations List (with search, filter, pagination) ---
-app.get('/api/admin/quotations', adminAuthMiddleware, requireRole('admin', 'subadmin'), async (req: any, res: any) => {
+app.get('/api/admin/quotations', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), async (req: any, res: any) => {
   try {
     const search = req.query.search || '';
     const status = req.query.status || '';
@@ -3570,7 +3583,7 @@ app.get('/api/admin/quotations', adminAuthMiddleware, requireRole('admin', 'suba
 // และตัวกรอง exported ตั้งต้นเป็น 'no' ครั้งถัดไปจึงได้เฉพาะใบใหม่ (แอดมินถอยเครื่องหมายได้ถ้านำเข้าไม่ผ่าน)
 //
 // 1 ครั้ง = 1 บริษัท (company=qp|qt) เพราะ Odoo ของ PM กับ THT เป็นคนละระบบและใช้ชื่อภาษีคนละค่า
-app.get('/api/admin/quotations/export', adminAuthMiddleware, requireRole('admin', 'subadmin'), async (req: any, res: any) => {
+app.get('/api/admin/quotations/export', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), async (req: any, res: any) => {
   try {
     // บริษัทต้องส่งมาเสมอ ไม่มีค่าตั้งต้น — เดาผิดแปลว่าไฟล์ได้ชื่อภาษีของอีกบริษัท
     // แล้วใบชุดนั้นถูกมาร์ก "ส่งออกแล้ว" ไปเรียบร้อย กว่าจะรู้ตัวก็ตอนนำเข้า Odoo ไม่ผ่าน
@@ -3758,7 +3771,7 @@ app.get('/api/admin/quotations/export', adminAuthMiddleware, requireRole('admin'
 // --- API Endpoint: ยกเลิกเครื่องหมาย "ส่งออกแล้ว" ของใบเดียว ---
 //
 // ใช้ตอนนำเข้า Odoo ไม่ผ่าน หรือไฟล์หายระหว่างดาวน์โหลด — ใบจะกลับเข้าคิว export รอบถัดไป
-app.post('/api/admin/quotations/:id/unmark-export', adminAuthMiddleware, requireRole('admin', 'subadmin'), async (req: any, res: any) => {
+app.post('/api/admin/quotations/:id/unmark-export', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), async (req: any, res: any) => {
   try {
     const id = String(req.params.id || '').trim();
     if (!UUID_RE.test(id)) {
@@ -3782,7 +3795,7 @@ app.post('/api/admin/quotations/:id/unmark-export', adminAuthMiddleware, require
  * ตัวเลขนี้คือของสำคัญที่สุดของทั้งฟีเจอร์ — ใบกลุ่มนี้ **ไม่อยู่ในไฟล์ส่งออกปกติแล้ว**
  * ถ้าไม่มีใครเห็นยอดค้าง มันจะไม่ไปถึง Odoo เลยโดยไม่มีอะไรฟ้อง
  */
-app.get('/api/admin/quotations/manual-review-counts', adminAuthMiddleware, requireRole('admin', 'subadmin'), async (_req: any, res: any) => {
+app.get('/api/admin/quotations/manual-review-counts', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), async (_req: any, res: any) => {
   try {
     const groups = await getOdooManualReviewCounts(pool);
     res.json({ total: groups.reduce((s, g) => s + g.count, 0), groups });
@@ -3793,7 +3806,7 @@ app.get('/api/admin/quotations/manual-review-counts', adminAuthMiddleware, requi
 });
 
 // --- API Endpoint: ประวัติชุดการส่งออก Odoo ---
-app.get('/api/admin/quotations/export-batches', adminAuthMiddleware, requireRole('admin', 'subadmin'), async (req: any, res: any) => {
+app.get('/api/admin/quotations/export-batches', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), async (req: any, res: any) => {
   try {
     const limit = Math.min(parseInt(req.query.limit) || 20, 100);
     const offset = parseInt(req.query.offset) || 0;
@@ -3806,7 +3819,7 @@ app.get('/api/admin/quotations/export-batches', adminAuthMiddleware, requireRole
 });
 
 // --- API Endpoint: ยกเลิกเครื่องหมายทั้งชุด (ไฟล์ทั้งไฟล์นำเข้า Odoo ไม่ผ่าน) ---
-app.post('/api/admin/quotations/export-batches/:batchId/unmark', adminAuthMiddleware, requireRole('admin', 'subadmin'), async (req: any, res: any) => {
+app.post('/api/admin/quotations/export-batches/:batchId/unmark', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), async (req: any, res: any) => {
   try {
     const batchId = String(req.params.batchId || '').trim();
     if (!UUID_RE.test(batchId)) {

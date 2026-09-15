@@ -151,18 +151,80 @@ export function violationKey(v: Violation): string {
  */
 export const isBypassableViolation = (v: Violation): boolean => v.type !== 'SYSTEM_ERROR';
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  ชั้นที่สาม: "ทะลุได้ด้วยการอนุมัติเท่านั้น" (2026-09-15)
+//
+//  เจ้าของสั่งว่าใบจากหน้าเว็บที่ขายต่ำกว่าราคาขั้นต่ำ **คนออกใบติ๊กรับทราบเองไม่ได้**
+//  ต้องส่งให้ผู้มีสิทธิ์อนุมัติราคาให้ก่อน ⇒ กฎจึงมีสามชั้นแทนที่จะเป็นสอง:
+//
+//    ติ๊กรับทราบเองได้      — ของหมด · MOQ · สินค้าระงับ · blacklist · เครดิตค้าง
+//    ต้องมีคนอนุมัติ         — ราคาต่ำกว่าขั้นต่ำ            ← ชั้นใหม่
+//    ทะลุไม่ได้ทุกกรณี       — SYSTEM_ERROR
+//
+//  แผนเต็ม: docs/plan-quote-price-approval.md
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** กฎที่ต้องผ่านผู้อนุมัติ — เพิ่มกฎข้อใหม่เข้าคิวอนุมัติ = เติมที่นี่บรรทัดเดียว */
+export const APPROVAL_REQUIRED_TYPES: Violation['type'][] = ['MIN_PRICE_VIOLATION'];
+
+export const requiresPriceApproval = (v: Violation): boolean => APPROVAL_REQUIRED_TYPES.includes(v.type);
+
 /**
- * คัดว่าข้อไหน "ยังบล็อกอยู่" หลังหักรายการที่รับทราบไว้แล้ว — คืน [] แปลว่าออกใบต่อได้
+ * คีย์ของข้อที่ "อนุมัติไว้แล้วและยังใช้ได้อยู่" — อ่านจาก `quotations.price_approval` ของใบนั้น
+ *
+ * ⚠️ เทียบ **ราคา** ด้วย ไม่ใช่แค่ชื่อรุ่น — `violationKey()` เป็น `type|model` ที่จงใจไม่มีตัวเลข
+ *    (ไม่งั้นโมดัลเด้งซ้ำทุกครั้งที่พิมพ์) ถ้าเอาคีย์นั้นมาปลดตรง ๆ คนที่อนุมัติราคา ฿100 จะกลาย
+ *    เป็นอนุมัติ ฿10 ให้ด้วยโดยไม่มีใครรู้ · ขายแพงขึ้นกว่าที่อนุมัติไม่ต้องขอใหม่ (ปลอดภัยกว่าเดิม)
+ *    แต่ต่ำลงกว่าที่อนุมัติแม้บาทเดียว = คำขอใหม่
+ */
+export function approvedViolationKeys(priceApproval: any, current: Violation[]): string[] {
+  if (!priceApproval || priceApproval.status !== 'approved') return [];
+  const approvedPriceOf = new Map<string, number>();
+  for (const it of (Array.isArray(priceApproval.items) ? priceApproval.items : [])) {
+    const model = String(it?.model ?? '');
+    const price = Number(it?.price);
+    if (!model || !Number.isFinite(price)) continue;
+    // รุ่นเดียวกันหลายบรรทัด ⇒ ยึดราคาที่ต่ำที่สุดที่ถูกอนุมัติ (เป็นเพดานที่อนุมัติไว้จริง)
+    const prev = approvedPriceOf.get(model);
+    approvedPriceOf.set(model, prev === undefined ? price : Math.min(prev, price));
+  }
+  const keys: string[] = [];
+  for (const v of current || []) {
+    if (!requiresPriceApproval(v)) continue;
+    const approved = approvedPriceOf.get(v.model);
+    if (approved === undefined) continue;
+    // 0.005 = ครึ่งสตางค์ กันเลขทศนิยมลอยตัวปัดไม่ตรงกันระหว่าง JSON กับ numeric ของ Postgres
+    if (Number(v.price ?? 0) >= approved - 0.005) keys.push(violationKey(v));
+  }
+  return keys;
+}
+
+/**
+ * คัดว่าข้อไหน "ยังบล็อกอยู่" หลังหักรายการที่รับทราบ/อนุมัติไว้แล้ว — คืน [] แปลว่าออกใบต่อได้
  *
  * `acknowledgedKeys` มาจาก `rule_overrides.acknowledged_keys` ของใบนั้น (หรือจากสิ่งที่
  * หน้าจอส่งมาตอนสร้างร่าง) · ข้อที่ **ไม่อยู่** ในรายการคือข้อที่เพิ่งโผล่หลังคนกดรับทราบ
  * (เช่นของหมดสต็อกระหว่างทาง) ⇒ ต้องกลับไปให้คนดูใหม่ ไม่ใช่ปล่อยผ่านเพราะ "ก็กดไปแล้ว"
+ *
+ * `approvedKeys` มาจาก `approvedViolationKeys()` ของใบนั้น — **ค่าเริ่มต้นคือ `null` โดยตั้งใจ**
+ * ผู้เรียกที่ไม่ส่งค่าจึงได้ "ไม่มีใครอนุมัติ" = ราคาขั้นต่ำบล็อกเสมอ ซึ่งเป็นด้าน fail-closed
+ * และตรงกับพฤติกรรมเดิมของใบจาก LINE ทุกใบ (คอลัมน์ price_approval เป็น NULL)
  */
-export function blockingViolations(violations: Violation[], acknowledgedKeys: string[] | null): Violation[] {
+export function blockingViolations(
+  violations: Violation[],
+  acknowledgedKeys: string[] | null,
+  approvedKeys: string[] | null = null
+): Violation[] {
   const list = violations || [];
-  if (!acknowledgedKeys) return list;
-  const ack = new Set(acknowledgedKeys);
-  return list.filter((v) => !isBypassableViolation(v) || !ack.has(violationKey(v)));
+  const ack = new Set(acknowledgedKeys || []);
+  const approved = new Set(approvedKeys || []);
+  return list.filter((v) => {
+    if (!isBypassableViolation(v)) return true;
+    // ราคาขั้นต่ำ: คำรับทราบของคนออกใบไม่มีผล ต้องมาจากผู้อนุมัติเท่านั้น
+    if (requiresPriceApproval(v)) return !approved.has(violationKey(v));
+    if (!acknowledgedKeys) return true;
+    return !ack.has(violationKey(v));
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -950,8 +1012,14 @@ export async function insertDraftQuotations(
   try {
     insertedRaw = await withTransaction(async (client) => {
       if (!preserveDrafts) {
+        // ⚠️ `price_approval IS NULL` คือของใหม่ 2026-09-15 และขาดไม่ได้ — ร่างที่ "รออนุมัติราคา"
+        //    ค้างอยู่ใน DB จริงระหว่างรอคน (ต่างจากร่างปกติของหน้าเว็บที่อยู่ไม่ถึงสองวินาที)
+        //    ถ้าไม่เว้นไว้ แอดมินคนเดิมออกใบให้เซลส์คนเดิมอีกใบ = คำขอที่รออยู่หายทั้งใบเงียบ ๆ
         await client.query(
-          "DELETE FROM quotations WHERE user_id = $1 AND status IN ('pending_company', 'pending_contact', 'draft')",
+          `DELETE FROM quotations
+            WHERE user_id = $1
+              AND status IN ('pending_company', 'pending_contact', 'draft')
+              AND price_approval IS NULL`,
           [userId]
         );
       }

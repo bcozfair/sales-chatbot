@@ -72,7 +72,7 @@ CREATE TABLE public.admin_users (
     employee_quotation_id character varying(255),
     employee_quotation_phone character varying(64),
     signature_key character varying(32),
-    CONSTRAINT admin_users_role_check CHECK (role IN ('admin', 'subadmin', 'user'))
+    CONSTRAINT admin_users_role_check CHECK (role IN ('admin', 'approver', 'subadmin', 'user'))
 );
 
 
@@ -864,6 +864,11 @@ CREATE TABLE public.quotations (
     -- ⇒ นำเข้าตรง ๆ แล้วใบตก ต้องไปสร้าง/แก้ใน Odoo ก่อน ⇒ **กันออกจากไฟล์ปกติ** แล้วส่งออกจากเมนูแยก
     -- คนละเรื่องกับ rule_overrides โดยสิ้นเชิง · ใบเดียวมีได้ทั้งสองคอลัมน์
     odoo_manual_review jsonb,
+    -- ใบนี้ติดกฎ "ห้ามขายต่ำกว่าราคาขั้นต่ำ" และถูกส่งไปให้ผู้มีสิทธิ์อนุมัติราคา — คนออกใบติ๊กรับทราบ
+    -- เองไม่ได้ ต่างจาก rule_overrides ที่ใช้กับกฎข้ออื่น · `items` เก็บ **ราคาที่ถูกอนุมัติจริง**
+    -- เพราะคีย์ของกฎเป็น `type|model` ไม่มีตัวเลข ถ้าใช้คีย์เป็นตัวปลด อนุมัติ ฿100 = อนุมัติ ฿10 ด้วย
+    -- NULL = ไม่มีคำขอ (ใบจาก LINE ทุกใบ ⇒ ราคาขั้นต่ำบล็อกเหมือนเดิม)
+    price_approval jsonb,
     CONSTRAINT quotations_delivery_days_override_check CHECK (
         (delivery_days_override IS NULL)
         OR ((delivery_days_override >= 0) AND (delivery_days_override <= 3650))
@@ -1448,6 +1453,24 @@ CREATE INDEX idx_quotations_manual_review_pending ON public.quotations USING btr
 --
 
 CREATE INDEX idx_quotations_rule_overrides ON public.quotations USING btree (created_at DESC) WHERE (rule_overrides IS NOT NULL);
+
+
+--
+-- Name: idx_quotations_price_approval_pending; Type: INDEX; Schema: public; Owner: -
+--
+-- หน้าคิวอนุมัติราคา = "ใบที่มีคำขอ" ซึ่งเป็นส่วนน้อยมากของตาราง
+--
+
+CREATE INDEX idx_quotations_price_approval_pending ON public.quotations USING btree (created_at DESC) WHERE (price_approval IS NOT NULL);
+
+
+--
+-- Name: idx_quotations_price_approval_request; Type: INDEX; Schema: public; Owner: -
+--
+-- เปิด/อนุมัติ "ทั้งชุด" ด้วย request_id เดียว (ใบในชุดเดียวกันมีได้ 2 ใบ: PM/THT)
+--
+
+CREATE INDEX idx_quotations_price_approval_request ON public.quotations USING btree (((price_approval ->> 'request_id'::text))) WHERE (price_approval IS NOT NULL);
 
 
 --

@@ -53,14 +53,20 @@
 
 ```ts
 // config/auth.ts (backend) และ frontend/src/context/AuthContext.tsx (frontend) — ต้องตรงกันเสมอ
-export type Role = 'admin' | 'subadmin' | 'user';
+export type Role = 'admin' | 'approver' | 'subadmin' | 'user';
 ```
 
 | role | เมนูที่เข้าได้ |
 | --- | --- |
 | `admin` | ทุกเมนู รวมถึงจัดการผู้ใช้และกลุ่ม "ตั้งค่าเงื่อนไข & กฎ" |
-| `subadmin` | ประวัติใบเสนอราคา (ดู/กรอง/ส่งออก Odoo/ถอยเครื่องหมายส่งออก) |
+| `approver` | ทุกอย่างของ `subadmin` **บวก** อนุมัติราคาต่ำกว่าขั้นต่ำ (เมนู "อนุมัติราคา") |
+| `subadmin` | ขอใบเสนอราคา · ประวัติใบเสนอราคา (ดู/กรอง/ส่งออก Odoo/ถอยเครื่องหมายส่งออก) · เห็นคำขออนุมัติ **ของตัวเอง** |
 | `user` | บัญชีห้ามเสนอราคา |
+
+> `approver` เพิ่มเมื่อ 2026-09-15 ตาม [`plan-quote-price-approval.md`](plan-quote-price-approval.md)
+> — migration [`2026-09-15_02_quotations_price_approval.sql`](../migrations/changes/2026-09-15_02_quotations_price_approval.sql)
+> **ต้องรันก่อน deploy โค้ดเสมอ** ไม่งั้นการเลือกสิทธิ์นี้ในหน้าจัดการผู้ใช้จะโดน CHECK ปฏิเสธเป็น 500
+> · กติกาที่ไม่อยู่ในตาราง: **`approver` อนุมัติใบที่ตัวเองเป็นคนขอไม่ได้** (403) ส่วน `admin` อนุมัติได้ทุกใบ
 
 เก็บ type ไว้คู่กับ `requireRole` ใน `config/auth.ts` แทนการแยกไฟล์ `permissions.ts` ตามที่เคยร่างไว้ — มีแค่ type เดียว ไม่คุ้มกับไฟล์ใหม่
 ฝั่ง DB มี CHECK constraint `admin_users_role_check` เป็นด่านสุดท้าย ใส่ค่าอื่นไม่ผ่านแม้จะเลี่ยง API ได้
