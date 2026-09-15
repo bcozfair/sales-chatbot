@@ -1,9 +1,10 @@
 import React from 'react';
-import { Activity, BarChart3, History, Terminal } from 'lucide-react';
+import { Activity, BarChart3, DatabaseBackup, History, Terminal } from 'lucide-react';
 import { Traffic } from './Traffic';
 import { ApiLogs } from '../ApiLogs';
 import { AuditLogs } from './AuditLogs';
 import { SystemLogs } from './SystemLogs';
+import { BackupReport } from './BackupReport';
 
 /**
  * กรอบร่วมของกลุ่ม "บันทึกและรายงาน" — แถบแท็บ + หน้าที่กำลังเปิด
@@ -17,13 +18,14 @@ import { SystemLogs } from './SystemLogs';
  * สถานะจริงยังอยู่ที่ activeTab ของ AdminApp ที่เดียว ไม่มี state ซ้อนให้หลุดจากกัน
  */
 
-export type LogTab = 'traffic' | 'apilogs' | 'auditlogs' | 'systemlogs';
+export type LogTab = 'traffic' | 'apilogs' | 'auditlogs' | 'systemlogs' | 'backups';
 
 const TABS: { key: LogTab; label: string; icon: React.ElementType }[] = [
   { key: 'traffic', label: 'รายงานการใช้งาน', icon: BarChart3 },
   { key: 'apilogs', label: 'บันทึกการเรียก API', icon: Activity },
   { key: 'auditlogs', label: 'บันทึกการแก้ไข', icon: History },
   { key: 'systemlogs', label: 'บันทึกระบบ', icon: Terminal },
+  { key: 'backups', label: 'การสำรองข้อมูล', icon: DatabaseBackup },
 ];
 
 export const LogsShell: React.FC<{ tab: LogTab; onTab: (t: LogTab) => void }> = ({ tab, onTab }) => (
@@ -57,5 +59,6 @@ export const LogsShell: React.FC<{ tab: LogTab; onTab: (t: LogTab) => void }> = 
     {tab === 'apilogs' && <ApiLogs />}
     {tab === 'auditlogs' && <AuditLogs />}
     {tab === 'systemlogs' && <SystemLogs />}
+    {tab === 'backups' && <BackupReport />}
   </div>
 );

@@ -79,13 +79,14 @@ const NAV_ITEMS: { key: MainTab; label: string; icon: typeof LayoutDashboard; ro
 ];
 
 /**
- * กลุ่ม "Activity Log" — 4 หน้าที่ตอบคนละคำถามแต่ใช้ request_id ตัวเดียวกันโยงถึงกันได้
+ * กลุ่ม "Activity Log" — 5 หน้าที่ตอบคนละคำถาม (4 หน้าแรกโยงกันด้วย request_id ตัวเดียวกัน
+ * ส่วน "การสำรองข้อมูล" ไม่มี request_id เพราะคนเขียนคือ cron บน host ไม่ใช่แอป)
  *
  * เมนูข้างซ้ายเป็น "ปุ่มเดียว" ไม่มีเมนูย่อยพับได้อีกแล้ว — การสลับระหว่าง 4 หน้าอยู่ที่
  * แถบแท็บใน LogsShell ที่เดียว · เมนูย่อยกับแท็บที่ทำงานซ้ำกันคือการให้ผู้ใช้ต้องจำสองทาง
  * ไปที่เดียวกัน และทำให้ sidebar ยาวขึ้นโดยไม่ได้อะไรกลับมา
  */
-const LOG_TABS = new Set<MainTab>(['traffic', 'apilogs', 'auditlogs', 'systemlogs']);
+const LOG_TABS = new Set<MainTab>(['traffic', 'apilogs', 'auditlogs', 'systemlogs', 'backups']);
 
 /** แท็บที่เปิดให้เมื่อกดเมนูครั้งแรก — ตรงกับแท็บซ้ายสุดใน LogsShell */
 const LOG_TAB_DEFAULT: MainTab = 'traffic';
@@ -112,6 +113,7 @@ const PAGE_TITLES: Record<MainTab, string> = {
   apilogs: 'บันทึกการเรียก API',
   auditlogs: 'บันทึกการแก้ไข',
   systemlogs: 'บันทึกระบบ',
+  backups: 'การสำรองข้อมูล',
   settings: 'ตั้งค่าเงื่อนไข & กฎ',
 };
 

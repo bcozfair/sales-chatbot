@@ -153,6 +153,44 @@ ALTER SEQUENCE public.api_logs_id_seq OWNED BY public.api_logs.id;
 
 
 --
+-- Name: backup_runs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.backup_runs (
+    id bigint NOT NULL,
+    started_at timestamp with time zone NOT NULL,
+    finished_at timestamp with time zone DEFAULT now() NOT NULL,
+    status text NOT NULL,
+    file_name text,
+    size_bytes bigint,
+    toc_entries integer,
+    duration_ms integer,
+    free_mb_after integer,
+    kept_files integer,
+    message text
+);
+
+
+--
+-- Name: backup_runs_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.backup_runs_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: backup_runs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.backup_runs_id_seq OWNED BY public.backup_runs.id;
+
+
+--
 -- Name: customers; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1095,6 +1133,13 @@ ALTER TABLE ONLY public.api_logs ALTER COLUMN id SET DEFAULT nextval('public.api
 
 
 --
+-- Name: backup_runs id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.backup_runs ALTER COLUMN id SET DEFAULT nextval('public.backup_runs_id_seq'::regclass);
+
+
+--
 -- Name: product_optional_links id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -1144,6 +1189,14 @@ ALTER TABLE ONLY public.admin_users
 
 ALTER TABLE ONLY public.api_logs
     ADD CONSTRAINT api_logs_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: backup_runs backup_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.backup_runs
+    ADD CONSTRAINT backup_runs_pkey PRIMARY KEY (id);
 
 
 --
@@ -1280,6 +1333,13 @@ ALTER TABLE ONLY public.shipping_fee_config
 
 ALTER TABLE ONLY public.sync_state
     ADD CONSTRAINT sync_state_pkey PRIMARY KEY (resource);
+
+
+--
+-- Name: idx_backup_runs_finished_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_backup_runs_finished_at ON public.backup_runs USING btree (finished_at DESC);
 
 
 --

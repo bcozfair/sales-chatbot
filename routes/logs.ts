@@ -9,6 +9,7 @@ import {
   listAuditLogs, countAuditLogs, getAuditLogById, getAuditFacets,
   listSystemLogs, countSystemLogs, getSystemLogFacets,
   getRequestTimeline, getWorkerStatus, recordLogAccess,
+  getBackupSummary, listBackupRuns, countBackupRuns,
   type Granularity,
 } from '../db/logRepositories.js';
 
@@ -210,6 +211,33 @@ logsRouter.get('/system', safe('GET /system', async (req, res) => {
 /** สถานะงานเบื้องหลัง — หน้า "บันทึกระบบ" แสดงแถบเตือนเมื่อ stale = true */
 logsRouter.get('/worker-status', safe('GET /worker-status', async (_req, res) => {
   res.json({ data: await getWorkerStatus() });
+}));
+
+// ── การสำรองฐานข้อมูลอัตโนมัติ ───────────────────────────────────────────────
+
+/**
+ * รายงานของ scripts/backup/autoBackup.sh (cron บน host ตี 3)
+ *
+ * ⚠️ ตารางยังไม่มีในฐาน = ยังไม่ได้รัน migration ไม่ใช่ระบบพัง ⇒ ตอบ `installed: false`
+ *   ให้หน้าเว็บบอกวิธีติดตั้งได้ แทนที่จะขึ้น 500 ให้คนเดาเอง — โค้ดขึ้น server ก่อน migration
+ *   เป็นเรื่องปกติของที่นี่ (เกิดจริง 2026-09-15: คอลัมน์ admin_users ค้างไม่ได้รัน 6 วัน)
+ */
+logsRouter.get('/backups', safe('GET /backups', async (req, res) => {
+  const limit = Math.min(Math.max(Number(req.query.limit) || 30, 1), 200);
+  const offset = Math.max(Number(req.query.offset) || 0, 0);
+  try {
+    const [summary, data, total] = await Promise.all([
+      getBackupSummary(), listBackupRuns(limit, offset), countBackupRuns(),
+    ]);
+    audit(req, 'log.view', 'backup_run');
+    res.json({ installed: true, summary, data, total, limit, offset });
+  } catch (err: any) {
+    if (err?.code === '42P01') {           // undefined_table
+      res.json({ installed: false, summary: null, data: [], total: 0, limit, offset });
+      return;
+    }
+    throw err;
+  }
 }));
 
 // ── ตามรอย request เดียวข้ามทุกตาราง ────────────────────────────────────────

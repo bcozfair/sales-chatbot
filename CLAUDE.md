@@ -100,7 +100,7 @@ npm --prefix frontend run build    # typecheck + build admin (ผลลง publi
 
 npm run sync:products · sync:customers · sync:saleorders   # ดึงจาก Odoo
 npm run db:dump · db:restore                               # ถ่ายฐานข้อมูลด้วยมือ (ต้องมี pg_dump บน host)
-npm run backup:auto · backup:cron · diag:backup            # สำรองอัตโนมัติ (cron ตี 3 เก็บ 7 ชุด) — runbook ใน DEPLOY.md
+npm run backup:auto · backup:cron · diag:backup            # สำรองอัตโนมัติ (cron ตี 3 เก็บ 7 ชุด · รายงานอยู่ในแอดมิน) — runbook ใน DEPLOY.md
 tsx scripts/runMigration.ts                                # รัน migration ที่ยังไม่ได้รัน
 npm run diag:migrations                                    # ไล่เทียบ migrations/changes/ กับฐานจริง (รันบน host)
 npm run backfill:contacts · backfill:delivery-terms · backfill:print-snapshot

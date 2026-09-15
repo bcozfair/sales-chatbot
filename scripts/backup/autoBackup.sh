@@ -49,7 +49,45 @@ log() {
 
 die() {
   log "ล้มเหลว: $*"
+  record_run failed "$*"
   exit 1
+}
+
+# ── บันทึกผลของรอบนี้ลงตาราง backup_runs — สำหรับหน้า "การสำรองข้อมูล" ในแอดมิน ─
+#
+# ⚠️ ห้ามทำให้สคริปต์ล้มไม่ว่ากรณีใด (เหตุผลเดียวกับ recordLogAccess ใน db/logRepositories.ts):
+#   การบันทึกว่า "เกิดอะไรขึ้น" ต้องไม่มีวันทำให้สิ่งที่มันบันทึกล้มเหลว — ฐานล่ม ตารางยังไม่ถูก
+#   สร้าง (ยังไม่ได้รัน migration) หรือ psql หาย ⇒ แค่ไม่มีแถวในรายงาน ไฟล์สำรองยังได้เหมือนเดิม
+#   และ backup/autobackup.log ยังเป็นแหล่งความจริงสำรองอยู่
+#
+# ค่าที่ส่งไปใช้ `:'ตัวแปร'` ของ psql ซึ่ง quote ให้เองอย่างปลอดภัย ⇒ ข้อความไทยที่มี
+# อัญประกาศหรือ % ไม่ทำ SQL พัง · ตัวเลขที่ยังไม่มีค่าส่งเป็นค่าว่างแล้วให้ NULLIF แปลงเป็น NULL
+#
+# ⚠️ SQL ต้องส่งทาง **stdin** ไม่ใช่ `psql -c` — `-c` ไม่ขยายตัวแปรของ psql เลย
+#   (วัด 2026-09-15: `-c` ที่มี :'started' ตอบ `syntax error at or near ":"`) และความล้มเหลว
+#   นั้นเงียบสนิทเพราะฟังก์ชันนี้กลืน error ตามเจตนา ⇒ จะเห็นแค่ "รายงานไม่มีแถว" เท่านั้น
+RUN_FILE='' RUN_SIZE='' RUN_TOC='' RUN_FREE='' RUN_KEPT=''
+START_EPOCH="$(date +%s)"
+START_ISO="$(date --iso-8601=seconds)"
+RUN_RECORDED=0
+
+record_run() {
+  [ "$RUN_RECORDED" = 1 ] && return 0      # กันบันทึกซ้ำเมื่อ die ถูกเรียกซ้อน
+  [ -n "${PG_USER:-}" ] && [ -n "${PG_DATABASE:-}" ] || return 0
+  RUN_RECORDED=1
+  local status="$1" message="${2:-}"
+  local dur=$(( ($(date +%s) - START_EPOCH) * 1000 ))
+  printf '%s' \
+    "INSERT INTO backup_runs
+       (started_at, status, file_name, size_bytes, toc_entries, duration_ms, free_mb_after, kept_files, message)
+     VALUES (:'started'::timestamptz, :'status', NULLIF(:'file',''), NULLIF(:'size','')::bigint,
+             NULLIF(:'toc','')::int, NULLIF(:'dur','')::int, NULLIF(:'free','')::int,
+             NULLIF(:'kept','')::int, NULLIF(:'msg',''));" \
+  | docker compose exec -T db psql -U "$PG_USER" -d "$PG_DATABASE" -q -v ON_ERROR_STOP=1 \
+      -v started="$START_ISO" -v status="$status" -v msg="$message" -v file="$RUN_FILE" \
+      -v size="$RUN_SIZE" -v toc="$RUN_TOC" -v dur="$dur" -v free="$RUN_FREE" -v kept="$RUN_KEPT" \
+      >/dev/null 2>&1 \
+    || log "หมายเหตุ: บันทึกผลลงตาราง backup_runs ไม่สำเร็จ (ไฟล์สำรองไม่กระทบ)"
 }
 
 # หมุน log ก่อนเขียนบรรทัดแรกของรอบนี้
@@ -57,17 +95,11 @@ if [ -f "$LOG_FILE" ] && [ "$(stat -c%s "$LOG_FILE")" -gt "$LOG_MAX_BYTES" ]; th
   mv -f "$LOG_FILE" "$LOG_FILE.1"
 fi
 
-# กันรันซ้อน: รอบก่อนยังไม่จบ (ดิสก์ช้า/DB ยุ่ง) แล้ว cron รอบใหม่มาถึง = ออกเงียบ ๆ
-exec 9>"$BACKUP_DIR/.autobackup.lock"
-if ! flock -n 9; then
-  log "ข้ามรอบนี้ — มี autobackup ตัวอื่นทำงานอยู่"
-  exit 0
-fi
-
 cd "$PROJECT_DIR" || die "เข้า $PROJECT_DIR ไม่ได้"
 
 # ── อ่านค่าจาก .env แบบเจาะทีละตัว ไม่ source ทั้งไฟล์ ─────────────────────────
 # source ทั้งไฟล์จะรันทุกบรรทัดใน .env (มี prompt หลายบรรทัดและอักขระพิเศษ) เป็นคำสั่ง shell
+# อ่านก่อนคว้า lock เพราะรอบที่ถูกข้ามก็ต้องบันทึกลงรายงานได้ (ต้องรู้ชื่อฐานก่อน)
 env_get() {
   grep -m1 "^$1=" "$PROJECT_DIR/.env" 2>/dev/null | cut -d= -f2- | tr -d '\r'
 }
@@ -77,6 +109,14 @@ PG_DATABASE="$(env_get PG_DATABASE)"
 [ -n "$PG_USER" ]     || die "ไม่พบ PG_USER ใน $PROJECT_DIR/.env"
 [ -n "$PG_DATABASE" ] || die "ไม่พบ PG_DATABASE ใน $PROJECT_DIR/.env"
 
+# กันรันซ้อน: รอบก่อนยังไม่จบ (ดิสก์ช้า/DB ยุ่ง) แล้ว cron รอบใหม่มาถึง = ออกเงียบ ๆ
+exec 9>"$BACKUP_DIR/.autobackup.lock"
+if ! flock -n 9; then
+  log "ข้ามรอบนี้ — มี autobackup ตัวอื่นทำงานอยู่"
+  record_run skipped "มี autobackup ตัวอื่นทำงานอยู่"
+  exit 0
+fi
+
 # ── container db ต้องขึ้นอยู่จริง ────────────────────────────────────────────
 if ! docker compose ps --status running --services 2>/dev/null | grep -qx db; then
   die "container db ไม่ได้รันอยู่ — ยังไม่ได้ดัมป์อะไรทั้งนั้น"
@@ -84,6 +124,7 @@ fi
 
 # ── ที่ว่างบน host ต้องพอ ────────────────────────────────────────────────────
 free_mb="$(df -Pm "$BACKUP_DIR" | awk 'NR==2 {print $4}')"
+RUN_FREE="$free_mb"
 if [ "${free_mb:-0}" -lt "$MIN_FREE_MB" ]; then
   die "ที่ว่างเหลือ ${free_mb}MB ต่ำกว่าเกณฑ์ ${MIN_FREE_MB}MB — ไม่ดัมป์ (ลบไฟล์เก่าหรือขยายดิสก์ก่อน)"
 fi
@@ -124,6 +165,7 @@ toc_entries="$(docker compose exec -T db pg_restore --list "$IN_BOX" 2>/dev/null
 if [ "${toc_entries:-0}" -lt 1 ]; then
   die "ไฟล์ที่ได้อ่าน TOC ไม่ออก (pg_restore --list ว่าง) — ทิ้งไฟล์รอบนี้ ของเก่ายังอยู่ครบ"
 fi
+RUN_TOC="$toc_entries"
 
 # ── 3. ผ่านแล้วค่อยออกมาอยู่บน host ─────────────────────────────────────────
 if ! docker compose cp "db:$IN_BOX" "$PART" >/dev/null 2>>"$LOG_FILE"; then
@@ -141,6 +183,8 @@ if ! mv -f "$PART" "$BACKUP_DIR/$NAME"; then
   die "ตั้งชื่อไฟล์ปลายทางไม่สำเร็จ — ของเก่ายังอยู่ครบ"
 fi
 
+RUN_FILE="$NAME"
+RUN_SIZE="$(stat -c%s "$BACKUP_DIR/$NAME")"
 log "สำเร็จ: $NAME (${size_mb}MB · $toc_entries รายการใน TOC)"
 
 # ── 4. เก็บของเก่า — เฉพาะไฟล์ที่สคริปต์นี้สร้างเอง ──────────────────────────
@@ -156,3 +200,9 @@ done
 kept="$(ls -1 "$BACKUP_DIR/$PREFIX"*.dump 2>/dev/null | wc -l)"
 free_after="$(df -Pm "$BACKUP_DIR" | awk 'NR==2 {print $4}')"
 log "จบรอบ — มี $kept ไฟล์อัตโนมัติใน backup/ · ที่ว่างเหลือ ${free_after}MB"
+
+RUN_KEPT="$kept"
+RUN_FREE="$free_after"
+removed=${#old_files[@]}
+[ -z "${old_files[0]:-}" ] && removed=0
+record_run success "$([ "$removed" -gt 0 ] && echo "ลบของเก่า $removed ชุด" || echo "")"

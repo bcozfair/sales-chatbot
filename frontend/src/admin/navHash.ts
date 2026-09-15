@@ -20,8 +20,8 @@ import { readHash } from './logs/useHashState';
 
 export type MainTab =
   | 'dashboard' | 'quoterequest' | 'approvals' | 'quotations' | 'salespersons' | 'promotions' | 'users' | 'blacklist'
-  // กลุ่ม "บันทึกและรายงาน" — 4 หน้าที่อยู่ใต้หัวข้อพับได้อันเดียวกัน
-  | 'traffic' | 'apilogs' | 'auditlogs' | 'systemlogs'
+  // กลุ่ม "บันทึกและรายงาน" — 5 หน้าที่อยู่ใต้หัวข้อพับได้อันเดียวกัน
+  | 'traffic' | 'apilogs' | 'auditlogs' | 'systemlogs' | 'backups'
   | 'settings';
 
 export type SubTab = 'quotation' | 'optional' | 'stock' | 'moq' | 'block' | 'shipping';
@@ -54,6 +54,7 @@ export const TAB_SLUG: Record<MainTab, string> = {
   apilogs: 'apilogs',
   auditlogs: 'audit',
   systemlogs: 'system',
+  backups: 'backups',
   settings: 'settings',
 };
 
