@@ -101,12 +101,14 @@ npm --prefix frontend run build    # typecheck + build admin (ผลลง publi
 npm run sync:products · sync:customers · sync:saleorders   # ดึงจาก Odoo
 npm run db:dump · db:restore                               # ถ่ายฐานข้อมูล
 tsx scripts/runMigration.ts                                # รัน migration ที่ยังไม่ได้รัน
+npm run diag:migrations                                    # ไล่เทียบ migrations/changes/ กับฐานจริง (รันบน host)
 npm run backfill:contacts · backfill:delivery-terms · backfill:print-snapshot
 npm run logworker                                          # worker เขียน log แยกโปรเซส
 ```
 
 `npm test` เป็น stub (`exit 1`) โดยตั้งใจ — **ด่านตรวจของโปรเจคนี้คือ typecheck + `scripts/diag/*`**
-(46 ไฟล์ · 30+ npm script) ดูรายการเต็มใน `package.json` และดูว่าตัวไหนเป็น gate ใน `AGENTS.md` ข้อ 6
+(วัด 2026-09-15: 48 รายการใน `scripts/diag/` · 30+ npm script) ดูรายการเต็มใน `package.json`
+และดูว่าตัวไหนเป็น gate ใน `AGENTS.md` ข้อ 6
 
 ---
 
@@ -272,8 +274,11 @@ npm run logworker                                          # worker เขีย
 - **ห้าม `COMMENT ON` (COLUMN/TABLE/VIEW/INDEX)** ใน migration หรือยิงเข้า DB เว้นแต่ผู้ใช้สั่งเอง —
   อธิบายด้วย `--` ในไฟล์ migration แทน
 
-- **migration ใหม่ต้องยุบเข้า `migrations/schema.sql` ด้วย** (47 ไฟล์ใน `migrations/changes/`
-  ณ 2026-09-12) ไม่งั้น schema เต็มจะค่อย ๆ ล้าสมัยจนตั้ง DB ใหม่จากศูนย์ไม่ได้ — วิธีตรวจอยู่หัวไฟล์
+- **migration ใหม่ต้องยุบเข้า `migrations/schema.sql` ด้วย** (49 ไฟล์ใน `migrations/changes/`
+  ณ 2026-09-15) ไม่งั้น schema เต็มจะค่อย ๆ ล้าสมัยจนตั้ง DB ใหม่จากศูนย์ไม่ได้ — วิธีตรวจอยู่หัวไฟล์
+  **และ "อยู่ใน repo" ไม่ได้แปลว่า "ลงฐาน prod แล้ว"** — `npm run diag:migrations` คือตัวที่ตอบ
+  คำถามหลัง (เกิดจริง 2026-09-15: คอลัมน์ของ `admin_users` ค้างไม่ได้รันมา 6 วัน หน้าเว็บขอ
+  ใบเสนอราคาจึงขึ้น "โหลดข้อมูลผู้เสนอราคาไม่สำเร็จ" ทั้งที่โค้ดกับไฟล์ migration ขึ้น server ครบแล้ว)
 
 ---
 
