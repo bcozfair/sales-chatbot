@@ -15,7 +15,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, BadgeCheck, Ban, CheckCircle2, ChevronDown, ChevronUp,
-  FileText, Pencil, RotateCcw, Send, XCircle,
+  FileText, Pencil, RotateCcw, Save, Send, XCircle,
 } from 'lucide-react';
 import { useAuth, type Role } from '../context/AuthContext';
 import { PageHeader } from './PageHeader';
@@ -55,6 +55,27 @@ interface ApprovalRequest {
   line_count: number;
 }
 
+/** บรรทัดในใบตามที่ enrichQuotationData คืนมา — ใช้เฉพาะฟิลด์ที่จอนี้ต้องแสดง/แก้ */
+interface DetailItem {
+  model: string;
+  name: string;
+  quantity: number;
+  price: number;
+  discount_1: number;
+  discount_2: number;
+  is_optional?: boolean;
+  is_shipping_fee?: boolean;
+  is_manual_service?: boolean;
+}
+
+interface ApprovalDetail extends ApprovalRequest {
+  quotes: { id: string; company: 'PM' | 'THT'; total_sum: number; items: DetailItem[] }[];
+  current_violations: { type: string; model: string; display_message: string }[];
+}
+
+/** ตัวเลขที่กำลังพิมพ์อยู่ — เก็บเป็นสตริงเพื่อให้ลบทั้งช่องแล้วพิมพ์ใหม่ได้ ไม่เด้งเป็น 0 ทันที */
+type LineDraft = { quantity: string; price: string; discount_1: string; discount_2: string };
+
 const money = (n: number) =>
   Number(n || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -79,6 +100,59 @@ const STATUS_BADGE: Record<ApprovalStatus, { label: string; className: string }>
 
 const canDecide = (role: Role) => role === 'admin' || role === 'approver';
 
+/**
+ * บรรทัดที่คนแก้ตัวเลขได้ — บรรทัดที่ "กฎ" เป็นคนเติม (สินค้าพ่วง · ค่าบริการอัตโนมัติ)
+ * ถูกคำนวณใหม่ทุกครั้งที่บันทึก ให้แก้ไปก็ถูกเขียนทับอยู่ดี · กติกาเดียวกับฝั่ง server
+ */
+const isEditableLine = (it: DetailItem) =>
+  !it.is_optional && (!it.is_shipping_fee || it.is_manual_service === true);
+
+const initialDrafts = (d: ApprovalDetail): Record<string, LineDraft> => {
+  const out: Record<string, LineDraft> = {};
+  for (const q of d.quotes ?? []) {
+    (q.items ?? []).forEach((it, index) => {
+      out[`${q.id}:${index}`] = {
+        quantity: String(it.quantity ?? 0),
+        price: String(it.price ?? 0),
+        discount_1: String(it.discount_1 ?? 0),
+        discount_2: String(it.discount_2 ?? 0),
+      };
+    });
+  }
+  return out;
+};
+
+/**
+ * มีตัวเลขที่พิมพ์ค้างแต่ยังไม่กดบันทึกไหม
+ *
+ * ต้องรู้ เพราะปุ่ม "อนุมัติและออกใบ" ออกใบจาก **ของที่อยู่ในฐาน** ไม่ใช่ของที่อยู่บนจอ —
+ * ถ้าปล่อยให้กดได้ ตัวเลขที่เพิ่งพิมพ์จะหายเงียบ ๆ แล้วใบออกไปด้วยราคาเดิม
+ */
+const hasUnsaved = (d: ApprovalDetail | null, drafts: Record<string, LineDraft>): boolean => {
+  if (!d) return false;
+  for (const q of d.quotes ?? []) {
+    for (let i = 0; i < (q.items ?? []).length; i++) {
+      const it = q.items[i];
+      const draft = drafts[`${q.id}:${i}`];
+      if (!draft) continue;
+      if (Number(draft.quantity) !== Number(it.quantity)) return true;
+      if (Number(draft.price) !== Number(it.price)) return true;
+      if (Number(draft.discount_1) !== Number(it.discount_1)) return true;
+      if (Number(draft.discount_2) !== Number(it.discount_2)) return true;
+    }
+  }
+  return false;
+};
+
+/** ยอดของบรรทัดตามตัวเลขที่กำลังพิมพ์อยู่ — ให้เห็นผลก่อนกดบันทึก (server คิดใหม่อยู่ดี) */
+const lineTotal = (d: LineDraft | undefined, it: DetailItem): number => {
+  const qty = Number(d?.quantity ?? it.quantity) || 0;
+  const price = Number(d?.price ?? it.price) || 0;
+  const d1 = Number(d?.discount_1 ?? it.discount_1) || 0;
+  const d2 = Number(d?.discount_2 ?? it.discount_2) || 0;
+  return qty * price * (1 - d1 / 100) * (1 - d2 / 100);
+};
+
 export const PriceApprovals: React.FC = () => {
   const { token, user } = useAuth();
   const role = (user?.role ?? 'user') as Role;
@@ -94,6 +168,12 @@ export const PriceApprovals: React.FC = () => {
   const [rejecting, setRejecting] = useState<ApprovalRequest | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [issued, setIssued] = useState<{ quotation_no: string; pdf_link: string }[]>([]);
+  /** รายละเอียดของคำขอที่กางอยู่ — โหลดตอนกางเท่านั้น คิวยาว ๆ จะได้ไม่ยิงทีเดียวทั้งหน้า */
+  const [detail, setDetail] = useState<ApprovalDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  /** ตัวเลขที่ผู้อนุมัติกำลังแก้ · คีย์ = `<quote_id>:<index ของบรรทัด>` */
+  const [drafts, setDrafts] = useState<Record<string, LineDraft>>({});
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
@@ -151,6 +231,78 @@ export const PriceApprovals: React.FC = () => {
       return data;
     } finally {
       setBusyId(null);
+    }
+  };
+
+  /** กาง/ยุบคำขอ — กางเมื่อไหร่ถึงค่อยโหลดรายละเอียด (คิวยาวไม่ควรยิงทั้งหน้าเผื่อไว้) */
+  const toggleOpen = async (req: ApprovalRequest) => {
+    if (openId === req.request_id) {
+      setOpenId(null);
+      setDetail(null);
+      setDrafts({});
+      return;
+    }
+    setOpenId(req.request_id);
+    setDetail(null);
+    setDrafts({});
+    setDetailLoading(true);
+    try {
+      const res = await fetch(`/api/admin/approvals/${req.request_id}`, { headers: authHeaders });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(String(data?.error || 'เปิดรายละเอียดไม่สำเร็จ'));
+      setDetail(data as ApprovalDetail);
+      setDrafts(initialDrafts(data as ApprovalDetail));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'เปิดรายละเอียดไม่สำเร็จ');
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  /** บันทึกตัวเลขที่ผู้อนุมัติแก้ — server ตรวจกฎใหม่ทั้งใบ ไม่ใช่เชื่อค่าที่ส่งมา */
+  const saveEdits = async () => {
+    if (!detail) return;
+    setSavingEdit(true);
+    setError('');
+    try {
+      const payload = {
+        quotes: detail.quotes.map((q) => ({
+          quote_id: q.id,
+          items: q.items
+            .map((it, index) => ({ it, index }))
+            .filter(({ it }) => isEditableLine(it))
+            .map(({ it, index }) => {
+              const d = drafts[`${q.id}:${index}`];
+              return {
+                index,
+                model: it.model,
+                quantity: Number(d?.quantity ?? it.quantity),
+                price: Number(d?.price ?? it.price),
+                discount_1: Number(d?.discount_1 ?? it.discount_1),
+                discount_2: Number(d?.discount_2 ?? it.discount_2),
+              };
+            }),
+        })),
+      };
+      const res = await fetch(`/api/admin/approvals/${detail.request_id}/items`, {
+        method: 'PUT',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(String(data?.error || 'บันทึกการแก้ไขไม่สำเร็จ'));
+      // โหลดของจริงกลับมาใหม่ทั้งชุด — ค่าบริการอัตโนมัติและยอดรวมถูกคิดใหม่ฝั่ง server
+      const fresh = await fetch(`/api/admin/approvals/${detail.request_id}`, { headers: authHeaders });
+      if (fresh.ok) {
+        const d = (await fresh.json()) as ApprovalDetail;
+        setDetail(d);
+        setDrafts(initialDrafts(d));
+      }
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'บันทึกการแก้ไขไม่สำเร็จ');
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -229,7 +381,7 @@ export const PriceApprovals: React.FC = () => {
         icon={BadgeCheck}
         title="อนุมัติราคา"
         description={decider
-          ? 'คำขอขายต่ำกว่าราคาขั้นต่ำ — อนุมัติแล้วระบบจะออกใบเสนอราคาให้ทันที'
+          ? 'คำขอขายต่ำกว่าราคาขั้นต่ำ — แก้ตัวเลขเองได้ก่อนอนุมัติ · อนุมัติแล้วระบบออกใบให้ทันที'
           : 'คำขอขายต่ำกว่าราคาขั้นต่ำของคุณ — รอผู้อนุมัติตัดสิน'}
       >
         <Button variant="neutral" tone="soft" icon={RotateCcw} onClick={() => void load()}>
@@ -291,8 +443,13 @@ export const PriceApprovals: React.FC = () => {
               const badge = STATUS_BADGE[req.status];
               const busy = busyId === req.request_id;
               const mine = req.requested_by_id === user?.id;
-              // §3.4 ของแผน — approver อนุมัติใบที่ตัวเองขอไม่ได้ · admin ได้
-              const selfBlocked = decider && role !== 'admin' && mine;
+              /**
+               * ผู้อนุมัติแก้ตัวเลขในร่างได้เองเฉพาะตอนที่คำขอยังรออยู่ — คำขอที่ตัดสินไปแล้ว
+               * ใบอาจออกเลขไปแล้ว (แก้ไม่ได้อยู่ดี) หรือกำลังรอผู้ขอแก้ ซึ่งเป็นคิวของเขา
+               */
+              const canEdit = decider && req.status === 'pending';
+              /** พิมพ์ค้างไว้แต่ยังไม่บันทึก — ห้ามให้กดอนุมัติทับ ไม่งั้นตัวเลขที่พิมพ์หายเงียบ ๆ */
+              const unsaved = open && detail?.request_id === req.request_id && hasUnsaved(detail, drafts);
               return (
                 <div key={req.request_id} className="px-4 py-3 space-y-2.5">
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
@@ -304,6 +461,12 @@ export const PriceApprovals: React.FC = () => {
                     <span className="text-xs text-slate-400">
                       ต่ำกว่าขั้นต่ำ {req.items.length} จาก {req.line_count} รายการ
                     </span>
+                    {/* ตัวเลขที่ผู้อนุมัติดูก่อนอย่างอื่นเสมอ — ห่างจากขั้นต่ำมากที่สุดกี่เปอร์เซ็นต์ */}
+                    {req.items.length > 0 && (
+                      <span className="text-xs font-semibold text-red-700 tabular-nums">
+                        ต่ำสุด -{Math.max(...req.items.map(gapPct)).toFixed(1)}%
+                      </span>
+                    )}
                     <span className="text-xs text-slate-500 tabular-nums">฿{money(req.total_sum)}</span>
                     <span className="ml-auto text-xs text-slate-400">
                       {req.requested_by_name || req.requested_by || '-'} · {when(req.requested_at)}
@@ -314,7 +477,7 @@ export const PriceApprovals: React.FC = () => {
                       size="icon-sm"
                       aria-label={open ? 'ย่อรายละเอียด' : 'ดูรายละเอียด'}
                       icon={open ? ChevronUp : ChevronDown}
-                      onClick={() => setOpenId(open ? null : req.request_id)}
+                      onClick={() => void toggleOpen(req)}
                     />
                   </div>
 
@@ -334,35 +497,98 @@ export const PriceApprovals: React.FC = () => {
                   )}
 
                   {open && (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-xs">
-                        <thead>
-                          <tr className="text-slate-400 text-left">
-                            <th className="py-1.5 pr-3 font-semibold">รหัส</th>
-                            <th className="py-1.5 pr-3 font-semibold">ชื่อสินค้า</th>
-                            <th className="py-1.5 pr-3 font-semibold text-right">จำนวน</th>
-                            <th className="py-1.5 pr-3 font-semibold text-right">ราคาที่ขอ</th>
-                            <th className="py-1.5 pr-3 font-semibold text-right">ขั้นต่ำ</th>
-                            <th className="py-1.5 font-semibold text-right">ต่ำกว่า</th>
-                          </tr>
-                        </thead>
-                        <tbody className="text-slate-700">
-                          {req.items.map((it, i) => (
-                            <tr key={`${it.model}-${i}`} className="border-t border-slate-100">
-                              <td className="py-1.5 pr-3 font-semibold text-slate-900">{it.model}</td>
-                              <td className="py-1.5 pr-3">{it.name}</td>
-                              <td className="py-1.5 pr-3 text-right tabular-nums">{it.quantity}</td>
-                              <td className="py-1.5 pr-3 text-right tabular-nums font-semibold text-red-700">
-                                ฿{money(it.price)}
-                              </td>
-                              <td className="py-1.5 pr-3 text-right tabular-nums">฿{money(it.min_price)}</td>
-                              <td className="py-1.5 text-right tabular-nums font-semibold text-red-700">
-                                {gapPct(it).toFixed(1)}%
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                    <div className="space-y-3">
+                      {detailLoading && <p className="text-xs text-slate-400">กำลังโหลดรายละเอียด...</p>}
+
+                      {/* ผู้อนุมัติแก้ตัวเลขเองได้ก่อนกดอนุมัติ — เคสจริงคือ "ลดได้แค่นี้"
+                          ซึ่งถ้าต้องตีกลับไปให้ผู้ขอพิมพ์ใหม่ คือการเดินสองรอบเพื่อแก้เลขตัวเดียว */}
+                      {detail?.request_id === req.request_id && detail.quotes.map((q) => (
+                        <div key={q.id} className="space-y-1">
+                          <p className="text-[11px] font-bold text-slate-500">
+                            ใบ {q.company} · ยอด ฿{money(q.total_sum)}
+                          </p>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="text-slate-400 text-left">
+                                  <th className="py-1.5 pr-3 font-semibold">รหัส</th>
+                                  <th className="py-1.5 pr-3 font-semibold">ชื่อสินค้า</th>
+                                  <th className="py-1.5 pr-3 font-semibold text-right">จำนวน</th>
+                                  <th className="py-1.5 pr-3 font-semibold text-right">ราคา</th>
+                                  <th className="py-1.5 pr-3 font-semibold text-right">ลด 1 (%)</th>
+                                  <th className="py-1.5 pr-3 font-semibold text-right">ลด 2 (%)</th>
+                                  <th className="py-1.5 pr-3 font-semibold text-right">ขั้นต่ำ</th>
+                                  <th className="py-1.5 font-semibold text-right">รวม</th>
+                                </tr>
+                              </thead>
+                              <tbody className="text-slate-700">
+                                {q.items.map((it, index) => {
+                                  const key = `${q.id}:${index}`;
+                                  const d = drafts[key];
+                                  const editable = canEdit && isEditableLine(it);
+                                  const minPrice = req.items.find((a) => a.model === it.model)?.min_price ?? 0;
+                                  const under = minPrice > 0 && Number(d?.price ?? it.price) < minPrice;
+                                  const cell = (field: keyof LineDraft, max?: number) => (
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      max={max}
+                                      value={d?.[field] ?? ''}
+                                      disabled={savingEdit}
+                                      onChange={(e) =>
+                                        setDrafts((prev) => ({
+                                          ...prev,
+                                          [key]: { ...prev[key], [field]: e.target.value },
+                                        }))
+                                      }
+                                      className="w-20 bg-card border border-slate-200 rounded-lg px-2 py-1 text-right tabular-nums text-slate-900 focus:outline-none focus:border-[var(--brand-fg)]"
+                                    />
+                                  );
+                                  return (
+                                    <tr key={key} className="border-t border-slate-100">
+                                      <td className="py-1.5 pr-3 font-semibold text-slate-900">{it.model}</td>
+                                      <td className="py-1.5 pr-3">
+                                        {it.name}
+                                        {!isEditableLine(it) && (
+                                          <span className="ml-1.5 text-[10px] text-slate-400">(ระบบเติมให้)</span>
+                                        )}
+                                      </td>
+                                      <td className="py-1.5 pr-3 text-right tabular-nums">
+                                        {editable ? cell('quantity') : it.quantity}
+                                      </td>
+                                      <td className={`py-1.5 pr-3 text-right tabular-nums ${under ? 'font-semibold text-red-700' : ''}`}>
+                                        {editable ? cell('price') : `฿${money(it.price)}`}
+                                      </td>
+                                      <td className="py-1.5 pr-3 text-right tabular-nums">
+                                        {editable ? cell('discount_1', 100) : it.discount_1}
+                                      </td>
+                                      <td className="py-1.5 pr-3 text-right tabular-nums">
+                                        {editable ? cell('discount_2', 100) : it.discount_2}
+                                      </td>
+                                      <td className="py-1.5 pr-3 text-right tabular-nums text-slate-500">
+                                        {minPrice > 0 ? `฿${money(minPrice)}` : '-'}
+                                      </td>
+                                      <td className="py-1.5 text-right tabular-nums">฿{money(lineTotal(d, it))}</td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ))}
+
+                      {canEdit && detail?.request_id === req.request_id && (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button variant="secondary" icon={Save} busy={savingEdit} onClick={() => void saveEdits()}>
+                            บันทึกการแก้ไข
+                          </Button>
+                          <span className="text-xs text-slate-500">
+                            แก้ได้เฉพาะจำนวน · ราคา · ส่วนลด — ต้องการเพิ่ม/ลบสินค้าหรือเปลี่ยนลูกค้า ให้กด
+                            “เปิดในฟอร์ม” หรือตีกลับให้ผู้ขอแก้
+                          </span>
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -373,7 +599,7 @@ export const PriceApprovals: React.FC = () => {
                           variant="primary"
                           icon={CheckCircle2}
                           busy={busy}
-                          disabled={selfBlocked}
+                          disabled={savingEdit || unsaved}
                           onClick={() => void approve(req)}
                         >
                           อนุมัติและออกใบ
@@ -382,14 +608,19 @@ export const PriceApprovals: React.FC = () => {
                           variant="danger"
                           tone="soft"
                           icon={XCircle}
-                          disabled={busy || selfBlocked}
+                          disabled={busy || savingEdit}
                           onClick={() => { setRejecting(req); setRejectReason(''); }}
                         >
                           ไม่อนุมัติ
                         </Button>
-                        {selfBlocked && (
+                        {/* เพิ่ม/ลบสินค้า หรือเปลี่ยนลูกค้า — งานของฟอร์มเต็ม ไม่ใช่ของตารางตัวเลขข้างบน
+                            ส่งกลับเข้าฟอร์มแล้วส่งคำขอใหม่ (ใบเดิมถูกยกเลิกหลังใบใหม่สำเร็จ) */}
+                        <Button variant="neutral" tone="soft" icon={Pencil} busy={busy} disabled={unsaved} onClick={() => void editInForm(req)}>
+                          เปิดในฟอร์ม
+                        </Button>
+                        {unsaved && (
                           <span className="text-xs text-amber-700">
-                            คำขอนี้คุณเป็นคนส่งเอง — ต้องให้ผู้อนุมัติคนอื่นหรือผู้ดูแลระบบเป็นคนตัดสิน
+                            มีตัวเลขที่แก้แล้วยังไม่ได้บันทึก — กด “บันทึกการแก้ไข” ก่อน
                           </span>
                         )}
                       </>

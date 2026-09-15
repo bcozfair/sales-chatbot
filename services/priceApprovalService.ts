@@ -16,11 +16,15 @@
  *
  * ## กติกาสิทธิ์ (เจ้าของเลือก 2026-09-15)
  *
- * * `approver` ทำงานของ `subadmin` ได้ด้วย ⇒ **อนุมัติใบที่ตัวเองเป็นคนขอไม่ได้** (403)
- *   ไม่งั้นด่านนี้ไม่ได้กันอะไรเลย
- * * `admin` อนุมัติได้ทุกใบรวมถึงของตัวเอง — เขาแก้ราคาขั้นต่ำของสินค้าเองได้อยู่แล้วผ่านเมนู
- *   ตั้งค่า การห้ามอนุมัติใบตัวเองจึงเพิ่มแค่ขั้นตอน ไม่ได้เพิ่มการควบคุม และกันเคส
- *   "ผู้อนุมัติมีคนเดียวแล้วคำขอค้างตลอดกาล"
+ * * `approver` ทำงานของ `subadmin` ได้ด้วย **และอนุมัติใบที่ตัวเองเป็นคนขอได้** — เจ้าของสั่ง
+ *   ชัดเมื่อ 2026-09-15 หลังลองใช้: ทีมมีผู้อนุมัติไม่กี่คนและเป็นคนออกใบเองด้วย การบังคับให้
+ *   ต้องมีคนที่สองมากดทำให้ใบค้างโดยไม่ได้อะไรกลับมา (รอบแรกเคยกันไว้ แล้วถูกสั่งให้ปลด)
+ *   ⇒ **สิ่งที่กันคนละเรื่องกับ "ใครกด" คือ "มีร่องรอยว่าใครกด"** — ทุกคำขอเก็บชื่อผู้ขอและ
+ *   ผู้อนุมัติพร้อมเวลาไว้ในใบเสมอ แม้จะเป็นคนเดียวกัน
+ * * **ผู้อนุมัติแก้ตัวเลขในร่างได้เองก่อนอนุมัติ** (`updateRequestItems`) — เคสจริงคือ
+ *   "ลดได้แค่นี้" ซึ่งถ้าต้องตีกลับไปให้ผู้ขอพิมพ์ใหม่แล้วส่งกลับมา คือการเดินสองรอบเพื่อแก้
+ *   ตัวเลขตัวเดียว · ขอบเขตคือ **จำนวน/ราคา/ส่วนลดของบรรทัดที่มีอยู่** เท่านั้น
+ *   การเพิ่ม-ลบสินค้าหรือเปลี่ยนลูกค้ายังต้องกลับไปที่ฟอร์มของผู้ขอ (ดู `loadRequestIntoForm`)
  */
 
 import { randomUUID } from 'crypto';
@@ -30,14 +34,19 @@ import {
   getQuotationsByApprovalRequest,
   decidePriceApprovalRequest,
   countPriceApprovalRequests,
+  getAcknowledgedViolationKeys,
   insertMessage,
 } from '../db/repositories.js';
 import {
   enrichQuotationData,
   validateQuotationItems,
+  buildItemSnapshots,
+  blockingViolations,
   requiresPriceApproval,
+  buildViolationText,
   type Violation,
 } from './quotationService.js';
+import { sumLineTotals } from '../utils/pricing.js';
 import { confirmQuotationById } from './quotationConfirm.js';
 import { parseWebUserId } from './webIdentity.js';
 
@@ -270,6 +279,153 @@ export async function getApprovalRequest(params: {
   return { ...summary, quotes, current_violations: violations };
 }
 
+// ── ผู้อนุมัติแก้ตัวเลขเองก่อนอนุมัติ ────────────────────────────────────────
+//
+//  เจ้าของสั่งเพิ่ม 2026-09-15: "ให้ผู้อนุมัติแก้ไขร่างนั้นได้เอง เพื่อไม่ต้องตีกลับ"
+//  เคสจริงคือ *ลดได้แค่นี้* — ตีกลับไปให้ผู้ขอพิมพ์เลขใหม่แล้วส่งกลับมา คือการเดินสองรอบ
+//  เพื่อแก้ตัวเลขตัวเดียว
+//
+//  **ขอบเขต: จำนวน · ราคา · ส่วนลด ของบรรทัดที่มีอยู่แล้วเท่านั้น**
+//  เพิ่ม/ลบสินค้า หรือเปลี่ยนลูกค้า/เครดิต ⇒ ยังต้องกลับไปที่ฟอร์มของผู้ขอ (loadRequestIntoForm)
+//  เพราะสองอย่างนั้นแตะ `customer_details` กับการแตกใบ PM/THT ซึ่งเป็นงานของ
+//  `insertDraftQuotations` ทั้งก้อน ไม่ใช่การแก้ตัวเลขในใบที่แตกไปแล้ว
+//
+//  ด่านตรวจกฎยังทำงานเต็มรูปแบบและเป็น fail-closed เหมือนทุกเส้น — แก้แล้วไปชนกฎข้ออื่น
+//  (ของหมด · MOQ · สินค้าระงับ) จะถูกปฏิเสธ ไม่ใช่บันทึกทับแล้วไปเจอตอนกดอนุมัติ
+//  ส่วนราคาที่ยังต่ำกว่าขั้นต่ำอยู่ **ไม่ใช่เหตุให้บันทึกไม่ได้** — มันคือเรื่องที่กำลังจะอนุมัติอยู่
+
+export interface ApprovalLineEdit {
+  /** ตำแหน่งบรรทัดใน item_details ของใบนั้น — ส่งคู่กับ model เพื่อกันข้อมูลเลื่อนใต้มือ */
+  index: number;
+  model: string;
+  quantity?: number;
+  price?: number;
+  discount_1?: number;
+  discount_2?: number;
+}
+
+export interface ApprovalQuoteEdit {
+  quote_id: string;
+  items: ApprovalLineEdit[];
+}
+
+/** ตัวเลขที่รับมาจากหน้าจอ — ค่าที่ไม่ใช่ตัวเลขหรือติดลบถือว่าไม่ได้แก้ ไม่ใช่ error เงียบ ๆ */
+const editedNumber = (raw: unknown, current: number, max = Number.MAX_SAFE_INTEGER): number => {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0 || n > max) return current;
+  return n;
+};
+
+export async function updateRequestItems(params: {
+  requestId: string;
+  actor: ApprovalActor;
+  quotes: ApprovalQuoteEdit[];
+}): Promise<{ request_id: string; violations: Violation[]; items: ApprovalItem[]; total_sum: number }> {
+  if (!canDecideApproval(params.actor)) {
+    throw new PriceApprovalError('FORBIDDEN', 'ไม่มีสิทธิ์แก้ไขร่างที่รออนุมัติ', 403);
+  }
+  const rows = await loadRequestRows(params.requestId, params.actor);
+  const pa = rows[0]?.price_approval || {};
+  if (pa.status !== 'pending') {
+    throw new PriceApprovalError('ALREADY_DECIDED', `คำขอนี้ถูกตัดสินไปแล้ว (${pa.status}) แก้ไขไม่ได้`, 409);
+  }
+
+  const editByQuote = new Map<string, ApprovalLineEdit[]>();
+  for (const q of (params.quotes || [])) {
+    editByQuote.set(String(q.quote_id), Array.isArray(q.items) ? q.items : []);
+  }
+
+  const allViolations: Violation[] = [];
+  const approvalItems: ApprovalItem[] = [];
+  let grandTotal = 0;
+
+  for (const row of rows) {
+    if (row.status !== 'draft') continue;
+    const enriched = await enrichQuotationData(row);
+    const items: any[] = Array.isArray(enriched.items) ? enriched.items : [];
+    const edits = editByQuote.get(String(row.id)) ?? [];
+
+    for (const e of edits) {
+      const line = items[Number(e.index)];
+      // บรรทัดเลื่อนไปแล้ว = หน้าจอถือของเก่า — ปฏิเสธทั้งชุด ดีกว่าบันทึกราคาลงผิดบรรทัด
+      if (!line || String(line.model ?? '') !== String(e.model ?? '')) {
+        throw new PriceApprovalError('STALE_ITEMS', 'รายการในใบเปลี่ยนไปแล้ว กรุณารีเฟรชหน้าจอแล้วแก้ใหม่', 409);
+      }
+      // บรรทัดที่กฎเป็นคนเติม (สินค้าพ่วง · ค่าบริการอัตโนมัติ) ไม่ใช่ของที่คนแก้เอง —
+      // มันถูกคำนวณใหม่ทุกครั้งที่บันทึก การยอมให้แก้คือการให้คนแก้สิ่งที่จะถูกเขียนทับอยู่ดี
+      if (line.is_optional || (line.is_shipping_fee && line.is_manual_service !== true)) continue;
+
+      line.quantity = Math.max(1, Math.round(editedNumber(e.quantity, Number(line.quantity) || 1, 1_000_000)));
+      line.price = editedNumber(e.price, Number(line.price) || 0);
+      line.discount_1 = editedNumber(e.discount_1, Number(line.discount_1) || 0, 100);
+      line.discount_2 = editedNumber(e.discount_2, Number(line.discount_2) || 0, 100);
+    }
+
+    // สินค้าพ่วงเดินตามจำนวนของตัวหลักเสมอ — กติกาเดียวกับ PUT /api/quotation/:id
+    for (const opt of items) {
+      if (!opt?.is_optional || !opt.linked_to_product_id) continue;
+      const parent = items.find((it: any) => it.product_id === opt.linked_to_product_id);
+      if (parent) opt.quantity = parent.quantity;
+    }
+
+    // ด่านตรวจกฎเต็มรูปแบบ (fail-closed) — ข้อที่ **ไม่ใช่** เรื่องราคาขั้นต่ำยังบล็อกเหมือนเดิม
+    const { violations } = await validateQuotationItems(items, {
+      stage: 'save',
+      customerName: enriched.customer_name,
+      customerId: row.customer_id,
+      contactId: row.contact_id,
+    });
+    // ข้อที่ยังบล็อกอยู่จริง = หักคำรับทราบที่ผูกกับใบไว้แล้ว (เช่นของหมดที่ผู้ขอกดรับทราบตอนส่ง)
+    // แล้วเอา "ข้อที่กำลังจะอนุมัติ" (ราคาขั้นต่ำ) ออก — ที่เหลือคือของที่ต้องหยุดมือจริง ๆ
+    const ackKeys = await getAcknowledgedViolationKeys(pool, String(row.id));
+    const hard = blockingViolations(violations, ackKeys).filter((v) => !requiresPriceApproval(v));
+    if (hard.length > 0) {
+      throw new PriceApprovalError('RULE_VIOLATION', buildViolationText(hard), 422);
+    }
+
+    const total = sumLineTotals(items);
+    const snapshot = await buildItemSnapshots(items);
+    await pool.query(
+      `UPDATE quotations
+          SET item_details = $2::jsonb, total_sum = $3, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1 AND status = 'draft'`,
+      [row.id, JSON.stringify(snapshot), total]
+    );
+
+    allViolations.push(...violations.filter(requiresPriceApproval));
+    approvalItems.push(...buildApprovalItems(violations, items));
+    grandTotal += total;
+  }
+
+  // ค่าบริการอัตโนมัติคิดจากยอดรวมของทุกใบในชุด — ต้องคิดใหม่หลังแก้ตัวเลข และ **ผูกขอบเขต
+  // ด้วย request_id** ไม่งั้นไปรวมกับชุดอื่นของแอดมินคนเดียวกันที่ค้างอยู่ (plan §2.3)
+  try {
+    const { applyShippingFeeToQuoteGroup } = await import('./shippingFee.js');
+    await applyShippingFeeToQuoteGroup(rows[0].user_id, undefined, String(params.requestId));
+  } catch (err) {
+    console.error('[priceApproval] คิดค่าบริการใหม่หลังแก้ไม่สำเร็จ:', err);
+  }
+
+  // คำขอต้องสะท้อน "ราคาที่กำลังจะถูกอนุมัติ" ตัวใหม่เสมอ — ไม่งั้นคนกดอนุมัติทีหลังจะอนุมัติ
+  // ราคาชุดเก่าที่ไม่มีอยู่ในใบแล้ว (และ approvedViolationKeys จะเทียบกับตัวเลขผิดตัว)
+  await decidePriceApprovalRequest(pool, String(params.requestId), 'pending', {
+    items: approvalItems,
+    violations: allViolations,
+    edited_by_id: params.actor.id,
+    edited_by: params.actor.username,
+    edited_at: new Date().toISOString(),
+  });
+
+  await logApprovalEvent(rows[0]?.user_id, 'web_approval_edited', {
+    request_id: String(params.requestId),
+    edited_by: params.actor.username,
+    items: approvalItems,
+    total_sum: grandTotal,
+  }, `✏️ ผู้อนุมัติแก้ตัวเลขในร่าง (ยอดรวมใหม่ ฿${grandTotal.toFixed(2)})`);
+
+  return { request_id: String(params.requestId), violations: allViolations, items: approvalItems, total_sum: grandTotal };
+}
+
 // ── ตัดสิน ───────────────────────────────────────────────────────────────────
 
 export interface ApproveResult {
@@ -298,11 +454,6 @@ export async function approveRequest(params: {
   if (pa.status !== 'pending') {
     throw new PriceApprovalError('ALREADY_DECIDED', `คำขอนี้ถูกตัดสินไปแล้ว (${pa.status})`, 409);
   }
-  // §3.4 ของแผน — `approver` อนุมัติใบตัวเองไม่ได้ · `admin` ได้
-  if (params.actor.role !== 'admin' && Number(pa.requested_by_id) === params.actor.id) {
-    throw new PriceApprovalError('SELF_APPROVAL', 'อนุมัติใบเสนอราคาที่ตัวเองเป็นคนขอไม่ได้ — ต้องให้ผู้อนุมัติคนอื่นหรือผู้ดูแลระบบเป็นคนอนุมัติ', 403);
-  }
-
   const decidedAt = new Date().toISOString();
   const touched = await decidePriceApprovalRequest(pool, String(params.requestId), 'pending', {
     status: 'approved',
