@@ -1,5 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { createPortal } from 'react-dom';
+import { useState, useEffect } from 'react';
 import { AuthProvider, useAuth, type Role } from '../context/AuthContext';
 import { Login } from './Login';
 import { Users } from './Users';
@@ -33,6 +32,16 @@ import {
   UserCheck,
   FileText,
   Sliders,
+  SlidersHorizontal,
+  Settings2,
+  PackagePlus,
+  PackageX,
+  PackageMinus,
+  ShieldBan,
+  Truck,
+  BriefcaseBusiness,
+  Contact,
+  Activity,
   ChevronDown,
   ChevronsLeft,
   ChevronsRight,
@@ -65,17 +74,78 @@ const BRAND_SOFT = 'var(--brand-soft)';
 const BRAND_SOFT_STRONG = 'var(--brand-soft-strong)';
 const BRAND_BORDER = 'var(--brand-border)';
 
-// roles = สิทธิ์ที่เห็นเมนูนี้ — เป็นแค่การซ่อน UI เท่านั้น ตัวบังคับจริงคือ requireRole ฝั่ง backend
-const NAV_ITEMS: { key: MainTab; label: string; icon: typeof LayoutDashboard; roles: Role[] }[] = [
-  { key: 'dashboard', label: 'แผงควบคุม', icon: LayoutDashboard, roles: ['admin'] },
-  { key: 'quoterequest', label: 'ขอใบเสนอราคา', icon: FilePlus2, roles: ['admin', 'approver', 'subadmin'] },
-  // subadmin เห็นเมนูนี้ด้วย แต่เห็น "คำขอของตัวเอง" เท่านั้น — server เป็นคนกรอง ไม่ใช่หน้าจอ
-  { key: 'approvals', label: 'อนุมัติราคา', icon: BadgeCheck, roles: ['admin', 'approver', 'subadmin'] },
-  { key: 'quotations', label: 'ประวัติใบเสนอราคา', icon: FileText, roles: ['admin', 'approver', 'subadmin'] },
-  { key: 'promotions', label: 'จัดการโปรโมชันส่วนลด', icon: Tag, roles: ['admin'] },
-  { key: 'salespersons', label: 'จัดการข้อมูลพนักงาน', icon: UserCheck, roles: ['admin'] },
-  { key: 'users', label: 'จัดการผู้ใช้งานระบบ', icon: UsersIcon, roles: ['admin'] },
-  { key: 'blacklist', label: 'บัญชีห้ามเสนอราคา', icon: Ban, roles: ['admin', 'user'] },
+/**
+ * เมนูข้างซ้าย — หนึ่งเมนูเดี่ยวบนสุด + สี่กลุ่มที่พับได้
+ *
+ * ทำไมถึงจัดกลุ่ม (2026-09-15): เดิมเป็นปุ่มเรียงแถวเดียว 8 ปุ่ม + หน้าตั้งค่าที่มีหัวข้อย่อย
+ * อีก 6 หัวข้อ รวม 14 บรรทัดที่ไม่บอกว่าอันไหนคืองานที่ทำทุกวัน อันไหนคือค่าที่ตั้งทีเดียวแล้ว
+ * ไม่แตะอีกทั้งปี · และหัวข้อย่อยของหน้าตั้งค่าเคยเป็น "ตัวอักษรล้วนไม่มีไอคอน" ⇒ พอ sidebar
+ * ย่อเหลือ 76px มันหายไปทั้ง 6 หัวข้อ ต้องกางออกก่อนถึงจะกดได้ ตอนนี้ทุกตัวเลือกมีไอคอนของ
+ * ตัวเอง โหมดย่อจึงกดถึงได้ทุกหน้าโดยไม่ต้องกางอะไรก่อน
+ *
+ * **การจัดกลุ่มเป็นเรื่องของหน้าจออย่างเดียว ไม่ได้แตะเส้นทาง** — ทั้ง `tab` และ `sub`
+ * ยังเป็นค่าเดิมใน navHash.ts ทุกตัว ลิงก์ที่แชร์กันไว้ (`#promotions`, `#settings/stock`)
+ * จึงเปิดได้เหมือนเดิม
+ *
+ * roles = สิทธิ์ที่เห็นเมนูนี้ — เป็นแค่การซ่อน UI เท่านั้น ตัวบังคับจริงคือ requireRole ฝั่ง backend
+ */
+type NavItem = { label: string; icon: typeof LayoutDashboard; roles: Role[] } & (
+  | { tab: MainTab; sub?: never }
+  | { sub: SubTab; tab?: never }
+);
+
+/** หน้าแรกที่ทุกคนกลับมา จึงอยู่เดี่ยวบนสุด ไม่ใช่ของที่ต้องกางกลุ่มก่อนถึงจะเห็น */
+const NAV_HOME: NavItem & { tab: MainTab } = {
+  tab: 'dashboard', label: 'แผงควบคุม', icon: LayoutDashboard, roles: ['admin'],
+};
+
+const NAV_GROUPS: { key: string; label: string; icon: typeof LayoutDashboard; items: NavItem[] }[] = [
+  {
+    key: 'work',
+    label: 'งานใบเสนอราคา',
+    icon: BriefcaseBusiness,
+    items: [
+      { tab: 'quoterequest', label: 'ขอใบเสนอราคา', icon: FilePlus2, roles: ['admin', 'approver', 'subadmin'] },
+      // subadmin เห็นเมนูนี้ด้วย แต่เห็น "คำขอของตัวเอง" เท่านั้น — server เป็นคนกรอง ไม่ใช่หน้าจอ
+      { tab: 'approvals', label: 'อนุมัติราคา', icon: BadgeCheck, roles: ['admin', 'approver', 'subadmin'] },
+      { tab: 'quotations', label: 'ประวัติใบเสนอราคา', icon: FileText, roles: ['admin', 'approver', 'subadmin'] },
+    ],
+  },
+  {
+    // โปรโมชันส่วนลดอยู่กลุ่มนี้เพราะมันคือ "กฎส่วนลด" เรื่องเดียวกับ MOQ / บล็อกสินค้า /
+    // ค่าขนส่ง — เจ้าของเลือกให้ย้ายลงมาเมื่อ 2026-09-15 (เดิมอยู่แถวบนปนกับงานประจำวัน)
+    key: 'rules',
+    label: 'เงื่อนไข & กฎ',
+    icon: SlidersHorizontal,
+    items: [
+      { sub: 'quotation', label: 'เงื่อนไขหลัก', icon: Settings2, roles: ['admin'] },
+      { tab: 'promotions', label: 'จัดการโปรโมชันส่วนลด', icon: Tag, roles: ['admin'] },
+      // สามหัวข้อที่เป็นกฎของ "ตัวสินค้า" ใช้ไอคอนตระกูล Package เดียวกัน (+ พ่วง · ✕ หมด · − ขั้นต่ำ)
+      { sub: 'optional', label: 'สินค้าพ่วงเสริม', icon: PackagePlus, roles: ['admin'] },
+      { sub: 'stock', label: 'ระงับเมื่อหมดสต็อก', icon: PackageX, roles: ['admin'] },
+      { sub: 'moq', label: 'ขั้นต่ำสั่งซื้อ', icon: PackageMinus, roles: ['admin'] },
+      // ShieldBan ไม่ใช่ Ban เพราะ Ban ถูกใช้กับ "บัญชีห้ามเสนอราคา" ไปแล้ว — คนละเรื่องกัน
+      { sub: 'block', label: 'บล็อกสินค้า', icon: ShieldBan, roles: ['admin'] },
+      { sub: 'shipping', label: 'ค่าขนส่ง & เครดิต', icon: Truck, roles: ['admin'] },
+    ],
+  },
+  {
+    key: 'people',
+    label: 'ข้อมูล & ผู้ใช้งาน',
+    icon: Contact,
+    items: [
+      { tab: 'salespersons', label: 'จัดการข้อมูลพนักงาน', icon: UserCheck, roles: ['admin'] },
+      { tab: 'users', label: 'จัดการผู้ใช้งานระบบ', icon: UsersIcon, roles: ['admin'] },
+      { tab: 'blacklist', label: 'บัญชีห้ามเสนอราคา', icon: Ban, roles: ['admin', 'user'] },
+    ],
+  },
+  {
+    key: 'audit',
+    label: 'ตรวจสอบระบบ',
+    icon: Activity,
+    // เมนูเดียวในกลุ่ม — การสลับ 4 หน้าย่อยอยู่ที่แถบแท็บใน LogsShell ตามเหตุผลข้างล่าง
+    items: [{ tab: 'traffic', label: 'รายงานการใช้งาน', icon: ClipboardList, roles: ['admin'] }],
+  },
 ];
 
 /**
@@ -89,15 +159,6 @@ const LOG_TABS = new Set<MainTab>(['traffic', 'apilogs', 'auditlogs', 'systemlog
 
 /** แท็บที่เปิดให้เมื่อกดเมนูครั้งแรก — ตรงกับแท็บซ้ายสุดใน LogsShell */
 const LOG_TAB_DEFAULT: MainTab = 'traffic';
-
-const SETTINGS_SUBITEMS: { key: SubTab; label: string }[] = [
-  { key: 'quotation', label: 'เงื่อนไขหลัก' },
-  { key: 'optional', label: 'สินค้าพ่วงเสริม' },
-  { key: 'stock', label: 'ระงับเมื่อหมดสต็อก' },
-  { key: 'moq', label: 'ขั้นต่ำสั่งซื้อ' },
-  { key: 'block', label: 'บล็อกสินค้า' },
-  { key: 'shipping', label: 'ค่าขนส่ง & เครดิต' },
-];
 
 const PAGE_TITLES: Record<MainTab, string> = {
   dashboard: 'แผงควบคุม',
@@ -123,23 +184,43 @@ function AdminContent() {
   const subTab = route.sub;
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [settingsExpanded, setSettingsExpanded] = useState(true);
+  /**
+   * กลุ่มไหนกางอยู่ — เก็บเฉพาะกลุ่มที่ "คนกดเอง" เท่านั้น
+   * ไม่มีค่าในนี้ = ตามหน้าที่เปิดอยู่ (กลุ่มที่มีหน้าปัจจุบันกางเอง กลุ่มอื่นหุบ)
+   * ⇒ เดินออกจากกลุ่มไหน กลุ่มนั้นหุบกลับเอง ไม่ต้องมีใครไล่ปิด และกลุ่มที่คนตั้งใจเปิดค้างไว้
+   * ก็ไม่ถูกหุบให้โดยไม่ได้สั่ง
+   */
+  const [groupToggles, setGroupToggles] = useState<Record<string, boolean>>({});
   // แท็บล่าสุดในกลุ่ม Activity Log — ออกไปหน้าอื่นแล้วกดเมนูกลับมา ต้องได้แท็บเดิม
   // ไม่ใช่เด้งกลับหน้าแรกทุกครั้ง (คนที่ตามเรื่องอยู่มักวนกลับมาที่หน้าเดิมซ้ำ ๆ)
   const [lastLogTab, setLastLogTab] = useState<MainTab>(() =>
     LOG_TABS.has(route.tab) ? route.tab : LOG_TAB_DEFAULT,
   );
-  // ตอน sidebar ย่อ: กดไอคอนตั้งค่า → เปิด flyout เลือก sub-tab (nav มี overflow-y-auto จึงต้องลอยแบบ fixed)
-  const [settingsFlyoutTop, setSettingsFlyoutTop] = useState<number | null>(null);
-  const settingsBtnRef = useRef<HTMLButtonElement>(null);
-  const settingsFlyoutRef = useRef<HTMLDivElement>(null);
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [statsError, setStatsError] = useState<string | null>(null);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
 
   const isAdmin = user?.role === 'admin';
-  const visibleNavItems = NAV_ITEMS.filter((item) => !!user && item.roles.includes(user.role));
+  const canSee = (item: NavItem) => !!user && item.roles.includes(user.role);
+  const homeVisible = canSee(NAV_HOME);
+  /** กลุ่มที่ไม่เหลือเมนูให้ผู้ใช้คนนี้เลย ต้องหายไปทั้งกลุ่ม — หัวข้อกลุ่มเปล่า ๆ อ่านว่า "พัง" */
+  const visibleGroups = NAV_GROUPS
+    .map((group) => ({ ...group, items: group.items.filter(canSee) }))
+    .filter((group) => group.items.length > 0);
+  /**
+   * เหลือกลุ่มเดียว = ไม่ต้องมีหัวข้อกลุ่ม
+   * หัวข้อของกลุ่มเดียวไม่ได้แยกอะไรออกจากอะไร มันแค่เพิ่มบรรทัดที่ต้องกดก่อนถึงจะใช้งานได้
+   * (เกิดกับ approver/subadmin ที่เห็น 3 เมนู และ role `user` ที่เห็นเมนูเดียว)
+   */
+  const flatNav = visibleGroups.length <= 1;
+  /** หน้าหลักทั้งหมดที่เห็น เรียงตามที่ตาเห็นบนเมนู — ตัวแรกคือหน้าที่ถอยกลับมาเมื่อสิทธิ์ไม่ถึง */
+  const visibleTabs: MainTab[] = [
+    ...(homeVisible ? [NAV_HOME.tab] : []),
+    ...visibleGroups.flatMap((group) =>
+      group.items.map((item) => item.tab).filter((tab): tab is MainTab => !!tab),
+    ),
+  ];
 
   /**
    * ตัวเลขข้างเมนู "อนุมัติราคา" — **แทนการแจ้งเตือน** เพราะระบบนี้ห้ามใช้ LINE push
@@ -147,7 +228,7 @@ function AdminContent() {
    * · ผู้อนุมัติได้ "รออนุมัติกี่ชุด" · คนขอได้ "ของฉันถูกตีกลับกี่ชุด" (server เป็นคนตัดสินว่าใครเห็นอะไร)
    */
   const [approvalBadge, setApprovalBadge] = useState(0);
-  const showsApprovals = visibleNavItems.some((item) => item.key === 'approvals');
+  const showsApprovals = visibleTabs.includes('approvals');
   useEffect(() => {
     if (!token || !showsApprovals) return;
     let cancelled = false;
@@ -169,10 +250,10 @@ function AdminContent() {
   // คำนวณตอน render แทนการ setState ใน effect: ไม่มี re-render รอบพิเศษ และครอบเคสถูกลดสิทธิ์
   // ระหว่างเปิดหน้าค้างไว้ด้วย (adminAuthMiddleware อ่าน role สดจาก DB ทุก request)
   const effectiveTab: MainTab =
-    visibleNavItems.some((item) => item.key === activeTab) ||
+    visibleTabs.includes(activeTab) ||
     ((activeTab === 'settings' || LOG_TABS.has(activeTab)) && isAdmin)
       ? activeTab
-      : (visibleNavItems[0]?.key ?? 'blacklist');
+      : (visibleTabs[0] ?? 'blacklist');
 
   useEffect(() => {
     // /api/admin/stats เปิดให้เฉพาะ admin — ยิงด้วย role อื่นจะได้ 403 แล้วขึ้น error ให้เปล่า ๆ
@@ -200,28 +281,6 @@ function AdminContent() {
     };
   }, [activeTab, token, isAdmin]);
 
-  const closeSettingsFlyout = useCallback(() => setSettingsFlyoutTop(null), []);
-
-  // ปิด flyout เลือก sub-tab เมื่อคลิกนอกพื้นที่ / กด Esc
-  useEffect(() => {
-    if (settingsFlyoutTop === null) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') closeSettingsFlyout();
-    };
-    const onPointer = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (settingsFlyoutRef.current?.contains(t) || settingsBtnRef.current?.contains(t)) return;
-      closeSettingsFlyout();
-    };
-    window.addEventListener('keydown', onKey);
-    // capture=true จับก่อน handler ปุ่มอื่น กันเคสคลิกปุ่มแล้ว flyout ยังค้าง
-    window.addEventListener('mousedown', onPointer, true);
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      window.removeEventListener('mousedown', onPointer, true);
-    };
-  }, [settingsFlyoutTop, closeSettingsFlyout]);
-
   if (isLoading) {
     return (
       <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col items-center justify-center gap-3">
@@ -238,34 +297,28 @@ function AdminContent() {
   const goTo = (tab: MainTab) => {
     navigate({ tab, sub: subTab });
     setMobileOpen(false);
-    closeSettingsFlyout();
-    if (tab === 'settings') setSettingsExpanded(true);
     if (LOG_TABS.has(tab)) setLastLogTab(tab);
   };
 
   const goToSubTab = (tab: SubTab) => {
     navigate({ tab: 'settings', sub: tab });
     setMobileOpen(false);
-    closeSettingsFlyout();
   };
 
-  // ปุ่มตั้งค่า: ย่ออยู่ → toggle flyout (คำนวณ top จากปุ่ม), ขยายอยู่ → accordion แบบเดิม
-  const onSettingsClick = () => {
-    if (!collapsed) {
-      setSettingsExpanded((v) => !v);
-      return;
-    }
-    setSettingsFlyoutTop((cur) => {
-      if (cur !== null) return null;
-      return settingsBtnRef.current?.getBoundingClientRect().top ?? null;
-    });
+  /** เมนูหนึ่งบรรทัดกำลังเปิดอยู่หรือไม่ — หัวข้อย่อยของหน้าตั้งค่าเทียบที่ `sub` ไม่ใช่ `tab` */
+  const isItemActive = (item: NavItem) => {
+    if (item.tab === 'traffic') return LOG_TABS.has(effectiveTab);
+    if (item.tab) return effectiveTab === item.tab;
+    return effectiveTab === 'settings' && subTab === item.sub;
   };
 
-  // ย่อ/ขยาย sidebar — ปิด flyout ทุกครั้งไม่ให้ค้างลอยตอนความกว้างเปลี่ยน
-  const toggleCollapsed = () => {
-    closeSettingsFlyout();
-    setCollapsed((v) => !v);
+  const goToItem = (item: NavItem) => {
+    // กลุ่ม "ตรวจสอบระบบ" จำแท็บล่าสุดไว้ ไม่เด้งกลับหน้าแรกของกลุ่มทุกครั้งที่กดกลับมา
+    if (item.tab) return goTo(item.tab === 'traffic' ? lastLogTab : item.tab);
+    goToSubTab(item.sub);
   };
+
+  const toggleCollapsed = () => setCollapsed((v) => !v);
 
   const SUMMARY_CARDS: {
     key: keyof AdminStats;
@@ -285,6 +338,62 @@ function AdminContent() {
   ];
 
   const sidebarWidth = collapsed ? 76 : 264;
+
+  /**
+   * ปุ่มเมนูหนึ่งบรรทัด — ใช้ทั้งเมนูเดี่ยวบนสุดและเมนูในกลุ่ม
+   * `nested` = อยู่ในกลุ่มและ sidebar กางอยู่ ⇒ เล็กลงหนึ่งขั้น + มีเส้นรางด้านซ้าย
+   * (ยกรูปแบบเดิมของหัวข้อย่อยหน้าตั้งค่ามาทั้งชุด ไม่ได้ตั้งของใหม่)
+   * ตอน sidebar ย่อ ทุกบรรทัดกลับมาเท่ากันหมด เพราะเหลือแต่ไอคอนแล้วไม่มีลำดับชั้นให้สื่อ
+   */
+  const renderNavItem = (item: NavItem, nested: boolean) => {
+    const Icon = item.icon;
+    const active = isItemActive(item);
+    const pendingLabel =
+      item.tab === 'approvals' && approvalBadge > 0 ? `${item.label} (${approvalBadge} รายการ)` : item.label;
+    // ความมนอยู่ในบรรทัดของแต่ละแบบ ไม่ใช่ในบรรทัดฐาน — `rounded-lg` กับ `rounded-xl` ที่อยู่
+    // ในคลาสเดียวกัน ตัวที่ชนะคือตัวที่ Tailwind เรียงไว้ทีหลังใน CSS ไม่ใช่ตัวที่พิมพ์ทีหลัง
+    // (กับดักเดียวกับ `border-transparent` ใน docs/design.md หัวข้อ 2.1)
+    const shape = collapsed
+      ? 'justify-center px-3 py-2.5 rounded-xl text-sm font-semibold'
+      : nested
+        ? 'gap-2.5 px-3 py-2 rounded-lg border-l-2 text-[13px] font-medium'
+        : 'gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold';
+    const tone = active
+      ? nested
+        ? 'border-current'
+        : ''
+      : nested
+        ? 'border-transparent text-slate-400 hover:text-slate-700 hover:bg-slate-50'
+        : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800';
+    return (
+      <button
+        key={item.tab ?? item.sub}
+        onClick={() => goToItem(item)}
+        title={collapsed ? pendingLabel : undefined}
+        className={`relative w-full flex items-center transition-all ${shape} ${tone}`}
+        style={
+          active
+            ? nested
+              ? { color: BRAND, borderColor: BRAND, backgroundColor: BRAND_SOFT }
+              : { backgroundColor: BRAND_SOFT_STRONG, color: BRAND }
+            : undefined
+        }
+      >
+        <Icon className={nested ? 'w-4 h-4 shrink-0' : 'w-[18px] h-[18px] shrink-0'} />
+        {!collapsed && <span className="whitespace-nowrap">{item.label}</span>}
+        {item.tab === 'approvals' && approvalBadge > 0 && !collapsed && (
+          <span className="ml-auto px-1.5 min-w-5 text-center rounded-lg text-[11px] font-bold bg-violet-100 text-violet-700">
+            {approvalBadge}
+          </span>
+        )}
+        {/* ย่ออยู่แล้วตัวเลขไม่มีที่อยู่ — เหลือจุดบอกว่ามีของค้าง ส่วนจำนวนอยู่ใน title ของปุ่ม
+            (ระบบนี้ห้ามใช้ LINE push ⇒ ถ้าตรงนี้ไม่บอก จะไม่มีอะไรบอกใครเลยว่ามีของรออยู่) */}
+        {item.tab === 'approvals' && approvalBadge > 0 && collapsed && (
+          <span className="absolute translate-x-3 -translate-y-2.5 w-1.5 h-1.5 rounded-full bg-violet-700" />
+        )}
+      </button>
+    );
+  };
 
   const SidebarContent = (
     <div className="h-full flex flex-col bg-card">
@@ -318,99 +427,49 @@ function AdminContent() {
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto py-3 px-2.5 space-y-0.5">
-        {visibleNavItems.map(({ key, label, icon: Icon }) => {
-          const active = effectiveTab === key;
+        {homeVisible && renderNavItem(NAV_HOME, false)}
+
+        {visibleGroups.map((group, index) => {
+          const GroupIcon = group.icon;
+          const hasActive = group.items.some(isItemActive);
+          const open = groupToggles[group.key] ?? hasActive;
+          if (flatNav) return <div key={group.key}>{group.items.map((item) => renderNavItem(item, false))}</div>;
           return (
-            <button
-              key={key}
-              onClick={() => goTo(key)}
-              title={collapsed ? label : undefined}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${
-                collapsed ? 'justify-center' : ''
-              } ${active ? '' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'}`}
-              style={active ? { backgroundColor: BRAND_SOFT_STRONG, color: BRAND } : undefined}
-            >
-              <Icon className="w-[18px] h-[18px] shrink-0" />
-              {!collapsed && <span className="whitespace-nowrap">{label}</span>}
-              {key === 'approvals' && approvalBadge > 0 && (
-                <span
-                  className={`ml-auto px-1.5 min-w-5 text-center rounded-lg text-[11px] font-bold bg-violet-100 text-violet-700 ${
-                    collapsed ? 'hidden' : ''
+            <div key={group.key}>
+              {collapsed ? (
+                /* ย่ออยู่: ไม่มีหัวข้อกลุ่มให้กด เพราะทุกตัวเลือกมีไอคอนของตัวเองแล้วจึงกดถึงได้ตรง ๆ
+                   — เส้นคั่นทำหน้าที่แทนหัวข้อ · อันแรกไม่ต้องมีถ้าไม่มีอะไรอยู่ข้างบนให้คั่น */
+                (index > 0 || homeVisible) && <div className="h-px bg-slate-100 my-2.5 mx-1.5" />
+              ) : (
+                <button
+                  onClick={() => setGroupToggles((prev) => ({ ...prev, [group.key]: !open }))}
+                  aria-expanded={open}
+                  title={!open && hasActive ? `${group.label} — หน้าที่เปิดอยู่อยู่ในกลุ่มนี้` : undefined}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all hover:bg-slate-50 hover:text-slate-800 ${
+                    hasActive ? 'text-slate-800' : 'text-slate-500'
                   }`}
                 >
-                  {approvalBadge}
-                </span>
+                  <GroupIcon className="w-[18px] h-[18px] shrink-0" />
+                  <span className="whitespace-nowrap flex-1 text-left">{group.label}</span>
+                  {/* หุบกลุ่มที่มีหน้าปัจจุบันอยู่ข้างในเมื่อไหร่ ต้องมีอะไรบอกว่า "ของที่เปิดอยู่อยู่ในนี้"
+                      ไม่งั้นเมนูจะดูเหมือนไม่มีหน้าไหนถูกเลือกเลย (คำอธิบายเต็มอยู่ใน title ของปุ่ม) */}
+                  {!open && hasActive && (
+                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: BRAND }} />
+                  )}
+                  <ChevronDown
+                    className={`w-3.5 h-3.5 shrink-0 transition-transform ${open ? '' : '-rotate-90'}`}
+                  />
+                </button>
               )}
-            </button>
+
+              {(collapsed || open) && (
+                <div className={collapsed ? 'space-y-0.5' : 'pl-4 mt-0.5 space-y-0.5'}>
+                  {group.items.map((item) => renderNavItem(item, !collapsed))}
+                </div>
+              )}
+            </div>
           );
         })}
-
-        {isAdmin && (
-          <>
-        <div className="h-px bg-slate-100 my-2.5 mx-1.5" />
-
-        {/* Activity Log — เมนูเดียว หน้าตาเท่ากับเมนูหลักอันอื่น
-            การเลือกว่าเป็นหน้าไหนใน 4 หน้าอยู่ที่แถบแท็บใน LogsShell ทั้งหมด */}
-        <button
-          onClick={() => goTo(lastLogTab)}
-          title={collapsed ? 'รายงานการใช้งาน' : undefined}
-          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${
-            collapsed ? 'justify-center' : ''
-          } ${LOG_TABS.has(effectiveTab) ? '' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'}`}
-          style={LOG_TABS.has(effectiveTab) ? { backgroundColor: BRAND_SOFT_STRONG, color: BRAND } : undefined}
-        >
-          <ClipboardList className="w-[18px] h-[18px] shrink-0" />
-          {!collapsed && <span className="whitespace-nowrap">รายงานการใช้งาน</span>}
-        </button>
-
-        <div className="h-px bg-slate-100 my-2.5 mx-1.5" />
-
-        {/* Settings group */}
-        <button
-          ref={settingsBtnRef}
-          onClick={onSettingsClick}
-          title={collapsed ? 'ตั้งค่าเงื่อนไข & กฎ' : undefined}
-          aria-haspopup={collapsed ? 'menu' : undefined}
-          aria-expanded={collapsed ? settingsFlyoutTop !== null : settingsExpanded}
-          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${
-            collapsed ? 'justify-center' : ''
-          } ${activeTab === 'settings' ? '' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'}`}
-          style={activeTab === 'settings' ? { backgroundColor: BRAND_SOFT_STRONG, color: BRAND } : undefined}
-        >
-          <Sliders className="w-[18px] h-[18px] shrink-0" />
-          {!collapsed && (
-            <>
-              <span className="whitespace-nowrap flex-1 text-left">ตั้งค่าเงื่อนไข & กฎ</span>
-              <ChevronDown
-                className={`w-3.5 h-3.5 shrink-0 transition-transform ${settingsExpanded ? '' : '-rotate-90'}`}
-              />
-            </>
-          )}
-        </button>
-
-        {!collapsed && settingsExpanded && (
-          <div className="pl-4 mt-0.5 space-y-0.5">
-            {SETTINGS_SUBITEMS.map(({ key, label }) => {
-              const active = activeTab === 'settings' && subTab === key;
-              return (
-                <button
-                  key={key}
-                  onClick={() => goToSubTab(key)}
-                  className={`w-full text-left pl-6 pr-3 py-2 rounded-lg text-xs font-medium transition-all border-l-2 ${
-                    active
-                      ? 'border-current'
-                      : 'border-transparent text-slate-400 hover:text-slate-700 hover:bg-slate-50'
-                  }`}
-                  style={active ? { color: BRAND, borderColor: BRAND, backgroundColor: BRAND_SOFT } : undefined}
-                >
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-        )}
-          </>
-        )}
       </nav>
 
       {/* User / logout — single row */}
@@ -475,38 +534,6 @@ function AdminContent() {
         >
           {collapsed ? <ChevronsRight className="w-3.5 h-3.5" /> : <ChevronsLeft className="w-3.5 h-3.5" />}
         </button>
-
-        {/* Flyout เลือก sub-tab ตอน sidebar ย่อ — portal ไป body เพื่อหนี stacking context ของ
-            <aside sticky> (ไม่งั้น input ในเนื้อหาลอยทับ flyout); fixed เพราะ nav มี overflow-y-auto ที่ clip */}
-        {collapsed && settingsFlyoutTop !== null && createPortal(
-          <div
-            ref={settingsFlyoutRef}
-            role="menu"
-            className="fixed z-[60] w-56 py-1.5 bg-card border border-slate-200 rounded-xl shadow-xl animate-fade-in"
-            style={{ top: settingsFlyoutTop, left: sidebarWidth + 6 }}
-          >
-            <p className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-              ตั้งค่าเงื่อนไข & กฎ
-            </p>
-            {SETTINGS_SUBITEMS.map(({ key, label }) => {
-              const active = activeTab === 'settings' && subTab === key;
-              return (
-                <button
-                  key={key}
-                  role="menuitem"
-                  onClick={() => goToSubTab(key)}
-                  className={`w-full text-left px-3 py-2 text-xs font-medium transition-colors ${
-                    active ? '' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                  }`}
-                  style={active ? { backgroundColor: BRAND_SOFT, color: BRAND } : undefined}
-                >
-                  {label}
-                </button>
-              );
-            })}
-          </div>,
-          document.body
-        )}
       </aside>
 
       {/* Mobile drawer */}
