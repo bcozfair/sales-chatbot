@@ -185,10 +185,10 @@ function AdminContent() {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   /**
-   * กลุ่มไหนกางอยู่ — เก็บเฉพาะกลุ่มที่ "คนกดเอง" เท่านั้น
-   * ไม่มีค่าในนี้ = ตามหน้าที่เปิดอยู่ (กลุ่มที่มีหน้าปัจจุบันกางเอง กลุ่มอื่นหุบ)
-   * ⇒ เดินออกจากกลุ่มไหน กลุ่มนั้นหุบกลับเอง ไม่ต้องมีใครไล่ปิด และกลุ่มที่คนตั้งใจเปิดค้างไว้
-   * ก็ไม่ถูกหุบให้โดยไม่ได้สั่ง
+   * กลุ่มไหนกางอยู่ — เก็บเฉพาะกลุ่มที่ "คนกดหุบเอง" เท่านั้น
+   * **ค่าเริ่มต้นคือกางทุกกลุ่ม** (เจ้าของเลือกเมื่อ 2026-09-15) — เปิดมาเห็นเมนูครบทุกบรรทัด
+   * ไม่ต้องกดกางก่อนถึงจะรู้ว่ามีอะไรอยู่ข้างใน · การพับมีไว้ให้คนที่อยากเก็บกลุ่มที่ไม่ได้ใช้
+   * ไม่ใช่ด่านที่ทุกคนต้องผ่านทุกครั้งที่เปิดหน้า
    */
   const [groupToggles, setGroupToggles] = useState<Record<string, boolean>>({});
   // แท็บล่าสุดในกลุ่ม Activity Log — ออกไปหน้าอื่นแล้วกดเมนูกลับมา ต้องได้แท็บเดิม
@@ -432,7 +432,7 @@ function AdminContent() {
         {visibleGroups.map((group, index) => {
           const GroupIcon = group.icon;
           const hasActive = group.items.some(isItemActive);
-          const open = groupToggles[group.key] ?? hasActive;
+          const open = groupToggles[group.key] ?? true;
           if (flatNav) return <div key={group.key}>{group.items.map((item) => renderNavItem(item, false))}</div>;
           return (
             <div key={group.key}>
