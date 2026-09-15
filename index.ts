@@ -57,6 +57,7 @@ import { confirmQuotationById } from './services/quotationConfirm.js';
 import {
   listApprovalRequests,
   getApprovalRequest,
+  updateRequestItems,
   approveRequest,
   rejectRequest,
   cancelRequest,
@@ -2585,6 +2586,22 @@ app.get('/api/admin/approvals/:requestId/form', adminAuthMiddleware, requireRole
     res.json(await loadRequestIntoForm({ requestId: req.params.requestId, actor: actorOf(req) }));
   } catch (err: any) {
     sendApprovalError(res, 'GET /api/admin/approvals/:requestId/form', err);
+  }
+});
+
+/**
+ * ผู้อนุมัติแก้ตัวเลขในร่างเอง (จำนวน · ราคา · ส่วนลด) ก่อนกดอนุมัติ — ไม่ต้องตีกลับ
+ * เพิ่ม/ลบสินค้า หรือเปลี่ยนลูกค้า ⇒ ยังต้องเปิดในฟอร์มขอใบเสนอราคา (เส้น `/form`)
+ */
+app.put('/api/admin/approvals/:requestId/items', adminAuthMiddleware, requireRole('admin', 'approver'), express.json({ limit: '2mb' }), async (req: any, res: any) => {
+  try {
+    res.json(await updateRequestItems({
+      requestId: req.params.requestId,
+      actor: actorOf(req),
+      quotes: req.body?.quotes ?? [],
+    }));
+  } catch (err: any) {
+    sendApprovalError(res, 'PUT /api/admin/approvals/:requestId/items', err);
   }
 });
 

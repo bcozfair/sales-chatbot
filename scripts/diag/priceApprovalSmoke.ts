@@ -8,12 +8,13 @@
 //  2. เว็บกดออกใบโดยไม่ส่งธง request_approval ⇒ ปฏิเสธ NEEDS_APPROVAL (ไม่สร้างคำขอเงียบ ๆ)
 //  3. ส่งขออนุมัติ ⇒ ร่างถูกสร้าง · price_approval = pending · **ยังไม่มีเลขที่ใบ**
 //  4. confirm ใบที่ยัง pending ⇒ 422 (คำรับทราบของคนออกใบปลดไม่ได้)
-//  5. ผู้อนุมัติที่เป็นคนขอเอง ⇒ 403 · admin อนุมัติได้
+//  5. คำขอโผล่ในคิวของผู้อนุมัติ · เปิดรายละเอียดแล้วเห็นผลตรวจกฎ "สด"
 //  6. ไม่อนุมัติโดยไม่ใส่เหตุผล ⇒ 400 · ใส่แล้ว ⇒ rejected และใบยังเป็นร่าง · confirm ยัง 422
 //  7. แก้แล้วส่งใหม่ (replacesRequestId) ⇒ คำขอเดิมถูกยกเลิก คำขอใหม่ pending
 //  8. insertDraftQuotations รอบใหม่ของ user เดิม ⇒ **ใบที่รออนุมัติไม่ถูกลบ**
-//  9. อนุมัติ ⇒ ทุกใบในชุดได้เลขที่ · price_approval = approved
-// 10. ราคาที่ถูกแก้ให้ต่ำลงกว่าที่อนุมัติ ⇒ คำอนุมัติเดิมใช้ไม่ได้ (approvedViolationKeys)
+//  9. **ผู้อนุมัติแก้ตัวเลขในร่างเองได้** ⇒ ราคาในใบเปลี่ยนจริง · คำขออัปเดตตามราคาใหม่
+// 10. **อนุมัติใบที่ตัวเองเป็นคนขอได้** (เจ้าของสั่งปลดด่านนี้) ⇒ ทุกใบในชุดได้เลขที่
+// 11. ราคาที่ถูกแก้ให้ต่ำลงกว่าที่อนุมัติ ⇒ คำอนุมัติเดิมใช้ไม่ได้ (approvedViolationKeys)
 //
 //  ⚠️ เขียนข้อมูลจริงลง DB (salesperson · admin_users · quotations · messages ของชุดทดสอบ)
 //     แล้วลบทิ้งใน finally ทุกกรณี · ข้อ 9 **กินเลขที่ใบจริง 1 เลข** จาก quotation_counters
@@ -32,7 +33,7 @@ import { confirmQuotationById } from '../../services/quotationConfirm.js';
 import { buildResolvedItem } from '../../services/quoteExtraction.js';
 import { createDraft, previewDraft, resolveWebUserId, WebQuoteError } from '../../services/webQuoteService.js';
 import {
-  approveRequest, rejectRequest, listApprovalRequests, getApprovalRequest,
+  approveRequest, rejectRequest, listApprovalRequests, getApprovalRequest, updateRequestItems,
   PriceApprovalError, type ApprovalActor,
 } from '../../services/priceApprovalService.js';
 
@@ -216,23 +217,21 @@ async function case2to4(cust: any, pick: any): Promise<string> {
 
 /** ข้อ 5–6 — สิทธิ์การตัดสิน และการไม่อนุมัติ */
 async function case5to6(requestId: string) {
-  console.log(`\n${BOLD}5) ผู้อนุมัติที่เป็นคนขอเอง → 403${RESET}`);
-  // คำขอข้างบนถูกส่งในนาม adminId ⇒ จำลองว่า "คนขอ" คนนั้นเป็น approver โดยยืม id เดียวกัน
-  const selfApprover: ApprovalActor = { id: adminId, username: TEST_ADMIN_USERNAME, name: 'DIAG', role: 'approver' };
-  let blocked = false;
-  try {
-    await approveRequest({ requestId, actor: selfApprover });
-  } catch (e) {
-    blocked = e instanceof PriceApprovalError && e.code === 'SELF_APPROVAL' && e.status === 403;
-  }
-  ok('approver อนุมัติใบที่ตัวเองขอไม่ได้', blocked);
-
+  console.log(`\n${BOLD}5) คำขอเข้าคิวของผู้อนุมัติ + เห็นผลตรวจกฎสด${RESET}`);
   const visible = await listApprovalRequests({ actor: approverActor, status: 'pending' });
   ok('คำขอโผล่ในคิวของผู้อนุมัติ', visible.some((r) => r.request_id === requestId), `${visible.length} คำขอ`);
+
+  const mineOnly = await listApprovalRequests({
+    actor: { id: approverId + 90000, username: 'diag_ไม่มีจริง', role: 'subadmin' }, status: 'pending',
+  });
+  ok('คนที่ไม่ใช่ผู้อนุมัติเห็นเฉพาะคำขอของตัวเอง (ของคนอื่นไม่โผล่)',
+    !mineOnly.some((r) => r.request_id === requestId), `${mineOnly.length} คำขอ`);
 
   const detail = await getApprovalRequest({ requestId, actor: approverActor });
   ok('เปิดรายละเอียดแล้วเห็นผลตรวจกฎสด',
     detail.current_violations.some((v) => v.type === 'MIN_PRICE_VIOLATION'));
+  ok('เห็นทุกบรรทัดของทุกใบในชุด (ไม่ใช่เฉพาะบรรทัดที่ผิดกฎ)',
+    detail.quotes.length > 0 && detail.quotes.every((q) => (q.items?.length ?? 0) > 0));
 
   console.log(`\n${BOLD}6) ไม่อนุมัติ → ใบยังเป็นร่าง + มีเหตุผล + confirm ยังไม่ได้${RESET}`);
   let needReason = false;
@@ -291,10 +290,57 @@ async function case7to8(cust: any, pick: any, oldRequestId: string): Promise<str
   return newId;
 }
 
-/** ข้อ 9 — อนุมัติ แล้วต้องได้เลขที่ใบทันที */
-async function case9(requestId: string) {
-  console.log(`\n${BOLD}9) admin อนุมัติ → ออกใบทันที${RESET}`);
-  const result = await approveRequest({ requestId, actor: adminActor, note: 'อนุมัติโดยด่านตรวจ (diag)' });
+/** ข้อ 9 — ผู้อนุมัติแก้ตัวเลขในร่างเองได้ (ไม่ต้องตีกลับ) */
+async function case9(requestId: string, pick: any): Promise<number> {
+  console.log(`\n${BOLD}9) ผู้อนุมัติแก้ตัวเลขในร่างเอง → ราคาในใบเปลี่ยนจริง${RESET}`);
+  const before = await getApprovalRequest({ requestId, actor: approverActor });
+  const quote = before.quotes[0];
+  const index = quote.items.findIndex((it: any) => String(it.model) === String(pick.product.model));
+  ok('หาบรรทัดที่จะแก้เจอ', index >= 0, `index=${index}`);
+  if (index < 0) return 0;
+
+  // ขยับราคาขึ้นมา "ต่ำกว่าขั้นต่ำ 1 บาท" — ยังต้องอนุมัติอยู่ แต่พิสูจน์ว่าค่าที่แก้ถึง DB จริง
+  const newPrice = Math.max(1, Number(pick.product.minimum_sales_price) - 1);
+  const result = await updateRequestItems({
+    requestId,
+    actor: approverActor,
+    quotes: [{
+      quote_id: quote.id,
+      items: [{ index, model: String(quote.items[index].model), quantity: 1, price: newPrice, discount_1: 0, discount_2: 0 }],
+    }],
+  });
+  ok('บันทึกแล้วยังติดราคาขั้นต่ำอยู่ (ยังต้องอนุมัติ)',
+    result.violations.some((v) => v.type === 'MIN_PRICE_VIOLATION'));
+  ok('คำขอถูกอัปเดตเป็นราคาใหม่',
+    result.items.some((it) => Math.abs(it.price - newPrice) < 0.005),
+    `ราคาในคำขอ = ${result.items.map((it) => it.price).join(', ')}`);
+
+  const row = (await pool.query('SELECT item_details, price_approval FROM quotations WHERE id = $1', [quote.id])).rows[0];
+  const saved = (row.item_details as any[]).find((it: any) => String(it.model) === String(pick.product.model));
+  ok('ราคาในใบ (item_details) เปลี่ยนตามจริง', Math.abs(Number(saved?.price) - newPrice) < 0.005,
+    `ในใบ = ${saved?.price}`);
+  ok('คำขอยังเป็น pending (แก้ไม่ใช่การตัดสิน)', row.price_approval?.status === 'pending');
+  ok('บันทึกว่าใครแก้', row.price_approval?.edited_by === TEST_APPROVER_USERNAME, row.price_approval?.edited_by);
+
+  let refusedAfterDecision = false;
+  try {
+    await updateRequestItems({ requestId: 'ไม่มีจริง-00000', actor: approverActor, quotes: [] });
+  } catch (e) {
+    refusedAfterDecision = e instanceof PriceApprovalError && e.status === 404;
+  }
+  ok('แก้คำขอที่ไม่มีอยู่ ⇒ 404', refusedAfterDecision);
+
+  return newPrice;
+}
+
+/** ข้อ 10 — อนุมัติใบที่ตัวเองเป็นคนขอได้ (เจ้าของสั่งปลดด่านนี้ 2026-09-15) */
+async function case10(requestId: string) {
+  console.log(`\n${BOLD}10) อนุมัติใบที่ตัวเองเป็นคนขอ → ออกใบทันที${RESET}`);
+  // ผู้ขอคือ adminId — ให้เขาสวมบทผู้อนุมัติแล้วกดเอง ซึ่งเจ้าของสั่งว่าต้องทำได้
+  const selfApprover: ApprovalActor = {
+    id: adminId, username: TEST_ADMIN_USERNAME, name: 'DIAG แอดมิน', role: 'approver',
+  };
+  const result = await approveRequest({ requestId, actor: selfApprover, note: 'อนุมัติเอง (diag)' });
   ok('ได้เลขที่ใบกลับมา', result.issued.length > 0,
     result.issued.map((i) => i.quotation_no).join(', ') || `failed=${result.failed.length}`);
   ok('ไม่มีใบที่ออกไม่สำเร็จ', result.failed.length === 0,
@@ -307,11 +353,13 @@ async function case9(requestId: string) {
   ok('ทุกใบในชุดเป็น confirmed และมีเลขที่', rows.every((r: any) => r.status === 'confirmed' && !!r.quotation_no));
   ok('price_approval = approved พร้อมชื่อคนอนุมัติ',
     rows.every((r: any) => r.price_approval?.status === 'approved' && r.price_approval?.decided_by === TEST_ADMIN_USERNAME));
+  ok('เก็บทั้งชื่อผู้ขอและผู้อนุมัติไว้ แม้เป็นคนเดียวกัน',
+    rows.every((r: any) => !!r.price_approval?.requested_by && !!r.price_approval?.decided_by));
 }
 
-/** ข้อ 10 — คำอนุมัติผูกกับ "ราคาที่อนุมัติ" ไม่ใช่แค่ชื่อรุ่น */
-function case10() {
-  console.log(`\n${BOLD}10) แก้ราคาให้ต่ำลงกว่าที่อนุมัติ → คำอนุมัติเดิมใช้ไม่ได้${RESET}`);
+/** ข้อ 11 — คำอนุมัติผูกกับ "ราคาที่อนุมัติ" ไม่ใช่แค่ชื่อรุ่น */
+function case11() {
+  console.log(`\n${BOLD}11) แก้ราคาให้ต่ำลงกว่าที่อนุมัติ → คำอนุมัติเดิมใช้ไม่ได้${RESET}`);
   const mk = (price: number): Violation => {
     const v = { type: 'MIN_PRICE_VIOLATION' as const, model: 'DIAG-X', price, min_price: 200 };
     return { ...v, display_message: buildViolationDisplay(v) };
@@ -343,8 +391,9 @@ async function main() {
     const requestId = await case2to4(cust, pick);
     await case5to6(requestId);
     const newRequestId = await case7to8(cust, pick, requestId);
-    await case9(newRequestId);
-    case10();
+    await case9(newRequestId, pick);
+    await case10(newRequestId);
+    case11();
   } catch (err) {
     fail++;
     console.error(`\n${RED}ด่านล้มกลางคัน:${RESET}`, err);
