@@ -450,7 +450,7 @@ export function QuotationRules() {
 
         <button
           onClick={openAddModal}
-          className="flex items-center justify-center gap-1.5 px-3.5 py-2 bg-[var(--brand)] hover:bg-[var(--brand-hover)] text-white text-sm font-bold rounded-xl shadow-sm transition-all active:scale-95 flex-shrink-0"
+          className="flex items-center justify-center gap-1.5 px-3.5 btn-h bg-[var(--brand)] hover:bg-[var(--brand-hover)] text-white text-sm font-bold rounded-xl shadow-sm transition-all active:scale-95 flex-shrink-0"
         >
           <Plus className="w-4 h-4" />
           <span className="hidden sm:inline">เพิ่มเงื่อนไข</span>
@@ -470,7 +470,7 @@ export function QuotationRules() {
           <p className="text-sm text-red-600">{error}</p>
           <button
             onClick={fetchRules}
-            className="mt-3 px-4 py-2 bg-card border border-red-200 text-red-700 hover:bg-red-50 rounded-xl text-xs font-semibold transition-all active:scale-95"
+            className="mt-3 px-4 btn-h bg-card border border-red-200 text-red-700 hover:bg-red-50 rounded-xl text-xs font-semibold transition-all active:scale-95"
           >
             ลองใหม่อีกครั้ง
           </button>
@@ -741,14 +741,14 @@ export function QuotationRules() {
               <button
                 type="button"
                 onClick={() => setTierDetailRule(null)}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 border border-slate-200 hover:bg-slate-100 rounded-lg transition-all"
+                className="px-4 btn-h text-xs font-semibold text-slate-600 hover:text-slate-800 border border-slate-200 hover:bg-slate-100 rounded-lg transition-all"
               >
                 ปิด
               </button>
               <button
                 type="button"
                 onClick={() => { const r = tierDetailRule; setTierDetailRule(null); openEditModal(r); }}
-                className="px-4 py-2 text-xs font-bold text-white bg-[var(--brand)] hover:bg-[var(--brand-hover)] rounded-lg transition-all active:scale-95 shadow-sm"
+                className="px-4 btn-h text-xs font-bold text-white bg-[var(--brand)] hover:bg-[var(--brand-hover)] rounded-lg transition-all active:scale-95 shadow-sm"
               >
                 แก้ไขเงื่อนไข
               </button>
@@ -1018,13 +1018,13 @@ export function QuotationRules() {
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 border border-slate-200 hover:bg-slate-100 rounded-lg transition-all"
+                  className="px-4 btn-h text-xs font-semibold text-slate-600 hover:text-slate-800 border border-slate-200 hover:bg-slate-100 rounded-lg transition-all"
                 >
                   ยกเลิก
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 text-xs font-bold text-white bg-[var(--brand)] hover:bg-[var(--brand-hover)] rounded-lg transition-all active:scale-95 shadow-sm"
+                  className="px-5 btn-h text-xs font-bold text-white bg-[var(--brand)] hover:bg-[var(--brand-hover)] rounded-lg transition-all active:scale-95 shadow-sm"
                 >
                   {editingRule ? 'บันทึกการแก้ไข' : 'เพิ่มเงื่อนไข'}
                 </button>

@@ -264,7 +264,7 @@ export const AuditLogs: React.FC = () => {
         <button
           onClick={() => { void doExport(); }}
           disabled={exporting}
-          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium text-white
+          className="inline-flex items-center gap-1.5 px-3 btn-h rounded-xl text-sm font-medium text-white
                      transition disabled:opacity-60"
           style={{ background: BRAND }}
         >

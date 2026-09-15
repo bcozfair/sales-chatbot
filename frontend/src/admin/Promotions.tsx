@@ -866,7 +866,7 @@ export const Promotions: React.FC = () => {
       >
         <button
           onClick={() => handleExportCsv()}
-          className="flex items-center justify-center gap-1.5 px-3.5 py-2 bg-[var(--brand)] hover:bg-[var(--brand-hover)] text-white text-sm font-bold rounded-xl shadow-sm transition-all active:scale-95 flex-shrink-0"
+          className="flex items-center justify-center gap-1.5 px-3.5 btn-h bg-[var(--brand)] hover:bg-[var(--brand-hover)] text-white text-sm font-bold rounded-xl shadow-sm transition-all active:scale-95 flex-shrink-0"
         >
           <FileSpreadsheet className="w-4 h-4" />
           <span className="hidden sm:inline">ส่งออก CSV</span>
@@ -874,7 +874,7 @@ export const Promotions: React.FC = () => {
         <button
           id="add-promo-btn"
           onClick={handleCreateOpen}
-          className="flex items-center justify-center gap-1.5 px-3.5 py-2 bg-card hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl shadow-sm transition-all active:scale-95 flex-shrink-0"
+          className="flex items-center justify-center gap-1.5 px-3.5 btn-h bg-card hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl shadow-sm transition-all active:scale-95 flex-shrink-0"
         >
           <Plus className="w-4 h-4" />
           <span className="hidden sm:inline">สร้างโปรโมชันใหม่</span>
@@ -1451,14 +1451,14 @@ export const Promotions: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-5 py-2.5 border border-slate-200 hover:border-slate-350 bg-card hover:bg-slate-50 text-slate-700 rounded-xl text-sm font-semibold transition-all active:scale-95"
+                  className="px-5 btn-h border border-slate-200 hover:border-slate-350 bg-card hover:bg-slate-50 text-slate-700 rounded-xl text-sm font-semibold transition-all active:scale-95"
                 >
                   ยกเลิก
                 </button>
                 <button
                   type="submit"
                   disabled={isSaving}
-                  className="flex items-center justify-center gap-2 px-6 py-2.5 bg-[var(--brand)] hover:bg-[var(--brand)]/95 text-white rounded-xl text-sm font-semibold shadow-md shadow-[var(--brand-fg)]/10 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex items-center justify-center gap-2 px-6 btn-h bg-[var(--brand)] hover:bg-[var(--brand)]/95 text-white rounded-xl text-sm font-semibold shadow-md shadow-[var(--brand-fg)]/10 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                   บันทึก
@@ -1488,14 +1488,14 @@ export const Promotions: React.FC = () => {
                 <button
                   onClick={() => setIsDeleteConfirmOpen(false)}
                   disabled={isSaving}
-                  className="flex-1 py-2.5 border border-slate-200 hover:border-slate-350 bg-card hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-bold transition-all active:scale-95 disabled:opacity-50"
+                  className="flex-1 btn-h border border-slate-200 hover:border-slate-350 bg-card hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-bold transition-all active:scale-95 disabled:opacity-50"
                 >
                   ยกเลิก
                 </button>
                 <button
                   onClick={handleDeleteConfirm}
                   disabled={isSaving}
-                  className="flex-1 py-2.5 bg-red-600 hover:bg-red-550 text-white rounded-xl text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  className="flex-1 btn-h bg-red-600 hover:bg-red-550 text-white rounded-xl text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5 disabled:opacity-50"
                 >
                   {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
                   ยืนยันลบ
@@ -1589,7 +1589,7 @@ export const Promotions: React.FC = () => {
               <div className="pt-3 border-t border-slate-100 flex justify-end">
                 <button
                   onClick={() => setSelectedPromoForDetails(null)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition-all active:scale-95 cursor-pointer"
+                  className="px-4 btn-h bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition-all active:scale-95 cursor-pointer"
                 >
                   ปิดหน้าต่าง
                 </button>

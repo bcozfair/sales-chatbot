@@ -333,7 +333,7 @@ export const Traffic: React.FC = () => {
                   description="ปริมาณการใช้งานย้อนหลัง วัน / สัปดาห์ / เดือน / ปี">
         <button
           onClick={() => { void load(); }}
-          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200
+          className="inline-flex items-center gap-1.5 px-3 btn-h rounded-xl border border-slate-200
                      text-sm text-slate-600 hover:bg-slate-50 transition"
         >
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -342,7 +342,7 @@ export const Traffic: React.FC = () => {
         <button
           onClick={() => { void doExport(); }}
           disabled={exporting}
-          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium text-white
+          className="inline-flex items-center gap-1.5 px-3 btn-h rounded-xl text-sm font-medium text-white
                      transition disabled:opacity-60"
           style={{ background: BRAND }}
           title={exportError ?? 'ส่งออกเป็น CSV — รูปแบบที่ใช้ส่งมอบเมื่อมีหมายเรียก'}

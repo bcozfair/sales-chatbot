@@ -379,7 +379,7 @@ export const BlockRules: React.FC = () => {
         </div>
         <button
           onClick={handleCreateOpen}
-          className="flex items-center justify-center gap-1.5 px-3.5 py-2 bg-[var(--brand)] hover:bg-[var(--brand-hover)] text-white text-sm font-bold rounded-xl shadow-sm transition-all active:scale-95 flex-shrink-0"
+          className="flex items-center justify-center gap-1.5 px-3.5 btn-h bg-[var(--brand)] hover:bg-[var(--brand-hover)] text-white text-sm font-bold rounded-xl shadow-sm transition-all active:scale-95 flex-shrink-0"
         >
           <Plus className="w-4 h-4" />
           <span className="hidden sm:inline">สร้างกฎใหม่</span>
@@ -674,14 +674,14 @@ export const BlockRules: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 border border-slate-200 hover:bg-slate-100 rounded-lg transition-all"
+                  className="px-4 btn-h text-xs font-semibold text-slate-600 hover:text-slate-800 border border-slate-200 hover:bg-slate-100 rounded-lg transition-all"
                 >
                   ยกเลิก
                 </button>
                 <button
                   type="submit"
                   disabled={isSaving}
-                  className="px-5 py-2 text-xs font-bold text-white bg-[var(--brand)] hover:bg-[var(--brand-hover)] rounded-lg transition-all active:scale-95 shadow-sm flex items-center gap-1.5"
+                  className="px-5 btn-h text-xs font-bold text-white bg-[var(--brand)] hover:bg-[var(--brand-hover)] rounded-lg transition-all active:scale-95 shadow-sm flex items-center gap-1.5"
                 >
                   {isSaving && <Loader2 className="w-3 h-3 animate-spin" />}
                   {editingRule ? 'บันทึกการแก้ไข' : 'บันทึกข้อมูล'}
@@ -710,7 +710,7 @@ export const BlockRules: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setIsDeleteConfirmOpen(false)}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 border border-slate-200 hover:bg-slate-100 rounded-lg transition-all"
+                className="px-4 btn-h text-xs font-semibold text-slate-600 hover:text-slate-800 border border-slate-200 hover:bg-slate-100 rounded-lg transition-all"
               >
                 ยกเลิก
               </button>
@@ -718,7 +718,7 @@ export const BlockRules: React.FC = () => {
                 type="button"
                 onClick={handleDeleteConfirm}
                 disabled={isSaving}
-                className="px-5 py-2 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-all active:scale-95 shadow-sm flex items-center gap-1.5"
+                className="px-5 btn-h text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-all active:scale-95 shadow-sm flex items-center gap-1.5"
               >
                 {isSaving && <Loader2 className="w-3 h-3 animate-spin" />}
                 ยืนยันการลบ

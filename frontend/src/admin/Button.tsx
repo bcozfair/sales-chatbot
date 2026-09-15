@@ -91,9 +91,16 @@ const ELEVATION = [
   'motion-reduce:transition-colors motion-reduce:enabled:hover:translate-y-0 motion-reduce:enabled:active:scale-100',
 ].join(' ');
 
+/**
+ * ขนาด — **ความสูงไม่ได้อยู่ในนี้** `sm` กับ `md` ใช้ `btn-h` (36px) จาก `index.css` ทั้งคู่
+ * เพราะมันคือความสูงเดียวกับปุ่มสั่งงานที่เหลือทั้งแอป (ต้นแบบคือปุ่ม "ส่งออก CSV" ที่เจ้าของ
+ * ชี้เมื่อ 2026-09-15) · สองขนาดนี้ต่างกันที่ **ขนาดตัวอักษร ระยะห่างซ้ายขวา และความมน**
+ * ไม่ใช่ความสูง — ปุ่มที่สูงไม่เท่ากันในแถบเดียวกันคือสิ่งที่ `btn-h` มีไว้เพื่อกันตั้งแต่แรก
+ * · ห้ามเติม `py-*` หรือ `h-*` กลับเข้ามาที่นี่ ตัวเลขอยู่ที่ `--btn-h` ใน `index.css` ที่เดียว
+ */
 const SIZE = {
-  sm: 'text-xs font-semibold px-3 py-2 rounded-lg gap-1.5',
-  md: 'text-sm font-semibold px-4 py-2.5 rounded-xl gap-2',
+  sm: 'text-xs font-semibold px-3 btn-h rounded-lg gap-1.5',
+  md: 'text-sm font-semibold px-4 btn-h rounded-xl gap-2',
   // ปุ่มไอคอนล้วน — สี่เหลี่ยมจัตุรัสที่ไม่มีข้อความ ต้องส่ง `aria-label` มาด้วยเสมอ
   icon: 'w-8 h-8 rounded-lg',
   'icon-sm': 'w-7 h-7 rounded-lg',

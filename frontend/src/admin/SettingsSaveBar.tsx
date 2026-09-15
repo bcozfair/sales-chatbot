@@ -64,7 +64,7 @@ export const SettingsSaveBar: React.FC<SaveBarProps> = ({ isDirty, isSaving, onS
       type="button"
       onClick={onSave}
       disabled={!isDirty || isSaving}
-      className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
+      className="inline-flex items-center gap-2 rounded-lg px-4 btn-h text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
       style={{ backgroundColor: 'var(--brand)' }}
     >
       {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
@@ -74,7 +74,7 @@ export const SettingsSaveBar: React.FC<SaveBarProps> = ({ isDirty, isSaving, onS
       type="button"
       onClick={onReset}
       disabled={!isDirty || isSaving}
-      className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-bold text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+      className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 btn-h text-sm font-bold text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
     >
       <RotateCcw className="w-4 h-4" />
       ย้อนกลับ

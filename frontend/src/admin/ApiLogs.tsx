@@ -353,7 +353,7 @@ export function ApiLogs() {
         <button
           onClick={() => { void loadStats(); void loadList(); }}
           disabled={statsLoading || listLoading}
-          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium
+          className="inline-flex items-center gap-1.5 px-3 btn-h rounded-xl text-sm font-medium
                      border border-slate-200 text-slate-600 hover:bg-slate-50 transition disabled:opacity-60"
         >
           <RefreshCw className={`w-4 h-4 ${statsLoading || listLoading ? 'animate-spin' : ''}`} />

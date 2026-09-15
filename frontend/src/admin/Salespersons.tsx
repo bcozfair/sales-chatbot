@@ -492,7 +492,7 @@ export function Salespersons() {
           <p className="text-sm text-red-600">{error}</p>
           <button 
             onClick={fetchSalespersons}
-            className="mt-3 px-4 py-2 bg-card border border-red-200 text-red-700 hover:bg-red-100/50 rounded-xl text-xs font-semibold transition-all active:scale-95"
+            className="mt-3 px-4 btn-h bg-card border border-red-200 text-red-700 hover:bg-red-100/50 rounded-xl text-xs font-semibold transition-all active:scale-95"
           >
             ลองใหม่อีกครั้ง
           </button>
@@ -819,14 +819,14 @@ export function Salespersons() {
                 <button
                   type="button"
                   onClick={() => setEditingSp(null)}
-                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 border border-slate-200 hover:bg-slate-100 rounded-lg transition-all"
+                  className="px-4 btn-h text-xs font-semibold text-slate-600 hover:text-slate-800 border border-slate-200 hover:bg-slate-100 rounded-lg transition-all"
                 >
                   ยกเลิก
                 </button>
                 <button
                   type="submit"
                   disabled={isSaving}
-                  className="px-5 py-2 text-xs font-bold text-white bg-[var(--brand)] hover:bg-[var(--brand-hover)] rounded-lg transition-all active:scale-95 shadow-sm flex items-center gap-1.5 disabled:opacity-60"
+                  className="px-5 btn-h text-xs font-bold text-white bg-[var(--brand)] hover:bg-[var(--brand-hover)] rounded-lg transition-all active:scale-95 shadow-sm flex items-center gap-1.5 disabled:opacity-60"
                 >
                   {isSaving && <Loader2 className="w-3 h-3 animate-spin" />}
                   บันทึกข้อมูล
@@ -871,7 +871,7 @@ export function Salespersons() {
               <button
                 type="button"
                 onClick={() => setDeletingSp(null)}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 border border-slate-200 hover:bg-slate-100 rounded-lg transition-all"
+                className="px-4 btn-h text-xs font-semibold text-slate-600 hover:text-slate-800 border border-slate-200 hover:bg-slate-100 rounded-lg transition-all"
               >
                 ยกเลิก
               </button>
@@ -879,7 +879,7 @@ export function Salespersons() {
                 type="button"
                 onClick={handleDelete}
                 disabled={isDeleting}
-                className="px-5 py-2 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-all active:scale-95 shadow-sm flex items-center gap-1.5 disabled:opacity-60"
+                className="px-5 btn-h text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-all active:scale-95 shadow-sm flex items-center gap-1.5 disabled:opacity-60"
               >
                 {isDeleting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
                 ลบพนักงานขาย

@@ -570,7 +570,7 @@ export const Quotations: React.FC = () => {
           <button
             onClick={() => setExportMenuOpen(open => !open)}
             disabled={isExporting}
-            className="flex items-center justify-center gap-1.5 px-3.5 py-2 bg-[var(--brand)] hover:bg-[var(--brand-hover)] disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl shadow-sm transition-all active:scale-95 flex-shrink-0"
+            className="flex items-center justify-center gap-1.5 px-3.5 btn-h bg-[var(--brand)] hover:bg-[var(--brand-hover)] disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl shadow-sm transition-all active:scale-95 flex-shrink-0"
           >
             {isExporting
               ? <Loader2 className="w-4 h-4 animate-spin" />

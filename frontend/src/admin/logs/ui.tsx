@@ -157,7 +157,7 @@ export const ErrorBox: React.FC<{ message: string; onRetry?: () => void }> = ({ 
     {onRetry && (
       <button
         onClick={onRetry}
-        className="px-3 py-1.5 rounded-lg bg-card border border-red-200 text-sm text-red-700 shrink-0"
+        className="px-3 btn-h rounded-lg bg-card border border-red-200 text-sm text-red-700 shrink-0"
       >
         ลองใหม่
       </button>

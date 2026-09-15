@@ -81,7 +81,7 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ onClos
           </div>
           <button
             onClick={() => logout()}
-            className="w-full py-2.5 px-4 text-white text-sm font-semibold rounded-xl transition-all active:scale-[0.98]"
+            className="w-full btn-h px-4 text-white text-sm font-semibold rounded-xl transition-all active:scale-[0.98]"
             style={{ backgroundColor: 'var(--brand)' }}
           >
             เข้าสู่ระบบใหม่
@@ -158,14 +158,14 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ onClos
               type="button"
               onClick={onClose}
               disabled={isSubmitting}
-              className="flex-1 py-2.5 px-4 border border-slate-200 text-slate-600 text-sm font-semibold rounded-xl hover:bg-slate-50 transition-all disabled:opacity-50"
+              className="flex-1 btn-h px-4 border border-slate-200 text-slate-600 text-sm font-semibold rounded-xl hover:bg-slate-50 transition-all disabled:opacity-50"
             >
               ยกเลิก
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="flex-1 py-2.5 px-4 text-white text-sm font-semibold rounded-xl transition-all active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50"
+              className="flex-1 btn-h px-4 text-white text-sm font-semibold rounded-xl transition-all active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50"
               style={{ backgroundColor: 'var(--brand)' }}
             >
               {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
