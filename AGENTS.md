@@ -443,6 +443,10 @@ docker compose exec -T db psql -U "$PG_USER" -d "$PG_DATABASE" -c "SELECT …"  
 `grep -ciE "INSERT INTO|UPDATE [a-z_]+ SET|DELETE FROM" scripts/diag/<ไฟล์>.ts`
 **ไม่แน่ใจว่าตัวไหนเขียน = ยังไม่ใช่ตัวที่รันบนนี้ได้**
 
+**ไฟล์ที่เพิ่มเข้ามาหลังวันที่วัด** (ตารางข้างบนยังเป็นตัวเลขของ 2026-09-12 ไม่ได้วัดใหม่ทั้งชุด) —
+วัดรายตัวด้วย grep ข้างบนเมื่อ 2026-09-15 ได้ 0 ทั้งสามตัว ⇒ อยู่กลุ่ม "SELECT อย่างเดียว" รันบน PMSV ได้:
+`webDecisionParity.ts` · `salespersonDedupeSmoke.ts` · `migrationsAudit.mjs`
+
 **ก่อนทำอะไรที่เขียน DB บน PMSV: `npm run db:dump` ก่อนเสมอ** และบอกเจ้าของว่า dump อยู่ไหน
 
 ---
@@ -574,8 +578,10 @@ TS ไต่ `node_modules` ขึ้นไปตามลำดับ ⇒ `<ท
 | คิว / งบเวลาตอบ | `npm run diag:queue-sim` · `diag:load-probe` · `diag:abort-check` · `diag:shutdown-check` |
 | PDF | `npm run diag:pdf-render` · `diag:pdf-cache` |
 | ค่าขนส่ง · api_logs · sync API · `APP_URL` | `diag:shipping-fee` · `diag:api-log` · `diag:sync-api` · `diag:app-url` |
+| เพิ่ม migration ใหม่ · ก่อน deploy | `npm run diag:migrations` — **รันบน host ไม่ใช่ในกล่อง** (ในกล่องจะอ่านรายชื่อ migration ของ image เก่าแล้วตอบว่าครบเสมอ) |
 
-รายการเต็มอยู่ใน `package.json` (46 ไฟล์ใน `scripts/diag/`)
+รายการเต็มอยู่ใน `package.json` (วัด 2026-09-15: 48 รายการใน `scripts/diag/` — 44 `.ts` ·
+1 `.mjs` · 2 `.sql` · โฟลเดอร์ `fixtures`)
 
 **ด่าน verify ของงานทดลอง/แล็บ รันบน Windows local ผ่านก็พอ** — ไม่ต้องยก
 `docker compose exec app …` ขึ้นมาเป็นเงื่อนไขปิดงานของเฟสที่ยังไม่ deploy แยกด่านเป็นสองชั้น:

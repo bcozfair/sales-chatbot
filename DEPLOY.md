@@ -211,6 +211,23 @@ docker compose exec db pg_restore -U "$PG_USER" -d "$PG_DATABASE" --clean --if-e
 ```bash
 git pull --ff-only origin main
 ```
+**ด่านแรก — ให้เครื่องไล่เทียบ `migrations/changes/` กับฐานจริงให้ทั้งโฟลเดอร์:**
+```bash
+npm run diag:migrations       # รันบน host ไม่ใช่ในกล่อง — ไม่ต้อง build ก่อน
+```
+ขึ้น `✅ ครบทุกไฟล์` = ไม่มี migration ค้าง · ถ้าขาด มันจะบอกว่าไฟล์ไหนขาด object อะไร
+และพิมพ์คำสั่ง `psql` ที่ต้องรันมาให้ครบทุกบรรทัด (เรียงตามวันที่แล้ว) คัดลอกไปรันได้เลย
+
+> **ทำไมรันบน host** — ขั้นนี้อยู่**ก่อน** rebuild ⇒ image ที่ยังรันอยู่เป็นของเก่าและไม่มีไฟล์
+> `.sql` ใหม่อยู่ข้างใน (`COPY . .` ตอน build) ถ้ารันในกล่องมันจะอ่านรายชื่อ migration ของรุ่นเก่า
+> แล้วตอบว่า "ครบแล้ว" ทุกครั้ง = ด่านที่ไม่มีวันจับอะไรได้ · สคริปต์จึงเป็น `.mjs` ที่ใช้ node
+> เปล่า ๆ ไม่พึ่ง `node_modules` และถาม DB ผ่าน `docker compose exec -T db psql`
+>
+> **สิ่งที่มันตรวจไม่ได้** — มันเทียบเฉพาะ "ของที่มีตัวตนใน catalog" (ตาราง คอลัมน์ index view
+> function extension) ⇒ ไฟล์ที่แก้แต่นิยาม view / CHECK / ข้อมูล จะขึ้นว่า "ไม่มี object ให้ตรวจ"
+> ซึ่งไม่ใช่ความล้มเหลว **ยังต้องใช้ query ข้างล่างคู่กัน** เพราะข้อเฉพาะกิจอย่าง `cdv_billed_only`
+> หรือ `credit_mode_2_values` อยู่ในนั้น
+
 เช็คสถานะ DB จริงว่าขาดตัวไหน (คำสั่งเดียวตอบครบ — เพิ่มบรรทัดเองได้เมื่อมี migration ใหม่):
 ```bash
 docker compose exec -T db psql -U "$PG_USER" -d "$PG_DATABASE" -c "
@@ -219,7 +236,7 @@ SELECT to_regclass('public.customers_data_view')  AS matview,
        EXISTS(SELECT 1 FROM pg_attribute WHERE attrelid=to_regclass('public.customers_data_view')
               AND attname='sales_team' AND NOT attisdropped)                                  AS sales_team,
        EXISTS(SELECT 1 FROM information_schema.columns
-              WHERE table_name='salesperson' AND column_name='employee_quotation_id')         AS employee_qid,
+              WHERE table_name='salesperson' AND column_name='employee_quotation_id')         AS sp_employee_qid,
        EXISTS(SELECT 1 FROM information_schema.columns
               WHERE table_name='quotations' AND column_name='odoo_exported_at')               AS exported_at,
        to_regclass('public.quotation_export_batches')                                         AS export_batches,
@@ -242,8 +259,22 @@ SELECT to_regclass('public.customers_data_view')  AS matview,
               WHERE table_name='api_logs' AND column_name='llm_ms')                           AS api_logs_llm,
        EXISTS(SELECT 1 FROM information_schema.columns
               WHERE table_name='api_logs' AND column_name='llm_cached_tokens')                AS api_logs_llm_tok,
-       EXISTS(SELECT 1 FROM pg_extension WHERE extname='pg_stat_statements')                  AS pg_stat_stmts;"
+       EXISTS(SELECT 1 FROM pg_extension WHERE extname='pg_stat_statements')                  AS pg_stat_stmts,
+       EXISTS(SELECT 1 FROM information_schema.columns
+              WHERE table_name='admin_users' AND column_name='employee_quotation_id')         AS admin_maker,
+       EXISTS(SELECT 1 FROM information_schema.columns
+              WHERE table_name='admin_users' AND column_name='signature_key')                 AS admin_sig_key,
+       EXISTS(SELECT 1 FROM information_schema.columns
+              WHERE table_name='messages' AND column_name='meta')                             AS msg_meta,
+       EXISTS(SELECT 1 FROM information_schema.columns
+              WHERE table_name='quotations' AND column_name='odoo_manual_review')             AS q_manual_review;"
 ```
+> ⚠️ **`sp_employee_qid` กับ `admin_maker` เป็นคนละตาราง ชื่อคอลัมน์บังเอิญเหมือนกัน** —
+> `salesperson.employee_quotation_id` (ใบจาก LINE) กับ `admin_users.employee_quotation_id`
+> (ใบจากหน้าเว็บ) · อาการเมื่อ `admin_maker` ขาด: หน้าขอใบเสนอราคาขึ้น
+> **"โหลดข้อมูลผู้เสนอราคาไม่สำเร็จ"** และ log มี `column "employee_quotation_id" does not exist`
+> เกิดขึ้นจริง 2026-09-15 — คอลัมน์ฝั่ง `admin_users` ค้างไม่ได้รันมา 6 วันตั้งแต่ deploy วันที่ 9
+> เพราะแถวเดิมในตารางนี้อ่านว่า `employee_qid = t` แล้วเข้าใจว่าครบ ทั้งที่ตรวจคนละตาราง
 > `pg_stat_stmts` = false ทั้งที่รัน `2026-09-03_02` ไปแล้ว แปลว่ากล่อง db ยังไม่ได้ start ด้วย
 > `-c shared_preload_libraries=pg_stat_statements` — ต้อง `docker compose up -d db` (recreate) ก่อน
 > แล้วค่อยรัน migration นั้น ไม่ใช่รัน migration ซ้ำ

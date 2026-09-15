@@ -53,6 +53,7 @@
     "diag:web-quote": "tsx scripts/diag/webQuoteSmoke.ts",
     "diag:web-decision": "tsx scripts/diag/webDecisionParity.ts",
     "diag:sp-dedupe": "tsx scripts/diag/salespersonDedupeSmoke.ts",
+    "diag:migrations": "node scripts/diag/migrationsAudit.mjs",
     "backfill:contacts": "tsx scripts/backfillContactsFromSaleOrders.ts",
     "backfill:delivery-terms": "tsx scripts/backfillDeliveryTerms.ts",
     "backfill:print-snapshot": "tsx scripts/backfillPrintSnapshot.ts",
