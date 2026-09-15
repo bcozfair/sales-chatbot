@@ -1,199 +1,523 @@
-# AGENTS.md — Primus Quotation System
+# AGENTS.md — Primus Quotation System (`sales-chatbot`)
 
-คุณคือ Senior Full-Stack Developer (Node.js / Express / TypeScript / React / PostgreSQL)
-ทำงานกับระบบใบเสนอราคาผ่าน LINE ของ Primus Co., Ltd. — **ระบบนี้รันจริงใน production และทำงานได้ดีมากแล้ว**
+กฎการทำงานของทุก agent ในรีโปนี้ คุณคือ Senior Full-Stack Developer
+(Node.js / Express / TypeScript / React / PostgreSQL) ของระบบใบเสนอราคาผ่าน LINE ของ
+Primus Co., Ltd. — **ระบบนี้รันจริงใน production และทำงานได้ดีแล้ว**
 
-> เอกสารนี้คือ "แผนที่ + กติกา" ถ้าเอกสารไม่ตรงกับโค้ดจริง ให้เชื่อโค้ดจริงก่อน แล้วแจ้งเพื่อแก้เอกสาร
+**รายละเอียดของระบบ** (เส้นทางข้อความ, กับดักของข้อมูล, ค่าอะไรอยู่ที่ไหน, แผนที่ไฟล์) อยู่ใน
+**`CLAUDE.md`** · **กติกาของสิ่งที่คนมองเห็นบนจอ** อยู่ใน **`docs/design.md`** ซึ่งต้องอ่าน
+**ก่อน** เขียนโค้ด UI ทุกครั้ง
 
-## หลักการยืนพื้น 2 ข้อ (เหนือทุกหัวข้อด้านล่าง)
+ไฟล์นี้แบ่งเป็นสองส่วน:
 
-1. **ห้ามทำของเดิมพัง** — ระบบใช้งานจริงอยู่และเสถียร ต้นทุนของ regression สูงกว่าประโยชน์ของการปรับปรุงที่ไม่ได้ขอ
-   ⇒ แก้เฉพาะที่ task ต้องการ, เพิ่มของใหม่แบบ additive (ทางเดิมยังทำงานเหมือนเดิม) แทนการรื้อ, ไม่ refactor สิ่งที่ไม่เกี่ยวข้อง
-2. **requirement เปลี่ยนตลอดเวลา** — โครงสร้างต้องพร้อมแก้และดูแลง่ายโดยไม่กระทบของเดิม
-   ⇒ เงื่อนไขธุรกิจอยู่ที่เดียว (ห้ามก๊อปตรรกะไปวางซ้ำ), เคารพ layer, ค่าที่เปลี่ยนบ่อยไปอยู่ DB/config ไม่ใช่ค่าคงที่ในโค้ด, เลือกวิธีที่ "ต่อเติมได้" มากกว่าวิธีที่ "ต้องรื้อ" ในรอบหน้า
+| | คืออะไร | แก้ยังไง |
+| --- | --- | --- |
+| **ส่วน A** | กติกาที่ใช้กับทั้งสองรีโปบนทุกเครื่อง — git, หลาย session, worktree, วิธีทำงาน | **สำเนาเดียวกันกับ `primus-chat`** แก้แล้วต้องแก้อีกรีโปในวันเดียวกัน ตรวจด้วย `bash tools/diff-section-a.sh` |
+| **ส่วน B** | เฉพาะรีโปนี้ — remote, กติกาบน PMSV, กฎเหล็กของ stack นี้, ตารางด่าน verify | แก้ได้อิสระ |
+
+รีโปนี้กับ `primus-chat` อยู่บนเครื่อง dev เดียวกัน **และ deploy อยู่บนเครื่อง PMSV เดียวกัน**
+โดยมี agent session ทำงานทั้งสองเครื่อง กฎครึ่งที่เป็นเรื่องของ **เครื่อง** จึงไม่มีเหตุผลที่จะ
+ต่างกัน — นั่นคือส่วน A · **ถ้า session นี้อยู่บน PMSV อ่าน A1 กับ B2 ก่อนทำอะไรทั้งสิ้น**
+
+<!-- ═══ ส่วน A: เริ่ม ═══════════════════════════════════════════════════════════
+     กติกาการทำงานของทั้งสองรีโป บนทุกเครื่อง — ข้อความชุดนี้เป็น **สำเนาเดียวกัน**
+     ในทั้ง primus-chat และ sales-chatbot เพราะสองรีโปอยู่บนเครื่อง dev เดียวกัน
+     deploy บนเครื่อง PMSV เดียวกัน และมี agent ทำงานทั้งสองเครื่อง
+     กฎครึ่งนี้จึงไม่มีเหตุผลที่จะต่างกัน
+     แก้ที่นี่แล้ว **ต้องแก้อีกรีโปให้ตรงกันในวันเดียวกัน** · ตรวจด้วย:
+         bash tools/diff-section-a.sh
+     สองไฟล์ต่างกันเมื่อไหร่ = มีรีโปหนึ่งเดินตามกฎที่อีกรีโปเลิกใช้แล้ว
+     ═══════════════════════════════════════════════════════════════════════════ -->
+
+## A0. ภาษาไทย — ทั้งคำตอบและ commit
+
+ทุกอย่างที่เจ้าของอ่านเป็นภาษาไทย: คำตอบใน session, ข้อความ commit, และเอกสารใน `docs/`
+ที่ยังเป็นอังกฤษได้คือของที่เป็นอังกฤษอยู่แล้วโดยธรรมชาติ — ชื่อตัวแปร ชื่อไฟล์ ชื่อตาราง
+ชื่อ branch และคำที่ไม่มีคำไทยที่ใครใช้จริง (`worktree`, `token`, `breakpoint`)
+
+**"เขียนอังกฤษเพราะสั้นกว่า" ไม่ใช่เหตุผล** และ "ไฟล์นี้เดิมเป็นอังกฤษทั้งไฟล์" ก็ไม่ใช่ —
+`git log` มีไว้ให้เจ้าของอ่านเพื่อตอบคำถาม "ตอนนั้นทำไมถึงแก้" และมันตอบไม่ได้ถ้าเขาต้องแปลก่อน
 
 ---
 
-## 1. ระบบนี้คืออะไร
+## A1. รู้ก่อนว่า session นี้อยู่บนเครื่องไหน — **มี agent ทำงานบนเครื่อง production ด้วย**
 
-ระบบออกใบเสนอราคาสำหรับพนักงานขาย 3 ส่วน ใช้ฐานข้อมูลเดียวกัน:
+**ถามเครื่อง ไม่ใช่เดา** เพราะกฎเดียวกันมีผลต่างกันมากระหว่างสองเครื่องนี้:
 
-* **LINE Bot (แกนหลัก)** — เซลล์พิมพ์คุยใน LINE → AI สกัดสินค้า/จำนวน → จับคู่ฐานข้อมูล → คิดราคาตามโปรโมชัน → ออก PDF
-* **Admin Portal** — React SPA (`frontend/`) จัดการพนักงาน สินค้า โปรโมชัน กฎราคา ลายเซ็น และดู api_logs
-* **LIFF Pages** — หน้าเว็บใน LINE (`liff_pages/`) ค้นหาสินค้า / แก้ใบเสนอราคา / ลงทะเบียน
-
-ข้อมูลสินค้า/ลูกค้า/ใบสั่งซื้อ sync มาจาก **Odoo**
-
-| ส่วน | เทคโนโลยี |
-| --- | --- |
-| Backend | Node.js + Express 5 + TypeScript (ESM, NodeNext) entry `index.ts` runtime `tsx` |
-| AI / LLM | DeepSeek ผ่าน OpenAI SDK — โมเดลกลาง `deepseek-v4-flash` เรียกผ่าน `createChatCompletion()` ใน `config/clients.ts` เท่านั้น |
-| Database | PostgreSQL ผ่าน `pg` — ใช้ `pool` / `withTransaction` จาก `config/db.ts` เท่านั้น |
-| LINE | `@line/bot-sdk` — ตอบด้วย **replyToken เท่านั้น** |
-| PDF | Puppeteer ผ่าน `pdfGenerator.ts` (root) ที่เดียว |
-| Admin | Vite + React 19 + TSX + Tailwind 4 + React Router |
-| LIFF | HTML + Vanilla JS เสิร์ฟผ่าน Express — **ห้าม React/Vite** |
-| ค้นหา | Fuse.js (default import) |
-
----
-
-## 2. โครงสร้าง — backend เป็น layer `route → handler → service → repository`
-
-```
-chatbot/
-├── index.ts              # Express entry + route ทั้งหมด (ไฟล์ใหญ่ ใช้ grep หา route ที่ต้องการ)
-├── pdfGenerator.ts       # PDF logic ที่เดียวในระบบ
-├── config/
-│   ├── db.ts             # pool เดียวของทั้งระบบ + withTransaction — ห้ามสร้าง connection ที่อื่น
-│   ├── clients.ts        # LINE client + DeepSeek client + createChatCompletion() + LLM_MODEL
-│   ├── auth.ts           # adminAuthMiddleware (JWT) + ระดับสิทธิ์
-│   ├── jwt.ts            # getJwtSecret
-│   ├── apiLogger.ts      # middleware บันทึกทุก request ลง api_logs
-│   └── loginRateLimit.ts # กันเดารหัสผ่าน + getClientIp()
-├── handlers/
-│   └── lineHandler.ts    # รับ event LINE, คุม flow การสนทนา
-├── services/             # business logic
-│   ├── quotationService.ts   # สร้าง/ยืนยันใบเสนอราคา (confirmQuotationAtomic, snapshot, กฎราคาขั้นต่ำ)
-│   ├── quotationAgent.ts     # AI สกัด/ตีความคำสั่งซื้อ
-│   ├── productService.ts     # ค้นหา/จับคู่สินค้า
-│   ├── customerService.ts    # ค้นหา/จับคู่ลูกค้า
-│   ├── rules/                # rule engine โปรโมชัน/เงื่อนไข (index, quotationRules, scopeMatch, cache, types)
-│   ├── shippingFee.ts        # ค่าขนส่ง
-│   ├── blacklistService.ts   # บัญชีห้ามเสนอราคา
-│   ├── creditHoldService.ts  # ระงับลูกค้าเครดิตที่ไม่มีใบวางบิลมานาน (เกณฑ์อยู่ DB, ข้อมูลอยู่ cdv)
-│   │                         # ⚠️ cdv.last_order_at ชื่อหลอก = วันบิลล่าสุด + เฉพาะลูกค้าเครดิต
-│   │                         #    NULL = ไม่เข้าข่ายตรวจ (3 สาเหตุ) — อ่านหัวไฟล์ก่อนใช้ที่อื่น
-│   ├── webhookQueue.ts       # KeyedTaskQueue + งบเวลาตอบ (BUDGET_MS) — หัวใจของ "ตอบทันภายใน replyToken"
-│   ├── pdfCache.ts           # cache PDF ที่ออกเลขแล้ว
-│   ├── apiLogService.ts      # คิวเขียน api_logs (ห้าม throw / ต้อง sync)
-│   ├── odooSaleOrderExport.ts# ส่งออกไป Odoo
-│   └── syncService.ts        # sync จาก Odoo
-├── db/
-│   ├── repositories.ts   # data-access layer — ทุก SQL ของระบบอยู่ที่นี่
-│   └── companyIdentity.ts# กติกาการระบุตัวตนบริษัท/ผู้ติดต่อ (ใช้ร่วมหลายที่)
-├── utils/                # pricing, promotionValidator, flexTemplates, address, deliveryTerms,
-│                         # quotationLink, thaiTime, warranty
-├── liff_pages/           # product-search / quote-edit / register (.html) — HTML + Vanilla JS ล้วน
-├── migrations/
-│   ├── schema.sql        # schema เต็ม (ตั้ง DB ใหม่จากศูนย์ได้จริง — วิธีตรวจอยู่หัวไฟล์)
-│   │                     # ⚠️ เขียน migration ใหม่แล้วต้องยุบเข้าไฟล์นี้ด้วย ไม่งั้นมันจะค่อย ๆ ล้าสมัย
-│   └── changes/          # migration ทีละไฟล์ `YYYY-MM-DD_NN_*.sql`
-├── scripts/              # sync/ · diag/ · runMigration.ts · dbDump/dbRestore · backfill* · evalCustomerSearch.ts
-├── data/
-│   ├── sale_sigs/        # ลายเซ็น — ชื่อไฟล์ต้องเป็น {salesperson_id}.png
-│   └── eval/             # ชุดข้อมูลทดสอบ
-├── frontend/             # Admin SPA (มี package.json/tsconfig/eslint ของตัวเอง)
-│   └── src/{admin, context, assets}   # หน้าจอ admin เป็นไฟล์ .tsx แบนใน frontend/src/admin/
-└── public/               # build output ของ admin — ห้ามแก้ไฟล์ในนี้โดยตรง
+```bash
+uname -s                    # MINGW64_NT… / MSYS_NT… = dev box · Linux = PMSV
+pwd && git branch --show-current
 ```
 
-**กฎ layer:** route/handler ไม่ยิง SQL เอง → เรียก service; service ดึงข้อมูลผ่าน `db/repositories.ts`; ตรรกะราคา/สิทธิ์อยู่ใน `utils/` + `services/rules/` ไม่ใช่ใน handler
-**ของใหม่ไปไว้ไหน:** SQL → `db/repositories.ts` · business logic → `services/` · ตัวช่วยไม่มี state → `utils/` · เงื่อนไขโปรโมชัน → `services/rules/` · ตาราง/คอลัมน์ → migration ใหม่
+| เครื่อง | บทบาท | checkout | branch ที่ถือ |
+| --- | --- | --- | --- |
+| Windows dev box | พัฒนาอย่างเดียว **ไม่ deploy** | `~/Downloads/primus-chat` · `~/Downloads/chatbot` | `dev` ทั้งคู่ |
+| **PMSV** `192.168.100.17` (`app_sales`) | พัฒนา **และ deploy ทั้งสองรีโป** | `/home/app_sales/primus-chat` | **`fair`** |
+| | | `/home/app_sales/salechatbot/chatbot` | **`main`** |
 
-### แผนที่งาน → เริ่มอ่านที่ไหน
+**สองรีโปใช้ชื่อ trunk คนละแบบบนเครื่องเดียวกัน** ⇒ บน PMSV `git push origin main` ที่ถูกต้อง
+ในโฟลเดอร์หนึ่ง คือสิ่งที่ห้ามทำในอีกโฟลเดอร์ **`pwd` ก่อน push ทุกครั้ง**
 
-| งานเกี่ยวกับ | เริ่มที่ |
+**PMSV มีโปรเจคอื่นอยู่ด้วย** — `/home/app_sales/primus-ot` ไม่ใช่หนึ่งในสองรีโปนี้ และ
+container ของโปรเจคอื่นก็ใช้เครื่องนี้ร่วมกัน ⇒ **แตะเฉพาะโฟลเดอร์และ container ของรีโปที่
+กำลังทำงานอยู่** ห้ามฆ่า process, ลบไฟล์, หรือหยุด container ที่ไม่ใช่ของรีโปนั้น
+
+**จากเครื่อง dev:** push `dev` แล้วจบหน้าที่ การ push ไม่ได้ทำให้อะไรขึ้นระบบจริงด้วยตัวมันเอง
+— ไม่มีอะไรเฝ้า `origin/dev` และห้ามเสนอให้ merge เข้า trunk บนเครื่อง dev
+
+**บน PMSV — สามอย่างนี้คือของจริงที่มีลูกค้าอยู่ปลายทาง**
+
+* **`docker compose up --build` คือการ deploy** build จาก working tree ของเครื่องนั้นตรง ๆ
+  ปลายทางคือโดเมนสาธารณะที่ลูกค้าคุยอยู่ **agent ไม่รันคำสั่งนี้เอง** ไม่ว่างานจะเสร็จเรียบร้อย
+  แค่ไหน — เป็นการตัดสินใจของเจ้าของ
+* **ฐานข้อมูลในกล่องคือฐานลูกค้าจริง** ไม่มี staging ⇒ คำสั่งที่เขียน DB ต้องได้รับคำสั่งจาก
+  เจ้าของเป็นครั้ง ๆ ไป ไม่ใช่ "รันเพื่อดูว่าได้ผลไหม" (รายการคำสั่งของแต่ละรีโปอยู่ในส่วน B)
+* **working tree ที่นั่นคือสิ่งที่จะถูก build ครั้งหน้า** ⇒ ของที่ค้างไว้ในทรีไม่ใช่ draft
+  มันคือของที่จะขึ้นระบบพร้อมการ deploy ครั้งถัดไปของใครก็ตาม
+
+---
+
+## A2. เริ่มงานทุกครั้ง: `fetch` แล้ว `merge` ก่อนแตะไฟล์แรก
+
+```bash
+git fetch origin
+B="$(git branch --show-current)"          # dev บนเครื่อง dev · fair/main บน PMSV
+git log --oneline "HEAD..origin/$B"       # มีอะไรเข้ามาตั้งแต่ครั้งก่อน
+git merge "origin/$B"                     # ก่อนเริ่ม ไม่ใช่หลังทำเสร็จ
+```
+
+เขียนแบบนี้เพราะ branch ที่ต้อง merge **ไม่ใช่ `dev` เสมอไป** — บน PMSV แต่ละ checkout
+ถือคนละ branch ตาม A1 การพิมพ์ `origin/dev` ติดมือที่นั่นคือการดึงงานที่ยังไม่ผ่าน trunk
+เข้าเครื่อง production
+
+บังคับทุก session รวมถึงรอบที่ merge แล้วไม่มีอะไรเปลี่ยน — **`fetch` คือสิ่งที่พิสูจน์ว่าไม่มีจริง**
+
+งานที่เริ่มบน tree เก่าจะกลายเป็น conflict ที่เจอ **ตอนจบงาน** แทนที่จะเจอก่อนเริ่ม วัดแล้วสองครั้ง
+บนเครื่องนี้: เคยตามหลัง trunk อยู่ **55 commit โดยไม่รู้ตัว** (จับได้เพราะเอกสารที่ถูกส่งมาอ้างไฟล์
+ที่เครื่องยังไม่มี) · และ 2026-09-12 งานเอกสารที่เริ่มบน tree เก่าไปชนกันที่ build output ตอนจะ push
+ทั้งที่ไฟล์นั้นไม่ได้ถูกแก้ด้วยมือเลยสักบรรทัด
+
+---
+
+## A3. ห้าม force-push ทุกกรณี
+
+**ห้าม `--force` และ `--force-with-lease` กับทุก branch ที่ push ไปแล้ว**
+push โดน reject = `fetch` → `merge` → push ใหม่ จบ
+
+ไม่มีสถานการณ์ไหนที่การเขียนประวัติที่ push ไปแล้วทับเป็นทางแก้ — รวมถึง "ประวัติดูรก" และ
+"อยาก squash ที่เพิ่ง push ไป" force-push คือทางออกที่ **ดูเหมือน** แก้ได้ตอนโดน reject
+และเป็นท่าเดียวที่ลบ commit ของอีกเครื่องทิ้งได้จริง
+
+---
+
+## A4. ให้ถือว่ามีอีกเซสชันอยู่ในทรีนี้เสมอ
+
+หลาย agent session ทำงานพร้อมกันได้ และ **ไม่มีวิธีดูว่ามีอีกเซสชันอยู่หรือเปล่า**
+ทุกข้อข้างล่างจึงเป็นค่าเริ่มต้น ไม่ใช่กรณีพิเศษ
+
+**A5 ย้ายงานที่แก้ไฟล์ออกไปอยู่ทรีของตัวเองหมดแล้ว (2026-09-14)** ข้อนี้จึงเป็นกติกาของ
+*ทรีหลัก* — ที่ที่ทุกสายกลับมา merge กัน — และเป็นตาข่ายรับงานที่ยังไม่ทันแยกทรี
+**แต่ไม่ได้ถูกยกเลิกไปพร้อมกัน**: stash stack เป็นของ repo ไม่ใช่ของทรี ⇒ A4.3 ยังบังคับ
+กับทุก worktree และ `git stash pop` ในทรีของตัวเองก็ดึงของเซสชันอื่นออกมาได้เหมือนเดิม
+
+**A4.1 เทิร์นแรกของทุกงาน จด baseline ก่อน**
+
+```bash
+git status --short      # ทุกบรรทัดในนี้คือของคนอื่น จนกว่าจะพิสูจน์ได้ว่าไม่ใช่
+```
+
+จดไว้แล้วเทียบกับมันทุกครั้งก่อน commit ถ้าเทิร์นแรกไม่ได้จด ก็ไม่มีทางแยกได้อีกเลยว่าไฟล์ที่ค้าง
+อยู่ตอนนี้เป็นของเราหรือของเซสชันที่กำลังพิมพ์อยู่อีกหน้าต่างหนึ่ง
+
+**A4.2 `git add <path>` ทีละไฟล์ที่ตัวเองแก้ · ห้าม `git add -A` และ `git add .`**
+
+`-A` และ `.` ไม่ได้แปลว่า "งานของฉัน" มันแปลว่า "ทุกอย่างที่ค้างอยู่ในทรีนี้" ซึ่งเป็นคนละความหมาย
+กันเสมอเมื่อมีอีกเซสชันอยู่
+
+**A4.3 ห้ามลบงานของคนอื่น แม้จะเป็นการลบชั่วคราว**
+
+ห้ามห้าท่านี้กับไฟล์ที่ตัวเองไม่ได้เป็นคนเขียนในเทิร์นนี้:
+
+| ห้าม | ใช้อะไรแทน |
 | --- | --- |
-| flow การคุยใน LINE | `handlers/lineHandler.ts` |
-| ความเร็ว/คิว/ตอบไม่ทัน | `services/webhookQueue.ts`, `index.ts` (POST /callback) |
-| สกัดคำสั่งซื้อด้วย AI | `services/quotationAgent.ts`, `config/clients.ts` |
-| สร้าง/ยืนยันใบเสนอราคา | `services/quotationService.ts` |
-| ค้นหาสินค้า/ลูกค้า | `services/productService.ts`, `services/customerService.ts` |
-| ราคา/โปรโมชัน | `utils/pricing.ts`, `utils/promotionValidator.ts`, `services/rules/` |
-| ห้ามเสนอราคา / เครดิตลูกค้า | `services/blacklistService.ts`, `services/creditHoldService.ts` |
-| SQL / ตาราง | `db/repositories.ts`, `migrations/schema.sql` |
-| route / API / auth | `index.ts`, `config/auth.ts` |
-| Flex message / PDF | `utils/flexTemplates.ts`, `pdfGenerator.ts` |
-| log การเรียก API | `config/apiLogger.ts`, `services/apiLogService.ts` |
+| `git stash` | `git branch backup-<งาน>` — ได้ผลเหมือนกันโดยไม่แตะทรีของใคร |
+| `git checkout -- <path>` · `git restore <path>` | ถามก่อน |
+| `git reset --hard` | `git pull` (merge commit) — เจ้าของเลือกท่านี้ ถึงจะรู้ว่ามี commit ท้องถิ่นซ้ำซ้อนก็ตาม |
+| `> file` เขียนทับ | อ่านก่อนว่าข้างในมีอะไร |
+
+เหตุผลข้อเดียว: ท่าพวกนี้ลบงานที่ยังไม่ถูก commit และ **ของที่ยังไม่ commit ไม่มี reflog ให้กู้**
+
+`git stash` อันตรายที่สุดเพราะดูเหมือนปลอดภัย — มันไม่ได้แยกว่าของในทรีเป็นของใคร มันเก็บทั้งหมด
+แล้วเอากลับมาทั้งหมดในอีกสถานะหนึ่ง ระหว่างนั้นอีกเซสชันจะเห็นไฟล์ของตัวเองย้อนกลับไปเป็นเวอร์ชัน
+ก่อนหน้าใต้มือ **โดยไม่มีอะไรบอก**
+
+เคสจริง 2026-07-24: ทีม agent 2 ทีมทำคนละ feature บน checkout เดียวกัน ทีม A **วินิจฉัยผิดว่างาน
+ของทีม B เป็น hallucination** แล้ว `git checkout --` / amend / rebase ทับทิ้ง — งาน 6 ไฟล์ที่ยังไม่
+commit, design doc และ memory 2 ไฟล์หายถาวร (เหลือแค่ dangling blob)
+**บทเรียนสองข้อ:** agent ที่เคลมว่า "เสร็จ + verify ผ่าน" พูดจริง ณ เวลาที่มันรัน แต่ working tree
+เปลี่ยนหลังจากนั้นได้ · และ **"โค้ดที่ไม่รู้จัก" บน checkout ร่วมอาจเป็นงานของสายอื่น ไม่ใช่
+hallucination — ไม่ชัดให้ถามก่อนลบ**
+
+`git add -p` ปลอดภัย · `git diff` ปลอดภัย · การอ่านทุกชนิดปลอดภัย
+
+**`merge` ที่ถูกปฏิเสธเพราะชนไฟล์ของอีกเซสชัน คือการปฏิเสธที่ถูกแล้ว** — exit 1 และทรีไม่ถูกแตะเลย
+สังเกตว่า **git เองแนะนำ `stash` บนหน้าจอนั้น** คำแนะนำนั้นเขียนขึ้นสำหรับทรีที่มีเจ้าของคนเดียว
+เมื่อเจอหน้าจอนี้: **หยุด บอกเจ้าของว่าชนไฟล์ไหน แล้วรอให้เจ้าของตัดสิน**
+
+**A4.4 จบงานแล้ว commit ทันที หนึ่งงานหนึ่งคอมมิต**
+
+งานที่ทำเสร็จแล้วปล่อยค้างในทรีร่วม จะแยกไม่ออกว่าเป็นของใครภายในไม่กี่นาที — ทันทีที่อีกเซสชัน
+เริ่มแก้ไฟล์ถัดไป baseline ของทุกคนก็เพี้ยนพร้อมกัน
 
 ---
 
-## 3. กฎเหล็ก — ห้ามละเมิดในทุก task (และเช็คซ้ำก่อน deploy)
+## A5. worktree — หนึ่งงาน หนึ่งทรี ไม่มีข้อยกเว้น
 
-**LINE**
-* [ ] **ห้ามใช้ push message** ใช้ `replyToken` เท่านั้น — push มีโควตารายเดือนและมีค่าใช้จ่ายเมื่อเกิน ส่วน reply ฟรี เผลอใช้แล้วจะกินโควตาและอาจส่งไม่ออกใน production
-* [ ] replyToken อายุ **1 นาทีนับจากรับ webhook** ใช้ได้ครั้งเดียว — ทุกคำตอบต้องผลิตเสร็จใน `BUDGET_MS` จะ ack ก่อนแล้วตอบทีหลังไม่ได้
+**งานที่จะแก้ไฟล์ ต้องอยู่ใน worktree ของตัวเองก่อนแตะไฟล์แรก — รวมทั้ง session หลัก
+ไม่ใช่เฉพาะ subagent** งานที่อ่านอย่างเดียวอยู่ในทรีหลักได้ เพราะการอ่านไม่ทับงานใคร
 
-**Database**
-* [ ] ใช้ `pool.query(sql, [params])` จาก `config/db.ts` เท่านั้น — ห้าม Supabase-style (`.eq .or .ilike .in .select`) ห้ามสร้าง connection ใหม่
-* [ ] parameterized ทุก query — ห้ามต่อ string ค่าเข้า SQL
-* [ ] แก้ schema ต้องเขียนไฟล์ใหม่ใน `migrations/changes/` แล้วรัน `tsx scripts/runMigration.ts` — ห้ามแก้ schema ด้วยมือ
-* [ ] **ห้ามใส่ `COMMENT ON` (COLUMN/TABLE/VIEW/INDEX)** ใน migration หรือยิงเข้า DB เว้นแต่ผู้ใช้สั่งเอง — อธิบายด้วย `--` ในไฟล์ migration แทน
+เกณฑ์เดิม ("แยกเมื่อมีตั้งแต่สองสายทำงานพร้อมกัน") **ยกเลิกเมื่อ 2026-09-14** เพราะมันสั่งให้
+ตอบคำถามที่ A4 บอกไว้เองว่าตอบไม่ได้ — "ตอนนี้มีอีกเซสชันอยู่ในทรีนี้หรือเปล่า" ทุกงานจึงดู
+เหมือนงานเดี่ยวตอนเริ่ม แล้วไปเจอกันตอน commit **กฎที่มีจุดให้ตัดสิน คือกฎที่ถูกตัดสินผิด
+ในวันที่ยุ่ง** ⇒ ทรีหลักเหลืองานสามอย่าง: **`fetch`/`merge` · อ่าน · deploy** ไม่ใช่ที่ลงมือแก้
 
-**Security**
-* [ ] ไม่มี hardcode secret / LIFF ID / DB connection string — LIFF ID ดึงจาก `/api/liff/config?page=` เสมอ
-* [ ] `/api/admin/*` ทุก endpoint ผ่าน `adminAuthMiddleware` (JWT) · `/api/liff/*` ตรวจ LINE access token
-* [ ] Promotion/สิทธิ์ราคา ตรวจทั้งฝั่ง LIFF (UI) และ Backend (API) — ห้ามตรวจแค่ฝั่งเดียว
+**ท่าสร้าง**
 
-**Stack boundary**
-* [ ] `liff_pages/` เป็น HTML + Vanilla JS ล้วน — ไม่มี React/Vite
-* [ ] ไม่มี PDF logic นอก `pdfGenerator.ts`
-* [ ] ไม่แตะ LLM client ตรง ๆ — เรียกผ่าน `createChatCompletion()` และห้าม hardcode ชื่อโมเดล
-* [ ] ไม่แก้ไฟล์ใน `public/` (build output)
-* [ ] ลายเซ็นต้องชื่อ `{salesperson_id}.png` อัปโหลดได้เฉพาะแอดมิน
+```bash
+git worktree add .claude/worktrees/<ชื่องาน>     # ก่อนแตะไฟล์แรก
+```
 
-**กระบวนการ**
-* [ ] ห้ามรายงานว่า task เสร็จโดยยังไม่ผ่าน Self-Review + verify (หัวข้อ 6–7)
+subagent ไม่ต้องสร้างเอง — ตั้ง `isolation: worktree` ใน frontmatter ให้ harness บังคับ
+**ไม่ใช่เขียนกฎไว้ให้ agent จำ** · session หลักสั่ง `EnterWorktree` ได้ผลเดียวกัน
+(วัด 2026-09-14: ได้ทรีที่ `.claude/worktrees/<ชื่อ>` บน branch `worktree-<ชื่อ>` จริง)
+
+**`baseRef` ที่ไม่ได้ตั้ง = ทุกทรีเริ่มจากโค้ดผิดตัว — วัดแล้ว 2026-09-14**
+
+ค่าเริ่มต้นของ harness คือ `fresh` ซึ่งแตกจาก **`origin/<default branch>` = `origin/main`**
+ไม่ใช่ trunk ของเครื่องนี้ (วัดจริง: บน `sales-chatbot` ทรีที่ได้ **ตามหลัง `dev` 22 คอมมิต
+และนำหน้าไปอีก 5 คอมมิตพร้อมกัน** · บน `primus-chat` `dev` นำหน้า `origin/main` อยู่ 444)
+แก้ด้วยบรรทัดเดียวใน `.claude/settings.json` ของรีโป:
+
+```json
+{ "worktree": { "baseRef": "head" } }
+```
+
+`head` = แตกจาก HEAD ของทรีหลัก ⇒ ตรงกับ trunk ของเครื่องนั้นเสมอโดยไม่ต้องรู้ว่าชื่ออะไร
+วัดซ้ำหลังตั้งค่า: ทรีใหม่ตรงกับ `dev` พอดี (ตามหลัง 0 นำหน้า 0)
+
+**ทรีใหม่เริ่มจากคอมมิตล่าสุด ไม่ใช่จากของที่ค้างอยู่ในทรีหลัก** — ของที่แก้ค้างไว้ไม่ตามไป
+(วัด 2026-09-14: `git status` ในทรีใหม่ว่างเปล่า ขณะที่ทรีหลักมี 15 บรรทัด) ⇒ แยกทรี
+**ตั้งแต่ก่อนเริ่ม** ไม่ใช่ตอนแก้ไปครึ่งทางแล้ว ไม่งั้นงานครึ่งแรกยังนอนอยู่ในทรีร่วมตามเดิม
+
+`.claude/worktrees/` **gitignore ไว้แล้วและห้าม `git add` เข้าไป** — มันเป็น git repo ซ้อน
+เผลอ add จะกลายเป็น gitlink (submodule ปลอม) ที่ชี้ commit ของ branch อื่น แล้ว checkout
+ที่อื่นจะพัง (เกิดขึ้นจริงใน `77ec504` ต้องถอนออกตอน merge)
+
+**ไฟล์ที่ git-ignore ไว้ไม่ตามไปเอง** — `git worktree add` เอาเฉพาะไฟล์ที่ tracked ⇒ `.env`
+ต้องคัดลอกเอง และ `node_modules` ใช้ junction ตาม A6 (งานที่แก้แต่เอกสารไม่ต้องทั้งคู่)
+
+**ท่าปิด — ลำดับสลับกันไม่ได้**
+
+```bash
+git merge <branch ของงาน>
+git worktree remove .claude/worktrees/<ชื่องาน>   # ไม่ใช่ rm -rf — git ต้องรู้ว่ามันหายไปแล้ว
+git branch -d <branch ของงาน>                    # ต่อเมื่อ merge สำเร็จ และหลังเอาทรีออกแล้ว
+```
+
+`git branch -d` ขณะที่ยังมี worktree ถือ branch นั้นอยู่จะถูกปฏิเสธ (`cannot delete branch 'x'
+used by worktree at …`) · `git worktree remove` จะปฏิเสธถ้าทรีนั้นยังมีของค้างอยู่ **และนั่นถูกแล้ว**
+ตอบด้วยการกลับไปดูว่าค้างอะไร ไม่ใช่เติม `--force` · ถ้าลบโฟลเดอร์ทิ้งด้วยมือไปแล้ว
+`git worktree prune` เป็นคนเก็บกวาดรายการที่ค้าง
+
+**worktree ไม่ได้แยกสามอย่างนี้** และการเผลอคิดว่ามันแยกคือวิธีที่งานทดสอบไปแตะของจริง:
+**ฐานข้อมูลเป็นตัวเดียวกัน** (สคริปต์ที่เขียน DB ใน worktree เขียนลงของจริง) · **พอร์ตเป็นของเครื่อง**
+(สองทรีรันพร้อมกันไม่ได้ถ้าไม่เปลี่ยนพอร์ต) · **deploy เป็นของเจ้าของ** ตาม A1
 
 ---
 
-## 4. Conventions — ผิดแล้ว build ไม่ผ่านหรือพังเงียบ
+## A6. กับดักของ shell บน Windows dev box — วัดแล้วทั้งสามข้อ
 
-* **ESM import ต้องลงท้าย `.js`** แม้ไฟล์ต้นทางเป็น `.ts`
-  ถูก `import { pool } from './config/db.js'` · ผิด `'./config/db'` (รันไม่ขึ้น)
-* **LINE Flex ต้องระบุ type เป็น literal** — `const msg: FlexMessage = { type: 'flex', ... }` หรือ `type: 'flex' as const` ไม่งั้น TS มองเป็น `string` → type error
-* **Fuse.js** ใช้ default import (`esModuleInterop: true`)
-* **LLM** `createChatCompletion()` ตั้ง `thinking: disabled` + `temperature: 0` มาให้แล้ว (เร็วกว่าและผลคงที่) จะ override เฉพาะจุดก็ส่ง param เข้ามาได้
-* **TypeScript strict** ทั้ง backend และ admin — เลี่ยง `any` ที่ไม่จำเป็น อย่านิยาม type ซ้ำ
+(ข้อนี้เป็นเรื่องของ Git Bash บนเครื่อง Windows · session ที่อยู่บนเครื่อง Linux ข้ามได้)
+
+**heredoc กิน backslash ไป 1 ชั้น** ถึงจะ quote `'EOF'` แล้วก็ตาม ⇒ **ไฟล์ที่มี backslash
+(regex, path) ใช้ Write tool เสมอ ห้าม `cat > file <<'EOF'`** regex ที่เพี้ยนแบบนี้ไม่ error
+มันแค่ไม่ match แล้วคืนค่าเดิม (เคสจริง 2026-09-07: probe คืน 96 ชื่อผิด เกือบสรุปผิดว่า Postgres
+`regexp_replace` มีปัญหา — เขียนใหม่ด้วย Write tool ได้ 70 ชื่อถูกทันที)
+**อาการที่ควรสงสัยทันที:** regex ที่ "ควรจะ match แน่ ๆ" แต่ไม่ match อะไรเลย → สงสัยไฟล์ก่อนสงสัย engine
+
+**`ln -s` บน Git Bash ไม่ได้ทำลิงก์ มันก๊อปทั้งโฟลเดอร์เงียบ ๆ** (วัด 2026-09-11: ได้ไดเรกทอรีจริง
+162 รายการ `LinkType` ว่าง และ**ไม่มีอะไรฟ้องสักบรรทัด**) ต้นเหตุคือ MSYS สร้าง native symlink ไม่ได้
+ถ้าไม่ได้เปิดโหมดนักพัฒนา มันจึงถอยไปก๊อปให้แทน ⇒ ใช้ junction ซึ่งไม่ต้องใช้สิทธิ์อะไรเลย:
+
+```powershell
+New-Item -ItemType Junction -Path <ทรีใหม่>\node_modules -Target <ทรีหลัก>\node_modules
+```
+
+และตั้ง `MSYS=winsymlinks:nativestrict` ไว้ในตัวแปรผู้ใช้ เพื่อให้ `ln -s` **ปฏิเสธเสียงดัง**
+(`Operation not permitted`) แทนที่จะก๊อปเงียบ ๆ ซึ่งดีกว่าในทุกกรณี
+
+**และ junction ที่ A6 เพิ่งแนะนำ มีกับดักรออยู่ที่ปลายทาง: `git worktree remove`
+ลบทะลุมันเข้าไปกินของในทรีหลัก** (วัด 2026-09-14 หลังทำพังจริงบนเครื่องนี้)
+
+```
+git worktree remove <ทรี>     → exit 0 เงียบ ๆ
+<ทรีหลัก>/web/node_modules    → 0 รายการ
+```
+
+ทำซ้ำในโฟลเดอร์ชั่วคราวล้วนแล้วได้เหมือนกัน **7 รายการ → 0 และ exit code 0** ต้นเหตุคือ git
+บน Windows ไม่ได้มอง junction เป็นลิงก์ มันเห็นเป็นไดเรกทอรีธรรมดาแล้วเดินเข้าไปลบ
+
+**เงื่อนไขที่ทำให้มันยิงคือ `.gitignore`** และนี่คือส่วนที่ดักคน: รีโปเปล่าที่ไม่มี
+`.gitignore` **git ปฏิเสธ** (`contains modified or untracked files, use --force`) — ของ
+ปลายทางรอด แต่พอ `node_modules/` ถูก gitignore ไว้ (ซึ่งคือทุกรีโปในโลก และคือท่าที่
+B3 แนะนำ) git ถือว่ามัน "ทิ้งได้" จึงลบให้โดยไม่ถาม ⇒ **ท่าที่ปลอดภัยกว่าในสายตาคน
+คือท่าที่อันตรายกว่าในสายตา git**
+
+⇒ **ถอด junction ก่อนเสมอ แล้วค่อย `git worktree remove`** และถอดด้วย `rmdir` ของ cmd
+ซึ่งลบเฉพาะตัวลิงก์:
+
+```powershell
+cmd /c rmdir <ทรี>\web\node_modules      # ลบลิงก์อย่างเดียว ไม่แตะปลายทาง
+git worktree remove <ทรี>
+```
+
+**ห้ามใช้ `Remove-Item -Recurse` กับ junction** — PowerShell 5.1 ก็ไล่ลบของในปลายทาง
+เหมือนกัน คนละเครื่องมือ กับดักเดียวกัน
+
+ถ้าพลาดไปแล้ว: `npm install` ใหม่ได้ของครบเหมือนเดิม (`node_modules` เป็นของที่สร้างใหม่ได้
+ไม่ใช่ของที่เขียนเอง) แต่ **npm จะเขียน `package-lock.json` ทับด้วย** — วัดแล้วบนเครื่องนี้
+(npm 11.6.2): ไม่มีเวอร์ชันไหนขยับเลย แต่มันถอด `libc` ออก 8 จุด (ตัวบอกว่า binary ของ
+esbuild/rollup ตัวไหนเป็น glibc ตัวไหนเป็น musl — ซึ่งเครื่อง Linux ต้องใช้) และเติม
+`peer: true` 5 จุด ⇒ **คืนค่า `package-lock.json` กลับด้วยเสมอ** แล้ว build ซ้ำเทียบ hash
+ถ้าได้ไฟล์ชื่อเดิมเป๊ะ แปลว่าไม่มีอะไรหายจริง
+
 
 ---
 
-## 5. กับดักที่เคยทำระบบพังทั้งระบบ (อ่านก่อนแตะจุดเหล่านี้)
+## A7. วิธีทำงาน
 
-* **ห้ามเติม `express.json()` หรือ body parser แบบ global** — `line.middleware()` ที่ `POST /callback` ต้องได้ raw body ไปคำนวณ HMAC ของ `x-line-signature` ถ้ามีใคร parse ก่อน ลายเซ็นจะไม่ผ่าน = บอทหยุดตอบทั้งระบบ
-* **ใน `withTransaction()`** ห้ามเรียก `pool.query` (ต้องใช้ client ที่รับมา) · ห้าม `res.json()` (return ค่าออกไปตอบหลัง COMMIT) · ห้ามยิง network (LLM/LINE/puppeteer) เพราะจะเปิด transaction ค้าง
-* **กฎ "ห้ามขายต่ำกว่าราคาขั้นต่ำ" มีที่เดียว** ใน `services/quotationService.ts` (fail-closed) — ห้ามก๊อปตรรกะไปเขียนซ้ำที่อื่น
-* **อ่าน IP ด้วย `getClientIp()` เท่านั้น** ห้ามอ่าน `req.socket.remoteAddress` ตรง ๆ
-* **`sale_orders.company_id` ไม่ใช่รหัสลูกค้า** — เป็น "บริษัทผู้ขาย" ของ Odoo มีแค่ค่า 1 กับ 2 (PM/THT)
-  จุดเชื่อมลูกค้าคือ `contact_id` เท่านั้น (+ `customer_tax_id`/`customer_reference` ตอนขยายนิติบุคคล)
-  เผลอ join ด้วย `company_id` แล้วผลจะดู "ถูก" แต่ว่างเปล่า — วัดจริง: join แบบนั้นได้บริษัทที่มีออเดอร์ 1 ราย
-  จากทั้งหมด 53,266 ราย
-* **การจับคู่ลูกค้า** ชื่อคล้ายกันอาจคนละนิติบุคคล — ห้าม normalize/ยุบชื่อเพิ่มเองโดยไม่รัน eval เทียบผล
-* **`scripts/diag/*Smoke.ts`** ที่จบด้วย ROLLBACK ห้ามเปลี่ยนเป็น COMMIT
+**A7.1 วางแผนตามความเสี่ยง**
 
----
-
-## 6. วิธีทำงาน
-
-**6.1 วางแผนตามความเสี่ยง**
-* อ่าน/สืบสวน/ตอบคำถาม (read-only) → ทำได้ทันที ไม่ต้องขออนุมัติ และอ่านหลายไฟล์ขนานกันได้
+* อ่าน / สืบสวน / ตอบคำถาม (read-only) → ทำได้ทันที ไม่ต้องขออนุมัติ อ่านหลายไฟล์ขนานกันได้
 * แก้เล็ก reversible (typo, ข้อความ, จุดเดียวไม่กระทบ logic) → บอกสั้น ๆ แล้วลงมือ
-* แก้ business logic / หลายไฟล์ / DB / อะไรที่ย้อนยาก → เขียน implementation plan ภาษาไทย แล้ว **หยุดรออนุมัติ**
+* แก้ business logic / หลายไฟล์ / DB / อะไรที่ย้อนยาก → เขียนแผนภาษาไทยแล้ว **หยุดรออนุมัติ**
+* แตะสิ่งที่คนมองเห็นบนจอ → A9 (ต้องมี mockup และคำยืนยัน)
 
 การอนุมัติดูที่เจตนา ("ได้เลย" "เอาเลย" "ทำต่อ" "ok" "go" 👍 = อนุมัติ) ไม่ชัดให้ถาม
 
-**6.2 Scope = 1 การเปลี่ยนแปลงเชิงตรรกะ**
-แก้ทีละหน่วยตรรกะ และต้องทำให้ต้นไม้โค้ดยัง typecheck ผ่าน (เปลี่ยน signature + อัปเดต caller ทั้งหมด = 1 task)
-ห้ามแก้ไฟล์นอกแผน ห้าม refactor สิ่งที่ไม่เกี่ยว — ถ้าจำเป็นต้องออกนอก scope ให้หยุดแจ้งก่อน
+**A7.2 Scope = 1 การเปลี่ยนแปลงเชิงตรรกะ** และต้องทำให้ต้นไม้โค้ดยัง typecheck ผ่าน
+(เปลี่ยน signature + อัปเดต caller ทั้งหมด = 1 task) ห้ามแก้ไฟล์นอกแผน ห้าม refactor สิ่งที่ไม่เกี่ยว
+— ถ้าจำเป็นต้องออกนอก scope ให้หยุดแจ้งก่อน
 
-**6.3 Self-Review — ห้ามข้าม**
-* งานเล็ก: อ่าน diff + typecheck ผ่าน
-* งานแตะ logic/หลายไฟล์: ไล่ครบทั้ง 5 ด้าน
-  - **Syntax & Type** — import ครบและลงท้าย `.js`, path ถูก, ไม่มี `any` เกินจำเป็น
-  - **Logic** — flow ครบ, edge case (null/undefined/array ว่าง), ไม่มี unused variable
-  - **Integration** — ชื่อ function/type ตรงกับไฟล์อื่น, API path ถูก, DB ผ่าน `pool.query()`, Flex ใช้ type literal
-  - **Security** — ตามหัวข้อ 3
-  - **Regression** — ทางเดิมยังทำงานเหมือนเดิม, ตรวจ caller/callee ทุกจุดที่แก้, frontend↔backend contract ยังตรง
+**A7.3 Self-Review — ห้ามข้าม**
+งานเล็ก: อ่าน diff + typecheck ผ่าน · งานแตะ logic หรือหลายไฟล์: ไล่ครบทั้ง 5 ด้าน
+**Syntax & Type** (import ครบและถูก path · ไม่มี `any` เกินจำเป็น) · **Logic** (flow ครบ ·
+edge case null/undefined/array ว่าง · ไม่มี unused variable) · **Integration** (ชื่อ function/type
+ตรงกับไฟล์อื่น · contract ระหว่างหน้าบ้าน↔หลังบ้านยังตรง) · **Security** (ตามกฎเหล็กของส่วน B) ·
+**Regression** (ทางเดิมยังทำงานเหมือนเดิม · ตรวจ caller/callee ทุกจุดที่แก้)
 
-**6.4 Dead Code Review** — ไม่เหลือ function/component/hook/endpoint/type/import/branch/state/DB field ที่ไม่ได้ใช้
-dead code ที่เกิดจาก task นี้และอยู่ใน scope → ลบเลย · ที่กระทบนอก scope → หยุดแจ้งก่อน
+**A7.4 Dead Code Review** — ไม่เหลือ function / component / hook / endpoint / type / import /
+branch / state / DB field ที่ไม่ได้ใช้ · dead code ที่เกิดจาก task นี้และอยู่ใน scope → ลบเลย ·
+ที่กระทบนอก scope → หยุดแจ้งก่อน
 
-**6.5 ระบุวิธีทดสอบทุก task** — คำสั่งอัตโนมัติถ้ามี ไม่งั้นบอกขั้นตอน manual ที่ทำตามได้จริง
-พบปัญหาแก้ก่อนรายงาน ถ้า verify ไม่ผ่านให้รายงานตามจริงพร้อม output
+**A7.5 ระบุวิธีทดสอบทุก task** — คำสั่งอัตโนมัติถ้ามี ไม่งั้นบอกขั้นตอน manual ที่ทำตามได้จริง
+พบปัญหาแก้ก่อนรายงาน **ถ้า verify ไม่ผ่านให้รายงานตามจริงพร้อม output**
+
+**A7.6 ด่านที่เป็น gate ต้องรันทั้งก่อนและหลังแล้วเทียบผล** — ตัวเลขที่เท่ากันคือหลักฐาน
+ตัวเลขที่ดีขึ้นต้องอธิบายได้ว่าดีขึ้นเพราะอะไร (ตารางว่าแตะอะไรต้องรันอะไรอยู่ในส่วน B)
+**ห้ามรายงานว่า task เสร็จโดยยังไม่ผ่าน A7.3 และ gate ของมัน**
 
 ---
 
-## 7. Verify — ยืนยันด้วยคำสั่ง อย่าอาศัยการอ่านด้วยตา
+## A8. แก้โค้ดแล้วแก้เอกสารในคอมมิตเดียวกับงาน ไม่ใช่คอมมิตถัดไป
+
+เหตุผลไม่ใช่ความเรียบร้อย: `CLAUDE.md` `AGENTS.md` `docs/design.md` ถูกโหลดเข้า context ของ
+**ทุก session และทุก subagent** ประโยคที่ไม่จริงจึงไม่ได้แค่ล้าสมัย มันคือ **คำสั่งที่ผิด** ที่
+agent ตัวถัดไปจะทำตามอย่างมั่นใจ — เอกสารที่ค้างคือบั๊ก ไม่ใช่หนี้ที่ค่อยจ่ายทีหลังได้
+และ "คอมมิตหน้าค่อยแก้" มาไม่ถึงจริงบ่อยกว่าที่คิด
+
+**หัวข้อที่ยาวเกิน ~15 บรรทัด เขียนเป็นไฟล์ใน `docs/` แล้วเหลือบรรทัดดัชนีไว้** — ราคาของการ
+ไม่ทำวัดแล้วเมื่อ 2026-09-12: เอกสารสามไฟล์ของ primus-chat เคยรวมกันเป็น **~107,000 โทเคน
+ต่อเทิร์น** ซึ่งเกือบทั้งหมดไม่เกี่ยวกับงานที่กำลังทำ และเพราะกฎ "แก้เอกสารในคอมมิตเดียวกับงาน"
+ทำให้ก้อนนี้เปลี่ยนบ่อย **prompt cache จึงพังบ่อยตามไปด้วย** — ความยาวเป็นต้นทุนที่ทุกงานจ่าย
+ไม่ใช่แค่งานที่เกี่ยวข้อง
+
+**ถ้ารอบนั้นไม่ได้ทำให้ประโยคไหนไม่จริง ก็ไม่ต้องเขียนอะไรเพิ่ม** — เอกสารที่โตขึ้นทุกคอมมิต
+คือค่าที่ทุกงานหลังจากนั้นจ่ายเป็นโทเคน
+
+**เอกสารไม่ตรงโค้ดเมื่อไหร่ ให้เชื่อโค้ด แล้วแก้เอกสาร**
+
+---
+
+## A9. หน้าตาของแอปเป็นของเจ้าของ
+
+**ห้ามแตะไฟล์ UI ก่อนได้คำยืนยันที่ชัดเจน** และสองอย่างนี้ **ไม่นับว่าได้รับอนุมัติ**: การเงียบ
+และการตอบเรื่องที่ใกล้เคียงแต่ไม่ใช่เรื่องที่ถาม ขอบเขตคือทุกอย่างที่คนเห็น — layout, ถ้อยคำบนปุ่ม,
+สิ่งที่หายไปจากหน้าจอ, ลำดับของสิ่งที่อ่าน
+
+**ดราฟต์เป็นโค้ดแล้วค่อยถาม ไม่นับว่าถาม** และราคาของมันวัดได้: 2026-08-31 คำอธิบาย **59 ประโยค
+ใน 13 หน้า** ถูก merge ไปแล้วร้านตีกลับเย็นวันเดียวกัน ทั้ง 13 หน้าถูกแก้ใหม่ทั้งหมด
+ครั้งที่สองไม่ได้เดาอีก — ทำ mockup หลายแบบให้เลือก **จบในรอบเดียว**
+mockup เก็บนอก git ตั้งใจ — มันคือบทสนทนา ไม่ใช่ของที่ส่งมอบ
+
+**สืบทอดก่อนประดิษฐ์** จอใหม่ประกอบจากของที่จอเดิมทำไว้แล้ว **ห้ามก๊อปบล็อกจากคอมโพเนนต์อื่น
+มาแก้** — สำเนาที่แยกร่างไปแล้วไม่เคยถูกแก้พร้อมกัน ถ้าจอหนึ่งสร้างจากของที่มีไม่ได้โดยไม่ฝืน
+นั่นคือคำถามที่ต้องกลับมาถามเจ้าของ ไม่ใช่ใบอนุญาตให้สร้างระบบคู่ขนาน
+
+**responsive คือครึ่งหนึ่งของดีไซน์ ไม่ใช่งานเก็บตอนท้าย** — ถามว่า "หน้าตาเป็นอย่างไร" แล้วได้
+คำตอบฝั่งเดสก์ท็อป คือถามไปครึ่งเดียว และ **"ของเดิมแต่เล็กลง" ไม่ใช่คำตอบ**: ตารางเจ็ดคอลัมน์
+ที่ย่อลงมาเฉย ๆ คือตารางที่อ่านไม่ออก — วัดที่ 390px คอลัมน์หลักเหลือ **55px** เพราะอีกสามคอลัมน์
+เป็น `nowrap` (รายการความกว้างที่ต้องเปิดดูจริงอยู่ใน `docs/design.md` ของแต่ละรีโป)
+
+**build ผ่านไม่ได้แปลว่าหน้าไม่ขาว** — วัดแล้วสองครั้งบน primus-chat: ปุ่มที่อ้างฟังก์ชันที่ไม่เคย
+ถูกเขียน (`26ef2e3`) และบรรทัด import ที่หาย (`5cef17f`) **build ผ่านทั้งคู่** เพราะมันไม่ resolve
+identifier ⇒ คำว่า "เสร็จ" แปลว่า **เปิดดูด้วยตาที่ความกว้างในเช็กลิสต์**
+
+<!-- ═══ ส่วน A: จบ ═══════════════════════════════════════════════════════════ -->
+
+---
+---
+
+# ส่วน B — เฉพาะรีโปนี้
+
+## B1. remote และ trunk
+
+ตารางเครื่อง/โฟลเดอร์/branch อยู่ที่ **A1** ส่วนนี้เก็บของเฉพาะรีโปนี้
+
+- **trunk ของรีโปนี้คือ `main`** — เครื่อง dev push `dev` เท่านั้น เจ้าของ merge เข้า `main`
+  ที่ PMSV (`primus-chat` ข้าง ๆ ใช้ `fair` เป็น trunk — คนละชื่อ ระวังสลับโฟลเดอร์)
+- remote: `https://github.com/bcozfair/sales-chatbot.git`
+  เปลี่ยนชื่อจาก `bcozfair/chatbot` เมื่อ 2026-09-12 — GitHub redirect ชื่อเก่าให้ แต่ redirect
+  หายทันทีถ้ามีใครสร้าง repo ชื่อ `chatbot` ขึ้นมาใหม่ ⇒ checkout บน PMSV ควรสั่ง
+  `git remote set-url` ให้ตรงตาม `DEPLOY.md` ข้อ 2.1
+
+**หลัง pull ครั้งใหญ่ต้องทำ 2 อย่าง ไม่งั้นแอปไม่บูต**
+1. `npm install` (`package.json` เปลี่ยนบ่อย)
+2. เช็ค `.env` — โดยเฉพาะ `APP_URL` ที่ **ไม่มีค่าสำรอง** ไม่ตั้ง = ตายตั้งแต่ boot (ตั้งใจ)
+   ตรวจด้วย `npm run diag:app-url`
+
+---
+
+## B2. ถ้า session นี้อยู่บน PMSV — ทุกอย่างที่แตะคือของจริง
+
+หลักการอยู่ที่ A1 ส่วนนี้คือรายการคำสั่งของรีโปนี้โดยเฉพาะ **ไม่มี staging ไม่มีฐานทดสอบ**
+Postgres ในกล่อง (`PG_DATABASE=chatbot_primus`) คือฐานลูกค้าจริง และ `docker compose exec app …`
+คือการรันในโปรเซสที่กำลังตอบ LINE อยู่
+
+**อ่านอย่างเดียว — รันได้เลย ไม่ต้องขอ**
+
+```bash
+npm run diag:app-url          # และ diag:credit-hold
+docker compose exec -T app printenv APP_URL
+docker compose logs --tail=200 app
+docker compose exec -T db psql -U "$PG_USER" -d "$PG_DATABASE" -c "SELECT …"   # SELECT เท่านั้น
+```
+
+**เขียน DB — ต้องได้คำสั่งจากเจ้าของเป็นครั้ง ๆ ไป ห้ามรัน "เพื่อดูว่าได้ผลไหม"**
+
+| คำสั่ง | ทำอะไรกับของจริง |
+| --- | --- |
+| `npm run sync:products` · `sync:customers` · `sync:saleorders` | เขียนทับข้อมูลสินค้า/ลูกค้า/ใบสั่งขายจาก Odoo · `--full` กวาดทั้งฐาน ต้องทำนอกเวลา |
+| `npm run backfill:contacts` · `backfill:delivery-terms` · `backfill:print-snapshot` · `backfill:audit-actor` | เขียนย้อนหลังทั้งตาราง ย้อนกลับไม่ได้ถ้าไม่มี dump |
+| `tsx scripts/runMigration.ts` | เปลี่ยน schema ของฐานจริง |
+| `npm run db:restore` | **เขียนทับทั้งฐาน** — ท่าที่อันตรายที่สุดในรีโปนี้ |
+| `npm run db:dump` | ปลอดภัยต่อข้อมูล แต่ได้ไฟล์ที่มี PII ลูกค้า + password hash ⇒ ห้ามให้ออกนอกเครื่อง |
+
+**`scripts/diag/*` ไม่ได้ read-only ทั้งหมด และชื่อไฟล์ไม่ใช่เครื่องบอก** — วัดครบทั้ง 46 ไฟล์
+เมื่อ 2026-09-12 ได้สี่กลุ่ม:
+
+| กลุ่ม | จำนวน | บน PMSV |
+| --- | --- | --- |
+| ไม่แตะ DB เลย | 11 | รันได้ |
+| แตะ DB แต่ SELECT อย่างเดียว | 26 | รันได้ |
+| เขียนจริงแล้ว **ROLLBACK** ทุกกรณี — `apiLogSmoke` (เฉพาะ `--write`) · `dateFilterSmoke` · `exportTrackingSmoke` | 3 | รันได้ · **ห้ามแก้เป็น `COMMIT`** (กฎเหล็ก) |
+| **เขียนจริง commit ลงฐาน แล้วลบทิ้งใน `finally`** — `companyNameConsistencySmoke` · `confirmRaceDiag` · `lineFlexParity` · `pdfIssuerSmoke` · `shippingFeeSmoke` · `webQuoteSmoke` | 6 | **ต้องขอเจ้าของก่อน** |
+
+หกไฟล์กลุ่มสุดท้าย **ไม่ได้อยู่ในทรานแซกชัน** — มันสร้างแถวจริงใน `quotations` / `salesperson` /
+`admin_users` / `messages` / `quotation_counters` แล้วค่อย `DELETE` ตอนจบ ⇒ **ฆ่ากลางคัน
+(Ctrl-C, timeout, เครื่องดับ) = แถวทดสอบค้างอยู่ในฐานของร้าน** และ `npm run diag:line-parity`
+ซึ่งเป็นด่านประจำของงาน prompt/Flex ก็อยู่ในกลุ่มนี้
+
+ชื่อไม่ช่วย: `stockRuleSmoke` ลงท้าย `Smoke` แต่ไม่แตะ DB เลย ส่วน `confirmRaceDiag` กับ
+`lineFlexParity` ไม่ได้ลงท้าย `Smoke` แต่เขียนจริง — วัดใหม่เมื่อสงสัยด้วย
+`grep -ciE "INSERT INTO|UPDATE [a-z_]+ SET|DELETE FROM" scripts/diag/<ไฟล์>.ts`
+**ไม่แน่ใจว่าตัวไหนเขียน = ยังไม่ใช่ตัวที่รันบนนี้ได้**
+
+**ก่อนทำอะไรที่เขียน DB บน PMSV: `npm run db:dump` ก่อนเสมอ** และบอกเจ้าของว่า dump อยู่ไหน
+
+---
+
+## B3. หลักการยืนพื้น 2 ข้อ (เหนือทุกหัวข้อในส่วน B)
+
+1. **ห้ามทำของเดิมพัง** — ระบบใช้งานจริงและเสถียร ต้นทุนของ regression สูงกว่าประโยชน์ของการ
+   ปรับปรุงที่ไม่ได้ขอ ⇒ แก้เฉพาะที่ task ต้องการ · เพิ่มของใหม่แบบ additive (ทางเดิมยังทำงาน
+   เหมือนเดิม) แทนการรื้อ · ไม่ refactor สิ่งที่ไม่เกี่ยวข้อง
+2. **requirement เปลี่ยนตลอดเวลา** — โครงสร้างต้องพร้อมแก้โดยไม่กระทบของเดิม ⇒ เงื่อนไขธุรกิจ
+   อยู่ที่เดียว (ห้ามก๊อปตรรกะไปวางซ้ำ) · เคารพ layer · ค่าที่เปลี่ยนบ่อยไปอยู่ DB/config
+   ไม่ใช่ค่าคงที่ในโค้ด · เลือกวิธีที่ "ต่อเติมได้" มากกว่าวิธีที่ "ต้องรื้อ" ในรอบหน้า
+
+---
+
+## B4. กฎเหล็ก — ห้ามละเมิดในทุก task (เช็คซ้ำก่อน deploy)
+
+เหตุผลเต็มของทุกข้ออยู่ใน `CLAUDE.md`
+
+**LINE**
+* [ ] **ห้ามใช้ push message** ใช้ `replyToken` เท่านั้น — reply ฟรี push มีโควตาและมีค่าใช้จ่าย
+      (`grep pushMessage` ต้องเป็น 0 จุด)
+* [ ] ทุกคำตอบต้องผลิตเสร็จใน `BUDGET_MS` (48s) — "ack ก่อนแล้วตอบทีหลัง" ทำไม่ได้
+* [ ] **ห้ามเติม `express.json()` หรือ body parser แบบ global** — `POST /callback` ต้องได้ raw body
+      ไม่งั้นบอทหยุดตอบทั้งระบบ
+
+**Database**
+* [ ] ใช้ `pool.query(sql, [params])` จาก `config/db.ts` เท่านั้น — ห้าม Supabase-style
+      (`.eq .or .ilike .in .select`) ห้ามสร้าง connection ใหม่
+* [ ] parameterized ทุก query — ห้ามต่อ string ค่าเข้า SQL
+* [ ] ใน `withTransaction()` ห้าม `pool.query` · ห้าม `res.json()` · ห้ามยิง network ·
+      ห้ามเรียก `enrichQuotationData` (self-deadlock)
+* [ ] แก้ schema = เขียนไฟล์ใหม่ใน `migrations/changes/` แล้ว `tsx scripts/runMigration.ts`
+      **และยุบเข้า `migrations/schema.sql` ด้วย** — ห้ามแก้ schema ด้วยมือ
+* [ ] **ห้ามใส่ `COMMENT ON`** ใน migration หรือยิงเข้า DB เว้นแต่ผู้ใช้สั่งเอง — ใช้ `--` แทน
+
+**Security**
+* [ ] ไม่มี hardcode secret / LIFF ID / DB connection string — LIFF ID ดึงจาก
+      `/api/liff/config?page=` เสมอ
+* [ ] `/api/admin/*` ผ่าน `adminAuthMiddleware` (JWT) · `/api/liff/*` ตรวจ LINE access token ·
+      `/api/sync/v1/*` ผ่าน `config/syncApiAuth.ts`
+* [ ] Promotion / สิทธิ์ราคา ตรวจทั้งฝั่ง client (UI) และ Backend (API) — ห้ามตรวจแค่ฝั่งเดียว
+* [ ] อ่าน IP ด้วย `getClientIp()` เท่านั้น ห้ามอ่าน `req.socket.remoteAddress` ตรง ๆ
+
+**ตรรกะที่มีที่เดียว — ห้ามก๊อปไปเขียนซ้ำ**
+* [ ] "ห้ามขายต่ำกว่าราคาขั้นต่ำ" อยู่ใน `services/quotationService.ts` (fail-closed)
+* [ ] กฎสต็อกตัดสินที่ `evaluateStockViolation` / `checkStockRules` — **client ห้ามบล็อกจาก
+      สต็อกดิบ** และต้องตรวจซ้ำตอน confirm
+* [ ] เงื่อนไขวันที่ SQL อยู่ที่ `createdAtFromThaiDayCondition` / `createdAtToThaiDayCondition`
+* [ ] ตรรกะธุรกิจของหน้าเว็บขอใบเสนอราคา **เรียกของเดิม** ห้ามก๊อปมาไว้ฝั่งเว็บ
+
+**ขอบของ stack**
+* [ ] `liff_pages/` เป็น HTML + Vanilla JS ล้วน — ไม่มี React/Vite
+* [ ] ไม่มี PDF logic นอก `pdfGenerator.ts`
+* [ ] ไม่แตะ LLM client ตรง ๆ — เรียกผ่าน `createChatCompletion()` และห้าม hardcode ชื่อโมเดล
+* [ ] ไม่แก้ไฟล์ใน `public/` (build output ของ admin — แก้ที่ `frontend/` แล้ว build)
+* [ ] `prompt` ของ `quoteExtraction.ts` ห้ามจัดย่อหน้าใหม่ — ช่องว่างคือเนื้อ prompt
+* [ ] ลายเซ็นต้องชื่อ `{salesperson_id}.png` อัปโหลดได้เฉพาะแอดมิน
+* [ ] `scripts/diag/*Smoke.ts` ที่จบด้วย ROLLBACK ห้ามเปลี่ยนเป็น COMMIT
+
+### Conventions — ผิดแล้ว build ไม่ผ่านหรือพังเงียบ
+
+* **ESM import ต้องลงท้าย `.js`** แม้ไฟล์ต้นทางเป็น `.ts` —
+  ถูก `import { pool } from './config/db.js'` · ผิด `'./config/db'` (รันไม่ขึ้น)
+* **LINE Flex ต้องระบุ `type` เป็น literal** — `const msg: FlexMessage = { type: 'flex', … }`
+  หรือ `type: 'flex' as const` ไม่งั้น TS มองเป็น `string` → type error
+* **Fuse.js ใช้ default import** (`esModuleInterop: true`)
+* **`createChatCompletion()` ตั้ง `thinking: disabled` + `temperature: 0` มาให้แล้ว**
+  (เร็วกว่าและผลคงที่) จะ override เฉพาะจุดก็ส่ง param เข้ามาได้
+* **TypeScript strict ทั้ง backend และ admin** — เลี่ยง `any` ที่ไม่จำเป็น (`catch` ให้ `unknown`
+  เสมอ เป็นกติกา lint ของ frontend) และอย่านิยาม type ซ้ำ
+
+---
+
+## B5. Verify — ยืนยันด้วยคำสั่ง อย่าอาศัยการอ่านด้วยตา
 
 ```bash
 npx tsc --noEmit                   # typecheck backend ทั้งหมด — ต้องผ่าน
@@ -201,34 +525,126 @@ npm --prefix frontend run lint     # eslint ของ admin
 npm --prefix frontend run build    # typecheck + build admin
 ```
 
-Harness เฉพาะโดเมน (รันเมื่อแตะส่วนที่เกี่ยว — ตัวที่เป็น gate ให้รันทั้งก่อนและหลังแล้วเทียบผล):
+**อยู่ใน worktree ต้อง `npm --prefix frontend install` ก่อน ไม่งั้นสองคำสั่งล่างรันไม่ได้** —
+`frontend/` เป็น npm project ของตัวเองที่มี `node_modules` **แยกจากรากคนละตัว** และทั้งคู่
+git-ignore ไว้ ⇒ `git worktree add` ไม่พาไปให้ตาม A5 · **junction ของ `node_modules` ราก
+ไม่ครอบถึงตัวนี้** เพราะมันลิงก์แค่โฟลเดอร์เดียว
+อาการ (เจอจริง 2026-09-14): `frontend/tsconfig.app.json` ตั้ง `"types": ["vite/client"]` แล้ว TS ฟ้อง
+`Cannot find type definition file for 'vite/client'` ทั้งที่ทรีหลักผ่านสะอาด
 
-```bash
-tsx scripts/evalCustomerSearch.ts   # gate: logic จับคู่ลูกค้า
-npm run diag:date-filter            # gate: ตัวกรองวันที่ต้องเท่ากันทุก TimeZone ของ DB
-npm run diag:confirm-race           # race ตอนยืนยันใบเสนอราคา
-npm run diag:credit-hold            # gate: กฎระงับบริษัทที่ไม่มีคำสั่งซื้อมานาน (อ่านอย่างเดียว รันกับ prod ได้)
-npm run diag:quote-validation       # กฎ validate ใบเสนอราคา
-npm run diag:stock-rule             # กฎสต็อก (มี :stock-rule-put ด้วย)
-npm run diag:shipping-fee           # ค่าขนส่ง
-npm run diag:pdf-render             # เรนเดอร์ PDF (มี :pdf-cache ด้วย)
-npm run diag:queue-sim              # คิว/งบเวลาตอบ (มี :load-probe, :abort-check, :shutdown-check)
-npm run diag:api-log                # api_logs
-npm run diag:odoo-export            # ส่งออก Odoo (มี :export-tracking ด้วย)
+**ถ้า path ใน error ชี้ไปที่ `.claude/worktrees/<ชื่อ>` ที่ปิดไปแล้ว นั่นคือ error ค้างของ TS server
+ใน VSCode ไม่ใช่ปัญหาในโค้ด** — ยืนยันด้วย `git worktree list` ว่าทรีนั้นไม่มีแล้ว แล้วสั่ง
+`TypeScript: Restart TS Server` ก็หาย ห้ามไล่แก้ `tsconfig` ตามข้อความ error
+
+**กันไม่ให้ VSCode ฟ้องอีก — ทำครั้งเดียวต่อเครื่อง** (วัด 2026-09-14: error 2 บรรทัด → **0** ·
+ทรีหลักยัง `exit=0` เหมือนเดิม) วาง junction ไว้ **ข้าง ๆ** `.claude/worktrees/` ไม่ใช่ข้างใน
+ทุกทรีที่สร้างหลังจากนี้จึง resolve `vite/client` ได้เองโดยไม่ต้อง install อะไร:
+
+```powershell
+New-Item -ItemType Junction -Path <repo>\.claude\worktrees\node_modules\vite `
+         -Target <repo>\frontend\node_modules\vite
 ```
 
-> ไม่มี unit test suite (`npm test` เป็น stub) — typecheck + diag/eval คือด่านตรวจหลัก ดูรายการเต็มใน `package.json`
+TS ไต่ `node_modules` ขึ้นไปตามลำดับ ⇒ `<ทรี>/frontend/` เจอตัวนี้ก่อนถึงรากเสมอ ·
+**junction เฉพาะ `vite` ไม่ใช่ทั้ง `frontend/node_modules`** เพราะสอง `node_modules` มีชื่อซ้ำกัน
+16 ตัวรวม `@types` กับ `typescript` — ยกทั้งก้อนไปจะบัง `@types` ของ backend ส่วน `vite`
+ไม่อยู่ในรายชื่อซ้ำและ backend ไม่ import มันเลยสักไฟล์ ⇒ ไม่บังอะไรทั้งสิ้น
+**ปลอดภัยกับการปิดทรี** (พิสูจน์แล้ว): มันอยู่นอกทุก worktree `git worktree remove` จึงไม่แตะ
+· แต่ **ห้าม `rm -rf .claude/worktrees/*`** เพราะจะทะลุ junction ไปลบ `vite` ตัวจริง
+(เสียหาย 2.2 MB ซ่อมด้วย `npm --prefix frontend install` — ดังและรู้ตัวทันที)
+มันอยู่ใต้ path ที่ git-ignore ไว้ ⇒ **ไม่เดินทางไปกับ `git pull`** เครื่องใหม่ต้องสั่งเอง
+· นี่แก้แค่ "VSCode เลิกฟ้อง" เท่านั้น จะ **รัน** `lint`/`build` ในทรีจริง ๆ ยังต้อง
+`npm --prefix frontend install` ตามย่อหน้าบน
+
+**ไม่มี unit test suite** (`npm test` เป็น stub) — typecheck + `scripts/diag/*` คือด่านตรวจหลัก
+กฎ "รันทั้งก่อนและหลังแล้วเทียบผล" อยู่ที่ A7.6
+
+| แตะอะไร | gate |
+| --- | --- |
+| การจับคู่ลูกค้า | `npm run diag:customer-search` (เทียบ baseline — **ห้าม `--refresh-corpus` ตอนเทียบ**) และ `tsx scripts/evalCustomerSearch.ts` (54 เคส · `wrong-auto-select` ต้องเป็น 0 · **ห้าม `--mine` ตอนเทียบ**) |
+| อะไรที่เกี่ยวกับวันที่ | `npm run diag:date-filter` |
+| flow ยืนยัน / การออกเลขใบ | `npm run diag:confirm-race` (ต้องเปิด server ก่อน) |
+| กฎสต็อก / validation ของใบ | `npm run diag:stock-rule` · `diag:stock-rule-put` · `diag:quote-validation` |
+| ชื่อลูกค้า / ส่งออก Odoo | `npm run diag:odoo-export` — ถ้าขึ้น `(ตรวจ 0 ชื่อ)` แปลว่าด่านผ่านแบบว่างเปล่า อย่าเชื่อ |
+| กฎเครดิต | `npm run diag:credit-hold` (read-only รันกับ prod ได้) |
+| `prompt` ของการสกัด / Flex | `npm run diag:line-parity` |
+| หน้าเว็บขอใบเสนอราคา | `npm run diag:web-quote` · `diag:pdf-issuer` · `diag:sp-dedupe` |
+| ชั้นตัดสินใจ "ต้องให้คนเลือกไหม" | `npm run diag:web-decision` (`--ai` = pipeline เต็ม) — กฎ auto-select มี **สองสำเนาโดยตั้งใจ** (`quotationService.ts` ของ LINE ห้ามแตะ · `decideCustomerSelection()` ของเว็บ) ด่านนี้อ่านซอร์สมาเทียบให้ว่ายังตรงกัน |
+| สินค้าพ่วง / กฎบล็อก | `npm run diag:optional-pair` · `diag:block-rule` · `diag:block-parity` |
+| คิว / งบเวลาตอบ | `npm run diag:queue-sim` · `diag:load-probe` · `diag:abort-check` · `diag:shutdown-check` |
+| PDF | `npm run diag:pdf-render` · `diag:pdf-cache` |
+| ค่าขนส่ง · api_logs · sync API · `APP_URL` | `diag:shipping-fee` · `diag:api-log` · `diag:sync-api` · `diag:app-url` |
+
+รายการเต็มอยู่ใน `package.json` (46 ไฟล์ใน `scripts/diag/`)
+
+**ด่าน verify ของงานทดลอง/แล็บ รันบน Windows local ผ่านก็พอ** — ไม่ต้องยก
+`docker compose exec app …` ขึ้นมาเป็นเงื่อนไขปิดงานของเฟสที่ยังไม่ deploy แยกด่านเป็นสองชั้น:
+ชั้น "เฟสนี้" (รัน local ได้ทั้งหมด) กับชั้น "ก่อน deploy" (ต้องอยู่ในกล่อง)
 
 ---
 
-## 8. Scripts ที่ใช้บ่อย
+## B6. สี่พื้นผิว — อ่าน `docs/design.md` ก่อนแตะอะไรที่คนเห็น
 
-* **Dev:** `npm run dev` (API) · `npm run dev:web` (admin) · `npm run dev:all` (API + admin + ngrok)
-* **Sync Odoo:** `npm run sync:products` · `sync:customers` · `sync:saleorders`
-* **DB:** `npm run db:dump` · `npm run db:restore` · `tsx scripts/runMigration.ts`
-* **Backfill:** `npm run backfill:contacts` · `backfill:delivery-terms` · `backfill:print-snapshot`
+รีโปนี้มีสี่พื้นผิวที่มีกติกาคนละชุด (**Admin SPA · LIFF · LINE Flex · PDF**) และการเผลอเอา
+กติกาของพื้นผิวหนึ่งไปใช้กับอีกพื้นผิวคือบั๊กที่เกิดซ้ำที่สุด — ลำดับห้าขั้นก่อนแตะโค้ด
+เช็กลิสต์ก่อนบอกว่าจอเสร็จ และรายการความกว้างที่ต้องเปิดดูจริง อยู่ใน `docs/design.md` ทั้งหมด
 
-## 9. เอกสารอื่น
+---
 
-* `DEPLOY.md` — deploy ด้วย Docker, ตั้ง LINE webhook, กฎ LIFF ต้องอยู่ provider เดียวกับ Messaging API channel, กู้รหัสผ่าน admin, แก้ปัญหาเบื้องต้น
-* `README.md` — คำอธิบายโครงสร้างแบบละเอียด
+## B7. ทีม agent — `.claude/agents/` และ `docs/agent-team.md`
+
+รีโปนี้มี agent 7 ตัวนิยามไว้ใน `.claude/agents/*.md` (`architect` · `data-analyst` ·
+`fullstack-dev` · `qa-tester` · `ai-engineer` · `ux-designer` · `devops`) โดย **PM คือ
+session หลัก ไม่ใช่ subagent**
+
+**`effort` และ `isolation` อยู่ใน frontmatter ของแต่ละไฟล์ ไม่ใช่สิ่งที่ผู้เรียกต้องจำ** —
+สายเขียนทั้งสี่ (`fullstack-dev` `qa-tester` `ai-engineer` `ux-designer`) ตั้ง
+`isolation: worktree` ไว้แล้ว ซึ่งคือที่ที่กฎ worktree ของ A5 ถูกบังคับจริง
+ส่วนสายอ่านไม่ใส่ เพราะไม่เขียนไฟล์ก็ไม่มีอะไรให้ทับ และ `.env` ไม่เดินทางไป worktree ใหม่
+**PM ไม่มี frontmatter ให้ใครไปตั้งแทน จึงต้องสั่ง `EnterWorktree` เองก่อนแตะไฟล์แรก**
+ตาม A5 · `worktree.baseRef` อยู่ใน `.claude/settings.json` ซึ่งรีโปนี้ commit ไว้ใน repo
+⇒ PMSV ได้ค่าเดียวกันตอน pull
+
+ใครทำอะไร · เกณฑ์ `effort` · loop ของงานหนึ่งชิ้น · เช็คลิสต์ก่อน merge อยู่ใน
+`docs/agent-team.md` — และมันบันทึกไว้ด้วยว่า **`AGENTS.md` กับ `docs/design.md`
+ไม่ถูกโหลดเข้า context ให้อัตโนมัติ** ต่างจาก `CLAUDE.md` ⇒ ไฟล์ agent ทุกตัวจึงสั่งให้เปิดเอง
+
+---
+
+## B8. ชนที่ `public/` ตอน merge — ข้อยกเว้นข้อเดียวของ A4.3
+
+ข้อนี้เคยอยู่เป็น A4.5 ในส่วน A — ย้ายลงส่วน B เมื่อ 2026-09-14 เพราะ `primus-chat`
+ไม่มี build output ที่ commit ไว้เลย (วัด: `git ls-files` ใต้ `dist/`/`public/` = 0 ไฟล์)
+กติกาที่ใช้ได้กับรีโปเดียวอยู่ในส่วน A ไม่ได้ — มันทำให้สองไฟล์ต่างกันถาวรและ
+`tools/diff-section-a.sh` แดงค้าง จนไม่มีใครเชื่อมันอีก
+
+**ไม่ต้องอ่าน ไม่ต้องถาม ให้ build ใหม่**
+
+`public/` เป็น build output ของ admin ทั้งโฟลเดอร์ (แม้ `logo.png`/`icons.svg` ก็มาจาก
+`frontend/public/` และ `emptyOutDir: true` ล้างทุกรอบ) ⇒ **ไม่มีไบต์ไหนในนั้นที่เขียนด้วยมือ**
+พอสองสายแก้ frontend คนละที่แล้ว merge จะชนที่ bundle ซึ่งแก้มือไม่ได้ ท่าที่ถูกคือ:
+
+```bash
+git checkout --ours public && npm --prefix frontend run build   # แล้ว add เฉพาะ public/
+```
+
+ทำไมข้อนี้ไม่ขัดกับ A4.3 (ที่ห้าม `git checkout --`): ข้อห้ามนั้นมีไว้เพราะของที่ยังไม่ commit
+ไม่มี reflog ให้กู้ — แต่ bundle สร้างใหม่จากซอร์สที่ merge แล้วได้เสมอ สิ่งที่ทิ้งไปคือผลลัพธ์เก่า
+ไม่ใช่งานของใคร · **ขอบเขตคือ `public/` เท่านั้น** ที่อื่นห้ามตามเดิมทุกข้อ
+
+และเหตุผลที่ `.gitattributes` ตั้ง `public/assets/** binary`: ถ้าปล่อยให้ git รวมเป็นข้อความ
+มันจะ auto-merge minified 700 KB **"สำเร็จ"** ได้จริง แล้วได้ bundle ที่เป็นลูกผสมของสองบิลด์
+ซึ่งพังเงียบ ๆ โดย git ไม่รายงานอะไร — `binary` บังคับให้มันขึ้นเป็น conflict ทุกครั้ง
+
+**เรื่องขนาด: `public/` ที่ commit ไว้ไม่ทำให้รีโปบวม — วัดแล้ว 2026-09-13**
+ประวัติ `public/assets` ทั้ง 36 commit = **0.67 MB ใน pack** (137 object · 6.6 MB ก่อนบีบอัด)
+ทั้งรีโป clone ใหม่ = 14.8 MB ⇒ โตราว **19 KB ต่อ commit ที่แตะ frontend** เพราะ ~90% ของ bundle
+คือ vendor ที่ไม่เปลี่ยน git จึงเก็บเป็น delta ได้แม้ชื่อไฟล์เปลี่ยน hash ทุกรอบ
+(ทดลองถอด hash ออกจากชื่อไฟล์แล้วดีขึ้นแค่ 10% — ไม่คุ้มกับการเสีย cache-busting)
+**อย่าใช้ขนาดก่อนบีบอัดจาก `cat-file` เป็นเหตุผลในการเสนอ ignore `public/`** มันสูงเกินจริง 30 เท่า
+และ `.git` บนเครื่อง dev ที่ใหญ่กว่านั้นคือ loose object ที่ยังไม่ถูก pack (auto-gc เริ่มที่ 6,700
+ไฟล์) แก้ด้วย gc ครั้งเดียว **โดยต้องกัน reflog ไว้** เพราะมันคือทางกู้ branch ที่ถูกลบ:
+
+```bash
+git -c gc.reflogExpire=never -c gc.reflogExpireUnreachable=never gc --prune=never
+```

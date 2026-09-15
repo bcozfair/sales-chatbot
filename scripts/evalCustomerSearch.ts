@@ -53,7 +53,16 @@ const PINNED_CASES: EvalCase[] = [
   { id: 'pin-1-dot-initial', source: 'pinned', note: 'cluster 1: จุดย่อตัวเดียว (7 msgs fail)', customerQuery: 'บริษัท ก.แสงทอง', contactQuery: 'คุณก้อย', expected: 'บริษัท ก.แสงทอง เอ็นจิเนียริ่ง จำกัด (สำนักงานใหญ่)' },
   { id: 'pin-2-spelling', source: 'pinned', note: 'cluster 2: สะกดต่าง แมส/แมช (6 msgs fail)', customerQuery: 'บ.เอ.เค.พลาสติกแมสชีนเนอรี่', contactQuery: 'คุณอั๋น', expected: 'บริษัท เอ.เค.พลาสติกแมชชินเนอรี่ จำกัด (สำนักงานใหญ่)' },
   { id: 'pin-3-spacing', source: 'pinned', note: 'cluster 3: เว้นวรรคต่าง', customerQuery: 'โคราชกรุ๊ป', contactQuery: 'คุณรจนา', expected: 'บริษัท โคราช กรุ๊ป วิศวกรรม จำกัด (สาขาที่ 00002)' },
-  { id: 'pin-4-person-phone', source: 'pinned', note: 'cluster 4: ลูกค้าบุคคล+เบอร์ (5 msgs fail)', customerQuery: 'คุณโยธิน 06-3884-0005', contactQuery: '', expected: 'คุณ โยธิน  ปาทาน' },
+  // ⚠️ เฉลยเคยเป็น "คุณ โยธิน  ปาทาน" ซึ่ง **ผิด** — แก้เป็น "คุณโยธิน นามบุรี" เมื่อ 2026-09-14
+  // หลักฐาน (วัดจาก DB จริงบนเครื่อง dev): ข้อความต้นทาง msg #74/#92/#135/#141/#284 คือ
+  //   "เสนอราคานามบุคคล A/35512\n\nคุณโยธิน 06-3884-0005\n..."  → เซลส์ระบุรหัส A/35512 มาเอง
+  //   A/35512 = "คุณโยธิน นามบุรี" มีออเดอร์จริง 9 ใบ (2022-12-07 … 2026-06-22 คือก่อนข้อความ 1 วัน)
+  //   A014913 = "คุณ โยธิน  ปาทาน" มีออเดอร์จริง 0 ใบ
+  //   เบอร์ 06-3884-0005 ไม่มีอยู่ใน customers / sale_orders / customers_data_view เลยสักแถว
+  //   ⇒ เบอร์ไม่เคยเป็น "ตัวชี้ขาด" ที่หายไป และ stripPhoneNumbers ไม่ได้ทำอะไรผิด
+  // เคสนี้จงใจตัดบรรทัดรหัสทิ้ง (ของเดิมเป็นแบบนั้น) จึงวัด "ชื่อบุคคล + เบอร์ ล้วน ๆ" ตามชื่อ cluster
+  // ส่วน production เห็นรหัสด้วยเสมอ (prompt ข้อ 13 สั่งรวมรหัสเข้า customer_query) → ไป fast-path
+  { id: 'pin-4-person-phone', source: 'pinned', note: 'cluster 4: ลูกค้าบุคคล+เบอร์ (5 msgs fail)', customerQuery: 'คุณโยธิน 06-3884-0005', contactQuery: '', expected: 'คุณโยธิน นามบุรี' },
   { id: 'pin-5a-contact-ku-jittipong', source: 'pinned', note: 'cluster 5: contact ชี้ขาด', customerQuery: 'บ.เคยู', contactQuery: 'คุณจิตติพงษ์', expected: 'บริษัท เคยู พลัส จำกัด (สำนักงานใหญ่)' },
   { id: 'pin-5b-contact-ku-thanet', source: 'pinned', note: 'cluster 5: เคยเลือกผิดเป็นสยามเคยู', customerQuery: 'บ.เคยู', contactQuery: 'คุณธเนศ', expected: 'บริษัท พีเคยู อินเตอร์เนชั่นแนล เทคโนโลยี จำกัด (สำนักงานใหญ่)' },
   { id: 'pin-5c-contact-ku-chao', source: 'pinned', note: 'cluster 5: contact ชี้ขาด', customerQuery: 'บ.เคยู', contactQuery: 'คุณเชาว์', expected: 'บริษัท เคยู ดีแม็ค จำกัด (สำนักงานใหญ่)' },

@@ -2174,7 +2174,12 @@
           goodsTotal < Number(shippingFeeCfg.threshold_before_vat) &&
           !hasCreditTerms(terms);
 
-        if (shouldHave) {
+        // บรรทัดที่แอดมินกดเพิ่มเองจากหน้าเว็บอยู่ต่อเสมอ (mirror ของ keepFee ใน shippingFee.ts)
+        // มีได้บรรทัดเดียว ⇒ ถ้ามีของคนใส่เองแล้ว กฎไม่เติมซ้อน
+        const isManualFee = !!(prevFee && prevFee.is_manual_service);
+        const keepFee = shouldHave || isManualFee;
+
+        if (keepFee) {
           // ใบ PM ก่อน (quote_company มากับ /api/quotations) ไม่มีก็ใบแรกที่มีสินค้า
           let target = quotesData.findIndex(
             (q) => q.quote_company !== "THT" && q.items.length > 0,
@@ -2205,6 +2210,7 @@
             stock: 0,
             is_optional: false,
             is_shipping_fee: true,
+            is_manual_service: isManualFee,
           });
         }
 
@@ -2677,13 +2683,21 @@
           // ── บรรทัดค่าขนส่ง: ระบบใส่/ถอดเอง เซลล์แก้ได้แค่ชื่อกับราคา ──
           // ไม่มีปุ่มลบ (ระบบเอาออกเองเมื่อยอดถึงเกณฑ์) · จำนวนล็อก · ไม่มีส่วนลด · ไม่มีสถานะสต๊อก
           if (isShippingFeeItem(item)) {
+            // บรรทัดของกฎ: ลบไม่ได้ (ระบบถอดเองเมื่อยอดถึงเกณฑ์)
+            // บรรทัดที่แอดมินเพิ่มเอง: ระบบไม่ยุ่ง ⇒ ต้องมีปุ่มลบ ไม่งั้นเอาออกไม่ได้เลยทั้งระบบ
+            const manualFee = !!item.is_manual_service;
             const feeEl = document.createElement("div");
             feeEl.className = "item-card";
             feeEl.innerHTML = `
             <div class="item-top-bar is-fee">
               <span class="item-index">${idx + 1}</span>
               <span class="item-code">ค่าบริการ</span>
-              <span class="item-stock-badge">ระบบเพิ่มให้อัตโนมัติ</span>
+              <span class="item-stock-badge">${manualFee ? "แอดมินเพิ่มเอง" : "ระบบเพิ่มให้อัตโนมัติ"}</span>
+              ${
+                manualFee
+                  ? `<button type="button" class="btn-delete-item" data-q="${qIdx}" data-i="${idx}" title="ลบรายการ">🗑️</button>`
+                  : ""
+              }
             </div>
             <div class="item-body">
               <div class="fee-row">
@@ -2700,7 +2714,11 @@
                 </div>
               </div>
               <div class="fee-row">
-                <span class="fee-note">ลูกค้าไม่มีเครดิต · ยอดก่อน VAT ต่ำกว่า ฿${formatNumber(Number(shippingFeeCfg.threshold_before_vat), 2)} — ระบบเอาออกให้เองเมื่อยอดถึงเกณฑ์</span>
+                <span class="fee-note">${
+                  manualFee
+                    ? "แอดมินเพิ่มรายการนี้เอง — ระบบไม่ถอดออกให้ ลบได้ที่ปุ่มถังขยะ"
+                    : `ลูกค้าไม่มีเครดิต · ยอดก่อน VAT ต่ำกว่า ฿${formatNumber(Number(shippingFeeCfg.threshold_before_vat), 2)} — ระบบเอาออกให้เองเมื่อยอดถึงเกณฑ์`
+                }</span>
                 <span class="item-total item-total-chip">฿${formatNumber(itemTotal, 2)}</span>
               </div>
             </div>

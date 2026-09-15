@@ -28,6 +28,11 @@ import {
   ODOO_EXPORT_RAW_NAME_COLS,
   parseExportedFilter,
   exportedFilterCondition,
+  parseQuoteFlagFilter,
+  quoteFlagFilterCondition,
+  odooManualBucketCondition,
+  getOdooManualReviewCounts,
+  getAcknowledgedViolationKeys,
   createdAtFromThaiDayCondition,
   createdAtToThaiDayCondition,
   claimQuotationsForExport,
@@ -41,8 +46,12 @@ import {
   countApiLogs,
   getApiLogById,
   getApiLogStats,
+  insertMessage,
 } from './db/repositories.js';
-import { confirmQuotationAtomic, enrichQuotationData, buildItemSnapshots, buildViolationDisplay } from './services/quotationService.js';
+import {
+  confirmQuotationAtomic, enrichQuotationData, buildItemSnapshots, buildViolationDisplay,
+  blockingViolations, ODOO_MANUAL_REASON_KINDS,
+} from './services/quotationService.js';
 import { pdfCacheKey, getCachedPdf, setCachedPdf, isPrintFrozen, invalidatePdfCache } from './services/pdfCache.js';
 import {
   listBlacklist,
@@ -96,12 +105,15 @@ import {
   getAdminSignature,
   saveAdminSignature,
   deleteAdminSignature,
+  parseWebUserId,
 } from './services/webIdentity.js';
 import {
   WebQuoteError,
   listSalespersonsForWeb,
+  listPaymentTermOptions,
   proposeFromText,
   createDraft as createWebQuoteDraft,
+  previewDraft as previewWebQuoteDraft,
   reviseQuotation as reviseWebQuotation,
 } from './services/webQuoteService.js';
 import {
@@ -469,6 +481,7 @@ app.get('/api/shipping-fee/config', async (req: any, res: any) => {
       default_item_name: cfg.defaultItemName,
       product_id: cfg.productId,
       product_model: cfg.productModel,
+      product_name: cfg.productName,
       internal_reference: cfg.productInternalReference
     });
   } catch (err: any) {
@@ -990,8 +1003,13 @@ app.put('/api/quotation/:id', express.json(), async (req: any, res: any) => {
       customerId: isCustomerUnchanged ? null : customer_id,
       contactId: isCustomerUnchanged ? null : contact_id,
     });
-    if (putViolations.length > 0) {
-      return res.status(422).json({ error: 'VALIDATION_ERROR', violations: putViolations });
+    // ⚠️ อ่านคำรับทราบจาก **แถวของใบ** ไม่ใช่จาก body — endpoint นี้หน้า LIFF ใช้ร่วมกันอยู่
+    //    ใบจาก LINE ไม่มีคอลัมน์นี้ (NULL) ⇒ ได้พฤติกรรมเดิมทุกประการ ไม่มีทางทะลุกฎ
+    const putBlockers = blockingViolations(
+      putViolations, await getAcknowledgedViolationKeys(pool, quoteId)
+    );
+    if (putBlockers.length > 0) {
+      return res.status(422).json({ error: 'VALIDATION_ERROR', violations: putBlockers });
     }
 
     // คำนวณราคายอดรวมสุทธิของใบเสนอราคาใหม่
@@ -1146,6 +1164,12 @@ app.put('/api/quotation/:id', express.json(), async (req: any, res: any) => {
         if (customMeta.address) contactAddress = customMeta.address;
       }
 
+      // เครดิตที่คนออกใบสั่งทับไว้ตอนสร้างใบ ต้องอยู่ยงข้ามการบันทึกซ้ำ — บล็อกข้างบนเพิ่ง
+      // ประกอบ customer_details ใหม่จาก customers_data_view ทั้งก้อน ถ้าไม่หยิบธงของเดิมกลับมา
+      // ใส่ การกดบันทึกในหน้าแก้ไขใบจะคืนเครดิตเป็นของลูกค้าเงียบ ๆ (plan-web-quote-request §4.1)
+      const paymentTermsOverride = quote.customer_details?.payment_terms_override ?? null;
+      if (paymentTermsOverride !== null) paymentTerms = paymentTermsOverride;
+
       customerDetailsPayload = {
         customer_name: companyName,
         customer_code: customerCode,
@@ -1155,6 +1179,7 @@ app.put('/api/quotation/:id', express.json(), async (req: any, res: any) => {
         email: contactEmail,
         address: contactAddress,
         payment_terms: paymentTerms,
+        payment_terms_override: paymentTermsOverride,
         revise_from: reviseFrom,
         custom_meta: customMetaStr
       };
@@ -1282,8 +1307,14 @@ app.post('/api/quotation/:id/confirm', express.json(), async (req: any, res: any
       customerName: quote.customer_name, stage: 'confirm',
       customerId: quote.customer_id, contactId: quote.contact_id
     });
-    if (confirmViolations.length > 0) {
-      return res.status(422).json({ error: 'VALIDATION_ERROR', violations: confirmViolations });
+    // คำรับทราบผูกกับใบ (คอลัมน์ rule_overrides) ไม่ใช่กับ endpoint — เหตุผลเดียวกับ PUT ข้างบน
+    // ข้อที่ **เพิ่งโผล่** หลังคนกดรับทราบ (ของหมดระหว่างทาง) ยังตอบ 422 เหมือนเดิม
+    // เพราะเจ้าของเลือกไว้ว่า "ปฏิเสธและให้ดูใหม่" ไม่ใช่ปล่อยผ่านเพราะกดยืนยันมาแล้ว
+    const confirmBlockers = blockingViolations(
+      confirmViolations, await getAcknowledgedViolationKeys(pool, quoteId)
+    );
+    if (confirmBlockers.length > 0) {
+      return res.status(422).json({ error: 'VALIDATION_ERROR', violations: confirmBlockers });
     }
 
     // ห้ามกลับไปเดาจาก req.get('host') — ดูเหตุผลที่ /callback และ config/appUrl.ts
@@ -1309,6 +1340,29 @@ app.post('/api/quotation/:id/confirm', express.json(), async (req: any, res: any
     // ลิงก์ต้องสร้างหลังตรงนี้ เพราะเลขใบเสนอราคาเพิ่งถูกออกใน confirmQuotationAtomic
     const pdfLink = buildPdfLink(reqUrl, quoteId, confirmResult.quotationNo);
     console.log(`[Push Disabled] Confirm quotation no: ${confirmResult.quotationNo} for user: ${userId}`);
+
+    // ประวัติของหน้าเว็บแอดมิน — docs/plan-web-quote-logging.md §4
+    //
+    // route นี้ใช้ร่วมกับ LIFF ของเซลส์ ⇒ เขียนเฉพาะขา `web:%` เท่านั้น ถ้าเขียนทุกขา
+    // ใบที่เซลส์ยืนยันผ่าน LIFF จะเริ่มมีแถวใหม่ใน messages ซึ่งไปเปลี่ยนความหมายของประวัติ
+    // ที่ quoteExtraction อ่านอยู่ (ตัดหน้าต่าง 15 นาทีด้วยคำว่า "ยืนยันสำเร็จ")
+    //
+    // อยู่หลัง confirmQuotationAtomic ที่ COMMIT ไปแล้ว — ห้ามขยับขึ้นไปอยู่ในทรานแซกชัน
+    if (parseWebUserId(userId)) {
+      await insertMessage({
+        user_id: userId,
+        message_id: `web_confirm_${Date.now()}`,
+        type: 'web_confirm',
+        content: 'ยืนยัน',
+        reply_token: null,
+        reply_content: `✅ ยืนยันสำเร็จ!\n📄 ใบเสนอราคาเลขที่: ${confirmResult.quotationNo}`,
+        meta: {
+          quotation_no: confirmResult.quotationNo,
+          quotation_id: String(quoteId),
+          outcome: confirmResult.outcome,
+        },
+      });
+    }
     res.json({ success: true, quotation_no: confirmResult.quotationNo, pdf_link: pdfLink });
   } catch (err: any) {
     console.error("API POST confirm error:", err);
@@ -2468,6 +2522,20 @@ app.get('/api/admin/webquote/salespersons', adminAuthMiddleware, requireRole('ad
 });
 
 /**
+ * เครดิตทุกแบบที่ลูกค้าจริงใช้อยู่ — ตัวเลือกของช่อง "เขียนทับเครดิต" ในฟอร์มขอใบเสนอราคา
+ *
+ * เป็น endpoint แยกแทนที่จะแปะไปกับพรีวิว เพราะมันเป็นรายการระดับระบบที่โหลดครั้งเดียวตอน
+ * เปิดหน้า ไม่ได้ขึ้นกับใบที่กำลังกรอก · แคช 5 นาทีอยู่ในเซอร์วิส
+ */
+app.get('/api/admin/webquote/payment-terms', adminAuthMiddleware, requireRole('admin', 'subadmin'), async (req: any, res: any) => {
+  try {
+    res.json({ terms: await listPaymentTermOptions() });
+  } catch (err: any) {
+    sendWebQuoteError(res, 'GET /api/admin/webquote/payment-terms', err);
+  }
+});
+
+/**
  * วางข้อความ → คืน slots + candidates ให้ฟอร์มเรนเดอร์ — **ยังไม่เขียน DB สักแถว**
  *
  * ยังไม่ลบร่างที่ค้างอยู่ด้วย (`purgePending: false` ใน service) เพราะแค่วางข้อความผิด
@@ -2486,6 +2554,28 @@ app.post('/api/admin/webquote/propose', adminAuthMiddleware, requireRole('admin'
 });
 
 /**
+ * ฟอร์มที่เคาะแล้ว → "ใบที่จะได้" โดยยังไม่เขียน DB สักแถว (dry-run ของ /drafts)
+ *
+ * มีเพราะเส้นเว็บทิ้งร่างทั้งใบเมื่อติดกฎ — ถ้าไม่มีพรีวิว แอดมินจะรู้ว่าติดอะไรก็ต่อเมื่อ
+ * กดสร้างไปแล้ว · ไม่รับ `sp_user_id` โดยตั้งใจ เพราะพรีวิวไม่ต้องมีตัวตนผู้ออกใบ
+ * และการ resolve ตัวตนจะไปเขียนแถวพร็อกซีลง salesperson (ดูหัวข้อ previewDraft)
+ */
+app.post('/api/admin/webquote/preview', adminAuthMiddleware, requireRole('admin', 'subadmin'), express.json({ limit: '2mb' }), async (req: any, res: any) => {
+  try {
+    res.json(await previewWebQuoteDraft({
+      customerId: req.body?.customer_id,
+      contactId: req.body?.contact_id,
+      items: req.body?.items,
+      // ค่าที่แอดมินตั้งทับต้องมาถึงพรีวิวด้วย ไม่งั้นตัวเลขบนจอกับใบที่ออกจริงคนละชุด
+      paymentTermsOverride: req.body?.payment_terms_override,
+      delivery: req.body?.delivery,
+    }));
+  } catch (err: any) {
+    sendWebQuoteError(res, 'POST /api/admin/webquote/preview', err);
+  }
+});
+
+/**
  * ฟอร์มที่เคาะแล้ว → ร่างจริง · คืน `quotes` + `web_user_id`
  *
  * `web_user_id` ต้องส่งกลับไปด้วยเสมอ เพราะขั้นถัดไป (PUT /api/quotation/:id · confirm · cancel)
@@ -2499,6 +2589,13 @@ app.post('/api/admin/webquote/drafts', adminAuthMiddleware, requireRole('admin',
       customerId: req.body?.customer_id,
       contactId: req.body?.contact_id,
       items: req.body?.items,
+      proposeMsgId: req.body?.propose_msg_id,
+      reviseFrom: req.body?.revise_from,
+      paymentTermsOverride: req.body?.payment_terms_override,
+      delivery: req.body?.delivery,
+      // คำรับทราบจากโมดัล — server ตรวจกฎใหม่เองแล้วเทียบ ไม่ได้เชื่อว่า "ส่งมาแปลว่าผ่าน"
+      acknowledgedViolations: req.body?.acknowledged_violations,
+      adminUsername: req.admin?.username ?? null,
     }));
   } catch (err: any) {
     sendWebQuoteError(res, 'POST /api/admin/webquote/drafts', err);
@@ -3377,6 +3474,8 @@ app.get('/api/admin/quotations', adminAuthMiddleware, requireRole('admin', 'suba
     const dateTo = req.query.dateTo || '';
     // สถานะการส่งออก Odoo — หน้าจอส่ง param มาเสมอ; ไม่ส่งมา = 'all' เพื่อไม่เปลี่ยนพฤติกรรมผู้เรียกเดิม
     const exported = parseExportedFilter(req.query.exported, 'all');
+    // ป้ายของใบ (ทะลุกฎ / ต้องแก้มือ) — ไม่ส่งมา = 'all' ⇒ ผู้เรียกเดิมได้ผลเหมือนเดิมทุกประการ
+    const flag = parseQuoteFlagFilter(req.query.flag, 'all');
     const limit = Math.min(parseInt(req.query.limit) || 50, 200);
     const offset = parseInt(req.query.offset) || 0;
 
@@ -3426,6 +3525,9 @@ app.get('/api/admin/quotations', adminAuthMiddleware, requireRole('admin', 'suba
 
     const exportedCondition = exportedFilterCondition(exported);
     if (exportedCondition) conditions.push(exportedCondition);
+
+    const flagCondition = quoteFlagFilterCondition(flag);
+    if (flagCondition) conditions.push(flagCondition);
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
@@ -3489,6 +3591,11 @@ app.get('/api/admin/quotations/export', adminAuthMiddleware, requireRole('admin'
     // คือไม่ส่งใบเดิมซ้ำ ซึ่งเป็นเหตุผลทั้งหมดที่ฟีเจอร์นี้มีอยู่
     const exported = parseExportedFilter(req.query.exported, 'no');
     const format: OdooExportFormat = req.query.format === 'csv' ? 'csv' : 'xlsx';
+    // ไฟล์ไหน — ไม่ส่งมา = ไฟล์ปกติ ซึ่งตั้งแต่ 2026-09-15 **ตัดใบที่ต้องแก้มือใน Odoo ออก**
+    // (ค่าในไฟล์ไม่มีอยู่ในฐาน Odoo ⇒ นำเข้าแล้วตกทั้งใบ) ส่วนใบที่แค่ทะลุกฎยังอยู่ในไฟล์ปกติ
+    // ค่าที่ไม่รู้จักตกเป็น null = ไฟล์ปกติ ไม่ใช่ 400 — ผู้เรียกเก่าที่ไม่รู้จัก param นี้ต้องได้ของเดิม
+    const manualRaw = String(req.query.manual ?? '').trim();
+    const manualBucket = (ODOO_MANUAL_REASON_KINDS as readonly string[]).includes(manualRaw) ? manualRaw : null;
 
     // Validate sort fields and direction to prevent SQL injection
     const allowedSortFields: Record<string, string> = {
@@ -3543,6 +3650,11 @@ app.get('/api/admin/quotations/export', adminAuthMiddleware, requireRole('admin'
 
     const exportedCondition = exportedFilterCondition(exported);
     if (exportedCondition) conditions.push(exportedCondition);
+
+    // แยกไฟล์ปกติออกจากไฟล์ "ต้องแก้มือก่อน" — เงื่อนไขอยู่ใน db/repositories.ts ที่เดียว
+    // ใบหนึ่งอยู่ได้กลุ่มเดียวเสมอ (ดู ODOO_MANUAL_BUCKET_SQL) ⇒ ไม่มีใบไหนโผล่สองไฟล์
+    conditions.push(odooManualBucketCondition(manualBucket, paramIndex));
+    if (manualBucket) { params.push(manualBucket); paramIndex++; }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
@@ -3600,7 +3712,7 @@ app.get('/api/admin/quotations/export', adminAuthMiddleware, requireRole('admin'
           format,
           quotationCount: emitted.length,
           rowCount: rows.length,
-          filters: { company, search, status, dateFrom, dateTo, exported, sortBy: sortByParam, sortOrder: sortOrderParam },
+          filters: { company, search, status, dateFrom, dateTo, exported, manual: manualBucket, sortBy: sortByParam, sortOrder: sortOrderParam },
         });
         await insertExportLogRows(client, batchId, emitted.map((q: any) => ({
           id: String(q.id), quotation_no: q.quotation_no ?? null,
@@ -3616,7 +3728,11 @@ app.get('/api/admin/quotations/export', adminAuthMiddleware, requireRole('admin'
     // วันที่ในชื่อไฟล์ตามเวลาไทย — toISOString() ให้วัน UTC ซึ่งจะเป็นวันก่อนหน้าถ้ากดก่อน 07:00
     const stamp = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok' }).format(new Date());
     // ชื่อไฟล์ต้องบอกบริษัทด้วย — สองไฟล์ของวันเดียวกันหน้าตาเหมือนกันทุกอย่างจากภายนอก
-    const baseName = `salechatbot_quotation_${company}_${stamp}`;
+    // ไฟล์ของคิวแก้มือต้องแยกชื่อออกจากไฟล์ปกติ — สองไฟล์ของวันเดียวกันหน้าตาเหมือนกันจากภายนอก
+    // แล้วคนนำเข้าจะแยกไม่ออกว่าไฟล์ไหนพร้อมนำเข้า ไฟล์ไหนต้องไปสร้างข้อมูลใน Odoo ก่อน
+    const baseName = manualBucket
+      ? `salechatbot_quotation_${company}_manual_${manualBucket}_${stamp}`
+      : `salechatbot_quotation_${company}_${stamp}`;
     // header เสริมให้หน้าจอบอกจำนวนใบจริงได้ (ตัวไฟล์นับใบไม่ได้เพราะ 1 ใบ = หลายแถว)
     res.setHeader('X-Export-Quotation-Count', String(built.quotationCount));
     res.setHeader('X-Export-Row-Count', String(built.rowCount));
@@ -3656,6 +3772,22 @@ app.post('/api/admin/quotations/:id/unmark-export', adminAuthMiddleware, require
     res.json({ success: true });
   } catch (err: any) {
     console.error("POST /api/admin/quotations/:id/unmark-export error:", err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+/**
+ * --- API Endpoint: จำนวนใบที่ค้างในคิว "ต้องแก้มือใน Odoo" แยกตามเหตุ × บริษัท ---
+ *
+ * ตัวเลขนี้คือของสำคัญที่สุดของทั้งฟีเจอร์ — ใบกลุ่มนี้ **ไม่อยู่ในไฟล์ส่งออกปกติแล้ว**
+ * ถ้าไม่มีใครเห็นยอดค้าง มันจะไม่ไปถึง Odoo เลยโดยไม่มีอะไรฟ้อง
+ */
+app.get('/api/admin/quotations/manual-review-counts', adminAuthMiddleware, requireRole('admin', 'subadmin'), async (_req: any, res: any) => {
+  try {
+    const groups = await getOdooManualReviewCounts(pool);
+    res.json({ total: groups.reduce((s, g) => s + g.count, 0), groups });
+  } catch (err) {
+    console.error('GET /api/admin/quotations/manual-review-counts error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

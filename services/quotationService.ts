@@ -18,7 +18,7 @@ import { expandOptionalProducts, checkStockRules, StockViolation } from './produ
 import { sumLineTotals, calcNetPrice } from '../utils/pricing.js';
 import { validateProductPriceWithPromotions } from '../utils/promotionValidator.js';
 import { buildThaiAddress } from '../utils/address.js';
-import { resolveDeliveryTerms } from '../utils/deliveryTerms.js';
+import { resolveDeliveryTerms, type DeliveryTypeKey } from '../utils/deliveryTerms.js';
 import { isBlacklisted } from './blacklistService.js';
 import { checkCreditHold, type CreditHoldResult } from './creditHoldService.js';
 import { getIssuerSnapshot } from './webIdentity.js';
@@ -118,6 +118,111 @@ export const systemErrorViolation = (): Violation => {
   const v: Omit<Violation, 'display_message'> = { type: 'SYSTEM_ERROR', model: '-' };
   return { ...v, display_message: buildViolationDisplay(v) };
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  การ "ทะลุด่านตรวจ" ของหน้าเว็บขอใบเสนอราคา (2026-09-15)
+//
+//  เจ้าของสั่งว่าหน้าเว็บต้องออกใบได้แม้ติดกฎ **แต่คำเตือนต้องอยู่ครบเหมือนเดิม** และต้องมี
+//  โมดัลให้ยืนยันอีกชั้น ⇒ สามฟังก์ชันข้างล่างคือกติกาเดียวของทั้งระบบว่า "ข้อไหนทะลุได้"
+//  และ "รับทราบข้อไหนไปแล้ว" — ห้ามเขียนเงื่อนไขซ้ำที่ endpoint ไหนอีก
+//
+//  ⚠️ การปลดล็อก **ผูกกับใบ ไม่ใช่กับ endpoint** เพราะ `PUT /api/quotation/:id` กับ
+//     `POST /api/quotation/:id/confirm` เป็นของที่ LIFF ใช้ร่วมกันอยู่ ถ้าไปปลดที่ endpoint
+//     ใบจาก LINE จะทะลุกฎตามไปด้วยโดยไม่มีใครรู้ · ตัวปลดคือคอลัมน์ `quotations.rule_overrides`
+//     ซึ่งมีค่าเฉพาะใบที่คนกดรับทราบไว้แล้ว (ใบจาก LINE เป็น NULL เสมอ)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ชื่อเรียกของกฎหนึ่งข้อบนใบหนึ่งใบ — ใช้เทียบว่า "ข้อที่เพิ่งเจอ อยู่ในรายการที่รับทราบไว้ไหม"
+ *
+ * `type|model` เท่านั้น ไม่รวมตัวเลข (ราคา/จำนวน) โดยตั้งใจ — ถ้ารวม การแก้จำนวนหนึ่งชิ้น
+ * จะกลายเป็นกฎ "ข้อใหม่" แล้วโมดัลเด้งซ้ำทุกครั้งที่พิมพ์ ซึ่งคือการฝึกให้คนกดผ่านโดยไม่อ่าน
+ */
+export function violationKey(v: Violation): string {
+  return `${v.type}|${v.model || '-'}`;
+}
+
+/**
+ * ข้อที่ทะลุไม่ได้ไม่ว่าใครจะรับทราบก็ตาม
+ *
+ * `SYSTEM_ERROR` = "ตรวจกฎไม่สำเร็จ" (ฐานล่ม/กฎอ่านไม่ขึ้น) ซึ่งเป็นค่าของด่าน fail-closed —
+ * มันไม่ได้แปลว่า "ใบนี้ผิดกฎข้อนี้" แต่แปลว่า **ยังไม่รู้ว่าผิดหรือไม่** การให้คนกดรับทราบ
+ * สิ่งที่ระบบยังไม่รู้ คือการเปลี่ยน fail-closed ให้กลายเป็น fail-open โดยใช้ปุ่มเป็นข้ออ้าง
+ */
+export const isBypassableViolation = (v: Violation): boolean => v.type !== 'SYSTEM_ERROR';
+
+/**
+ * คัดว่าข้อไหน "ยังบล็อกอยู่" หลังหักรายการที่รับทราบไว้แล้ว — คืน [] แปลว่าออกใบต่อได้
+ *
+ * `acknowledgedKeys` มาจาก `rule_overrides.acknowledged_keys` ของใบนั้น (หรือจากสิ่งที่
+ * หน้าจอส่งมาตอนสร้างร่าง) · ข้อที่ **ไม่อยู่** ในรายการคือข้อที่เพิ่งโผล่หลังคนกดรับทราบ
+ * (เช่นของหมดสต็อกระหว่างทาง) ⇒ ต้องกลับไปให้คนดูใหม่ ไม่ใช่ปล่อยผ่านเพราะ "ก็กดไปแล้ว"
+ */
+export function blockingViolations(violations: Violation[], acknowledgedKeys: string[] | null): Violation[] {
+  const list = violations || [];
+  if (!acknowledgedKeys) return list;
+  const ack = new Set(acknowledgedKeys);
+  return list.filter((v) => !isBypassableViolation(v) || !ack.has(violationKey(v)));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  คิว "ต้องแก้มือใน Odoo ก่อนนำเข้า" — คนละเรื่องกับการทะลุกฎข้างบนโดยสิ้นเชิง
+//
+//  ใบที่ทะลุกฎ (ของหมด/ต่ำกว่าราคาขั้นต่ำ/ลูกค้าติด blacklist) **นำเข้า Odoo ได้ทันที**
+//  เพราะทุกช่องในไฟล์ยังตรงกับฐาน Odoo — มันผิดกฎของร้าน ไม่ใช่ผิดข้อมูล
+//  ส่วนใบในคิวนี้คือใบที่ **ค่าในไฟล์ไม่มีอยู่ในฐาน Odoo** ⇒ นำเข้าแล้วตกทั้งใบ
+//  ต้องไปสร้าง/แก้ใน Odoo ก่อน ⇒ กันออกจากไฟล์ปกติแล้วส่งออกจากเมนูแยก
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** ชนิดของเหตุ — เรียงตามลำดับที่ต้องไปสร้างใน Odoo ก่อน (ใช้เป็นลำดับของกลุ่มในเมนูส่งออกด้วย) */
+export const ODOO_MANUAL_REASON_KINDS = ['new_contact', 'custom_product', 'payment_terms_override'] as const;
+export type OdooManualReasonKind = (typeof ODOO_MANUAL_REASON_KINDS)[number];
+
+export interface OdooManualReason {
+  kind: OdooManualReasonKind;
+  /** ชื่อคอลัมน์ในไฟล์ Odoo ที่จะไม่ตรงกับฐาน — บอกคนที่รับไปแก้ว่าต้องดูช่องไหน */
+  field: string;
+  value: string | null;
+  /** ถ้อยคำเดียวของทั้งระบบ — server เป็นเจ้าของคำ เหมือน buildViolationDisplay ของฝั่งกฎ */
+  display_message: string;
+}
+
+/** คำอธิบายเหตุที่ต้องแก้มือ — โมดัล หน้าประวัติ และไฟล์ export ต้องใช้ประโยคเดียวกัน */
+export function buildManualReasonDisplay(r: Omit<OdooManualReason, 'display_message'>): string {
+  switch (r.kind) {
+    case 'payment_terms_override':
+      return `💳 เครดิตของใบนี้ตั้งเอง เป็น “${r.value ?? '-'}” ⇒ ช่อง ${r.field} ในไฟล์อาจไม่ตรงกับฐาน Odoo`;
+    case 'new_contact':
+      return `👤 ผู้ติดต่อรายนี้ยังไม่มีใน Odoo ⇒ ต้องสร้างก่อน ไม่งั้นช่อง ${r.field} จับคู่ไม่ติด`;
+    case 'custom_product':
+      return `📦 รหัสสินค้า “${r.value ?? '-'}” ยังไม่มีใน Odoo ⇒ ต้องสร้างก่อน ไม่งั้นช่อง ${r.field} จับคู่ไม่ติด`;
+  }
+}
+
+/**
+ * ใบนี้ต้องแก้มือใน Odoo ก่อนไหม — อ่านจากข้อมูลของใบเองล้วน ๆ ไม่ยิง query เพิ่ม
+ * (เรียกอยู่ใน transaction ของ confirmQuotationAtomic จึงห้ามยิงงานหนัก)
+ *
+ * วันนี้มีเหตุเดียวคือ **เครดิตที่แอดมินตั้งทับ** และเจ้าของเลือกไว้ชัดเมื่อ 2026-09-15 ว่าให้
+ * นับ **ทุกครั้งที่ทับ** ไม่ต้องดูว่าค่าที่ตั้งบังเอิญตรงกับ payment term ที่ Odoo รู้จักหรือไม่ —
+ * ปลอดภัยกว่าและอธิบายให้คนหน้างานเข้าใจง่ายกว่า "ทับแล้วต้องดูอีกทีว่าตรงรายการไหม"
+ * แลกกับคิวที่ยาวกว่าความจำเป็นบ้าง (วัด 2026-09-15: ใบที่ทับเครดิตทั้งฐานมี 2 ใบ)
+ *
+ * เหตุอีกสองชนิด (`new_contact` · `custom_product`) ยังไม่มีฟีเจอร์ที่สร้างมันได้ในวันนี้ —
+ * จงใจประกาศชนิดไว้ก่อน เพื่อให้ตัวกรองหน้าประวัติกับเมนูส่งออกที่ทำรอบนี้ใช้ต่อได้เลย
+ * โดยไม่ต้องแก้ schema หรือ backfill อีกรอบ
+ */
+export function buildOdooManualReview(enrichedQuote: any): { reasons: OdooManualReason[] } | null {
+  const reasons: OdooManualReason[] = [];
+
+  const ptOverride = enrichedQuote?.customer_details?.payment_terms_override;
+  if (ptOverride !== null && ptOverride !== undefined) {
+    const r = { kind: 'payment_terms_override' as const, field: 'payment_term_id', value: String(ptOverride) };
+    reasons.push({ ...r, display_message: buildManualReasonDisplay(r) });
+  }
+
+  return reasons.length > 0 ? { reasons } : null;
+}
 
 /** ประกอบหลาย violation เป็นข้อความเดียวสำหรับ LINE (หัวข้อ + รายการ) */
 export function buildViolationText(violations: Violation[]): string {
@@ -236,6 +341,13 @@ export async function confirmQuotationAtomic(
       frozen_at: new Date().toISOString(),
     };
 
+    // 2.7) ตรึง "ต้องแก้มือใน Odoo ก่อนไหม" ลงใบ — ที่เดียวของทั้งระบบที่เขียนคอลัมน์นี้
+    //      อยู่ตรงนี้เพราะเป็น **จุดเดียวที่ใบกลายเป็นเอกสารจริง** และไฟล์ export หยิบเฉพาะใบที่
+    //      มีเลขที่แล้ว ⇒ คำนวณครั้งเดียวตอนยืนยัน ไม่ต้องคอยตามอัปเดตทุกครั้งที่ร่างถูกแก้
+    //      (ถ้าไปคำนวณตอนสร้างร่างแทน จะมีสองจุดที่ต้องดูแล คือ insert กับ PUT — เหมือนที่
+    //       payment_terms_override เคยพลาดมาแล้ว)
+    const odooManualReview = buildOdooManualReview(enrichedQuote);
+
     // 3) UPDATE แบบมีเงื่อนไข status + เช็ค rowCount (ห้ามเขียนทับ created_at เพราะเลขคำนวณจากมัน)
     const upd = await client.query(
       `UPDATE quotations
@@ -243,10 +355,12 @@ export async function confirmQuotationAtomic(
               quotation_no = COALESCE(quotation_no, $1),
               delivery_terms = $3::jsonb,
               print_snapshot = $4::jsonb,
+              odoo_manual_review = $5::jsonb,
               updated_at = NOW()
         WHERE id = $2 AND status <> 'confirmed' AND status <> 'cancelled'
       RETURNING quotation_no`,
-      [quotationNo, quoteId, JSON.stringify(deliveryTerms), JSON.stringify(printSnapshot)]
+      [quotationNo, quoteId, JSON.stringify(deliveryTerms), JSON.stringify(printSnapshot),
+       odooManualReview ? JSON.stringify(odooManualReview) : null]
     );
     if (upd.rowCount === 0) {
       // มี FOR UPDATE แล้วยังโดน 0 แถว = มีทางเขียน status ที่เรายังไม่รู้ ให้ rollback ทั้งชุด
@@ -509,6 +623,28 @@ export function companyNameOfRow(row: any, current: string): string {
   return String(row?.customer_name ?? row?.display_name ?? '').trim() || current;
 }
 
+/**
+ * ค่าที่ "คนออกใบ" ตั้งทับของที่ระบบหามาให้ — ใบร่างจากหน้าเว็บใช้ตัวนี้ (2026-09-14)
+ *
+ * แยกเป็นพารามิเตอร์ตัวสุดท้ายแบบไม่บังคับ เพราะ **เส้น LINE ไม่ส่งมาเลยสักฟิลด์** และต้อง
+ * ได้ผลเหมือนเดิมทุกไบต์ (ไม่ส่ง ⇒ เครดิตมาจากลูกค้า · คอลัมน์ override เป็น null เหมือนเดิม)
+ */
+export interface DraftQuoteOverrides {
+  /**
+   * เครดิตที่แอดมินเขียนทับเฉพาะชุดใบนี้ — ลงใน `customer_details.payment_terms`
+   *
+   * ⚠️ ไม่ได้แค่ขึ้นบนเอกสาร: `applyShippingFeeToQuoteGroup()` ที่ถูกเรียกท้ายฟังก์ชันนี้
+   *    อ่านค่านี้จากแถวไปตัดสินว่าใบนี้ต้องมีบรรทัดค่าบริการไหม (เจ้าของเลือกไว้ 2026-09-14
+   *    ว่าให้ "มีผลทุกอย่าง" — สิ่งที่เห็นบนจอต้องเท่ากับสิ่งที่บันทึก ไม่มีเลขซ่อน)
+   */
+  paymentTerms?: string | null;
+  /**
+   * กำหนดส่งที่ตั้งเอง แยกตาม "ใบที่จะออกจริง" เพราะ PM กับ THT มีสต๊อกคนละชุด
+   * ⇒ ค่าอัตโนมัติของสองใบไม่เท่ากันอยู่แล้ว การตั้งทับจึงต้องแยกใบตามไปด้วย
+   */
+  delivery?: Partial<Record<'PM' | 'THT', { type?: DeliveryTypeKey | null; days?: number | null }>>;
+}
+
 export async function insertDraftQuotations(
   userId: string,
   customerName: string,
@@ -516,7 +652,8 @@ export async function insertDraftQuotations(
   status: string,
   customerId?: number | null,
   contactId?: number | null,
-  preserveDrafts: boolean = false
+  preserveDrafts: boolean = false,
+  overrides?: DraftQuoteOverrides
 ): Promise<any[] | null> {
   // การลบร่างเดิม (pending/draft) ย้ายไปทำใน transaction เดียวกับ INSERT ด้านล่าง
   // เพื่อให้ DELETE+INSERT เป็น atomic — ถ้า INSERT ล้ม ร่างเดิมจะไม่ถูกลบทิ้งไปฟรี ๆ
@@ -528,6 +665,10 @@ export async function insertDraftQuotations(
     await import('./shippingFee.js');
   const shippingCfg = await loadShippingFeeConfig();
   const items = (itemsForDb || []).filter((item: any) => !isShippingFeeItem(item, shippingCfg));
+  // ตัดออกจากการแบ่งใบ แต่ต้องไม่ทิ้ง — ส่งต่อให้ applyShippingFeeToQuoteGroup เติมกลับหลัง COMMIT
+  // (มีได้บรรทัดเดียว ⇒ หยิบตัวแรกพอ) ถ้าปล่อยหายตรงนี้ ค่าบริการที่แอดมินเพิ่มจากหน้าเว็บ
+  // จะไม่มีวันถึง DB เลยสักครั้ง
+  const incomingFee = (itemsForDb || []).find((item: any) => isShippingFeeItem(item, shippingCfg)) ?? null;
   const pmItems: any[] = [];
   const thtItems: any[] = [];
 
@@ -733,6 +874,11 @@ export async function insertDraftQuotations(
     if (customMeta.address) contactAddress = customMeta.address;
   }
 
+  // เครดิตที่คนออกใบตั้งทับ — ทับ *หลัง* custom_meta เพราะเป็นค่าที่เพิ่งพิมพ์มากับคำขอนี้
+  // `null`/ไม่ส่ง = ใช้ของลูกค้าตามเดิม · สตริงว่าง = ตั้งใจให้ใบนี้ไม่มีเครดิต (คนละความหมาย)
+  const paymentTermsOverride = overrides?.paymentTerms ?? null;
+  if (paymentTermsOverride !== null) paymentTerms = paymentTermsOverride;
+
   // ยังไม่ได้ผูกลูกค้า = null (ระบบอนุญาตเฉพาะลูกค้าที่มีในฐานข้อมูล ไม่มีค่า default อีกแล้ว)
   const customerDetails = {
     customer_name: companyName || null,
@@ -743,11 +889,26 @@ export async function insertDraftQuotations(
     email: contactEmail,
     address: contactAddress,
     payment_terms: paymentTerms,
+    /**
+     * ธงบอกว่า `payment_terms` ข้างบนเป็นค่าที่ "คนสั่งทับ" ไม่ใช่ค่าที่อ่านมาจากลูกค้า
+     *
+     * ⚠️ จำเป็นเพราะ **ทุกจุดที่บันทึกใบจะประกอบ `customer_details` ใหม่จาก `customers_data_view`**
+     *    (ที่นี่ และ `PUT /api/quotation/:id`) ⇒ ถ้าไม่ทิ้งร่องรอยไว้ การกดบันทึกครั้งถัดไป
+     *    จะเขียนเครดิตกลับเป็นของลูกค้าเงียบ ๆ — ปัญหาที่ docs/plan-web-quote-request.md §4.1
+     *    ทำนายไว้ตั้งแต่ก่อนลงมือ · null = ไม่ได้ทับ (ใบของ LINE ทุกใบเป็นแบบนี้)
+     */
+    payment_terms_override: paymentTermsOverride,
     revise_from: reviseFrom,
     custom_meta: customMetaStr
   };
 
   const draftQuotesToInsert: any[] = [];
+
+  /** กำหนดส่งที่ตั้งทับของใบนั้น — ไม่ส่งมา = null ซึ่งคือค่าที่คอลัมน์นี้เคยเป็นมาตลอด */
+  const deliveryOf = (company: 'PM' | 'THT') => ({
+    delivery_type_override: overrides?.delivery?.[company]?.type ?? null,
+    delivery_days_override: overrides?.delivery?.[company]?.days ?? null,
+  });
 
   if (pmItems.length > 0) {
     const pmSum = sumLineTotals(pmItems);
@@ -761,7 +922,8 @@ export async function insertDraftQuotations(
       salesperson_id: salespersonIdStr,
       employee_details: employeeDetails,
       customer_id: customerId || null,
-      contact_id: contactId || null
+      contact_id: contactId || null,
+      ...deliveryOf('PM')
     });
   }
 
@@ -777,7 +939,8 @@ export async function insertDraftQuotations(
       salesperson_id: salespersonIdStr,
       employee_details: employeeDetails,
       customer_id: customerId || null,
-      contact_id: contactId || null
+      contact_id: contactId || null,
+      ...deliveryOf('THT')
     });
   }
 
@@ -798,14 +961,17 @@ export async function insertDraftQuotations(
           INSERT INTO quotations (
             user_id, total_sum, status,
             customer_details, item_details, salesperson_id, employee_details,
-            customer_id, contact_id
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            customer_id, contact_id,
+            delivery_type_override, delivery_days_override
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
           RETURNING *
         `, [
           q.user_id, q.total_sum, q.status,
           JSON.stringify(q.customer_details), JSON.stringify(q.item_details), q.salesperson_id, JSON.stringify(q.employee_details),
           q.customer_id,
-          q.contact_id
+          q.contact_id,
+          q.delivery_type_override,
+          q.delivery_days_override
         ]);
         if (res.rows[0]) rows.push(res.rows[0]);
       }
@@ -818,7 +984,7 @@ export async function insertDraftQuotations(
 
   // ค่าขนส่งอัตโนมัติ — ต้องทำหลัง COMMIT เพราะกฎคิดจากยอดรวมของ "ทุกใบในกลุ่ม"
   // ซึ่งเพิ่งมีครบตอนนี้ แล้วอ่านแถวกลับมาใหม่เพื่อให้ผู้เรียกได้ item_details ล่าสุด
-  await applyShippingFeeToQuoteGroup(userId);
+  await applyShippingFeeToQuoteGroup(userId, incomingFee);
   const insertedIds = insertedRaw.map((row: any) => row.id);
   if (insertedIds.length > 0) {
     try {
@@ -1881,7 +2047,10 @@ export async function enrichQuotationData(quoteDb: any): Promise<any> {
         production: item.production || '',
         stock: liveStock,
         is_optional: !!item.is_optional,
-        linked_to_product_id: item.linked_to_product_id || null
+        linked_to_product_id: item.linked_to_product_id || null,
+        // ข้อเท็จจริงของบรรทัดนั้นที่สร้างใหม่ไม่ได้ (ใครเป็นคนใส่บรรทัดค่าบริการ) ⇒ ต้องอยู่ในลิสต์
+        // ตกหล่นเมื่อไหร่ = ค่าบริการที่แอดมินเพิ่มกลายเป็นบรรทัดของกฎ แล้วโดนถอดทิ้งรอบถัดไป
+        is_manual_service: item.is_manual_service === true
       };
     });
 
@@ -1905,6 +2074,8 @@ export async function enrichQuotationData(quoteDb: any): Promise<any> {
       contact_address: customerDetails.address || '',
       delivery_address: customerDetails.address || '',
       payment_terms: customerDetails.payment_terms || '',
+      // null = เครดิตข้างบนคือของลูกค้าจริง ๆ · มีค่า = คนออกใบสั่งทับไว้ (ใบของ LINE เป็น null เสมอ)
+      payment_terms_override: customerDetails.payment_terms_override ?? null,
       salesperson_name: employeeDetails.saleperson || '',
       salesperson_phone: employeeDetails.sale_phone || '',
       salesperson_employee_code: salespersonId || null,

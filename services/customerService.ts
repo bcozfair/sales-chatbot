@@ -468,6 +468,57 @@ export function formatLineLabel(text: string | null | undefined): string {
 
 
 /**
+ * ผลการชั่งน้ำหนัก candidate — "ต้องถามคนใช้ไหม" ไม่ใช่ "หาอะไรเจอบ้าง"
+ */
+export interface CustomerDecision {
+  /** ตัดสินแทนผู้ใช้ได้เลยหรือไม่ */
+  auto: boolean;
+  /** candidate ที่ชนะ (shape เดิมของ findCustomerCandidates คือ `{ item, score }`) · null เมื่อไม่มีผู้ชนะ */
+  winner: any | null;
+}
+
+/**
+ * ชั้นตัดสินใจหลัง `findCustomerCandidates` — **ของหน้าเว็บ** (`webQuoteService.proposeFromText`)
+ *
+ * ═══ ทำไมมีฟังก์ชันนี้ ═══
+ * เกณฑ์ `top <= 0.05 && gap > 0.05` เขียนสดอยู่ใน `processQuotationRequest` มาแต่ไหนแต่ไร
+ * เส้นทางหน้าเว็บจึงไม่ได้มันไปด้วยตอนแยกเส้นออกมา — เว็บนับจำนวน candidate ล้วน มากกว่า 1
+ * เมื่อไหร่ก็โยนให้แอดมินเลือกทุกครั้ง แม้คะแนนจะชี้ขาดอยู่แล้ว
+ * วัดจริง 2026-09-14 (`npm run diag:web-decision` ชุดข้อสอบ 56 เคส): LINE ตัดสินเองได้ 48 เคส
+ * เว็บตัดสินเองได้ 10 เคส — ห่างกัน 38 เคส และทั้ง 38 เคสนั้นเลือก **ถูกหมด**
+ *
+ * ═══ ⚠️ ทำไมถึงยอมให้กฎมีสองชุด ทั้งที่ปกติห้าม ═══
+ * **เจ้าของสั่งไว้ 2026-09-14: ห้ามแตะเส้นทาง LINE เลย** — มันรันบน production ได้ดีอยู่แล้ว
+ * และความเสี่ยงที่งานหน้าเว็บจะไปทำให้ของที่ดีอยู่แล้วแย่ลง สูงกว่าประโยชน์ของการรวมโค้ด
+ * ⇒ `processQuotationRequest` เก็บ `if` ของตัวเองไว้เหมือนเดิมทุกตัวอักษร ฟังก์ชันนี้เป็น
+ *   **กระจกเงา** ของมัน ไม่ใช่เจ้าของกฎ
+ *
+ * กันเพี้ยนด้วยด่าน ไม่ใช่ด้วยวินัย: `npm run diag:web-decision` อ่านซอร์สของ
+ * `quotationService.ts` แล้วเทียบว่านิพจน์ยังเหมือนกันอยู่ไหม — ใครแก้ฝั่งใดฝั่งหนึ่ง ด่านล้มทันที
+ * **แก้ที่นี่แล้วต้องไปแก้ทั้งที่ `quotationService.ts` และสำเนาในด่านนั้นด้วยมือ**
+ *
+ * ตัวเลข 0.05 ไม่ได้ลอยมา — `NAME_ONLY_DEMOTED_SCORE` (0.06) กับ `PARTIAL_CONTACT_ONLY_SCORE`
+ * (0.055) ถูกตั้งค่าโดยอ้างอิงเกณฑ์นี้โดยตรง (ดูหมายเหตุที่นิยามของทั้งสองตัว)
+ * ⇒ **แก้ตัวเลขตรงนี้ = แก้ความหมายของ constant ทั้งสองตัวนั้นด้วย** ห้ามขยับเดี่ยว ๆ
+ *
+ * candidate เดียว = ตัดสินได้ เพราะมันคือ Case 4 ของ `processQuotationRequest` ที่เข้า
+ * `resolveContactFlow` ตรง ๆ อยู่แล้วมาตลอด — ไม่ใช่กฎใหม่
+ *
+ * ⚠️ ฟังก์ชันนี้ **บริสุทธิ์** ห้ามยิง DB/LLM/network
+ */
+export function decideCustomerSelection(candidates: any[]): CustomerDecision {
+  if (!Array.isArray(candidates) || candidates.length === 0) return { auto: false, winner: null };
+  if (candidates.length === 1) return { auto: true, winner: candidates[0] };
+
+  const topScore = Number(candidates[0]?.score);
+  const secondScore = Number(candidates[1]?.score);
+  if (!Number.isFinite(topScore) || !Number.isFinite(secondScore)) return { auto: false, winner: null };
+
+  const auto = topScore <= 0.05 && (secondScore - topScore) > 0.05;
+  return { auto, winner: auto ? candidates[0] : null };
+}
+
+/**
  * ยุบ candidate ที่เป็น "บริษัทเดียวกันแต่มีหลายแถว" — ชื่อ *และ* รหัสลูกค้าเหมือนกันเป๊ะ
  *
  * Odoo แตกนิติบุคคลเดียวกันเป็นหลาย company_id ทำให้ picker เคยมีปุ่มที่ข้อความเหมือนกัน

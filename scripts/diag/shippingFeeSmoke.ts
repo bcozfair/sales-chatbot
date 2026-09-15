@@ -108,7 +108,8 @@ ok('1000.01 → ไม่คิด', !(over < cfg.thresholdBeforeVat));
 //  ถ้า shape ไม่ตรง บรรทัดค่าขนส่งจะหลุด index กับ snapshot ตัวอื่นตอนคำนวณวันจัดส่ง
 const expectedKeys = ['internal_reference', 'product_id', 'model', 'name', 'sales_description',
   'price', 'quantity', 'discount_1', 'discount_2', 'remark', 'brand', 'series', 'production',
-  'warranty_display', 'delivery_in_stock_days', 'delivery_out_of_stock_days', 'delivery_source', 'is_optional'];
+  'warranty_display', 'delivery_in_stock_days', 'delivery_out_of_stock_days', 'delivery_source', 'is_optional',
+  'is_manual_service'];
 ok('snapshot มี field ครบและไม่เกิน',
   JSON.stringify(Object.keys(feeLine)) === JSON.stringify(expectedKeys),
   Object.keys(feeLine).join(','));
@@ -116,6 +117,9 @@ ok('บรรทัดใหม่ใช้ค่าตั้งต้นจา�
   feeLine.name === cfg.defaultItemName && feeLine.price === cfg.feePrice && feeLine.quantity === cfg.feeQuantity);
 ok('บรรทัดใหม่ถูกจับว่าเป็นค่าขนส่ง (round-trip)', isShippingFeeItem(feeLine, cfg));
 ok('ไม่มีส่วนลดติดมา', feeLine.discount_1 === 0 && feeLine.discount_2 === 0);
+ok('บรรทัดที่กฎสร้างเองไม่ติดธง is_manual_service', feeLine.is_manual_service === false);
+ok('ธง is_manual_service ของบรรทัดที่แอดมินเพิ่มอยู่รอดเมื่อกฎรันซ้ำ',
+  buildShippingFeeSnapshot(cfg, { name: 'ค่าติดตั้ง', price: 3500, is_manual_service: true }).is_manual_service === true);
 
 const edited = buildShippingFeeSnapshot(cfg, { name: 'ค่าจัดส่งด่วน', price: 350 });
 ok('ชื่อ/ราคาที่เซลล์แก้อยู่รอดเมื่อกฎรันซ้ำ',
@@ -138,6 +142,10 @@ ok('buildItemSnapshots: ราคาที่เซลล์แก้อยู�
 ok('buildItemSnapshots: จำนวนถูกล็อกตาม config (เซลล์แก้ไม่ได้)',
   (await buildItemSnapshots([{ model: cfg.productModel, name: 'x', price: 200, quantity: 99 }]))[0]?.quantity === cfg.feeQuantity);
 ok('buildItemSnapshots: ปั๊มมาร์ก delivery_source = shipping_fee', rt[0]?.delivery_source === 'shipping_fee');
+// ธงนี้สร้างใหม่เองไม่ได้ (ไม่มีที่ไหนบอกได้ว่าใครเป็นคนใส่บรรทัด) ⇒ ต้องรอด round-trip
+// ทั้งฝั่งเขียน (ตรงนี้) และฝั่งอ่าน (legacyItems ใน enrichQuotationData)
+ok('buildItemSnapshots: ธง is_manual_service อยู่รอด round-trip',
+  (await buildItemSnapshots([{ model: cfg.productModel, name: 'ค่าติดตั้ง', price: 3500, quantity: 1, is_manual_service: true }]))[0]?.is_manual_service === true);
 ok('buildItemSnapshots: ส่วนลดถูกล็อกเป็น 0',
   (await buildItemSnapshots([{ model: cfg.productModel, name: 'x', price: 200, quantity: 1, discount_1: 50 }]))[0]?.discount_1 === 0);
 
@@ -281,6 +289,22 @@ liffRes = liffRun([boundQuote([gItem(500), {
 ok('recalc ซ้ำแล้วชื่อ/ราคาที่เซลล์แก้ยังอยู่',
   liffFees(liffRes)[0]?.name === 'ค่าส่งด่วน' && liffFees(liffRes)[0]?.price === 400);
 ok('  ไม่เกิดบรรทัดซ้ำ', liffFees(liffRes).length === 1);
+
+// บรรทัดที่แอดมินเพิ่มเอง: กฎฝั่ง client ต้องไม่ถอดทิ้งแม้เงื่อนไขอัตโนมัติจะไม่เข้า
+const manualLine = (price = 3500) => ({
+  model: cfg.productModel, internal_reference: cfg.productInternalReference,
+  name: 'ค่าติดตั้งหน้างาน', price, quantity: 1, discount_1: 0, discount_2: 0,
+  is_shipping_fee: true, is_manual_service: true
+});
+liffRes = liffRun([boundQuote([gItem(48000), manualLine()], '30 Days')]);
+ok('ลูกค้าเครดิต + ยอดสูง แต่มีค่าบริการที่แอดมินเพิ่ม → ไม่ถูกถอดทิ้ง',
+  liffFees(liffRes).length === 1 && liffFees(liffRes)[0]?.name === 'ค่าติดตั้งหน้างาน');
+ok('  ธงยังติดอยู่หลัง recalc', liffFees(liffRes)[0]?.is_manual_service === true);
+liffRes = liffRun([boundQuote([gItem(500), manualLine()])]);
+ok('Cash + ยอดต่ำกว่าเกณฑ์ + มีของที่แอดมินเพิ่ม → ยังมีบรรทัดเดียว (ไม่เติมซ้อน)',
+  liffFees(liffRes).length === 1 && liffFees(liffRes)[0]?.price === 3500);
+ok('ลบบรรทัดที่แอดมินเพิ่มออกแล้ว (ลูกค้าเครดิต) → หายจริง ไม่ถูกเติมกลับ',
+  liffFees(liffRun([boundQuote([gItem(48000)], '30 Days')])).length === 0);
 
 // เติมแล้วรันซ้ำต้องนิ่ง — ถ้าฐานยอดเผลอนับค่าขนส่งด้วย บรรทัดจะเด้งเข้า-ออกไม่จบ
 const settled = liffRun(liffRun([boundQuote([gItem(900)])]));
@@ -431,6 +455,51 @@ try {
   await applyShippingFeeToQuoteGroup(USER);
   ok('แต่ละใบ 600 (ต่ำกว่าเกณฑ์) แต่รวม 1200 → ไม่คิดค่าขนส่ง',
     feeLinesOf((await readQuote(thtId)).items).length + feeLinesOf((await readQuote(pmId)).items).length === 0);
+
+  // 6.11b ค่าบริการที่แอดมินเพิ่มเอง — กฎห้ามถอดทิ้ง และห้ามเติมซ้อน (มีได้บรรทัดเดียว)
+  //  นี่คือเหตุผลทั้งหมดของธง is_manual_service: ก่อนมีมัน บรรทัดนี้หายทุกครั้งที่บันทึก
+  //  สำหรับลูกค้าเครดิตทุกราย ซึ่งเป็นเคสส่วนใหญ่ของระบบ
+  const manualFee = {
+    internal_reference: cfg.productInternalReference, product_id: cfg.productId,
+    model: cfg.productModel, name: 'ค่าติดตั้งหน้างาน', price: 3500, quantity: 1,
+    discount_1: 0, discount_2: 0, is_manual_service: true
+  };
+  const manualId = await insertDraft({
+    items: [goodsItem(48000), manualFee], paymentTerms: '30 Days'
+  });
+  await applyShippingFeeToQuoteGroup(USER);
+  let manualQ = await readQuote(manualId);
+  ok('ลูกค้าเครดิต + ยอด 48,000 + ค่าบริการที่แอดมินเพิ่ม → ไม่ถูกถอดทิ้ง',
+    feeLinesOf(manualQ.items).length === 1, `ได้ ${feeLinesOf(manualQ.items).length}`);
+  ok('  ชื่อ/ราคา/ธง ยังอยู่ครบ',
+    feeLinesOf(manualQ.items)[0]?.name === 'ค่าติดตั้งหน้างาน' &&
+    feeLinesOf(manualQ.items)[0]?.price === 3500 &&
+    feeLinesOf(manualQ.items)[0]?.is_manual_service === true,
+    JSON.stringify(feeLinesOf(manualQ.items)[0] ?? {}));
+  ok('  total_sum รวมค่าบริการแล้ว', manualQ.totalSum === 51500, String(manualQ.totalSum));
+  await applyShippingFeeToQuoteGroup(USER);
+  manualQ = await readQuote(manualId);
+  ok('  รันซ้ำไม่เกิดบรรทัดซ้ำ', feeLinesOf(manualQ.items).length === 1);
+
+  // ลบออกแล้วต้องหายจริง — ไม่งั้นแอดมินเอาของที่ใส่ผิดออกไม่ได้เลยทั้งระบบ
+  await pool.query('UPDATE quotations SET item_details = $1 WHERE id = $2',
+    [JSON.stringify([goodsItem(48000)]), manualId]);
+  await applyShippingFeeToQuoteGroup(USER);
+  ok('  ลบบรรทัดออกแล้ว กฎไม่เติมกลับมาให้',
+    feeLinesOf((await readQuote(manualId)).items).length === 0);
+
+  // 6.11c เส้นทางของหน้าเว็บ: บรรทัดมากับคำขอ แต่ถูกตัดออกก่อนแบ่งใบ PM/THT
+  //  insertDraftQuotations ส่งต่อมาทาง argument ที่สอง ถ้าไม่ส่ง ของจะหายตั้งแต่ยังไม่ถึง DB
+  await pool.query(`DELETE FROM quotations WHERE customer_details->>'diag_tag' = $1`, [TAG]);
+  const webId = await insertDraft({ items: [goodsItem(48000)], paymentTerms: '30 Days' });
+  await applyShippingFeeToQuoteGroup(USER, manualFee);
+  const webQ = await readQuote(webId);
+  ok('ค่าบริการที่มากับคำขอ (ยังไม่ลง DB) ถูกเติมเข้าใบให้',
+    feeLinesOf(webQ.items).length === 1 && feeLinesOf(webQ.items)[0]?.name === 'ค่าติดตั้งหน้างาน');
+  ok('  ใบที่ไม่มีบรรทัดที่แอดมินเพิ่ม และเงื่อนไขไม่เข้า → ยังต้องไม่มีค่าบริการ',
+    feeLinesOf((await readQuote(await insertDraft({
+      userId: USER_B, items: [goodsItem(48000)], paymentTerms: '30 Days'
+    }))).items).length === 0);
 
   // 6.12 ไม่ยุ่งกับใบของพนักงานคนอื่น
   const otherId = await insertDraft({ userId: USER_B, items: [goodsItem(500)], paymentTerms: 'Cash' });

@@ -7,17 +7,39 @@
 //  2. proposeFromText() ต้อง **ไม่เขียน quotations** และ **ไม่ลบร่างที่ค้างอยู่**      [เฟส D]
 //  3. createDraft() → PUT /api/quotation/:id → confirm ครบวงจรด้วย webUserId          [เฟส D]
 //  4. reviseQuotation() — ใบที่ยืนยันแล้ว → ได้ร่าง revision · เลขที่ไม่มีจริง → ปฏิเสธ [เฟส D]
+//     + เส้นทางของหน้าเว็บ: รายการกลับเข้าฟอร์ม → createDraft({reviseFrom}) → confirm
+//  5. ประวัติลง `messages` ครบ 4 ชนิด · chosen_rank คำนวณถูก · แถวของ LINE ไม่ปนเปื้อน
+//     (docs/plan-web-quote-logging.md §7)
+//  6. previewDraft() — dry-run ที่ต้องไม่เขียน DB · แบ่งใบ PM/THT · คืนกำหนดส่ง
+//     และบรรทัดค่าบริการที่แอดมินเพิ่มเองต้องรอดไปถึงใบจริง (บรรทัดเดียวเสมอ)
+//  7. เครดิต/กำหนดส่งที่แอดมินตั้งทับ — เปลี่ยนคำตอบของกฎค่าบริการจริง · ลงคอลัมน์/คีย์ถูกที่
+//     · ค่าที่ไม่รู้จักถูกปฏิเสธ 400 · ยืนยันแล้วถูกตรึงเป็น source 'override'
+//  8. ทะลุด่านตรวจได้ (`rule_overrides`) + คิวแก้มือใน Odoo (`odoo_manual_review`)
+//     · ข้อสำคัญที่สุด: **ใบจาก LINE ต้องยังถูกบล็อกเหมือนเดิม** (ปลดล็อกผูกกับใบ ไม่ใช่ endpoint)
+//     · `SYSTEM_ERROR` ทะลุไม่ได้แม้กดรับทราบ · ข้อที่เพิ่งโผล่ยังปฏิเสธ 422
 //
 //  ⚠️ เขียนข้อมูลจริงลง DB (salesperson · admin_users · quotations ของ user ทดสอบ)
 //     แล้วลบทิ้งใน finally ทุกกรณี — user/แอดมินทดสอบเป็นค่าคงที่ที่ไม่ชนของจริง
 //  ค่าใช้จ่าย: LLM ~2-4 call (ข้อ 1 และข้อ 2 อย่างละรอบ)
 // ─────────────────────────────────────────────────────────────────────────────
 import { pool } from '../../config/db.js';
+import { insertMessage } from '../../db/repositories.js';
 import { extractQuoteFromText, buildResolvedItem } from '../../services/quoteExtraction.js';
-import { validateQuotationItems } from '../../services/quotationService.js';
+import {
+  validateQuotationItems,
+  insertDraftQuotations,
+  buildViolationDisplay,
+  systemErrorViolation,
+  violationKey,
+  blockingViolations,
+  type Violation,
+} from '../../services/quotationService.js';
+import { odooManualBucketCondition, getOdooManualReviewCounts } from '../../db/repositories.js';
+import { decideCustomerSelection } from '../../services/customerService.js';
 import {
   proposeFromText,
   createDraft,
+  previewDraft,
   reviseQuotation,
   resolveWebUserId,
   WebQuoteError,
@@ -186,6 +208,26 @@ async function case2() {
   ok('คืน customer_candidates มาให้เคาะ', Array.isArray(proposed.customer_candidates),
     `${proposed.customer_candidates.length} ตัว`);
 
+  // ── ชั้นตัดสินใจ (2026-09-14) ──────────────────────────────────────────────
+  // ตารางความจริงของ decideCustomerSelection เขียนไว้ตรง ๆ ตรงนี้ ไม่ได้คำนวณจากตัวมันเอง
+  // ⇒ ใครขยับเกณฑ์ 0.05 หรือเผลอเปลี่ยนเป็นนับจำนวน ด่านนี้ล้มทันที · ไม่แตะ DB ไม่แตะ LLM
+  const s = (...scores: number[]) => scores.map(v => ({ item: { id: 1 }, score: v }));
+  ok('gate: ไม่มี candidate → ไม่ตัดสิน', decideCustomerSelection([]).auto === false);
+  ok('gate: candidate เดียว → ตัดสินได้', decideCustomerSelection(s(0.4)).auto === true);
+  ok('gate: 0 vs 0.06 → ตัดสินได้ (ห่างเกิน 0.05)', decideCustomerSelection(s(0, 0.06)).auto === true);
+  ok('gate: 0 vs 0.05 → ไม่ตัดสิน (ห่างไม่ถึง)', decideCustomerSelection(s(0, 0.05)).auto === false);
+  ok('gate: 0.06 vs 0.5 → ไม่ตัดสิน (ตัวนำคะแนนแย่เกิน)', decideCustomerSelection(s(0.06, 0.5)).auto === false);
+  ok('gate: คะแนนเท่ากัน → ไม่ตัดสิน', decideCustomerSelection(s(0, 0)).auto === false);
+
+  // สัญญาที่ฟอร์มพึ่งพา — ตรวจแบบไม่ผูกกับข้อมูลจริง (ชื่อบริษัทใน SAMPLE_TEXT มี/ไม่มีใน DB ก็ผ่าน)
+  const expectAuto = decideCustomerSelection(proposed.customer_candidates);
+  ok('auto_customer_id ตรงกับผลของ gate',
+    proposed.auto_customer_id === (expectAuto.auto ? Number(expectAuto.winner?.item?.id) || null : null),
+    `ได้ ${proposed.auto_customer_id}`);
+  ok('auto_customer_id ที่ไม่ null ต้องอยู่ในลิสต์ที่ส่งให้ฟอร์มจริง',
+    proposed.auto_customer_id === null
+    || proposed.customer_candidates.some((c: any) => Number(c?.item?.id) === proposed.auto_customer_id));
+
   await pool.query('DELETE FROM quotations WHERE id = $1', [survivorId]);
 }
 
@@ -274,11 +316,532 @@ async function case4(quotationNo: string | null) {
   catch (e: any) { blankCode = e instanceof WebQuoteError ? e.code : `(${e?.name}) ${e?.message}`; }
   ok('ไม่ส่งเลขที่ → BAD_REQUEST', blankCode === 'BAD_REQUEST', blankCode || '(ไม่ throw)');
 
+
+  // ── เส้นทางจริงของหน้าเว็บตั้งแต่ 2026-09-14 ────────────────────────────────
+  //  หน้าเว็บ *ไม่* ยืนยันร่างที่ reviseQuotation สร้างไว้ — มันเอารายการกลับเข้าฟอร์มให้แก้
+  //  แล้วออกใบจริงผ่าน createDraft({ reviseFrom }) เส้นเดียวกับทางปกติ ⇒ ด่านนี้เดินตามนั้นเป๊ะ
+  //  รวมถึงการกรองบรรทัดที่กฎเติมให้เอง ซึ่งถ้าพลาดจะได้สินค้าพ่วงซ้ำสองชุดในใบใหม่
+  const rq: any = revised.quotes?.[0];
+  const formItems = (rq?.items ?? [])
+    .filter((it: any) => !it.is_optional && (!it.is_shipping_fee || it.is_manual_service === true))
+    .map((it: any) => ({
+      product_template_id: it.product_id,
+      quantity: it.quantity,
+      price: it.price,
+      discount_1: it.discount_1,
+      discount_2: it.discount_2,
+      ...(it.is_manual_service ? { name: it.name } : {}),
+    }));
+
+  const redraft = await createDraft({
+    adminId,
+    spUserId: TEST_SP_USER,
+    customerId: rq?.customer_id,
+    contactId: rq?.contact_id,
+    items: formItems,
+    reviseFrom: quotationNo,
+  });
+  ok('createDraft({reviseFrom}) คืนใบร่าง', (redraft.quotes?.length ?? 0) > 0, `${redraft.quotes?.length ?? 0} ใบ`);
+
+  const leftover = Number((await pool.query(
+    'SELECT COUNT(*)::int AS n FROM quotations WHERE id = $1', [revised.draft_quote_id]
+  )).rows[0].n);
+  ok('ร่างที่ revise เตรียมไว้ถูกล้างตอนออกใบจริง (ไม่มีร่างซ้อน)', leftover === 0, `เหลือ ${leftover} แถว`);
+
+  const newQuote: any = redraft.quotes?.[0];
+  // ธง revise_from อยู่ใน customer_details.revise_from — คอลัมน์ customer_name ไม่มีจริง
+  // (enrichQuotationData เป็นคนประกอบกลับมาให้ตอนอ่าน) — นี่คือค่าที่ cancelOldRevision อ่านจริงตอนยืนยัน
+  const nameRow = (await pool.query(
+    `SELECT customer_details->>'revise_from' AS revise_from FROM quotations WHERE id = $1`, [newQuote?.id]
+  )).rows[0];
+  ok('ใบใหม่ติดธง revise_from ของใบต้นทาง',
+    nameRow?.revise_from === quotationNo, String(nameRow?.revise_from ?? '(ไม่มี)'));
+
+  const reConfirm = await fetch(`${BASE}/api/quotation/${newQuote?.id}/confirm`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId: webUserId }),
+  });
+  ok('ยืนยันใบ revision ด้วย webUserId → 200', reConfirm.status === 200, `HTTP ${reConfirm.status}`);
+
+  const after = (await pool.query(
+    'SELECT status, quotation_no FROM quotations WHERE id = $1', [newQuote?.id]
+  )).rows[0];
+  ok('ใบ revision ได้เลขที่ของตัวเอง', after?.status === 'confirmed' && !!after?.quotation_no,
+    `${after?.status} / ${after?.quotation_no ?? '(ไม่มีเลข)'}`);
+
+  const origin = (await pool.query(
+    'SELECT status FROM quotations WHERE quotation_no = $1', [quotationNo]
+  )).rows[0];
+  ok('ใบต้นทางถูกยกเลิกอัตโนมัติตอนยืนยัน', origin?.status === 'cancelled', String(origin?.status));
+
   console.log(`  ${DIM}หมายเหตุ: กิ่ง QUOTATION_NOT_CONFIRMED เป็นด่านกันเหนียวที่ยกมาจาก`);
   console.log(`  handleQuotationEditRequest() — ผ่านทางค้นด้วยเลขที่จะไปไม่ถึง เพราะใบร่างไม่มีเลข${RESET}`);
 }
 
+/**
+ * ข้อ 8 — ทะลุด่านตรวจได้ (rule_overrides) + คิวแก้มือใน Odoo (odoo_manual_review)
+ *
+ * **ข้อที่สำคัญที่สุดของด่านนี้คือ "ใบจาก LINE ต้องยังถูกบล็อกเหมือนเดิม"** — การปลดล็อกผูกกับ
+ * *ใบ* (คอลัมน์ rule_overrides) ไม่ใช่กับ *endpoint* เพราะ PUT/confirm เป็นของที่หน้า LIFF
+ * ใช้ร่วมกันอยู่ ถ้าใครเผลอย้ายเงื่อนไขไปไว้ที่ endpoint ใบจาก LINE จะทะลุกฎตามไปด้วยเงียบ ๆ
+ * และไม่มีอะไรฟ้องจนกว่าจะมีของหลุดไปถึงลูกค้า
+ *
+ * สร้าง violation จริงด้วยการ **สั่งเกินของ** สินค้าที่ติดกฎสต็อก (ไม่เขียนอะไรลงตารางกฎเลย)
+ */
+async function case8() {
+  console.log(`\n${BOLD}8) ทะลุด่านตรวจ + คิวแก้มือใน Odoo${RESET}`);
+
+  // ── ก) ตรรกะของประตู — ไม่แตะ DB จึง deterministic 100% ──────────────────
+  /** ประกอบ Violation สังเคราะห์ด้วย buildViolationDisplay ตัวจริง — ไม่เขียนถ้อยคำเองในด่าน */
+  const mk = (type: Violation['type'], model: string, extra: Partial<Violation> = {}): Violation => {
+    const v = { type, model, ...extra } as Omit<Violation, 'display_message'>;
+    return { ...v, display_message: buildViolationDisplay(v) };
+  };
+  const vStock = mk('OUT_OF_STOCK', 'DIAG-A', { qty: 9, quantity_on_hand_unreserved: 1 });
+  const vPrice = mk('MIN_PRICE_VIOLATION', 'DIAG-B', { price: 1, min_price: 99 });
+  const vSys = systemErrorViolation();
+
+  ok('คีย์ของกฎไม่ขึ้นกับตัวเลขในข้อนั้น (แก้จำนวนแล้วไม่กลายเป็นกฎข้อใหม่)',
+    violationKey(vPrice) === violationKey(mk('MIN_PRICE_VIOLATION', 'DIAG-B', { price: 2, min_price: 99 })),
+    violationKey(vPrice));
+  ok('ใบที่ไม่เคยมีใครรับทราบ (ใบจาก LINE) ⇒ ติดทุกข้อเหมือนเดิม',
+    blockingViolations([vStock, vPrice], null).length === 2);
+  ok('รับทราบข้อไหน ทะลุได้เฉพาะข้อนั้น',
+    blockingViolations([vStock, vPrice], [violationKey(vStock)]).map(violationKey).join() === violationKey(vPrice));
+  ok('“ตรวจกฎไม่สำเร็จ” ทะลุไม่ได้ แม้จะกดรับทราบมาแล้ว',
+    blockingViolations([vSys], [violationKey(vSys)]).length === 1);
+
+  // ── ข) เส้นจริง: สินค้าที่ติดกฎสต็อก สั่งเกินของที่มี ────────────────────
+  const cust = await pickCustomerContact();
+  const { rows: stockRows } = await pool.query(`
+    SELECT p.product_template_id, p.model, p.quantity_on_hand_unreserved
+      FROM product_stock_rules psr
+      JOIN products p ON p.internal_reference = psr.internal_reference
+     WHERE psr.is_active = true AND p.sales_price > 0
+     ORDER BY p.quantity_on_hand_unreserved ASC
+     LIMIT 1
+  `);
+  if (stockRows.length === 0) {
+    console.log(`  ${DIM}ข้ามข้อ ข)–ค) — เครื่องนี้ไม่มีสินค้าที่ติดกฎสต็อกเลยสักตัว${RESET}`);
+    return;
+  }
+  const blocked = stockRows[0];
+  const BIG = Number(blocked.quantity_on_hand_unreserved || 0) + 100000;
+  const items = [{ product_template_id: blocked.product_template_id, quantity: BIG }];
+  console.log(`  ${DIM}สินค้าติดกฎสต็อก: ${blocked.model} (ของว่าง ${blocked.quantity_on_hand_unreserved}) สั่ง ${BIG}${RESET}`);
+
+  const pv = await previewDraft({ customerId: cust.customerId, contactId: cust.contactId, items });
+  ok('พรีวิวยังรายงานว่าติดกฎครบตามเดิม', pv.violations.length > 0, `${pv.violations.length} ข้อ`);
+  ok('  แต่ can_create_draft = true แล้ว (ติดกฎไม่ได้แปลว่าออกไม่ได้อีกต่อไป)', pv.can_create_draft === true);
+  ok('  คืน override_keys ให้หน้าจอส่งกลับมาเป็นคำรับทราบ',
+    pv.override_keys.length === pv.violations.length, pv.override_keys.join(' · '));
+
+  let refusedWithoutAck = false;
+  try {
+    await createDraft({ adminId, spUserId: TEST_SP_USER, customerId: cust.customerId, contactId: cust.contactId, items });
+  } catch (e) {
+    refusedWithoutAck = e instanceof WebQuoteError && e.code === 'RULE_VIOLATION' && e.status === 422;
+  }
+  ok('ไม่ส่งคำรับทราบมา ⇒ ปฏิเสธ 422 เหมือนเดิมทุกประการ', refusedWithoutAck);
+
+  let refusedPartialAck = false;
+  try {
+    await createDraft({
+      adminId, spUserId: TEST_SP_USER, customerId: cust.customerId, contactId: cust.contactId, items,
+      acknowledgedViolations: ['MOQ_VIOLATION|ไม่มีอยู่จริง'],
+    });
+  } catch (e) {
+    refusedPartialAck = e instanceof WebQuoteError && e.status === 422;
+  }
+  ok('รับทราบข้อที่ไม่ตรงกับที่เจอ ⇒ ยังปฏิเสธ (กันคนยิง payload มั่ว ๆ)', refusedPartialAck);
+
+  const okDraft = await createDraft({
+    adminId, spUserId: TEST_SP_USER, customerId: cust.customerId, contactId: cust.contactId, items,
+    acknowledgedViolations: pv.override_keys,
+    adminUsername: TEST_ADMIN_USERNAME,
+    // ตั้งเครดิตทับด้วย เพื่อให้ใบนี้ติดทั้งสองแกนพร้อมกัน — ตรงกับเคสจริงที่เจ้าของอธิบายไว้
+    paymentTermsOverride: 'DIAG 45 วัน',
+  });
+  ok('รับทราบครบ ⇒ สร้างร่างได้', (okDraft.quotes?.length ?? 0) > 0, `${okDraft.quotes?.length ?? 0} ใบ`);
+  const ovQuote = okDraft.quotes[0];
+
+  const savedRow = (await pool.query(
+    'SELECT rule_overrides, odoo_manual_review FROM quotations WHERE id = $1', [ovQuote.id]
+  )).rows[0];
+  const ov = savedRow?.rule_overrides;
+  ok('ใบเก็บ rule_overrides ไว้กับตัวเอง (ไม่ใช่ที่ endpoint)', !!ov);
+  ok('  บันทึกว่าใครรับทราบ เมื่อไหร่', ov?.acknowledged_by === `admin:${TEST_ADMIN_USERNAME}` && !!ov?.acknowledged_at,
+    `${ov?.acknowledged_by} @ ${ov?.acknowledged_at}`);
+  ok('  เก็บ violation ที่ server คำนวณเอง ไม่ใช่ข้อความจากหน้าจอ',
+    Array.isArray(ov?.violations) && ov.violations.length > 0 && !!ov.violations[0]?.display_message);
+  ok('  ยังไม่ยืนยัน ⇒ odoo_manual_review ยังว่าง (ตรึงตอนยืนยันที่เดียว)', savedRow?.odoo_manual_review === null);
+
+  const ovConfirm = await fetch(`${BASE}/api/quotation/${ovQuote.id}/confirm`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId: okDraft.web_user_id }),
+  });
+  ok('confirm ใบที่รับทราบแล้ว → 200 (ทะลุด่านได้จริง)', ovConfirm.status === 200, `HTTP ${ovConfirm.status}`);
+
+  // ── ค) ใบจาก LINE ต้องยังถูกบล็อก — ข้อสำคัญที่สุดของด่านนี้ ──────────────
+  const lineQuotes = await insertDraftQuotations(
+    TEST_SP_USER, `${cust.name} (DIAG LINE)`, [{ ...buildResolvedItem(
+      (await pool.query('SELECT * FROM products WHERE product_template_id = $1', [blocked.product_template_id])).rows[0],
+      { quantity: BIG }, {}
+    ).itemForDb }], 'draft', cust.customerId, cust.contactId
+  );
+  const lineQuote = lineQuotes?.[0];
+  ok('เตรียมใบฝั่ง LINE ที่มีสินค้าเดียวกันได้', !!lineQuote);
+  if (lineQuote) {
+    const lineRow = (await pool.query('SELECT rule_overrides FROM quotations WHERE id = $1', [lineQuote.id])).rows[0];
+    ok('  ใบจาก LINE ไม่มี rule_overrides ติดมาเลย', lineRow?.rule_overrides === null);
+
+    const linePut = await fetch(`${BASE}/api/quotation/${lineQuote.id}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: lineQuote.items, total_sum: lineQuote.total_sum, userId: TEST_SP_USER }),
+    });
+    ok('  PUT ใบจาก LINE ที่ติดกฎ → 422 (ไม่ทะลุ)', linePut.status === 422, `HTTP ${linePut.status}`);
+
+    const lineConfirm = await fetch(`${BASE}/api/quotation/${lineQuote.id}/confirm`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: TEST_SP_USER }),
+    });
+    ok('  confirm ใบจาก LINE ที่ติดกฎ → 422 (ไม่ทะลุ)', lineConfirm.status === 422, `HTTP ${lineConfirm.status}`);
+  }
+
+  // ── ง) คิวแก้มือใน Odoo ──────────────────────────────────────────────────
+  const mr = (await pool.query(
+    'SELECT quotation_no, odoo_manual_review FROM quotations WHERE id = $1', [ovQuote.id]
+  )).rows[0];
+  ok('ยืนยันแล้วใบที่ตั้งเครดิตเองถูกมาร์กว่าต้องแก้มือ',
+    mr?.odoo_manual_review?.reasons?.[0]?.kind === 'payment_terms_override',
+    JSON.stringify(mr?.odoo_manual_review?.reasons?.[0] ?? null));
+  ok('  เก็บถ้อยคำที่ server ประกอบไว้แล้ว (ไฟล์/โมดัล/ป้าย ใช้ประโยคเดียวกัน)',
+    typeof mr?.odoo_manual_review?.reasons?.[0]?.display_message === 'string'
+    && mr.odoo_manual_review.reasons[0].display_message.length > 0);
+
+  const inFile = async (cond: string, params: any[]) => (await pool.query(
+    `SELECT 1 FROM quotations q WHERE q.id = $1 AND ${cond}`, [ovQuote.id, ...params]
+  )).rowCount ?? 0;
+  ok('ไฟล์ export ปกติ **ไม่มี** ใบที่ต้องแก้มือ',
+    (await inFile(odooManualBucketCondition(null, 2), [])) === 0);
+  ok('ไฟล์ของกลุ่ม “เครดิตตั้งเอง” **มี** ใบนี้',
+    (await inFile(odooManualBucketCondition('payment_terms_override', 2), ['payment_terms_override'])) === 1);
+
+  const counts = await getOdooManualReviewCounts(pool);
+  const bucket = counts.find((c) => c.bucket === 'payment_terms_override');
+  ok('ยอดค้างของเมนูส่งออกนับใบนี้ด้วย', (bucket?.count ?? 0) > 0,
+    `${bucket?.company ?? '-'} ${bucket?.count ?? 0} ใบ`);
+}
+
 // ── main ─────────────────────────────────────────────────────────────────────
+
+/**
+ * ข้อ 5 — ประวัติของหน้าเว็บลง `messages` (docs/plan-web-quote-logging.md)
+ *
+ * ต้องรันหลังข้อ 2–4 เพราะมันตรวจ "ร่องรอยที่สามข้อนั้นทิ้งไว้" ไม่ได้สร้างเหตุการณ์ใหม่เอง
+ * ยกเว้นท่อนสุดท้ายที่ปลูกแถว web_propose สังเคราะห์เพื่อวัด chosen_rank แบบ deterministic
+ * (ไม่ต้องพึ่ง LLM ว่าจะค้นเจอบริษัทไหน ⇒ ด่านไม่แกว่งตามข้อมูลจริง)
+ */
+async function case5() {
+  console.log(`\n${BOLD}5) ประวัติลง messages${RESET}`);
+
+  const rowsOf = async (t: string) => (await pool.query(
+    'SELECT content, reply_content, reply_token, meta FROM messages WHERE user_id = $1 AND type = $2 ORDER BY id',
+    [webUserId, t]
+  )).rows;
+
+  const propose = await rowsOf('web_propose');
+  ok('propose เขียนแถว web_propose', propose.length >= 1, `${propose.length} แถว`);
+  const p0 = propose[0];
+  ok('content เก็บข้อความที่วางไว้ดิบ ๆ', p0?.content === SAMPLE_TEXT);
+  ok('reply_token เป็น NULL (เว็บไม่มี token)', p0?.reply_token === null);
+  ok('meta.cust_candidates ไม่ว่าง', Array.isArray(p0?.meta?.cust_candidates) && p0.meta.cust_candidates.length > 0,
+    `${p0?.meta?.cust_candidates?.length ?? 0} ตัว`);
+  ok('candidate เก็บ rank/score ไว้ให้วัดได้',
+    p0?.meta?.cust_candidates?.[0]?.rank === 1 && p0?.meta?.cust_candidates?.[0]?.score !== undefined);
+
+  const draft = await rowsOf('web_draft');
+  ok('createDraft เขียนแถว web_draft', draft.length >= 1, `${draft.length} แถว`);
+  ok('reply_content คงรูปแบบที่ evalCustomerSearch ขุดเฉลยได้',
+    /ร่างใบเสนอราคา/.test(draft[0]?.reply_content ?? '') && /🏢 .+/.test(draft[0]?.reply_content ?? ''));
+  ok('meta บันทึกสิ่งที่แอดมินเคาะจริง',
+    Number(draft[0]?.meta?.chosen_customer_id) > 0 && Number(draft[0]?.meta?.chosen_contact_id) > 0);
+
+  const confirmed = await rowsOf('web_confirm');
+  ok('confirm เขียนแถว web_confirm', confirmed.length >= 1, `${confirmed.length} แถว`);
+  ok('reply_content มีคำว่า "ยืนยันสำเร็จ" (ตัวตัดหน้าต่างประวัติ)',
+    /ยืนยันสำเร็จ/.test(confirmed[0]?.reply_content ?? ''));
+  ok('meta เก็บเลขที่ใบ', !!confirmed[0]?.meta?.quotation_no, confirmed[0]?.meta?.quotation_no ?? '-');
+
+  const revised = await rowsOf('web_revise');
+  ok('revise เขียนแถว web_revise', revised.length >= 1, `${revised.length} แถว`);
+
+  // ── chosen_rank: ปลูก candidate ที่รู้คำตอบล่วงหน้า แล้ววัดว่าหลังบ้านอ่านกลับถูก ──
+  const cust = await pickCustomerContact();
+  const plantedId = await insertMessage({
+    user_id: webUserId,
+    message_id: `web_propose_planted_${Date.now()}`,
+    type: 'web_propose',
+    content: '(แถวสังเคราะห์ของด่าน — วัด chosen_rank)',
+    reply_token: null,
+    reply_content: '📝 ร่างใบเสนอราคา (ยังไม่บันทึก)',
+    meta: {
+      cust_candidates: [
+        { rank: 1, id: -1, display_name: 'DIAG บริษัทที่ไม่ถูกเลือก', score: 0 },
+        { rank: 2, id: cust.customerId, display_name: cust.name, score: 0.1 },
+      ],
+    },
+  });
+  ok('insertMessage คืน id ของแถวที่เพิ่งเขียน', typeof plantedId === 'number' && plantedId > 0, String(plantedId));
+
+  const product = await pickProduct(cust);
+  const d2 = await createDraft({
+    adminId, spUserId: TEST_SP_USER,
+    customerId: cust.customerId, contactId: cust.contactId,
+    items: [{ product_template_id: product.product_template_id, quantity: 1 }],
+    proposeMsgId: plantedId,
+  });
+  const linked = (await pool.query(
+    `SELECT meta FROM messages WHERE user_id = $1 AND type = 'web_draft' ORDER BY id DESC LIMIT 1`, [webUserId]
+  )).rows[0];
+  ok('web_draft อ้างกลับไปที่แถว propose ที่ถูกต้อง', Number(linked?.meta?.propose_msg_id) === plantedId);
+  ok('chosen_rank = อันดับที่แอดมินเคาะจริง (ปลูกไว้ที่ 2)', Number(linked?.meta?.chosen_rank) === 2,
+    `ได้ ${linked?.meta?.chosen_rank}`);
+  ok('createDraft ยังคืนใบร่างตามปกติ', (d2.quotes?.length ?? 0) > 0);
+
+  // ── กันแถวสองช่องทางปนกัน (§3.1 · §7) ──
+  const bleed = Number((await pool.query(
+    `SELECT COUNT(*)::int AS n FROM messages WHERE user_id NOT LIKE 'web:%' AND meta IS NOT NULL`
+  )).rows[0].n);
+  ok('แถวที่ไม่ใช่ของเว็บต้องมี meta เป็น NULL ทุกแถว', bleed === 0, `พบ ${bleed} แถว`);
+
+  const wrongType = Number((await pool.query(
+    `SELECT COUNT(*)::int AS n FROM messages WHERE user_id LIKE 'web:%' AND left(type, 4) <> 'web_'`
+  )).rows[0].n);
+  ok("แถวของเว็บต้องไม่ใช้ type ของ LINE (เช่น 'text')", wrongType === 0, `พบ ${wrongType} แถว`);
+}
+
+/**
+ * ข้อ 6 — พรีวิวก่อนกดสร้างร่าง + ค่าบริการที่แอดมินเพิ่มเอง
+ *
+ * สองเรื่องนี้อยู่ในข้อเดียวกันเพราะมันคือเส้นทางเดียวกันของแอดมิน: เห็นก่อน → เคาะ → กด
+ * และทั้งคู่พังเงียบได้แบบเดียวกัน (บรรทัดหาย / ตัวเลขไม่ตรงกับที่บันทึกจริง)
+ */
+async function case6() {
+  console.log(`\n${BOLD}6) previewDraft + ค่าบริการที่แอดมินเพิ่มเอง${RESET}`);
+  const cust = await pickCustomerContact();
+  const product = await pickProduct(cust);
+  const { loadShippingFeeConfig, isShippingFeeItem } = await import('../../services/shippingFee.js');
+  const cfg = await loadShippingFeeConfig();
+  console.log(`  ${DIM}ลูกค้า: ${cust.name} · สินค้า: ${product.model} · ค่าบริการ: ${cfg.productInternalReference}${RESET}`);
+
+  const items = [
+    { product_template_id: product.product_template_id, quantity: 2 },
+    { product_template_id: cfg.productId, quantity: 1, price: 3500, name: 'ค่าติดตั้งหน้างาน' },
+  ];
+
+  const countQuotes = async () =>
+    Number((await pool.query(`SELECT COUNT(*)::int AS n FROM quotations`)).rows[0].n);
+
+  const before = await countQuotes();
+  const pv = await previewDraft({ customerId: cust.customerId, contactId: cust.contactId, items });
+  const after = await countQuotes();
+  ok('previewDraft ไม่เขียน quotations สักแถว', before === after, `${before} → ${after}`);
+  ok('คืนใบอย่างน้อย 1 ใบ พร้อมข้อความกำหนดส่ง',
+    pv.quotes.length > 0 && !!pv.quotes[0].delivery_text, pv.quotes[0]?.delivery_text);
+  ok('คืนข้อมูลลูกค้าที่จะถูกบันทึกลงใบ', !!pv.customer.display_name && pv.customer.contact_id === cust.contactId);
+
+  const pvFees = pv.quotes.flatMap((q) => q.items).filter((it) => it.is_shipping_fee);
+  ok('บรรทัดค่าบริการมีบรรทัดเดียว', pvFees.length === 1, `ได้ ${pvFees.length}`);
+  ok('  ใช้ชื่อที่แอดมินตั้ง ไม่ใช่ชื่อกลางจาก products', pvFees[0]?.name === 'ค่าติดตั้งหน้างาน', pvFees[0]?.name);
+  ok('  ถูกทำเครื่องหมายว่าเป็นของที่คนใส่เอง', pvFees[0]?.is_manual_service === true);
+  // กติกาของ applyShippingFeeToQuoteGroup: ใบ PM ก่อน ถ้าไม่มีใบ PM เลยก็ใบแรกที่มีสินค้า
+  // (สินค้านำเข้าล้วนจะได้ใบ THT ใบเดียว — บรรทัดต้องไปอยู่ที่นั่น ไม่ใช่สร้างใบ PM เปล่าขึ้นมา)
+  const feeQuote = pv.quotes.find((q) => q.items.some((it) => it.is_shipping_fee));
+  const expectQuote = pv.quotes.find((q) => q.quote_company === 'PM') ?? pv.quotes[0];
+  ok('  อยู่ในใบเดียวกับที่กฎฝั่ง server จะวางไว้', feeQuote === expectQuote,
+    `ได้ใบ ${feeQuote?.quote_company} · คาด ${expectQuote?.quote_company}`);
+  ok('ยอดสินค้าที่ใช้ตัดสินกฎไม่รวมค่าบริการ', pv.goods_total < pv.grand_total,
+    `goods=${pv.goods_total} grand=${pv.grand_total}`);
+  ok('ลูกค้า/สินค้าชุดนี้ไม่ติดกฎ ⇒ สร้างร่างได้', pv.violations.length === 0 && pv.can_create_draft);
+
+  // ของจริง: กดสร้างแล้วบรรทัดต้องยังอยู่ — จุดที่เคยหายคือ insertDraftQuotations ตัดทิ้งก่อนแบ่งใบ
+  const draft = await createDraft({
+    adminId, spUserId: TEST_SP_USER,
+    customerId: cust.customerId, contactId: cust.contactId, items,
+  });
+  ok('createDraft คืนใบร่าง', (draft.quotes?.length ?? 0) > 0, `${draft.quotes?.length ?? 0} ใบ`);
+
+  const { rows: dbRows } = await pool.query(
+    `SELECT item_details FROM quotations WHERE user_id = $1 AND status = 'draft'`, [webUserId]
+  );
+  const dbItems = dbRows.flatMap((r: any) => (Array.isArray(r.item_details) ? r.item_details : []));
+  const dbFees = dbItems.filter((it: any) => isShippingFeeItem(it, cfg));
+  ok('บรรทัดค่าบริการรอดไปถึงใบจริง 1 บรรทัด', dbFees.length === 1, `ได้ ${dbFees.length}`);
+  ok('  ชื่อที่แอดมินตั้งอยู่รอดถึง DB', dbFees[0]?.name === 'ค่าติดตั้งหน้างาน', dbFees[0]?.name);
+  ok('  ราคาที่แอดมินตั้งอยู่รอดถึง DB', Number(dbFees[0]?.price) === 3500, String(dbFees[0]?.price));
+  ok('  ธง is_manual_service ถูกเก็บลง snapshot', dbFees[0]?.is_manual_service === true);
+
+  // ตัวเลขที่แอดมินเห็นก่อนกด ต้องตรงกับที่บันทึกจริง ไม่งั้นพรีวิวไม่มีความหมาย
+  const dbSum = Number(
+    (await pool.query(
+      `SELECT COALESCE(SUM(total_sum), 0)::float8 AS s FROM quotations WHERE user_id = $1 AND status = 'draft'`,
+      [webUserId]
+    )).rows[0].s
+  );
+  ok('ยอดรวมที่พรีวิวโชว์ = ยอดที่บันทึกจริง', Math.abs(dbSum - pv.grand_total) < 0.01,
+    `พรีวิว ${pv.grand_total} · ใบจริง ${dbSum}`);
+}
+
+/** สินค้าที่ผ่านกฎ **และ** ราคาต่ำกว่าเกณฑ์ค่าบริการ — ต้องต่ำ ไม่งั้นกฎไม่ทำงานให้ทดสอบ */
+async function pickCheapProduct(
+  cust: { customerId: number; contactId: number; name: string },
+  threshold: number,
+): Promise<any> {
+  const { rows } = await pool.query(`
+    SELECT * FROM products
+     WHERE sales_price > 0 AND sales_price < $1 AND quantity_on_hand_unreserved > 5
+     ORDER BY quantity_on_hand_unreserved DESC
+     LIMIT 10
+  `, [threshold]);
+  for (const p of rows) {
+    const { itemForDb } = buildResolvedItem(p, { quantity: 1 }, {});
+    const { violations } = await validateQuotationItems([itemForDb], {
+      stage: 'draft', customerName: cust.name.split(' | ')[0], customerId: cust.customerId, contactId: cust.contactId
+    });
+    if (violations.length === 0) return p;
+  }
+  throw new Error(`หาสินค้าราคาต่ำกว่า ${threshold} ที่ผ่านด่านกฎไม่ได้ — ตรวจข้อมูล dev ก่อน`);
+}
+
+/**
+ * ข้อ 7 — เครดิต/กำหนดส่งที่แอดมินตั้งทับ (2026-09-14)
+ *
+ * ข้อนี้มีเพราะการตั้งทับเครดิต **ไม่ได้แค่เปลี่ยนตัวหนังสือบนเอกสาร** — มันเปลี่ยนคำตอบของ
+ * กฎค่าบริการด้วย ⇒ ต้องพิสูจน์ทั้งสองด้าน: พรีวิวเปลี่ยนตาม และใบที่บันทึกจริงตรงกับพรีวิว
+ */
+async function case7() {
+  console.log(`\n${BOLD}7) เครดิต/กำหนดส่งที่แอดมินตั้งทับ${RESET}`);
+  const cust = await pickCustomerContact();
+  const { loadShippingFeeConfig, isShippingFeeItem } = await import('../../services/shippingFee.js');
+  const cfg = await loadShippingFeeConfig();
+  const product = await pickCheapProduct(cust, cfg.thresholdBeforeVat);
+  const items = [{ product_template_id: product.product_template_id, quantity: 1 }];
+  const base = { customerId: cust.customerId, contactId: cust.contactId, items };
+  console.log(`  ${DIM}ลูกค้า: ${cust.name} · สินค้า: ${product.model} · เกณฑ์ค่าบริการ: ${cfg.thresholdBeforeVat}${RESET}`);
+
+  // ── ก) เครดิตที่ตั้งทับต้องเปลี่ยนคำตอบของกฎค่าบริการ ──
+  const cash = await previewDraft({ ...base, paymentTermsOverride: 'Cash' });
+  const credit = await previewDraft({ ...base, paymentTermsOverride: '30 Days' });
+  const feeCount = (pv: any) => pv.quotes.flatMap((q: any) => q.items).filter((it: any) => it.is_shipping_fee).length;
+
+  ok('เครดิตที่ตั้งทับสะท้อนกลับมาในผลพรีวิว',
+    cash.customer.payment_terms === 'Cash' && cash.customer.payment_terms_overridden === true,
+    `${cash.customer.payment_terms} (ของลูกค้า: ${cash.customer.customer_payment_terms || '-'})`);
+  ok('  has_credit_terms ตอบตามค่าที่ใช้จริง ไม่ใช่ค่าของลูกค้า',
+    cash.customer.has_credit_terms === false && credit.customer.has_credit_terms === true);
+
+  if (cfg.isActive) {
+    ok('  ตั้งเป็น Cash ⇒ กฎเติมบรรทัดค่าบริการให้', feeCount(cash) === 1, `ได้ ${feeCount(cash)}`);
+    ok('  ตั้งเป็น 30 Days ⇒ บรรทัดค่าบริการหายไป', feeCount(credit) === 0, `ได้ ${feeCount(credit)}`);
+    ok('  ยอดรวมสองรอบต่างกันเท่าค่าบริการพอดี',
+      Math.abs(cash.grand_total - credit.grand_total - cfg.feePrice * cfg.feeQuantity) < 0.01,
+      `${cash.grand_total} − ${credit.grand_total}`);
+  } else {
+    console.log(`  ${DIM}ข้ามสามข้อของกฎค่าบริการ — shipping_fee_config ปิดอยู่บนเครื่องนี้${RESET}`);
+  }
+
+  // ── ข) กำหนดส่งที่ตั้งทับต้องเดินผ่าน resolveDeliveryTerms ตัวจริง ──
+  const co = credit.quotes[0].quote_company;
+  const autoDays = credit.quotes[0].delivery_days;
+  const ovDelivery = [{ quote_company: co, delivery_type_override: 'import', delivery_days_override: 21 }];
+  const ovPv = await previewDraft({ ...base, paymentTermsOverride: '30 Days', delivery: ovDelivery });
+  const q0 = ovPv.quotes.find((q) => q.quote_company === co)!;
+
+  ok('พรีวิวคืนข้อความกำหนดส่งตามค่าที่ตั้งเอง',
+    q0.delivery_text.includes('Import.,With in') && q0.delivery_days === 21, q0.delivery_text);
+  ok('  ยังคืนค่าอัตโนมัติมาให้เทียบคู่กัน', q0.delivery_days_auto === autoDays && !!q0.delivery_auto_label,
+    `อัตโนมัติ ${q0.delivery_auto_label} ${q0.delivery_days_auto} วัน`);
+  ok('  คืนตารางประเภทการจัดส่งครบชุดให้หน้าจอ (ไม่ต้องมีสำเนาที่สอง)',
+    ovPv.delivery_types.length === 4 && ovPv.delivery_types.every((t) => !!t.key && !!t.label));
+
+  let rejected = false;
+  try {
+    await previewDraft({ ...base, delivery: [{ quote_company: co, delivery_type_override: 'teleport' }] });
+  } catch (e: any) {
+    rejected = e instanceof WebQuoteError && e.status === 400;
+  }
+  ok('  ประเภทที่ไม่รู้จักถูกปฏิเสธเป็น 400 ไม่ใช่ทิ้งเงียบ', rejected);
+
+  // ── ค) ของจริง: createDraft แล้วค่าต้องลงถูกที่ ──
+  const draft = await createDraft({
+    adminId, spUserId: TEST_SP_USER,
+    customerId: cust.customerId, contactId: cust.contactId, items,
+    paymentTermsOverride: '30 Days', delivery: ovDelivery,
+  });
+  ok('createDraft คืนใบร่าง', (draft.quotes?.length ?? 0) > 0, `${draft.quotes?.length ?? 0} ใบ`);
+
+  const { rows: dbRows } = await pool.query(`
+    SELECT id, delivery_type_override, delivery_days_override, item_details,
+           customer_details->>'payment_terms' AS pt
+      FROM quotations
+     WHERE user_id = $1 AND status = 'draft'`, [webUserId]);
+  // ใบที่ตั้งค่าไว้คือใบของบริษัท `co` — หาเจอจากคอลัมน์ override ที่มีค่า (อีกใบต้องเป็น null)
+  const target = dbRows.find((r: any) => r.delivery_type_override !== null) ?? dbRows[0];
+
+  ok('เครดิตที่ตั้งทับถูกบันทึกลง customer_details', target?.pt === '30 Days', String(target?.pt));
+  ok('กำหนดส่งที่ตั้งทับลงคอลัมน์ override ครบทั้งคู่',
+    target?.delivery_type_override === 'import' && Number(target?.delivery_days_override) === 21,
+    `${target?.delivery_type_override} / ${target?.delivery_days_override}`);
+
+  const dbFees = dbRows
+    .flatMap((r: any) => (Array.isArray(r.item_details) ? r.item_details : []))
+    .filter((it: any) => isShippingFeeItem(it, cfg));
+  ok('ใบที่บันทึกจริงไม่มีบรรทัดค่าบริการ — กฎหลัง INSERT อ่านเครดิตที่ตั้งทับด้วย',
+    dbFees.length === 0, `ได้ ${dbFees.length} บรรทัด`);
+
+  // ── ค2) บันทึกซ้ำผ่าน PUT ต้องไม่คืนเครดิตกลับเป็นของลูกค้า ──
+  //  จุดนี้คือสิ่งที่ plan-web-quote-request §4.1 ทำนายไว้: ทุกจุดที่บันทึกใบประกอบ
+  //  customer_details ใหม่จาก customers_data_view ⇒ ถ้าไม่มีธง payment_terms_override
+  //  ให้หยิบกลับ ค่าที่แอดมินตั้งจะหายเงียบ ๆ ตอนเซลส์กดบันทึกในหน้าแก้ไขใบ
+  const targetQuote = draft.quotes.find((q: any) => String(q.id) === String(target.id)) ?? draft.quotes[0];
+  const putResp = await fetch(`${BASE}/api/quotation/${target.id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items: targetQuote.items, total_sum: targetQuote.total_sum, userId: webUserId }),
+  });
+  ok('PUT /api/quotation/:id บนใบที่ตั้งเครดิตเอง → 200', putResp.status === 200, `HTTP ${putResp.status}`);
+  const afterPut = (await pool.query(
+    `SELECT customer_details->>'payment_terms' AS pt,
+            customer_details->>'payment_terms_override' AS ov,
+            delivery_type_override, delivery_days_override
+       FROM quotations WHERE id = $1`, [target.id])).rows[0];
+  ok('  เครดิตที่ตั้งทับไม่ถูกเขียนกลับเป็นของลูกค้า', afterPut?.pt === '30 Days', String(afterPut?.pt));
+  ok('  ธง payment_terms_override ยังติดอยู่กับใบ', afterPut?.ov === '30 Days', String(afterPut?.ov));
+  ok('  กำหนดส่งที่ตั้งเองก็ไม่ถูกล้างด้วย client ที่ไม่ส่งฟิลด์นั้นมา',
+    afterPut?.delivery_type_override === 'import' && Number(afterPut?.delivery_days_override) === 21,
+    `${afterPut?.delivery_type_override} / ${afterPut?.delivery_days_override}`);
+
+  // ── ง) ยืนยันแล้วค่าที่ตั้งไว้ต้องถูก "ตรึง" ลงใบ ──
+  const confirmResp = await fetch(`${BASE}/api/quotation/${target.id}/confirm`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId: webUserId }),
+  });
+  ok('confirm ใบที่ตั้งค่าเอง → 200', confirmResp.status === 200, `HTTP ${confirmResp.status}`);
+
+  const after = (await pool.query(
+    `SELECT delivery_terms, customer_details->>'payment_terms' AS pt FROM quotations WHERE id = $1`,
+    [target.id])).rows[0];
+  const dt = after?.delivery_terms ?? {};
+  ok('delivery_terms ที่ตรึงตอนยืนยันใช้ค่าที่ตั้งเอง',
+    dt.type === 'import' && Number(dt.days) === 21, `${dt.type} ${dt.days}`);
+  ok('  บันทึกที่มาไว้ว่า "ตั้งเอง" ไม่ใช่ "อัตโนมัติ"',
+    dt.type_source === 'override' && dt.days_source === 'override', `${dt.type_source}/${dt.days_source}`);
+  ok('  เครดิตที่ตั้งทับอยู่รอดหลังยืนยัน (confirm ไม่เขียน customer_details ทับ)',
+    after?.pt === '30 Days', String(after?.pt));
+}
 
 async function main() {
   console.log(`${BOLD}webQuoteSmoke — ด่านเฟส D${RESET} ${DIM}(${BASE})${RESET}`);
@@ -296,6 +859,10 @@ async function main() {
     await case2();
     const quotationNo = await case3();
     await case4(quotationNo);
+    await case5();
+    await case6();
+    await case7();
+    await case8();
   } finally {
     await teardown();
   }

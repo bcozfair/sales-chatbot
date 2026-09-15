@@ -29,7 +29,7 @@
     "note": "cluster 4: ลูกค้าบุคคล+เบอร์ (5 msgs fail)",
     "customerQuery": "คุณโยธิน 06-3884-0005",
     "contactQuery": "",
-    "expected": "คุณ โยธิน  ปาทาน"
+    "expected": "คุณโยธิน นามบุรี"
   },
   {
     "id": "pin-5a-contact-ku-jittipong",

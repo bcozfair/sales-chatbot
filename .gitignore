@@ -37,3 +37,8 @@ data/eval/customer_search_llm_cache.json
 # gitlink (submodule ปลอม) ที่ชี้ commit ของ branch อื่น แล้ว checkout ที่อื่นจะพัง
 # (เกิดขึ้นจริงใน 77ec504 — ต้องถอนออกตอน merge)
 .claude/worktrees/
+
+# prototype หน้าตาที่ทำไว้ให้เจ้าของเคาะก่อนแก้โค้ดจริง (docs/design.md ข้อ 0.4)
+# เป็น HTML เปล่า ๆ ไม่ผูกกับ build ของ admin และจะล้าสมัยทันทีที่ของจริงถูกแก้
+# ถ้าตัวไหนกลายเป็นข้อตกลงถาวร ให้เขียนลง docs/design.md แทนการ commit ไฟล์นี้
+mockup/

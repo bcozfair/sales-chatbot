@@ -618,7 +618,8 @@ CREATE TABLE public.messages (
     type text,
     content text,
     reply_token text,
-    reply_content text
+    reply_content text,
+    meta jsonb
 );
 
 
@@ -855,6 +856,14 @@ CREATE TABLE public.quotations (
     odoo_imported_at timestamp with time zone,
     -- id ของเอกสารในฐาน Odoo — ไม่เปลี่ยนแม้เอกสารถูกเปลี่ยนชื่อ ใช้เป็นสมอตามหาสถานะปัจจุบันได้
     odoo_so_id integer,
+    -- ใบนี้ติดกฎ (สต็อก/MOQ/ราคาขั้นต่ำ/ระงับ/blacklist/เครดิตค้าง) แต่คนออกใบรับทราบแล้วและยืนยันจะออก
+    -- ⇒ ข้อมูลในไฟล์ยังตรงกับฐาน Odoo ทุกช่อง **ห้ามมีผลกับไฟล์ export** มีไว้กรอง/ติดป้ายในหน้าประวัติ
+    -- และเป็นตัวปลดล็อกด่านตรวจของ PUT/confirm ซึ่งผูกกับ "ใบ" ไม่ใช่ "endpoint" (LIFF ใช้ endpoint ร่วมกัน)
+    rule_overrides jsonb,
+    -- ข้อมูลในไฟล์ export **ไม่ตรง** กับฐานลูกค้า/สินค้าของ Odoo (เครดิตที่ตั้งทับ · ผู้ติดต่อใหม่ · สินค้า custom)
+    -- ⇒ นำเข้าตรง ๆ แล้วใบตก ต้องไปสร้าง/แก้ใน Odoo ก่อน ⇒ **กันออกจากไฟล์ปกติ** แล้วส่งออกจากเมนูแยก
+    -- คนละเรื่องกับ rule_overrides โดยสิ้นเชิง · ใบเดียวมีได้ทั้งสองคอลัมน์
+    odoo_manual_review jsonb,
     CONSTRAINT quotations_delivery_days_override_check CHECK (
         (delivery_days_override IS NULL)
         OR ((delivery_days_override >= 0) AND (delivery_days_override <= 3650))
@@ -1424,6 +1433,21 @@ CREATE INDEX idx_quotations_not_exported ON public.quotations USING btree (creat
 --
 
 CREATE INDEX idx_quotations_odoo_exported_at ON public.quotations USING btree (odoo_exported_at);
+
+
+--
+-- Name: idx_quotations_manual_review_pending; Type: INDEX; Schema: public; Owner: -
+--
+
+-- คิวแก้มือ = "มีค่า และยังไม่ถูกส่งออก" — เมนูส่งออกถามทุกครั้งที่เปิดหน้าประวัติ
+CREATE INDEX idx_quotations_manual_review_pending ON public.quotations USING btree (odoo_exported_at) WHERE ((odoo_manual_review IS NOT NULL) AND (odoo_exported_at IS NULL));
+
+
+--
+-- Name: idx_quotations_rule_overrides; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_quotations_rule_overrides ON public.quotations USING btree (created_at DESC) WHERE (rule_overrides IS NOT NULL);
 
 
 --

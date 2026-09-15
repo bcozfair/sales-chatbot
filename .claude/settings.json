@@ -10,8 +10,6 @@
       "PowerShell(git -C \"c:\\\\Users\\\\bcozf\\\\Downloads\\\\chatbot\" diff --stat)",
       "PowerShell(npx tsx scripts/evalCustomerSearch.ts 2>&1)",
       "PowerShell(Copy-Item \"services\\\\customerService.ts\" \"C:\\\\Users\\\\bcozf\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-bcozf-Downloads-chatbot\\\\e635625c-bb3d-4574-81e5-f5946c65876a\\\\scratchpad\\\\customerService.NEW.ts\" -Force)",
-      "PowerShell(git stash push services/customerService.ts)",
-      "PowerShell(git stash pop)",
       "PowerShell(npx tsx \"C:\\\\Users\\\\bcozf\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-bcozf-Downloads-chatbot\\\\e635625c-bb3d-4574-81e5-f5946c65876a\\\\scratchpad\\\\verifyTpcsFlow.ts\" --no-ai 2>&1)",
       "PowerShell(npx tsx \"C:\\\\Users\\\\bcozf\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-bcozf-Downloads-chatbot\\\\e635625c-bb3d-4574-81e5-f5946c65876a\\\\scratchpad\\\\inspectKorat.ts\")",
       "PowerShell(try { $r = Invoke-WebRequest -Uri \"http://localhost:3011/api/products/search?q=A\" -UseBasicParsing -TimeoutSec 8; \"UP: $\\($r.StatusCode\\)\" } catch { \"DOWN or error: $\\($_.Exception.Message\\)\" })",
@@ -114,5 +112,8 @@
       "Bash(git --no-pager diff -U3 -- liff_pages/quote-edit.html)",
       "Bash(git --no-pager diff -U2 -- liff_pages/product-search.html)"
     ]
+  },
+  "worktree": {
+    "baseRef": "head"
   }
 }
