@@ -14,6 +14,9 @@
 //     และบรรทัดค่าบริการที่แอดมินเพิ่มเองต้องรอดไปถึงใบจริง (บรรทัดเดียวเสมอ)
 //  7. เครดิต/กำหนดส่งที่แอดมินตั้งทับ — เปลี่ยนคำตอบของกฎค่าบริการจริง · ลงคอลัมน์/คีย์ถูกที่
 //     · ค่าที่ไม่รู้จักถูกปฏิเสธ 400 · ยืนยันแล้วถูกตรึงเป็น source 'override'
+//  8. ทะลุด่านตรวจได้ (`rule_overrides`) + คิวแก้มือใน Odoo (`odoo_manual_review`)
+//     · ข้อสำคัญที่สุด: **ใบจาก LINE ต้องยังถูกบล็อกเหมือนเดิม** (ปลดล็อกผูกกับใบ ไม่ใช่ endpoint)
+//     · `SYSTEM_ERROR` ทะลุไม่ได้แม้กดรับทราบ · ข้อที่เพิ่งโผล่ยังปฏิเสธ 422
 //
 //  ⚠️ เขียนข้อมูลจริงลง DB (salesperson · admin_users · quotations ของ user ทดสอบ)
 //     แล้วลบทิ้งใน finally ทุกกรณี — user/แอดมินทดสอบเป็นค่าคงที่ที่ไม่ชนของจริง
@@ -22,7 +25,16 @@
 import { pool } from '../../config/db.js';
 import { insertMessage } from '../../db/repositories.js';
 import { extractQuoteFromText, buildResolvedItem } from '../../services/quoteExtraction.js';
-import { validateQuotationItems } from '../../services/quotationService.js';
+import {
+  validateQuotationItems,
+  insertDraftQuotations,
+  buildViolationDisplay,
+  systemErrorViolation,
+  violationKey,
+  blockingViolations,
+  type Violation,
+} from '../../services/quotationService.js';
+import { odooManualBucketCondition, getOdooManualReviewCounts } from '../../db/repositories.js';
 import { decideCustomerSelection } from '../../services/customerService.js';
 import {
   proposeFromText,
@@ -367,6 +379,161 @@ async function case4(quotationNo: string | null) {
   console.log(`  handleQuotationEditRequest() — ผ่านทางค้นด้วยเลขที่จะไปไม่ถึง เพราะใบร่างไม่มีเลข${RESET}`);
 }
 
+/**
+ * ข้อ 8 — ทะลุด่านตรวจได้ (rule_overrides) + คิวแก้มือใน Odoo (odoo_manual_review)
+ *
+ * **ข้อที่สำคัญที่สุดของด่านนี้คือ "ใบจาก LINE ต้องยังถูกบล็อกเหมือนเดิม"** — การปลดล็อกผูกกับ
+ * *ใบ* (คอลัมน์ rule_overrides) ไม่ใช่กับ *endpoint* เพราะ PUT/confirm เป็นของที่หน้า LIFF
+ * ใช้ร่วมกันอยู่ ถ้าใครเผลอย้ายเงื่อนไขไปไว้ที่ endpoint ใบจาก LINE จะทะลุกฎตามไปด้วยเงียบ ๆ
+ * และไม่มีอะไรฟ้องจนกว่าจะมีของหลุดไปถึงลูกค้า
+ *
+ * สร้าง violation จริงด้วยการ **สั่งเกินของ** สินค้าที่ติดกฎสต็อก (ไม่เขียนอะไรลงตารางกฎเลย)
+ */
+async function case8() {
+  console.log(`\n${BOLD}8) ทะลุด่านตรวจ + คิวแก้มือใน Odoo${RESET}`);
+
+  // ── ก) ตรรกะของประตู — ไม่แตะ DB จึง deterministic 100% ──────────────────
+  /** ประกอบ Violation สังเคราะห์ด้วย buildViolationDisplay ตัวจริง — ไม่เขียนถ้อยคำเองในด่าน */
+  const mk = (type: Violation['type'], model: string, extra: Partial<Violation> = {}): Violation => {
+    const v = { type, model, ...extra } as Omit<Violation, 'display_message'>;
+    return { ...v, display_message: buildViolationDisplay(v) };
+  };
+  const vStock = mk('OUT_OF_STOCK', 'DIAG-A', { qty: 9, quantity_on_hand_unreserved: 1 });
+  const vPrice = mk('MIN_PRICE_VIOLATION', 'DIAG-B', { price: 1, min_price: 99 });
+  const vSys = systemErrorViolation();
+
+  ok('คีย์ของกฎไม่ขึ้นกับตัวเลขในข้อนั้น (แก้จำนวนแล้วไม่กลายเป็นกฎข้อใหม่)',
+    violationKey(vPrice) === violationKey(mk('MIN_PRICE_VIOLATION', 'DIAG-B', { price: 2, min_price: 99 })),
+    violationKey(vPrice));
+  ok('ใบที่ไม่เคยมีใครรับทราบ (ใบจาก LINE) ⇒ ติดทุกข้อเหมือนเดิม',
+    blockingViolations([vStock, vPrice], null).length === 2);
+  ok('รับทราบข้อไหน ทะลุได้เฉพาะข้อนั้น',
+    blockingViolations([vStock, vPrice], [violationKey(vStock)]).map(violationKey).join() === violationKey(vPrice));
+  ok('“ตรวจกฎไม่สำเร็จ” ทะลุไม่ได้ แม้จะกดรับทราบมาแล้ว',
+    blockingViolations([vSys], [violationKey(vSys)]).length === 1);
+
+  // ── ข) เส้นจริง: สินค้าที่ติดกฎสต็อก สั่งเกินของที่มี ────────────────────
+  const cust = await pickCustomerContact();
+  const { rows: stockRows } = await pool.query(`
+    SELECT p.product_template_id, p.model, p.quantity_on_hand_unreserved
+      FROM product_stock_rules psr
+      JOIN products p ON p.internal_reference = psr.internal_reference
+     WHERE psr.is_active = true AND p.sales_price > 0
+     ORDER BY p.quantity_on_hand_unreserved ASC
+     LIMIT 1
+  `);
+  if (stockRows.length === 0) {
+    console.log(`  ${DIM}ข้ามข้อ ข)–ค) — เครื่องนี้ไม่มีสินค้าที่ติดกฎสต็อกเลยสักตัว${RESET}`);
+    return;
+  }
+  const blocked = stockRows[0];
+  const BIG = Number(blocked.quantity_on_hand_unreserved || 0) + 100000;
+  const items = [{ product_template_id: blocked.product_template_id, quantity: BIG }];
+  console.log(`  ${DIM}สินค้าติดกฎสต็อก: ${blocked.model} (ของว่าง ${blocked.quantity_on_hand_unreserved}) สั่ง ${BIG}${RESET}`);
+
+  const pv = await previewDraft({ customerId: cust.customerId, contactId: cust.contactId, items });
+  ok('พรีวิวยังรายงานว่าติดกฎครบตามเดิม', pv.violations.length > 0, `${pv.violations.length} ข้อ`);
+  ok('  แต่ can_create_draft = true แล้ว (ติดกฎไม่ได้แปลว่าออกไม่ได้อีกต่อไป)', pv.can_create_draft === true);
+  ok('  คืน override_keys ให้หน้าจอส่งกลับมาเป็นคำรับทราบ',
+    pv.override_keys.length === pv.violations.length, pv.override_keys.join(' · '));
+
+  let refusedWithoutAck = false;
+  try {
+    await createDraft({ adminId, spUserId: TEST_SP_USER, customerId: cust.customerId, contactId: cust.contactId, items });
+  } catch (e) {
+    refusedWithoutAck = e instanceof WebQuoteError && e.code === 'RULE_VIOLATION' && e.status === 422;
+  }
+  ok('ไม่ส่งคำรับทราบมา ⇒ ปฏิเสธ 422 เหมือนเดิมทุกประการ', refusedWithoutAck);
+
+  let refusedPartialAck = false;
+  try {
+    await createDraft({
+      adminId, spUserId: TEST_SP_USER, customerId: cust.customerId, contactId: cust.contactId, items,
+      acknowledgedViolations: ['MOQ_VIOLATION|ไม่มีอยู่จริง'],
+    });
+  } catch (e) {
+    refusedPartialAck = e instanceof WebQuoteError && e.status === 422;
+  }
+  ok('รับทราบข้อที่ไม่ตรงกับที่เจอ ⇒ ยังปฏิเสธ (กันคนยิง payload มั่ว ๆ)', refusedPartialAck);
+
+  const okDraft = await createDraft({
+    adminId, spUserId: TEST_SP_USER, customerId: cust.customerId, contactId: cust.contactId, items,
+    acknowledgedViolations: pv.override_keys,
+    adminUsername: TEST_ADMIN_USERNAME,
+    // ตั้งเครดิตทับด้วย เพื่อให้ใบนี้ติดทั้งสองแกนพร้อมกัน — ตรงกับเคสจริงที่เจ้าของอธิบายไว้
+    paymentTermsOverride: 'DIAG 45 วัน',
+  });
+  ok('รับทราบครบ ⇒ สร้างร่างได้', (okDraft.quotes?.length ?? 0) > 0, `${okDraft.quotes?.length ?? 0} ใบ`);
+  const ovQuote = okDraft.quotes[0];
+
+  const savedRow = (await pool.query(
+    'SELECT rule_overrides, odoo_manual_review FROM quotations WHERE id = $1', [ovQuote.id]
+  )).rows[0];
+  const ov = savedRow?.rule_overrides;
+  ok('ใบเก็บ rule_overrides ไว้กับตัวเอง (ไม่ใช่ที่ endpoint)', !!ov);
+  ok('  บันทึกว่าใครรับทราบ เมื่อไหร่', ov?.acknowledged_by === `admin:${TEST_ADMIN_USERNAME}` && !!ov?.acknowledged_at,
+    `${ov?.acknowledged_by} @ ${ov?.acknowledged_at}`);
+  ok('  เก็บ violation ที่ server คำนวณเอง ไม่ใช่ข้อความจากหน้าจอ',
+    Array.isArray(ov?.violations) && ov.violations.length > 0 && !!ov.violations[0]?.display_message);
+  ok('  ยังไม่ยืนยัน ⇒ odoo_manual_review ยังว่าง (ตรึงตอนยืนยันที่เดียว)', savedRow?.odoo_manual_review === null);
+
+  const ovConfirm = await fetch(`${BASE}/api/quotation/${ovQuote.id}/confirm`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId: okDraft.web_user_id }),
+  });
+  ok('confirm ใบที่รับทราบแล้ว → 200 (ทะลุด่านได้จริง)', ovConfirm.status === 200, `HTTP ${ovConfirm.status}`);
+
+  // ── ค) ใบจาก LINE ต้องยังถูกบล็อก — ข้อสำคัญที่สุดของด่านนี้ ──────────────
+  const lineQuotes = await insertDraftQuotations(
+    TEST_SP_USER, `${cust.name} (DIAG LINE)`, [{ ...buildResolvedItem(
+      (await pool.query('SELECT * FROM products WHERE product_template_id = $1', [blocked.product_template_id])).rows[0],
+      { quantity: BIG }, {}
+    ).itemForDb }], 'draft', cust.customerId, cust.contactId
+  );
+  const lineQuote = lineQuotes?.[0];
+  ok('เตรียมใบฝั่ง LINE ที่มีสินค้าเดียวกันได้', !!lineQuote);
+  if (lineQuote) {
+    const lineRow = (await pool.query('SELECT rule_overrides FROM quotations WHERE id = $1', [lineQuote.id])).rows[0];
+    ok('  ใบจาก LINE ไม่มี rule_overrides ติดมาเลย', lineRow?.rule_overrides === null);
+
+    const linePut = await fetch(`${BASE}/api/quotation/${lineQuote.id}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: lineQuote.items, total_sum: lineQuote.total_sum, userId: TEST_SP_USER }),
+    });
+    ok('  PUT ใบจาก LINE ที่ติดกฎ → 422 (ไม่ทะลุ)', linePut.status === 422, `HTTP ${linePut.status}`);
+
+    const lineConfirm = await fetch(`${BASE}/api/quotation/${lineQuote.id}/confirm`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: TEST_SP_USER }),
+    });
+    ok('  confirm ใบจาก LINE ที่ติดกฎ → 422 (ไม่ทะลุ)', lineConfirm.status === 422, `HTTP ${lineConfirm.status}`);
+  }
+
+  // ── ง) คิวแก้มือใน Odoo ──────────────────────────────────────────────────
+  const mr = (await pool.query(
+    'SELECT quotation_no, odoo_manual_review FROM quotations WHERE id = $1', [ovQuote.id]
+  )).rows[0];
+  ok('ยืนยันแล้วใบที่ตั้งเครดิตเองถูกมาร์กว่าต้องแก้มือ',
+    mr?.odoo_manual_review?.reasons?.[0]?.kind === 'payment_terms_override',
+    JSON.stringify(mr?.odoo_manual_review?.reasons?.[0] ?? null));
+  ok('  เก็บถ้อยคำที่ server ประกอบไว้แล้ว (ไฟล์/โมดัล/ป้าย ใช้ประโยคเดียวกัน)',
+    typeof mr?.odoo_manual_review?.reasons?.[0]?.display_message === 'string'
+    && mr.odoo_manual_review.reasons[0].display_message.length > 0);
+
+  const inFile = async (cond: string, params: any[]) => (await pool.query(
+    `SELECT 1 FROM quotations q WHERE q.id = $1 AND ${cond}`, [ovQuote.id, ...params]
+  )).rowCount ?? 0;
+  ok('ไฟล์ export ปกติ **ไม่มี** ใบที่ต้องแก้มือ',
+    (await inFile(odooManualBucketCondition(null, 2), [])) === 0);
+  ok('ไฟล์ของกลุ่ม “เครดิตตั้งเอง” **มี** ใบนี้',
+    (await inFile(odooManualBucketCondition('payment_terms_override', 2), ['payment_terms_override'])) === 1);
+
+  const counts = await getOdooManualReviewCounts(pool);
+  const bucket = counts.find((c) => c.bucket === 'payment_terms_override');
+  ok('ยอดค้างของเมนูส่งออกนับใบนี้ด้วย', (bucket?.count ?? 0) > 0,
+    `${bucket?.company ?? '-'} ${bucket?.count ?? 0} ใบ`);
+}
+
 // ── main ─────────────────────────────────────────────────────────────────────
 
 /**
@@ -695,6 +862,7 @@ async function main() {
     await case5();
     await case6();
     await case7();
+    await case8();
   } finally {
     await teardown();
   }

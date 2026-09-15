@@ -594,6 +594,43 @@ export function exportedFilterCondition(filter: ExportedFilter): string {
 }
 
 /**
+ * ตัวกรอง "ป้ายของใบ" ในหน้าประวัติ — สองแกนที่ไม่เกี่ยวกันเลย (2026-09-15)
+ *   all    = ไม่กรอง
+ *   rule   = ใบที่ทะลุกฎ (ยังอยู่ในไฟล์ export ปกติ — ธงนี้ไม่มีผลกับไฟล์)
+ *   manual = ใบที่ข้อมูลไม่ตรงฐาน Odoo (ถูกกันออกจากไฟล์ปกติ)
+ *   clean  = ไม่ติดทั้งสองอย่าง
+ * ⚠️ ใบเดียวติดได้ทั้ง rule และ manual ⇒ สองตัวนี้ไม่ใช่ตัวเลือกที่แยกกันขาด
+ */
+export type QuoteFlagFilter = 'all' | 'rule' | 'manual' | 'clean';
+
+const QUOTE_FLAG_FILTERS: readonly string[] = ['all', 'rule', 'manual', 'clean'];
+
+export function parseQuoteFlagFilter(raw: any, fallback: QuoteFlagFilter): QuoteFlagFilter {
+  const v = String(raw ?? '').trim().toLowerCase();
+  return QUOTE_FLAG_FILTERS.includes(v) ? (v as QuoteFlagFilter) : fallback;
+}
+
+/** เงื่อนไข WHERE ของตัวกรองป้าย — คืน '' เมื่อไม่ต้องกรอง (alias `q` เหมือนตัวอื่นในไฟล์นี้) */
+export function quoteFlagFilterCondition(filter: QuoteFlagFilter): string {
+  if (filter === 'rule') return 'q.rule_overrides IS NOT NULL';
+  if (filter === 'manual') return 'q.odoo_manual_review IS NOT NULL';
+  if (filter === 'clean') return 'q.rule_overrides IS NULL AND q.odoo_manual_review IS NULL';
+  return '';
+}
+
+/**
+ * เงื่อนไข WHERE ของ "ไฟล์ไหน" ตอนส่งออก Odoo — `null` = ไฟล์ปกติ
+ *
+ * ไฟล์ปกติ **ตัดใบที่ต้องแก้มือออกทั้งหมด** เพราะนำเข้าแล้วตกทั้งใบ (ค่าในไฟล์ไม่มีในฐาน Odoo)
+ * ส่วนใบที่แค่ทะลุกฎยังอยู่ในไฟล์ปกติเหมือนเดิม — ตรงนี้คือจุดที่สองแกนแยกกันจริง ๆ ในโค้ด
+ */
+export function odooManualBucketCondition(bucket: string | null, paramIndex: number): string {
+  if (!bucket) return 'q.odoo_manual_review IS NULL';
+  // ค่า bucket เข้าเป็น parameter เสมอ ไม่ต่อสตริง แม้ผู้เรียกจะกรองด้วย whitelist มาแล้ว
+  return `q.odoo_manual_review IS NOT NULL AND (${ODOO_MANUAL_BUCKET_SQL}) = $${paramIndex}`;
+}
+
+/**
  * เงื่อนไขช่วงวันที่ของหน้าประวัติใบเสนอราคา — ตีความ 'yyyy-mm-dd' ที่แอดมินเลือกเป็น "วันตามเวลาไทย"
  * (ต้องมี alias ตาราง `q` = quotations อยู่ก่อนหน้าในคำสั่ง เหมือน exportedFilterCondition)
  *
@@ -633,6 +670,73 @@ export async function claimQuotationsForExport(
       WHERE id = ANY($1::uuid[]) ${guard}
       RETURNING id`, [ids]);
   return rows.map((r: any) => String(r.id));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  สองคอลัมน์ jsonb ของ "ทะลุกฎ" กับ "ต้องแก้มือใน Odoo" (2026-09-15)
+//  SQL ทั้งหมดของสองเรื่องนี้อยู่ตรงนี้ที่เดียวตามกฎ layer — service/route ห้ามเขียน SQL เอง
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * เขียน "กฎที่ทะลุ + ใครรับทราบ" ลงใบ — เรียกหลัง INSERT ร่างเสร็จแล้วเท่านั้น
+ * (นอกทรานแซกชันของ insertDraftQuotations ตามข้อห้ามของ CLAUDE.md)
+ */
+export async function saveQuotationRuleOverrides(
+  db: DbExecutor, quoteId: string, payload: unknown
+): Promise<void> {
+  await db.query(
+    `UPDATE quotations SET rule_overrides = $2::jsonb WHERE id = $1`,
+    [quoteId, JSON.stringify(payload)]);
+}
+
+/** คีย์ของกฎที่ใบนี้รับทราบไว้ — `null` = ใบนี้ไม่เคยมีใครกดรับทราบ (ใบจาก LINE ทุกใบ) */
+export async function getAcknowledgedViolationKeys(
+  db: DbExecutor, quoteId: string
+): Promise<string[] | null> {
+  const { rows } = await db.query(
+    `SELECT rule_overrides->'acknowledged_keys' AS keys FROM quotations WHERE id = $1`, [quoteId]);
+  const keys = rows[0]?.keys;
+  return Array.isArray(keys) ? keys.map((k: any) => String(k)) : null;
+}
+
+/**
+ * "กลุ่ม" ของใบที่ต้องแก้มือ — หนึ่งใบอยู่ได้กลุ่มเดียวเสมอ แม้จะติดหลายเหตุ
+ *
+ * เรียงตามของที่ต้องไปสร้างใน Odoo ก่อน (ผู้ติดต่อ → สินค้า → เครดิต) ⇒ ยอดของทุกกลุ่ม
+ * บวกกันได้เท่ากับจำนวนใบค้างพอดี และ **ไม่มีใบไหนโผล่สองไฟล์จนถูกนำเข้าซ้ำ**
+ * ลำดับนี้ต้องตรงกับ `ODOO_MANUAL_REASON_KINDS` ใน services/quotationService.ts
+ *
+ * เป็นนิพจน์คงที่ล้วน ไม่มี input ผู้ใช้ต่อเข้ามา จึงไม่ต้อง parameterize
+ * (ต้องมี alias ตาราง `q` = quotations อยู่ก่อนหน้า เหมือน exportedFilterCondition)
+ */
+export const ODOO_MANUAL_BUCKET_SQL = `
+  CASE
+    WHEN q.odoo_manual_review->'reasons' @> '[{"kind":"new_contact"}]'::jsonb            THEN 'new_contact'
+    WHEN q.odoo_manual_review->'reasons' @> '[{"kind":"custom_product"}]'::jsonb         THEN 'custom_product'
+    WHEN q.odoo_manual_review->'reasons' @> '[{"kind":"payment_terms_override"}]'::jsonb THEN 'payment_terms_override'
+    ELSE 'other'
+  END`;
+
+/**
+ * นับใบที่ยังค้างในคิวแก้มือ แยกตามกลุ่ม × บริษัท — ตัวเลขที่เมนูส่งออกเอาไปขึ้นข้างปุ่ม
+ *
+ * "ค้าง" = `odoo_manual_review IS NOT NULL AND odoo_exported_at IS NULL` ⇒ **ไม่มีสถานะใหม่
+ * ให้ใครคอยกดปิด** พอส่งออกชุดแยกแล้ว กลไก odoo_exported_at เดิมมาร์กให้เอง ใบก็ออกจากคิว
+ * · บริษัทดูจากอักษรนำของเลขที่ใบ ซึ่งเป็นตัวเดียวกับที่ไฟล์ export ใช้แบ่ง (QP=PM · QT=THT)
+ */
+export async function getOdooManualReviewCounts(
+  db: DbExecutor
+): Promise<{ bucket: string; company: 'PM' | 'THT'; count: number }[]> {
+  const { rows } = await db.query(
+    `SELECT ${ODOO_MANUAL_BUCKET_SQL} AS bucket,
+            CASE WHEN q.quotation_no LIKE 'QT%' THEN 'THT' ELSE 'PM' END AS company,
+            COUNT(*)::int AS count
+       FROM quotations q
+      WHERE q.odoo_manual_review IS NOT NULL
+        AND q.odoo_exported_at IS NULL
+        AND q.quotation_no IS NOT NULL AND TRIM(q.quotation_no) <> ''
+      GROUP BY 1, 2`);
+  return rows.map((r: any) => ({ bucket: String(r.bucket), company: r.company === 'THT' ? 'THT' : 'PM', count: Number(r.count) }));
 }
 
 /** บันทึกหัวชุดการส่งออก 1 ครั้ง แล้วคืน batch id */

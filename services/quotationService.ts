@@ -119,6 +119,111 @@ export const systemErrorViolation = (): Violation => {
   return { ...v, display_message: buildViolationDisplay(v) };
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  การ "ทะลุด่านตรวจ" ของหน้าเว็บขอใบเสนอราคา (2026-09-15)
+//
+//  เจ้าของสั่งว่าหน้าเว็บต้องออกใบได้แม้ติดกฎ **แต่คำเตือนต้องอยู่ครบเหมือนเดิม** และต้องมี
+//  โมดัลให้ยืนยันอีกชั้น ⇒ สามฟังก์ชันข้างล่างคือกติกาเดียวของทั้งระบบว่า "ข้อไหนทะลุได้"
+//  และ "รับทราบข้อไหนไปแล้ว" — ห้ามเขียนเงื่อนไขซ้ำที่ endpoint ไหนอีก
+//
+//  ⚠️ การปลดล็อก **ผูกกับใบ ไม่ใช่กับ endpoint** เพราะ `PUT /api/quotation/:id` กับ
+//     `POST /api/quotation/:id/confirm` เป็นของที่ LIFF ใช้ร่วมกันอยู่ ถ้าไปปลดที่ endpoint
+//     ใบจาก LINE จะทะลุกฎตามไปด้วยโดยไม่มีใครรู้ · ตัวปลดคือคอลัมน์ `quotations.rule_overrides`
+//     ซึ่งมีค่าเฉพาะใบที่คนกดรับทราบไว้แล้ว (ใบจาก LINE เป็น NULL เสมอ)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ชื่อเรียกของกฎหนึ่งข้อบนใบหนึ่งใบ — ใช้เทียบว่า "ข้อที่เพิ่งเจอ อยู่ในรายการที่รับทราบไว้ไหม"
+ *
+ * `type|model` เท่านั้น ไม่รวมตัวเลข (ราคา/จำนวน) โดยตั้งใจ — ถ้ารวม การแก้จำนวนหนึ่งชิ้น
+ * จะกลายเป็นกฎ "ข้อใหม่" แล้วโมดัลเด้งซ้ำทุกครั้งที่พิมพ์ ซึ่งคือการฝึกให้คนกดผ่านโดยไม่อ่าน
+ */
+export function violationKey(v: Violation): string {
+  return `${v.type}|${v.model || '-'}`;
+}
+
+/**
+ * ข้อที่ทะลุไม่ได้ไม่ว่าใครจะรับทราบก็ตาม
+ *
+ * `SYSTEM_ERROR` = "ตรวจกฎไม่สำเร็จ" (ฐานล่ม/กฎอ่านไม่ขึ้น) ซึ่งเป็นค่าของด่าน fail-closed —
+ * มันไม่ได้แปลว่า "ใบนี้ผิดกฎข้อนี้" แต่แปลว่า **ยังไม่รู้ว่าผิดหรือไม่** การให้คนกดรับทราบ
+ * สิ่งที่ระบบยังไม่รู้ คือการเปลี่ยน fail-closed ให้กลายเป็น fail-open โดยใช้ปุ่มเป็นข้ออ้าง
+ */
+export const isBypassableViolation = (v: Violation): boolean => v.type !== 'SYSTEM_ERROR';
+
+/**
+ * คัดว่าข้อไหน "ยังบล็อกอยู่" หลังหักรายการที่รับทราบไว้แล้ว — คืน [] แปลว่าออกใบต่อได้
+ *
+ * `acknowledgedKeys` มาจาก `rule_overrides.acknowledged_keys` ของใบนั้น (หรือจากสิ่งที่
+ * หน้าจอส่งมาตอนสร้างร่าง) · ข้อที่ **ไม่อยู่** ในรายการคือข้อที่เพิ่งโผล่หลังคนกดรับทราบ
+ * (เช่นของหมดสต็อกระหว่างทาง) ⇒ ต้องกลับไปให้คนดูใหม่ ไม่ใช่ปล่อยผ่านเพราะ "ก็กดไปแล้ว"
+ */
+export function blockingViolations(violations: Violation[], acknowledgedKeys: string[] | null): Violation[] {
+  const list = violations || [];
+  if (!acknowledgedKeys) return list;
+  const ack = new Set(acknowledgedKeys);
+  return list.filter((v) => !isBypassableViolation(v) || !ack.has(violationKey(v)));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  คิว "ต้องแก้มือใน Odoo ก่อนนำเข้า" — คนละเรื่องกับการทะลุกฎข้างบนโดยสิ้นเชิง
+//
+//  ใบที่ทะลุกฎ (ของหมด/ต่ำกว่าราคาขั้นต่ำ/ลูกค้าติด blacklist) **นำเข้า Odoo ได้ทันที**
+//  เพราะทุกช่องในไฟล์ยังตรงกับฐาน Odoo — มันผิดกฎของร้าน ไม่ใช่ผิดข้อมูล
+//  ส่วนใบในคิวนี้คือใบที่ **ค่าในไฟล์ไม่มีอยู่ในฐาน Odoo** ⇒ นำเข้าแล้วตกทั้งใบ
+//  ต้องไปสร้าง/แก้ใน Odoo ก่อน ⇒ กันออกจากไฟล์ปกติแล้วส่งออกจากเมนูแยก
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** ชนิดของเหตุ — เรียงตามลำดับที่ต้องไปสร้างใน Odoo ก่อน (ใช้เป็นลำดับของกลุ่มในเมนูส่งออกด้วย) */
+export const ODOO_MANUAL_REASON_KINDS = ['new_contact', 'custom_product', 'payment_terms_override'] as const;
+export type OdooManualReasonKind = (typeof ODOO_MANUAL_REASON_KINDS)[number];
+
+export interface OdooManualReason {
+  kind: OdooManualReasonKind;
+  /** ชื่อคอลัมน์ในไฟล์ Odoo ที่จะไม่ตรงกับฐาน — บอกคนที่รับไปแก้ว่าต้องดูช่องไหน */
+  field: string;
+  value: string | null;
+  /** ถ้อยคำเดียวของทั้งระบบ — server เป็นเจ้าของคำ เหมือน buildViolationDisplay ของฝั่งกฎ */
+  display_message: string;
+}
+
+/** คำอธิบายเหตุที่ต้องแก้มือ — โมดัล หน้าประวัติ และไฟล์ export ต้องใช้ประโยคเดียวกัน */
+export function buildManualReasonDisplay(r: Omit<OdooManualReason, 'display_message'>): string {
+  switch (r.kind) {
+    case 'payment_terms_override':
+      return `💳 เครดิตของใบนี้ตั้งเอง เป็น “${r.value ?? '-'}” ⇒ ช่อง ${r.field} ในไฟล์อาจไม่ตรงกับฐาน Odoo`;
+    case 'new_contact':
+      return `👤 ผู้ติดต่อรายนี้ยังไม่มีใน Odoo ⇒ ต้องสร้างก่อน ไม่งั้นช่อง ${r.field} จับคู่ไม่ติด`;
+    case 'custom_product':
+      return `📦 รหัสสินค้า “${r.value ?? '-'}” ยังไม่มีใน Odoo ⇒ ต้องสร้างก่อน ไม่งั้นช่อง ${r.field} จับคู่ไม่ติด`;
+  }
+}
+
+/**
+ * ใบนี้ต้องแก้มือใน Odoo ก่อนไหม — อ่านจากข้อมูลของใบเองล้วน ๆ ไม่ยิง query เพิ่ม
+ * (เรียกอยู่ใน transaction ของ confirmQuotationAtomic จึงห้ามยิงงานหนัก)
+ *
+ * วันนี้มีเหตุเดียวคือ **เครดิตที่แอดมินตั้งทับ** และเจ้าของเลือกไว้ชัดเมื่อ 2026-09-15 ว่าให้
+ * นับ **ทุกครั้งที่ทับ** ไม่ต้องดูว่าค่าที่ตั้งบังเอิญตรงกับ payment term ที่ Odoo รู้จักหรือไม่ —
+ * ปลอดภัยกว่าและอธิบายให้คนหน้างานเข้าใจง่ายกว่า "ทับแล้วต้องดูอีกทีว่าตรงรายการไหม"
+ * แลกกับคิวที่ยาวกว่าความจำเป็นบ้าง (วัด 2026-09-15: ใบที่ทับเครดิตทั้งฐานมี 2 ใบ)
+ *
+ * เหตุอีกสองชนิด (`new_contact` · `custom_product`) ยังไม่มีฟีเจอร์ที่สร้างมันได้ในวันนี้ —
+ * จงใจประกาศชนิดไว้ก่อน เพื่อให้ตัวกรองหน้าประวัติกับเมนูส่งออกที่ทำรอบนี้ใช้ต่อได้เลย
+ * โดยไม่ต้องแก้ schema หรือ backfill อีกรอบ
+ */
+export function buildOdooManualReview(enrichedQuote: any): { reasons: OdooManualReason[] } | null {
+  const reasons: OdooManualReason[] = [];
+
+  const ptOverride = enrichedQuote?.customer_details?.payment_terms_override;
+  if (ptOverride !== null && ptOverride !== undefined) {
+    const r = { kind: 'payment_terms_override' as const, field: 'payment_term_id', value: String(ptOverride) };
+    reasons.push({ ...r, display_message: buildManualReasonDisplay(r) });
+  }
+
+  return reasons.length > 0 ? { reasons } : null;
+}
+
 /** ประกอบหลาย violation เป็นข้อความเดียวสำหรับ LINE (หัวข้อ + รายการ) */
 export function buildViolationText(violations: Violation[]): string {
   if (!violations || violations.length === 0) return '';
@@ -236,6 +341,13 @@ export async function confirmQuotationAtomic(
       frozen_at: new Date().toISOString(),
     };
 
+    // 2.7) ตรึง "ต้องแก้มือใน Odoo ก่อนไหม" ลงใบ — ที่เดียวของทั้งระบบที่เขียนคอลัมน์นี้
+    //      อยู่ตรงนี้เพราะเป็น **จุดเดียวที่ใบกลายเป็นเอกสารจริง** และไฟล์ export หยิบเฉพาะใบที่
+    //      มีเลขที่แล้ว ⇒ คำนวณครั้งเดียวตอนยืนยัน ไม่ต้องคอยตามอัปเดตทุกครั้งที่ร่างถูกแก้
+    //      (ถ้าไปคำนวณตอนสร้างร่างแทน จะมีสองจุดที่ต้องดูแล คือ insert กับ PUT — เหมือนที่
+    //       payment_terms_override เคยพลาดมาแล้ว)
+    const odooManualReview = buildOdooManualReview(enrichedQuote);
+
     // 3) UPDATE แบบมีเงื่อนไข status + เช็ค rowCount (ห้ามเขียนทับ created_at เพราะเลขคำนวณจากมัน)
     const upd = await client.query(
       `UPDATE quotations
@@ -243,10 +355,12 @@ export async function confirmQuotationAtomic(
               quotation_no = COALESCE(quotation_no, $1),
               delivery_terms = $3::jsonb,
               print_snapshot = $4::jsonb,
+              odoo_manual_review = $5::jsonb,
               updated_at = NOW()
         WHERE id = $2 AND status <> 'confirmed' AND status <> 'cancelled'
       RETURNING quotation_no`,
-      [quotationNo, quoteId, JSON.stringify(deliveryTerms), JSON.stringify(printSnapshot)]
+      [quotationNo, quoteId, JSON.stringify(deliveryTerms), JSON.stringify(printSnapshot),
+       odooManualReview ? JSON.stringify(odooManualReview) : null]
     );
     if (upd.rowCount === 0) {
       // มี FOR UPDATE แล้วยังโดน 0 แถว = มีทางเขียน status ที่เรายังไม่รู้ ให้ rollback ทั้งชุด

@@ -20,7 +20,9 @@ import {
   ArrowUp,
   ArrowDown,
   History,
-  RotateCcw
+  RotateCcw,
+  AlertTriangle,
+  Ban
 } from 'lucide-react';
 
 interface QuotationItem {
@@ -60,6 +62,10 @@ interface Quotation {
   odoo_exported_at?: string | null;
   /** เวลาที่รอบ sync เห็นใบนี้อยู่ใน Odoo ครั้งแรก — null = ยังไม่เคยเห็น (ดู services/quotationOdooLink.ts) */
   odoo_imported_at?: string | null;
+  /** กฎที่ใบนี้ทะลุ + ใครรับทราบ — null = ไม่ได้ทะลุกฎ · **ไม่มีผลกับไฟล์ export** */
+  rule_overrides?: { acknowledged_by?: string; acknowledged_at?: string; violations?: { display_message?: string }[] } | null;
+  /** เหตุที่ข้อมูลในไฟล์ไม่ตรงฐาน Odoo — null = ตรงฐาน · มีค่า = **ถูกกันออกจากไฟล์ปกติ** */
+  odoo_manual_review?: { reasons?: { kind?: string; display_message?: string }[] } | null;
   /** id ของเอกสารในฐาน Odoo ตอนจับคู่ได้ — ไม่เปลี่ยนแม้ Odoo จะเปลี่ยนชื่อเอกสารภายหลัง */
   odoo_so_id?: number | null;
   customer_details?: {
@@ -100,6 +106,29 @@ type ExportFormat = 'xlsx' | 'csv';
 type ExportedFilter = 'no' | 'yes' | 'all' | 'pending' | 'imported';
 
 /**
+ * ตัวกรอง "ป้ายของใบ" — ตรงกับ query param `flag` ของ backend (db/repositories.ts)
+ *
+ * **สองป้ายนี้เป็นคนละแกนกัน ไม่ใช่สองระดับของเรื่องเดียวกัน** (เจ้าของแก้ความเข้าใจให้ 2026-09-15):
+ *   rule   = ผิดกติกาของร้าน แต่ข้อมูลตรงฐาน Odoo ⇒ **ยังอยู่ในไฟล์ export ปกติ**
+ *   manual = ค่าในไฟล์ไม่มีในฐาน Odoo ⇒ **ถูกกันออกจากไฟล์ปกติ** ไปอยู่เมนูแยก
+ * ใบเดียวติดได้ทั้งคู่ ⇒ ตัวเลือกสองอันนี้ไม่ได้แยกกันขาด
+ */
+type QuoteFlagFilter = 'all' | 'rule' | 'manual' | 'clean';
+
+/** เหตุที่ต้องแก้มือใน Odoo — เรียงตามของที่ต้องไปสร้างใน Odoo ก่อน (ตรงกับ ODOO_MANUAL_REASON_KINDS) */
+const MANUAL_REASON_LABELS: { kind: string; label: string }[] = [
+  { kind: 'new_contact', label: '👤 ผู้ติดต่อใหม่' },
+  { kind: 'custom_product', label: '📦 สินค้า custom' },
+  { kind: 'payment_terms_override', label: '💳 เครดิตตั้งเอง' },
+];
+
+/** ยอดใบที่ยังค้างในคิวแก้มือ แยกตามเหตุ × บริษัท (GET /api/admin/quotations/manual-review-counts) */
+interface ManualReviewCounts {
+  total: number;
+  groups: { bucket: string; company: 'PM' | 'THT'; count: number }[];
+}
+
+/**
  * บริษัทที่ส่งออก — ตรงกับ query param `company` ของ backend (ดูจากคำนำหน้าเลขที่ใบ)
  * 1 ครั้ง = 1 บริษัท เพราะ Odoo ของ PM กับ THT เป็นคนละระบบและใช้ชื่อภาษีคนละค่า
  */
@@ -109,6 +138,18 @@ const EXPORT_COMPANIES: { value: ExportCompany; company: string }[] = [
   { value: 'QP', company: 'PM' },
   { value: 'QT', company: 'THT' },
 ];
+
+/**
+ * ปุ่มดาวน์โหลดในเมนูส่งออก — คลาสชุดเดียวใช้ทั้งสองบรรทัดบนและทุกแถวในคิวแก้มือ
+ *
+ * **ปุ่ม CSV ถูกถอดออกทุกแถวเมื่อ 2026-09-15** — `quotation_export_batches` เก็บรูปแบบไฟล์ของ
+ * ทุกครั้งที่กดไว้อยู่แล้ว วัดได้ 67 ครั้ง · 3,542 ใบ · **xlsx 100% · csv 0 ครั้ง**
+ * (ครั้งแรก 2026-08-05 · ล่าสุด 2026-09-04) ⇒ ปุ่มนั้นกินที่ครึ่งหนึ่งของทุกแถวเพื่อสิ่งที่ยังไม่เคยถูกกด
+ * และเป็นตัวที่ทำให้เมนูใส่กลุ่ม "ต้องแก้มือก่อน" เพิ่มไม่ได้โดยไม่บาน
+ * · **หลังบ้านยังรับ `?format=csv` เหมือนเดิม** วันไหนอยากได้กลับมา เติมปุ่มอย่างเดียวจบ
+ */
+const EXPORT_BTN =
+  'flex items-center gap-1 px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-bold text-slate-600 hover:border-[var(--brand-fg)] hover:text-[var(--brand-fg)] hover:bg-[var(--brand)]/5 transition-colors';
 
 /** 1 ครั้งที่กดปุ่มส่งออก (GET /api/admin/quotations/export-batches) */
 interface ExportBatch {
@@ -160,6 +201,32 @@ const ODOO_STAGE_STYLES: Record<OdooStage, { bg: string; text: string; dot: stri
   },
 };
 
+/**
+ * ข้อความ tooltip ของป้าย 🚩 ทะลุกฎ — ใช้ `display_message` ที่ server ประกอบไว้แล้วทั้งดุ้น
+ * (ถ้อยคำของกฎมีที่เดียวคือ `buildViolationDisplay` — หน้าจอไม่ประกอบประโยคเอง)
+ */
+function ruleOverrideHint(quote: Quotation): string {
+  const ov = quote.rule_overrides;
+  if (!ov) return '';
+  const who = ov.acknowledged_by ? `${ov.acknowledged_by} รับทราบแล้ว` : 'รับทราบแล้ว';
+  const list = (ov.violations ?? []).map((v) => `• ${v.display_message ?? ''}`);
+  return [who, 'ใบนี้ยังอยู่ในไฟล์ส่งออก Odoo ตามปกติ', '', ...list].join('\n');
+}
+
+function manualReviewHint(quote: Quotation): string {
+  const list = (quote.odoo_manual_review?.reasons ?? []).map((r) => `• ${r.display_message ?? ''}`);
+  return ['ข้อมูลในไฟล์ไม่ตรงกับฐาน Odoo — ถูกกันออกจากไฟล์ส่งออกชุดปกติ', '', ...list].join('\n');
+}
+
+/** คำสั้นบนป้าย — ใบที่ติดหลายเหตุขึ้นเหตุแรกตามลำดับเดียวกับกลุ่มในเมนูส่งออก แล้วต่อท้ายว่ามีอีกกี่เรื่อง */
+function manualReviewShort(quote: Quotation): string {
+  const kinds = (quote.odoo_manual_review?.reasons ?? []).map((r) => String(r.kind ?? ''));
+  const first = MANUAL_REASON_LABELS.find((m) => kinds.includes(m.kind));
+  // ตัดอีโมจินำหน้าออก ป้ายในตารางมีไอคอนของตัวเองอยู่แล้ว
+  const label = first ? first.label.split(' ').slice(1).join(' ') : 'อื่น ๆ';
+  return kinds.length > 1 ? `${label} +${kinds.length - 1}` : label;
+}
+
 function getOdooStage(quote: Quotation): OdooStage {
   if (quote.odoo_imported_at) return 'imported';
   if (quote.odoo_exported_at) return 'pending';
@@ -203,6 +270,8 @@ export const Quotations: React.FC = () => {
   // ตั้งต้น 'no' — งานหลักของหน้านี้คือหยิบ "ใบใหม่ที่ยังไม่ได้นำเข้า Odoo" ไปส่งออก
   // อยากดูใบเก่าให้สลับตัวกรองเป็น "ส่งออกแล้ว" หรือ "ทั้งหมด"
   const [exportedFilter, setExportedFilter] = useState<ExportedFilter>('no');
+  /** ตั้งต้น 'all' — ป้ายสองอันนี้เป็นของที่ "ดูย้อนหลัง" ไม่ใช่คิวงานประจำวันเหมือนสถานะ Odoo */
+  const [flagFilter, setFlagFilter] = useState<QuoteFlagFilter>('all');
   const [sortBy, setSortBy] = useState('created_at');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
@@ -214,6 +283,13 @@ export const Quotations: React.FC = () => {
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const exportMenuRef = React.useRef<HTMLDivElement>(null);
+  /**
+   * ยอดค้างของคิวแก้มือ — **ตัวเลขนี้คือของสำคัญที่สุดของเมนู** เพราะใบกลุ่มนี้ไม่อยู่ในไฟล์ปกติแล้ว
+   * ถ้าไม่มีใครเห็นยอดค้าง มันจะไม่ไปถึง Odoo เลยโดยไม่มีอะไรฟ้อง
+   */
+  const [manualCounts, setManualCounts] = useState<ManualReviewCounts>({ total: 0, groups: [] });
+  /** กางกลุ่ม "ต้องแก้มือก่อน" ค้างไว้ไหม — จำไว้ระหว่างเปิด/ปิดเมนูในเซสชันเดียวกัน */
+  const [manualOpen, setManualOpen] = useState(true);
 
   // ประวัติการส่งออก + การถอยเครื่องหมาย
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -257,6 +333,7 @@ export const Quotations: React.FC = () => {
       if (dateFrom) params.set('dateFrom', dateFrom);
       if (dateTo) params.set('dateTo', dateTo);
       params.set('exported', exportedFilter);
+      params.set('flag', flagFilter);
       params.set('sortBy', sortBy);
       params.set('sortOrder', sortOrder);
       params.set('limit', String(pageSize));
@@ -278,7 +355,7 @@ export const Quotations: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [token, searchQuery, statusFilter, dateFrom, dateTo, exportedFilter, currentPage, pageSize, sortBy, sortOrder]);
+  }, [token, searchQuery, statusFilter, dateFrom, dateTo, exportedFilter, flagFilter, currentPage, pageSize, sortBy, sortOrder]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -286,6 +363,26 @@ export const Quotations: React.FC = () => {
     }, 0);
     return () => clearTimeout(timer);
   }, [fetchQuotations]);
+
+  // ยอดค้างของคิวแก้มือ — โหลดพร้อมตาราง เพราะการส่งออกครั้งหนึ่งทำให้ยอดนี้เปลี่ยนทันที
+  const fetchManualCounts = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/quotations/manual-review-counts', {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) return;           // ยอดค้างอ่านไม่ได้ ไม่ใช่เหตุให้ทั้งหน้าพัง — เมนูจะขึ้น "ไม่มีใบค้าง"
+      setManualCounts(await res.json());
+    } catch {
+      // เงียบด้วยเหตุผลเดียวกัน — ตารางหลักยังใช้งานได้ตามปกติ
+    }
+  }, [token]);
+
+  // setTimeout(0) ด้วยเหตุผลเดียวกับ effect ของ fetchQuotations ข้างบน — กติกา
+  // `react-hooks/set-state-in-effect` ห้าม setState ตรง ๆ ใน effect body
+  useEffect(() => {
+    const timer = setTimeout(() => { void fetchManualCounts(); }, 0);
+    return () => clearTimeout(timer);
+  }, [fetchManualCounts]);
 
   // ปิดเมนูส่งออกเมื่อคลิกนอกกล่อง
   useEffect(() => {
@@ -305,7 +402,7 @@ export const Quotations: React.FC = () => {
   //
   // ได้ทีละบริษัท: ไฟล์มีเฉพาะใบที่เลขที่ขึ้นต้นด้วย company ที่เลือก ใบของอีกบริษัท
   // และใบที่เลขที่ไม่ขึ้นต้นด้วย QP/QT จะไม่ลงไฟล์และไม่ถูกมาร์กว่าส่งออกแล้ว
-  const handleExportOdoo = async (format: ExportFormat, company: ExportCompany) => {
+  const handleExportOdoo = async (format: ExportFormat, company: ExportCompany, manualBucket?: string) => {
     setExportMenuOpen(false);
     setIsExporting(true);
     try {
@@ -319,6 +416,8 @@ export const Quotations: React.FC = () => {
       params.set('sortBy', sortBy);
       params.set('sortOrder', sortOrder);
       params.set('format', format);
+      // ไม่ส่ง = ไฟล์ปกติ ซึ่ง **ตัดใบที่ต้องแก้มือออก** · ส่งมา = ไฟล์ของกลุ่มนั้นกลุ่มเดียว
+      if (manualBucket) params.set('manual', manualBucket);
 
       const response = await fetch(`/api/admin/quotations/export?${params.toString()}`, {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -336,7 +435,9 @@ export const Quotations: React.FC = () => {
       // ต้องได้ชื่อเดียวกับ Content-Disposition ฝั่ง backend — attribute นี้เป็นตัวชนะเวลาเบราว์เซอร์เซฟไฟล์
       // ล็อกโซนไทยไว้ ไม่งั้นเครื่องที่ตั้งโซนอื่นจะได้วันที่คนละวันกับชื่อไฟล์ฝั่ง server
       const stamp = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok' }).format(new Date());
-      a.download = `salechatbot_quotation_${company}_${stamp}.${format}`;
+      a.download = manualBucket
+        ? `salechatbot_quotation_${company}_manual_${manualBucket}_${stamp}.${format}`
+        : `salechatbot_quotation_${company}_${stamp}.${format}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -348,6 +449,7 @@ export const Quotations: React.FC = () => {
 
       // ใบที่เพิ่งดาวน์โหลดถูกมาร์กไปแล้ว ถ้าไม่โหลดใหม่หน้าจอจะแสดงสถานะเก่าที่ไม่จริง
       fetchQuotations();
+      void fetchManualCounts();      // ยอดค้างลดลงทันทีที่ไฟล์ของกลุ่มนั้นถูกสร้างสำเร็จ
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการส่งออกข้อมูล';
       setError(errorMessage);
@@ -478,7 +580,7 @@ export const Quotations: React.FC = () => {
           </button>
 
           {exportMenuOpen && (
-            <div className="absolute right-0 top-full mt-2 z-30 w-[19rem] bg-card border border-slate-200 rounded-xl shadow-xl overflow-hidden">
+            <div className="absolute right-0 top-full mt-2 z-30 w-[17rem] bg-card border border-slate-200 rounded-xl shadow-xl overflow-hidden">
               {/* 1 ครั้ง = 1 บริษัท — Odoo ของ PM กับ THT เป็นคนละระบบ ไฟล์จึงรวมกันไม่ได้ */}
               {EXPORT_COMPANIES.map(({ value, company }) => (
                 <div key={value} className="flex items-center gap-2 px-3 py-2 border-b border-slate-100">
@@ -491,21 +593,80 @@ export const Quotations: React.FC = () => {
                   <button
                     onClick={() => handleExportOdoo('xlsx', value)}
                     title={`ส่งออก ${value} (${company}) เป็น Excel`}
-                    className="flex items-center gap-1 px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-bold text-slate-600 hover:border-[var(--brand-fg)] hover:text-[var(--brand-fg)] hover:bg-[var(--brand)]/5 transition-colors"
+                    className={EXPORT_BTN}
                   >
                     <FileSpreadsheet className="w-3.5 h-3.5" />
                     Excel
                   </button>
-                  <button
-                    onClick={() => handleExportOdoo('csv', value)}
-                    title={`ส่งออก ${value} (${company}) เป็น CSV`}
-                    className="flex items-center gap-1 px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-bold text-slate-600 hover:border-[var(--brand-fg)] hover:text-[var(--brand-fg)] hover:bg-[var(--brand)]/5 transition-colors"
-                  >
-                    <FileText className="w-3.5 h-3.5" />
-                    CSV
-                  </button>
                 </div>
               ))}
+
+              {/* ── คิวแก้มือ — กลุ่มตามเหตุ แถวข้างในตามบริษัท (เจ้าของเคาะแบบ ข-1 · 2026-09-15) ──
+                  **แถวหัวข้ออยู่ตำแหน่งเดิมเสมอ** แม้วันที่ไม่มีใบค้าง ไม่งั้นเมนูจะสูงไม่เท่ากันในแต่ละวัน
+                  แล้วปุ่ม "ประวัติการส่งออก" เลื่อนตำแหน่งใต้มือ · ส่วน **ข้างใน** แสดงเฉพาะช่องที่มีใบค้างจริง
+                  เพราะเป็นรายการงาน ไม่ใช่ปุ่มประจำที่ */}
+              <button
+                type="button"
+                onClick={() => setManualOpen((v) => !v)}
+                aria-expanded={manualOpen}
+                className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs font-bold border-b border-slate-100 transition-colors ${
+                  manualCounts.total > 0
+                    ? 'bg-amber-50 text-amber-800 hover:bg-amber-100'
+                    : 'bg-slate-50 text-slate-500 hover:bg-slate-100'
+                }`}
+              >
+                <AlertTriangle className={`w-3.5 h-3.5 shrink-0 ${manualCounts.total > 0 ? '' : 'opacity-50'}`} />
+                <span className="flex-1 min-w-0 truncate">ต้องแก้มือก่อน</span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${
+                  manualCounts.total > 0
+                    ? 'bg-amber-100 border-amber-300 text-amber-800'
+                    : 'bg-slate-100 border-slate-200 text-slate-400'
+                }`}>
+                  {manualCounts.total > 0 ? `${manualCounts.total} ใบ` : 'ไม่มีใบค้าง'}
+                </span>
+                <ChevronDown className={`w-3 h-3 shrink-0 transition-transform ${manualOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              {manualOpen && (
+                <div className={`border-b border-slate-100 ${manualCounts.total > 0 ? 'bg-amber-50' : 'bg-slate-50'}`}>
+                  {manualCounts.total === 0 ? (
+                    <p className="px-3 py-2.5 pl-6 text-[11px] leading-snug text-slate-500">
+                      ทุกใบข้อมูลตรงกับฐาน Odoo แล้ว — ใช้สองบรรทัดบนได้ตามปกติ
+                    </p>
+                  ) : (
+                    MANUAL_REASON_LABELS.map(({ kind, label }) => {
+                      const rows = manualCounts.groups.filter((g) => g.bucket === kind && g.count > 0);
+                      if (rows.length === 0) return null;
+                      const sum = rows.reduce((n, g) => n + g.count, 0);
+                      return (
+                        <div key={kind}>
+                          <p className="px-3 pt-2 pb-0.5 text-[11px] font-bold text-slate-700">
+                            {label} <span className="font-normal text-slate-500">{sum} ใบ</span>
+                          </p>
+                          {rows.map((g) => (
+                            <div key={`${kind}-${g.company}`} className="flex items-center gap-1.5 pl-6 pr-3 py-1">
+                              <span className="flex-1 min-w-0 truncate text-xs font-bold text-slate-800">
+                                {g.company === 'THT' ? 'QT · THT' : 'QP · PM'}
+                              </span>
+                              <span className="text-[11px] font-extrabold text-amber-800">{g.count}</span>
+                              <button
+                                onClick={() => handleExportOdoo('xlsx', g.company === 'THT' ? 'QT' : 'QP', kind)}
+                                title={`ส่งออกใบที่ต้องแก้มือ (${label}) ของ ${g.company} เป็น Excel`}
+                                className={EXPORT_BTN}
+                              >
+                                <FileSpreadsheet className="w-3.5 h-3.5" />
+                                Excel
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })
+                  )}
+                  <div className="h-2" />
+                </div>
+              )}
+
               <button
                 onClick={openHistory}
                 className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 transition-colors"
@@ -516,6 +677,7 @@ export const Quotations: React.FC = () => {
               <p className="px-3 py-2 text-[11px] leading-snug text-slate-500 border-t border-slate-100 bg-slate-50">
                 ส่งออกตามตัวกรองบนหน้าจอ (ตั้งต้น: เฉพาะใบที่ยังไม่เคยส่ง) ใบที่อยู่ในไฟล์จะถูกทำเครื่องหมายว่าส่งแล้วทันที
                 · เลขที่ที่ไม่ขึ้นต้นด้วย QP/QT จะไม่อยู่ในไฟล์
+                · <b>สองบรรทัดบนไม่มีใบที่ต้องแก้มือ</b> — ใบพวกนั้นนำเข้า Odoo ตรง ๆ ไม่ได้
               </p>
             </div>
           )}
@@ -572,6 +734,24 @@ export const Quotations: React.FC = () => {
               <option value="all">สถานะ Odoo ทั้งหมด</option>
             </select>
             <FileSpreadsheet className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+          </div>
+
+          {/* ป้ายของใบ — กรองร่วมกับตัวกรองเดิมได้ทุกตัว
+              **สองป้ายเป็นคนละแกน** ⇒ ตัวเลือกจึงไม่ได้แยกกันขาด ใบเดียวติดได้ทั้งคู่
+              ตั้งต้น "ทั้งหมด" เพราะเป็นของที่ดูย้อนหลัง ไม่ใช่คิวงานประจำวันเหมือนสถานะ Odoo */}
+          <div className="relative">
+            <select
+              id="quotation-flag-filter"
+              value={flagFilter}
+              onChange={(e) => { setFlagFilter(e.target.value as QuoteFlagFilter); setCurrentPage(1); }}
+              className="w-full bg-card border border-slate-200 focus:border-[var(--brand-fg)] focus:ring-2 focus:ring-[var(--brand-fg)]/10 focus:outline-none rounded-xl px-4 py-2.5 text-sm text-slate-800 transition-all appearance-none cursor-pointer"
+            >
+              <option value="all">ป้ายของใบ: ทั้งหมด</option>
+              <option value="rule">เฉพาะใบที่ทะลุกฎ</option>
+              <option value="manual">เฉพาะใบที่ต้องแก้มือใน Odoo</option>
+              <option value="clean">ใบปกติ (ไม่ติดทั้งสองอย่าง)</option>
+            </select>
+            <AlertTriangle className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
           </div>
 
           {/* Date From */}
@@ -722,6 +902,31 @@ export const Quotations: React.FC = () => {
                               <span className="text-xs text-slate-500">
                                 ติดต่อ: {quote.contact_name}
                               </span>
+                            )}
+                            {/* ป้ายสองแกน — มี **คำ** ไม่ใช่สีอย่างเดียว (docs/design.md ข้อ 8)
+                                🚩 ทะลุกฎ = ยังอยู่ในไฟล์ export ปกติ · 🔧 แก้มือ = ถูกกันออกจากไฟล์
+                                ใบเดียวขึ้นได้ทั้งสองป้าย เพราะเป็นคนละเรื่องกันจริง ๆ */}
+                            {(quote.rule_overrides || quote.odoo_manual_review) && (
+                              <div className="flex flex-wrap items-center gap-1 mt-1">
+                                {quote.rule_overrides && (
+                                  <span
+                                    title={ruleOverrideHint(quote)}
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border bg-red-50 border-red-200 text-red-700"
+                                  >
+                                    <Ban className="w-3 h-3" />
+                                    ทะลุกฎ {quote.rule_overrides.violations?.length ?? 0}
+                                  </span>
+                                )}
+                                {quote.odoo_manual_review && (
+                                  <span
+                                    title={manualReviewHint(quote)}
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border bg-amber-50 border-amber-300 text-amber-800"
+                                  >
+                                    <AlertTriangle className="w-3 h-3" />
+                                    แก้มือ: {manualReviewShort(quote)}
+                                  </span>
+                                )}
+                              </div>
                             )}
                           </div>
                         </td>

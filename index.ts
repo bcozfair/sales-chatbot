@@ -28,6 +28,11 @@ import {
   ODOO_EXPORT_RAW_NAME_COLS,
   parseExportedFilter,
   exportedFilterCondition,
+  parseQuoteFlagFilter,
+  quoteFlagFilterCondition,
+  odooManualBucketCondition,
+  getOdooManualReviewCounts,
+  getAcknowledgedViolationKeys,
   createdAtFromThaiDayCondition,
   createdAtToThaiDayCondition,
   claimQuotationsForExport,
@@ -43,7 +48,10 @@ import {
   getApiLogStats,
   insertMessage,
 } from './db/repositories.js';
-import { confirmQuotationAtomic, enrichQuotationData, buildItemSnapshots, buildViolationDisplay } from './services/quotationService.js';
+import {
+  confirmQuotationAtomic, enrichQuotationData, buildItemSnapshots, buildViolationDisplay,
+  blockingViolations, ODOO_MANUAL_REASON_KINDS,
+} from './services/quotationService.js';
 import { pdfCacheKey, getCachedPdf, setCachedPdf, isPrintFrozen, invalidatePdfCache } from './services/pdfCache.js';
 import {
   listBlacklist,
@@ -995,8 +1003,13 @@ app.put('/api/quotation/:id', express.json(), async (req: any, res: any) => {
       customerId: isCustomerUnchanged ? null : customer_id,
       contactId: isCustomerUnchanged ? null : contact_id,
     });
-    if (putViolations.length > 0) {
-      return res.status(422).json({ error: 'VALIDATION_ERROR', violations: putViolations });
+    // ⚠️ อ่านคำรับทราบจาก **แถวของใบ** ไม่ใช่จาก body — endpoint นี้หน้า LIFF ใช้ร่วมกันอยู่
+    //    ใบจาก LINE ไม่มีคอลัมน์นี้ (NULL) ⇒ ได้พฤติกรรมเดิมทุกประการ ไม่มีทางทะลุกฎ
+    const putBlockers = blockingViolations(
+      putViolations, await getAcknowledgedViolationKeys(pool, quoteId)
+    );
+    if (putBlockers.length > 0) {
+      return res.status(422).json({ error: 'VALIDATION_ERROR', violations: putBlockers });
     }
 
     // คำนวณราคายอดรวมสุทธิของใบเสนอราคาใหม่
@@ -1294,8 +1307,14 @@ app.post('/api/quotation/:id/confirm', express.json(), async (req: any, res: any
       customerName: quote.customer_name, stage: 'confirm',
       customerId: quote.customer_id, contactId: quote.contact_id
     });
-    if (confirmViolations.length > 0) {
-      return res.status(422).json({ error: 'VALIDATION_ERROR', violations: confirmViolations });
+    // คำรับทราบผูกกับใบ (คอลัมน์ rule_overrides) ไม่ใช่กับ endpoint — เหตุผลเดียวกับ PUT ข้างบน
+    // ข้อที่ **เพิ่งโผล่** หลังคนกดรับทราบ (ของหมดระหว่างทาง) ยังตอบ 422 เหมือนเดิม
+    // เพราะเจ้าของเลือกไว้ว่า "ปฏิเสธและให้ดูใหม่" ไม่ใช่ปล่อยผ่านเพราะกดยืนยันมาแล้ว
+    const confirmBlockers = blockingViolations(
+      confirmViolations, await getAcknowledgedViolationKeys(pool, quoteId)
+    );
+    if (confirmBlockers.length > 0) {
+      return res.status(422).json({ error: 'VALIDATION_ERROR', violations: confirmBlockers });
     }
 
     // ห้ามกลับไปเดาจาก req.get('host') — ดูเหตุผลที่ /callback และ config/appUrl.ts
@@ -2574,6 +2593,9 @@ app.post('/api/admin/webquote/drafts', adminAuthMiddleware, requireRole('admin',
       reviseFrom: req.body?.revise_from,
       paymentTermsOverride: req.body?.payment_terms_override,
       delivery: req.body?.delivery,
+      // คำรับทราบจากโมดัล — server ตรวจกฎใหม่เองแล้วเทียบ ไม่ได้เชื่อว่า "ส่งมาแปลว่าผ่าน"
+      acknowledgedViolations: req.body?.acknowledged_violations,
+      adminUsername: req.admin?.username ?? null,
     }));
   } catch (err: any) {
     sendWebQuoteError(res, 'POST /api/admin/webquote/drafts', err);
@@ -3452,6 +3474,8 @@ app.get('/api/admin/quotations', adminAuthMiddleware, requireRole('admin', 'suba
     const dateTo = req.query.dateTo || '';
     // สถานะการส่งออก Odoo — หน้าจอส่ง param มาเสมอ; ไม่ส่งมา = 'all' เพื่อไม่เปลี่ยนพฤติกรรมผู้เรียกเดิม
     const exported = parseExportedFilter(req.query.exported, 'all');
+    // ป้ายของใบ (ทะลุกฎ / ต้องแก้มือ) — ไม่ส่งมา = 'all' ⇒ ผู้เรียกเดิมได้ผลเหมือนเดิมทุกประการ
+    const flag = parseQuoteFlagFilter(req.query.flag, 'all');
     const limit = Math.min(parseInt(req.query.limit) || 50, 200);
     const offset = parseInt(req.query.offset) || 0;
 
@@ -3501,6 +3525,9 @@ app.get('/api/admin/quotations', adminAuthMiddleware, requireRole('admin', 'suba
 
     const exportedCondition = exportedFilterCondition(exported);
     if (exportedCondition) conditions.push(exportedCondition);
+
+    const flagCondition = quoteFlagFilterCondition(flag);
+    if (flagCondition) conditions.push(flagCondition);
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
@@ -3564,6 +3591,11 @@ app.get('/api/admin/quotations/export', adminAuthMiddleware, requireRole('admin'
     // คือไม่ส่งใบเดิมซ้ำ ซึ่งเป็นเหตุผลทั้งหมดที่ฟีเจอร์นี้มีอยู่
     const exported = parseExportedFilter(req.query.exported, 'no');
     const format: OdooExportFormat = req.query.format === 'csv' ? 'csv' : 'xlsx';
+    // ไฟล์ไหน — ไม่ส่งมา = ไฟล์ปกติ ซึ่งตั้งแต่ 2026-09-15 **ตัดใบที่ต้องแก้มือใน Odoo ออก**
+    // (ค่าในไฟล์ไม่มีอยู่ในฐาน Odoo ⇒ นำเข้าแล้วตกทั้งใบ) ส่วนใบที่แค่ทะลุกฎยังอยู่ในไฟล์ปกติ
+    // ค่าที่ไม่รู้จักตกเป็น null = ไฟล์ปกติ ไม่ใช่ 400 — ผู้เรียกเก่าที่ไม่รู้จัก param นี้ต้องได้ของเดิม
+    const manualRaw = String(req.query.manual ?? '').trim();
+    const manualBucket = (ODOO_MANUAL_REASON_KINDS as readonly string[]).includes(manualRaw) ? manualRaw : null;
 
     // Validate sort fields and direction to prevent SQL injection
     const allowedSortFields: Record<string, string> = {
@@ -3618,6 +3650,11 @@ app.get('/api/admin/quotations/export', adminAuthMiddleware, requireRole('admin'
 
     const exportedCondition = exportedFilterCondition(exported);
     if (exportedCondition) conditions.push(exportedCondition);
+
+    // แยกไฟล์ปกติออกจากไฟล์ "ต้องแก้มือก่อน" — เงื่อนไขอยู่ใน db/repositories.ts ที่เดียว
+    // ใบหนึ่งอยู่ได้กลุ่มเดียวเสมอ (ดู ODOO_MANUAL_BUCKET_SQL) ⇒ ไม่มีใบไหนโผล่สองไฟล์
+    conditions.push(odooManualBucketCondition(manualBucket, paramIndex));
+    if (manualBucket) { params.push(manualBucket); paramIndex++; }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
@@ -3675,7 +3712,7 @@ app.get('/api/admin/quotations/export', adminAuthMiddleware, requireRole('admin'
           format,
           quotationCount: emitted.length,
           rowCount: rows.length,
-          filters: { company, search, status, dateFrom, dateTo, exported, sortBy: sortByParam, sortOrder: sortOrderParam },
+          filters: { company, search, status, dateFrom, dateTo, exported, manual: manualBucket, sortBy: sortByParam, sortOrder: sortOrderParam },
         });
         await insertExportLogRows(client, batchId, emitted.map((q: any) => ({
           id: String(q.id), quotation_no: q.quotation_no ?? null,
@@ -3691,7 +3728,11 @@ app.get('/api/admin/quotations/export', adminAuthMiddleware, requireRole('admin'
     // วันที่ในชื่อไฟล์ตามเวลาไทย — toISOString() ให้วัน UTC ซึ่งจะเป็นวันก่อนหน้าถ้ากดก่อน 07:00
     const stamp = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok' }).format(new Date());
     // ชื่อไฟล์ต้องบอกบริษัทด้วย — สองไฟล์ของวันเดียวกันหน้าตาเหมือนกันทุกอย่างจากภายนอก
-    const baseName = `salechatbot_quotation_${company}_${stamp}`;
+    // ไฟล์ของคิวแก้มือต้องแยกชื่อออกจากไฟล์ปกติ — สองไฟล์ของวันเดียวกันหน้าตาเหมือนกันจากภายนอก
+    // แล้วคนนำเข้าจะแยกไม่ออกว่าไฟล์ไหนพร้อมนำเข้า ไฟล์ไหนต้องไปสร้างข้อมูลใน Odoo ก่อน
+    const baseName = manualBucket
+      ? `salechatbot_quotation_${company}_manual_${manualBucket}_${stamp}`
+      : `salechatbot_quotation_${company}_${stamp}`;
     // header เสริมให้หน้าจอบอกจำนวนใบจริงได้ (ตัวไฟล์นับใบไม่ได้เพราะ 1 ใบ = หลายแถว)
     res.setHeader('X-Export-Quotation-Count', String(built.quotationCount));
     res.setHeader('X-Export-Row-Count', String(built.rowCount));
@@ -3731,6 +3772,22 @@ app.post('/api/admin/quotations/:id/unmark-export', adminAuthMiddleware, require
     res.json({ success: true });
   } catch (err: any) {
     console.error("POST /api/admin/quotations/:id/unmark-export error:", err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+/**
+ * --- API Endpoint: จำนวนใบที่ค้างในคิว "ต้องแก้มือใน Odoo" แยกตามเหตุ × บริษัท ---
+ *
+ * ตัวเลขนี้คือของสำคัญที่สุดของทั้งฟีเจอร์ — ใบกลุ่มนี้ **ไม่อยู่ในไฟล์ส่งออกปกติแล้ว**
+ * ถ้าไม่มีใครเห็นยอดค้าง มันจะไม่ไปถึง Odoo เลยโดยไม่มีอะไรฟ้อง
+ */
+app.get('/api/admin/quotations/manual-review-counts', adminAuthMiddleware, requireRole('admin', 'subadmin'), async (_req: any, res: any) => {
+  try {
+    const groups = await getOdooManualReviewCounts(pool);
+    res.json({ total: groups.reduce((s, g) => s + g.count, 0), groups });
+  } catch (err) {
+    console.error('GET /api/admin/quotations/manual-review-counts error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

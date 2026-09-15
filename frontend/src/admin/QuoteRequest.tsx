@@ -37,6 +37,7 @@ import { PageHeader } from './PageHeader';
 import { QuoteIssuerProfile } from './QuoteIssuerProfile';
 import { Button } from './Button';
 import { ComboBox, type ComboOption } from './PersonComboBox';
+import { ConfirmIssueModal } from './ConfirmIssueModal';
 import {
   AlertCircle,
   AlertTriangle,
@@ -246,7 +247,15 @@ interface PreviewResult {
   goods_total: number;
   grand_total: number;
   violations: PreviewViolation[];
+  /**
+   * ออกใบต่อได้ไหม — **ติดกฎไม่ได้แปลว่าออกไม่ได้อีกแล้ว** (2026-09-15)
+   * เหลือ `false` เฉพาะข้อที่ทะลุไม่ได้จริง ๆ คือ `SYSTEM_ERROR` ("ตรวจกฎไม่สำเร็จ")
+   */
   can_create_draft: boolean;
+  /** คีย์ของกฎที่ต้องส่งกลับไปเป็น "คำรับทราบ" ตอนกดออกใบ — server เป็นคนประกอบคีย์ให้ */
+  override_keys: string[];
+  /** เหตุที่ใบชุดนี้จะถูกกันออกจากไฟล์ export ปกติ — คนละแกนกับ violations ทั้งหมด */
+  odoo_manual_reasons: { kind: string; field: string; value: string | null; display_message: string }[];
   service_line: {
     product_template_id: number | null;
     model: string;
@@ -1019,6 +1028,8 @@ export const QuoteRequest: React.FC = () => {
   >({});
 
   // ── ยืนยัน / ผลลัพธ์ ──
+  /** โมดัลยืนยันอีกชั้น — เปิดเฉพาะตอนที่มีอะไรให้รับทราบ ไม่ใช่เด้งทุกครั้งที่กดออกใบ */
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState('');
   const [results, setResults] = useState<{ quotation_no: string; pdf_link: string }[]>([]);
@@ -1471,6 +1482,12 @@ export const QuoteRequest: React.FC = () => {
 
   const grandTotal = groups.reduce((s, g) => s + g.subtotal, 0);
   const blockers = staleNow ? [] : (preview?.violations ?? []);
+  /**
+   * เหตุที่ใบชุดนี้จะถูกกันออกจากไฟล์ export ปกติ — **คนละแกนกับ `blockers` โดยสิ้นเชิง**
+   * ใบที่ติดกฎยังอยู่ในไฟล์ปกติ (ข้อมูลตรงฐาน Odoo) ส่วนใบในรายการนี้คือใบที่ค่าในไฟล์ไม่มีในฐาน
+   * ⇒ ห้ามเอาสองอันนี้มารวมนับเป็นตัวเลขเดียว ใบเดียวติดได้ทั้งคู่
+   */
+  const manualReasons = staleNow ? [] : (preview?.odoo_manual_reasons ?? []);
 
   /**
    * ป้ายใต้ชื่อรายการ — ตัวเดียวใช้ทั้งตารางในฟอร์มและตารางใบร่าง ไม่งั้นสองจอจะอธิบาย
@@ -1538,7 +1555,9 @@ export const QuoteRequest: React.FC = () => {
     if (customerId === null || contactId === null) return 'ยังไม่ได้เลือกบริษัทและผู้ติดต่อ';
     if (previewing) return 'กำลังตรวจรายละเอียด...';
     if (!preview || staleNow) return 'ต้องตรวจรายละเอียดให้สำเร็จก่อน — กด “ตรวจใหม่”';
-    return 'ติดด่านตรวจ — แก้ตามรายการด้านบนก่อน';
+    // เหลือทางเดียวที่ปุ่มยังจางอยู่: ด่านตรวจทำงานไม่สำเร็จ (SYSTEM_ERROR) ซึ่งทะลุไม่ได้
+    // เพราะมันไม่ได้แปลว่า "ใบนี้ผิดกฎ" แต่แปลว่า **ยังไม่รู้ว่าผิดหรือไม่**
+    return 'ตรวจกฎไม่สำเร็จ — ลองกด “ตรวจใหม่” อีกครั้ง ถ้ายังไม่หายให้แจ้งผู้ดูแลระบบ';
   };
 
   const confirmOne = async (quoteId: string, webId: string) => {
@@ -1571,8 +1590,19 @@ export const QuoteRequest: React.FC = () => {
     return { done, left, errors };
   };
 
+  /**
+   * ปุ่ม "ยืนยัน" ของขั้นใบร่าง — มีอะไรให้รับทราบก็เด้งโมดัลก่อน ไม่ออกใบทันที
+   * ไม่มีอะไรติดเลยก็ออกใบตรง ๆ เหมือนเดิม — โมดัลที่เด้งทั้งที่ไม่มีอะไรให้อ่าน คือโมดัลที่ถูกกดผ่าน
+   */
+  const requestConfirm = () => {
+    if (!canReview || confirming) return;
+    if (blockers.length > 0 || manualReasons.length > 0) { setConfirmOpen(true); return; }
+    void confirmAll();
+  };
+
   const confirmAll = async () => {
     if (!canReview || confirming) return;
+    setConfirmOpen(false);
     setConfirming(true);
     setConfirmError('');
     try {
@@ -1590,6 +1620,9 @@ export const QuoteRequest: React.FC = () => {
           // ค่าชุดเดียวกับที่ส่งให้ /preview — ถ้าสองที่ส่งไม่เท่ากัน ใบที่ออกจะไม่ใช่ใบที่เห็น
           payment_terms_override: paymentTerms,
           delivery: deliveryPayload,
+          // คำรับทราบจากโมดัล — คีย์มาจาก server (ไม่ประกอบเอง) และ server ตรวจกฎใหม่แล้วเทียบอีกที
+          // ⇒ ข้อที่เพิ่งโผล่หลังจากคนกดรับทราบ (ของหมดระหว่างทาง) ยังตอบ 422 เหมือนเดิม
+          acknowledged_violations: preview?.override_keys ?? [],
         }),
       });
       if (!res.ok) throw new Error(await readError(res, 'ออกใบเสนอราคาไม่สำเร็จ'));
@@ -2296,18 +2329,36 @@ export const QuoteRequest: React.FC = () => {
             </div>
           )}
 
-          {/* ติดกฎ = สร้างร่างไม่ได้เลย (createDraft ทิ้งทั้งใบ) ⇒ ต้องเห็นตั้งแต่ยังไม่กด */}
+          {/* ติดกฎ = **ออกใบได้ แต่ต้องยืนยันอีกชั้น** (2026-09-15) — คำเตือนยังอยู่ครบเหมือนเดิม
+              เปลี่ยนแค่บทสรุปบรรทัดแรกให้ตรงกับสิ่งที่ปุ่มทำจริง ไม่งั้นจอบอกว่า "ออกไม่ได้"
+              แล้วปุ่มออกใบได้ ซึ่งคือจอที่ไม่มีใครเชื่ออีกเลยหลังจากนั้น */}
           {blockers.length > 0 && !staleNow && (
             <div className="bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 text-xs text-red-700">
               <p className="flex items-center gap-2 font-bold">
-                <Ban className="w-4 h-4 shrink-0" />
-                ออกใบนี้ไม่ได้ — ติดด่านตรวจ {blockers.length} ข้อ
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                ติดด่านตรวจ {blockers.length} ข้อ — ออกใบได้ แต่ต้องยืนยันอีกชั้น
               </p>
               <ul className="mt-1 pl-6 list-disc space-y-0.5">
                 {blockers.map((v, i) => (
                   <li key={`${v.type}-${v.model}-${i}`}>{v.display_message}</li>
                 ))}
               </ul>
+            </div>
+          )}
+
+          {/* คนละแกนกับกล่องแดง: ใบยังนำเข้า Odoo ได้หรือไม่ ไม่ใช่ผิดกฎของร้านหรือไม่ */}
+          {manualReasons.length > 0 && !staleNow && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 text-xs text-amber-800">
+              <p className="flex items-center gap-2 font-bold">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                ต้องแก้มือใน Odoo ก่อนนำเข้า {manualReasons.length} เรื่อง
+              </p>
+              <ul className="mt-1 pl-6 list-disc space-y-0.5">
+                {manualReasons.map((r, i) => (
+                  <li key={`${r.kind}-${i}`}>{r.display_message}</li>
+                ))}
+              </ul>
+              <p className="mt-1.5 pl-6">ใบชุดนี้จะ<b>ไม่อยู่ในไฟล์ส่งออก Odoo ชุดปกติ</b> — ส่งออกจากเมนู “ต้องแก้มือก่อน” ในหน้าประวัติ</p>
             </div>
           )}
           <div className="flex flex-wrap items-center gap-3">
@@ -2510,12 +2561,14 @@ export const QuoteRequest: React.FC = () => {
                 <Button variant="danger" tone="soft" icon={Ban} disabled={confirming} onClick={resetAll}>
                   ยกเลิก
                 </Button>
+                {/* ใบที่ติดอะไรอยู่ ปุ่มเป็นสีแดง ไม่ใช่เขียว — สีของปุ่มต้องตรงกับผลของการกด
+                    (docs/design.md หัวข้อสีปุ่ม: แดง = ของที่ย้อนยาก) */}
                 <Button
-                  variant="primary"
+                  variant={blockers.length > 0 || manualReasons.length > 0 ? 'danger' : 'primary'}
                   icon={CheckCircle2}
                   busy={confirming}
                   disabled={!canReview || strandedIds.length > 0}
-                  onClick={confirmAll}
+                  onClick={requestConfirm}
                 >
                   {confirming ? 'กำลังออกใบ...' : 'ยืนยัน'}
                 </Button>
@@ -2523,6 +2576,18 @@ export const QuoteRequest: React.FC = () => {
             )}
           </div>
         </div>
+      )}
+
+      {/* ชั้นยืนยันอีกชั้นก่อนออกใบจริง — เด้งเฉพาะตอนที่มีอะไรให้รับทราบ (ดู requestConfirm) */}
+      {confirmOpen && (
+        <ConfirmIssueModal
+          violations={blockers}
+          manualReasons={manualReasons}
+          quoteLabels={groups.map((g) => g.label)}
+          busy={confirming}
+          onCancel={() => setConfirmOpen(false)}
+          onConfirm={confirmAll}
+        />
       )}
 
       {/* ── ส่วนที่ 3 — revise · พับหายตอนขึ้นขั้นใบร่าง เหมือนส่วนที่ 1 ── */}

@@ -21,6 +21,7 @@ import { pool } from '../config/db.js';
 import {
   getCustomerById, getContactById, getSalespersonByUserId,
   insertMessage, getMessageMetaById, listCustomerPaymentTerms,
+  saveQuotationRuleOverrides,
 } from '../db/repositories.js';
 import { KeyedTaskQueue, runWithDeadline } from './webhookQueue.js';
 import { extractQuoteFromText, buildResolvedItem, type QuoteSlot } from './quoteExtraction.js';
@@ -34,6 +35,10 @@ import {
   buildItemSnapshots,
   resolveQuotationDeliveryDays,
   parseDeliveryDaysOverride,
+  buildOdooManualReview,
+  violationKey,
+  isBypassableViolation,
+  blockingViolations,
   type Violation,
   type DraftQuoteOverrides,
 } from './quotationService.js';
@@ -428,6 +433,26 @@ export function parsePaymentTermsOverride(raw: any): string | null {
   return s;
 }
 
+/** คีย์ที่ยาวกว่านี้ไม่มีทางมาจาก `violationKey()` — กันคนยิง payload บวมเข้ามาตรง ๆ */
+const VIOLATION_KEY_MAX = 120;
+
+/**
+ * คำรับทราบที่หน้าจอส่งกลับมา — `null` = ไม่ได้ส่งมาเลย (เส้นทางเดิมก่อน 2026-09-15 ทุกเส้น)
+ *
+ * แยก "ไม่ส่งมา" (null) ออกจาก "ส่งมาเป็นรายการว่าง" ([]) โดยตั้งใจ แม้ผลลัพธ์วันนี้จะเท่ากัน —
+ * เพราะ `blockingViolations()` อ่าน null ว่า "ไม่มีใครรับทราบอะไร" ซึ่งเป็นค่าที่ปลอดภัยที่สุด
+ * และทำให้ผู้เรียกใหม่ที่ลืมส่งฟิลด์นี้ได้พฤติกรรมเดิมเป๊ะ ไม่ใช่ได้ทางที่ปล่อยผ่าน
+ */
+function parseAcknowledgedKeys(raw: unknown): string[] | null {
+  if (raw === undefined || raw === null) return null;
+  if (!Array.isArray(raw)) {
+    throw new WebQuoteError('BAD_REQUEST', 'acknowledged_violations ต้องเป็น array ของคีย์กฎ', 400);
+  }
+  return raw
+    .map((k) => String(k ?? '').trim())
+    .filter((k) => k !== '' && k.length <= VIOLATION_KEY_MAX);
+}
+
 /**
  * กำหนดส่งที่ตั้งทับรายใบ — ใช้ตัวตรวจตัวเดียวกับ `PUT /api/quotation/:id` ของหน้า LIFF
  * (`parseDeliveryTypeOverride` / `parseDeliveryDaysOverride`) ⇒ ค่าที่หน้าหนึ่งรับ อีกหน้าก็รับ
@@ -584,6 +609,15 @@ export async function createDraft(params: {
   paymentTermsOverride?: any;
   /** กำหนดส่งที่ตั้งเอง แยกรายใบ — ไม่ส่ง = ให้ระบบคิดเองทุกใบ */
   delivery?: WebQuoteDeliveryInput[] | null;
+  /**
+   * คีย์ของกฎที่คนกดรับทราบไว้ในโมดัล (`override_keys` ที่ /preview ส่งไปให้) — ไม่ส่ง = ไม่รับทราบอะไรเลย
+   *
+   * ⚠️ มันคือ "รับทราบข้อไหน" ไม่ใช่ "ปิดด่านตรวจ" — server ตรวจกฎใหม่เองทุกครั้งแล้วเทียบว่า
+   *    ข้อที่เจอตอนนี้อยู่ในรายการนี้ครบไหม ข้อที่โผล่มาใหม่ยังปฏิเสธเหมือนเดิม (422)
+   */
+  acknowledgedViolations?: unknown;
+  /** ชื่อผู้ใช้ของแอดมินที่กดรับทราบ — เก็บลงใบเพื่อตอบได้ย้อนหลังว่าใครเป็นคนปล่อยผ่าน */
+  adminUsername?: string | null;
 }): Promise<CreateDraftResult> {
   if (!Array.isArray(params.items) || params.items.length === 0) {
     throw new WebQuoteError('BAD_REQUEST', 'ต้องมีรายการสินค้าอย่างน้อย 1 รายการ (items)', 400);
@@ -634,8 +668,14 @@ export async function createDraft(params: {
       customerId: resolvedCustomerId,
       contactId,
     });
-    if (violations.length > 0) {
-      throw new WebQuoteError('RULE_VIOLATION', buildViolationText(violations), 422, { violations });
+    // ── ด่านตรวจ: ทะลุได้ แต่เฉพาะข้อที่คนกดรับทราบไว้จริง ─────────────────────
+    //  ข้อที่ยังบล็อกอยู่มีสองแบบ: (1) `SYSTEM_ERROR` ซึ่งทะลุไม่ได้ทุกกรณี
+    //  (2) ข้อที่เพิ่งโผล่หลังจากคนกดรับทราบ (ของหมดระหว่างที่โมดัลเปิดค้าง) — เจ้าของเลือกไว้ว่า
+    //  ให้ **ปฏิเสธและให้ดูใหม่** ไม่ใช่ปล่อยผ่านเพราะ "ก็กดยืนยันมาแล้ว"
+    const acknowledgedKeys = parseAcknowledgedKeys(params.acknowledgedViolations);
+    const blockers = blockingViolations(violations, acknowledgedKeys);
+    if (blockers.length > 0) {
+      throw new WebQuoteError('RULE_VIOLATION', buildViolationText(blockers), 422, { violations: blockers });
     }
 
     const plainName = `${customer.display_name} | ${contact.name}`;
@@ -645,6 +685,37 @@ export async function createDraft(params: {
     );
     if (!quotes || quotes.length === 0) {
       throw new WebQuoteError('INSERT_FAILED', 'ไม่สามารถบันทึกข้อมูลใบเสนอราคาได้', 500);
+    }
+
+    // ── ผูก "กฎที่ทะลุ" ไว้กับใบ ไม่ใช่กับ endpoint ────────────────────────────
+    //  เก็บลงแถวเพราะ `PUT /api/quotation/:id` และ `/confirm` เป็น endpoint ที่ LIFF ใช้ร่วมกัน
+    //  ⇒ ถ้าไปปลดล็อกที่ endpoint ใบจาก LINE จะทะลุกฎตามไปด้วยเงียบ ๆ · เขียนหลัง COMMIT
+    //  ของ insertDraftQuotations เหมือนที่ logWebEvent ทำ ด้วยเหตุผลข้อเดียวกัน
+    //
+    //  **เก็บ violation ที่ server คำนวณเอง ไม่ใช่ที่หน้าจอส่งมา** — สิ่งที่หน้าจอส่งมาคือ
+    //  "รับทราบข้อไหน" เท่านั้น ถ้าเก็บข้อความจากหน้าจอ ใครแก้ payload ก็เขียนประวัติปลอมได้
+    if (violations.length > 0) {
+      const acknowledgedAt = new Date().toISOString();
+      const acknowledgedBy = `admin:${params.adminUsername || params.adminId}`;
+      for (const q of quotes) {
+        // ใบแตกเป็น PM/THT แล้ว ⇒ ข้อของ "รายการสินค้า" ตามใบที่มีสินค้านั้นไป
+        // ส่วนข้อระดับลูกค้า (blacklist / เครดิตค้าง / ตรวจไม่สำเร็จ) model = '-' ติดทั้งสองใบ
+        const models = new Set((q.items || []).map((it: any) => String(it?.model ?? '')));
+        const mine = violations.filter((v) => !v.model || v.model === '-' || models.has(v.model));
+        if (mine.length === 0) continue;
+        try {
+          await saveQuotationRuleOverrides(pool, String(q.id), {
+            acknowledged_by: acknowledgedBy,
+            acknowledged_at: acknowledgedAt,
+            acknowledged_keys: mine.filter(isBypassableViolation).map(violationKey),
+            violations: mine,
+          });
+        } catch (err) {
+          // เขียนไม่ลงไม่ใช่เหตุให้ทิ้งร่างที่ INSERT สำเร็จไปแล้ว — ใบจะไปติดด่านตอนกดยืนยันเอง
+          // (ไม่มี acknowledged_keys = ไม่มีอะไรถูกปล่อยผ่าน) ซึ่งเป็นทางที่ปลอดภัยกว่าอยู่แล้ว
+          console.error('[webQuote] บันทึก rule_overrides ไม่สำเร็จ:', err);
+        }
+      }
     }
 
     // ── ประวัติ: เขียน "หลัง" insertDraftQuotations คืนค่าแล้วเท่านั้น ──────────
@@ -665,6 +736,8 @@ export async function createDraft(params: {
         // ค่าที่คนกดตั้งทับระบบ — ต้องตอบได้ย้อนหลังว่า "เครดิตในใบนี้ไม่ตรงกับลูกค้าเพราะใคร"
         payment_terms_override: overrides.paymentTerms,
         delivery_overrides: overrides.delivery ?? null,
+        // กฎที่คนกดรับทราบเพื่อออกใบทั้งที่ติดด่าน — ตอบได้ย้อนหลังว่า "ใครปล่อยผ่านข้อไหน เมื่อไหร่"
+        acknowledged_violations: acknowledgedKeys,
         chosen_customer_id: resolvedCustomerId,
         chosen_contact_id: contactId,
         chosen_rank: await resolveChosenRank(proposeMsgId, resolvedCustomerId, customerIdIn),
@@ -768,7 +841,31 @@ export interface WebQuotePreviewResult {
   goods_total: number;
   grand_total: number;
   violations: Violation[];
+  /**
+   * ออกใบต่อได้ไหม — ตั้งแต่ 2026-09-15 **ติดกฎไม่ได้แปลว่าออกไม่ได้อีกแล้ว**
+   *
+   * เจ้าของสั่งให้หน้าเว็บทะลุด่านตรวจได้ทุกข้อ ยกเว้น `SYSTEM_ERROR` ("ตรวจกฎไม่สำเร็จ")
+   * ซึ่งเป็นค่าของด่าน fail-closed ที่แปลว่า *ยังไม่รู้ว่าผิดหรือไม่* ⇒ ค่านี้จึงเหลือความหมายว่า
+   * "ไม่มีข้อที่ทะลุไม่ได้" ไม่ใช่ "ไม่ติดกฎเลย" · คำถามว่าติดอะไรบ้างอ่านจาก `violations`
+   */
   can_create_draft: boolean;
+  /**
+   * รายการที่หน้าจอต้องส่งกลับมาเป็น "คำรับทราบ" ตอนกดสร้างร่าง (ดู `violationKey`)
+   *
+   * ส่งมาให้แทนที่จะให้หน้าจอประกอบคีย์เอง เพราะถ้าสองฝั่งประกอบคนละแบบเมื่อไหร่
+   * คำรับทราบจะ "ไม่ตรงกับข้อไหนเลย" แล้ว server ปฏิเสธทั้งที่คนกดรับทราบไปแล้ว
+   */
+  override_keys: string[];
+  /**
+   * เหตุที่ใบชุดนี้จะ **ต้องแก้มือใน Odoo ก่อนนำเข้า** — คนละแกนกับ `violations` โดยสิ้นเชิง
+   *
+   * กฎที่ทะลุ = ผิดกติกาของร้าน แต่ข้อมูลตรงฐาน Odoo ⇒ นำเข้าได้เลย อยู่ในไฟล์ปกติเหมือนเดิม
+   * ส่วนรายการนี้ = **ค่าในไฟล์ไม่มีอยู่ในฐาน Odoo** ⇒ นำเข้าแล้วตกทั้งใบ ต้องไปสร้าง/แก้ก่อน
+   *
+   * คำนวณด้วย `buildOdooManualReview()` ตัวเดียวกับที่ตอนยืนยันเขียนลงคอลัมน์ `odoo_manual_review`
+   * ⇒ สิ่งที่โมดัลบอกก่อนกด กับสิ่งที่ถูกบันทึกจริง มาจากฟังก์ชันเดียวกัน ไม่มีสำเนาที่สองบนหน้าจอ
+   */
+  odoo_manual_reasons: { kind: string; field: string; value: string | null; display_message: string }[];
   /** ค่าที่ฟอร์มต้องใช้ตอนกดปุ่ม "เพิ่มค่าบริการ" — มาจาก shipping_fee_config + products */
   service_line: {
     product_template_id: number | null;
@@ -978,7 +1075,10 @@ export async function previewDraft(params: {
     goods_total: goodsTotal,
     grand_total: grandTotal,
     violations,
-    can_create_draft: violations.length === 0,
+    can_create_draft: violations.every(isBypassableViolation),
+    override_keys: violations.filter(isBypassableViolation).map(violationKey),
+    odoo_manual_reasons:
+      buildOdooManualReview({ customer_details: { payment_terms_override: paymentTermsOverride } })?.reasons ?? [],
     service_line: {
       product_template_id: cfg.productId,
       model: cfg.productModel,
@@ -1060,8 +1160,13 @@ export async function reviseQuotation(params: {
     const { items: revExpanded, violations } = await validateQuotationItems(active.items, {
       stage: 'draft', customerId: active.customer_id, contactId: active.contact_id
     });
-    if (violations.length > 0) {
-      throw new WebQuoteError('RULE_VIOLATION', buildViolationText(violations), 422, { violations });
+    // ร่างที่ได้จากขั้นนี้ยัง **ออกใบไม่ได้** ด้วยตัวมันเอง — มันถูกโยนกลับเข้าฟอร์มให้แอดมินแก้ต่อ
+    // แล้วไปออกใบจริงที่ createDraft ซึ่งมีโมดัลรับทราบอยู่แล้ว ⇒ ที่นี่ไม่ต้องขอคำรับทราบซ้ำ
+    // ปล่อยผ่านได้ แต่ **ยังกัน `SYSTEM_ERROR` ไว้** เพราะ "ตรวจกฎไม่สำเร็จ" แปลว่ายังไม่รู้ว่าผิดไหม
+    // ⇒ ยกใบที่ยังไม่ได้ตรวจจริงเข้าฟอร์ม คือการพาคนไปกดยืนยันบนข้อมูลที่ไม่มีใครตรวจ
+    const revBlockers = violations.filter((v) => !isBypassableViolation(v));
+    if (revBlockers.length > 0) {
+      throw new WebQuoteError('RULE_VIOLATION', buildViolationText(revBlockers), 422, { violations: revBlockers });
     }
 
     // ยกเลิกร่างที่ค้างของ "คู่ (แอดมิน × เซลส์) นี้เท่านั้น" — ไม่แตะร่างของเซลส์ตัวจริง
