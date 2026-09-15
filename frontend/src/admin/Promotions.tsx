@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { DateInput } from './DateInput';
+import { FilterBar, FilterSearch, FilterSelect, FilterDateRange } from './FilterBar';
 import { 
   Tag, 
   Plus, 
-  Search, 
   Edit2, 
   Trash2, 
   ToggleLeft, 
@@ -881,77 +881,47 @@ export const Promotions: React.FC = () => {
         </button>
       </PageHeader>
 
-      {/* Filters */}
-      <div className="bg-card border border-slate-200 rounded-2xl px-5 py-3.5 shadow-sm space-y-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Search */}
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input
-              id="promo-search-input"
-              type="text"
-              placeholder="ค้นหาด้วยชื่อแคมเปญ รหัสแคมเปญ หรือรหัสรุ่นสินค้า..."
-              value={searchQuery}
-              onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
-              className="w-full bg-card border border-slate-200 focus:border-[var(--brand-fg)] focus:ring-2 focus:ring-[var(--brand-fg)]/10 focus:outline-none rounded-xl pl-10 pr-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 transition-all"
-            />
-          </div>
+      {/* Filters — การ์ดร่วมชุดเดียวกับหน้าประวัติใบเสนอราคา (admin/FilterBar.tsx)
+          ปฏิทินสองช่องยุบเป็นกล่องช่วงเดียวตามต้นแบบ และคอลัมน์กว้างตามของที่อยู่ข้างใน
+          (ของเดิมเป็น 4 คอลัมน์เท่ากันหมด ช่องค้นหาจึงแคบเท่าช่องวันที่ทั้งที่ข้อความยาวกว่าสามเท่า) */}
+      <FilterBar
+        columns="grid-cols-1 sm:grid-cols-2 xl:grid-cols-[1.8fr_1fr_1.5fr]"
+        active={!!(searchQuery || statusFilter || dateFrom || dateTo)}
+        onClear={() => {
+          setSearchQuery('');
+          setStatusFilter('');
+          setDateFrom('');
+          setDateTo('');
+          setCurrentPage(1);
+        }}
+      >
+        <FilterSearch
+          id="promo-search-input"
+          placeholder="ค้นหาชื่อแคมเปญ / รหัสแคมเปญ / รหัสรุ่นสินค้า"
+          value={searchQuery}
+          onChange={(v) => { setSearchQuery(v); setCurrentPage(1); }}
+        />
 
-          {/* Status Filter */}
-          <div className="relative">
-            <select
-              id="promo-status-filter"
-              value={statusFilter}
-              onChange={(e) => { setStatusFilter(e.target.value); setCurrentPage(1); }}
-              className="w-full bg-card border border-slate-200 focus:border-[var(--brand-fg)] focus:ring-2 focus:ring-[var(--brand-fg)]/10 focus:outline-none rounded-xl px-4 py-2.5 text-sm text-slate-800 transition-all appearance-none cursor-pointer"
-            >
-              <option value="">สถานะทั้งหมด</option>
-              <option value="active">เปิดใช้งาน</option>
-              <option value="inactive">ปิดใช้งาน</option>
-            </select>
-            <Filter className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-          </div>
+        <FilterSelect
+          id="promo-status-filter"
+          aria-label="กรองตามสถานะโปรโมชัน"
+          icon={Filter}
+          value={statusFilter}
+          onChange={(v) => { setStatusFilter(v); setCurrentPage(1); }}
+        >
+          <option value="">สถานะทั้งหมด</option>
+          <option value="active">เปิดใช้งาน</option>
+          <option value="inactive">ปิดใช้งาน</option>
+        </FilterSelect>
 
-          {/* Date From */}
-          <div className="relative">
-            <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 z-10 pointer-events-none" />
-            <DateInput
-              value={dateFrom}
-              onChange={(v) => { setDateFrom(v); setCurrentPage(1); }}
-              aria-label="กรองตั้งแต่วันที่"
-              className="w-full bg-card border border-slate-200 focus-within:border-[var(--brand-fg)] focus-within:ring-2 focus-within:ring-[var(--brand-fg)]/10 focus:border-[var(--brand-fg)] focus:ring-2 focus:ring-[var(--brand-fg)]/10 focus:outline-none rounded-xl pl-10 pr-4 py-2.5 text-sm text-slate-800 transition-all"
-            />
-          </div>
-
-          {/* Date To */}
-          <div className="relative">
-            <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 z-10 pointer-events-none" />
-            <DateInput
-              value={dateTo}
-              onChange={(v) => { setDateTo(v); setCurrentPage(1); }}
-              aria-label="กรองถึงวันที่"
-              className="w-full bg-card border border-slate-200 focus-within:border-[var(--brand-fg)] focus-within:ring-2 focus-within:ring-[var(--brand-fg)]/10 focus:border-[var(--brand-fg)] focus:ring-2 focus:ring-[var(--brand-fg)]/10 focus:outline-none rounded-xl pl-10 pr-4 py-2.5 text-sm text-slate-800 transition-all"
-            />
-          </div>
-        </div>
-
-        {/* Clear Filters */}
-        {(searchQuery || statusFilter || dateFrom || dateTo) && (
-          <button
-            onClick={() => {
-              setSearchQuery('');
-              setStatusFilter('');
-              setDateFrom('');
-              setDateTo('');
-              setCurrentPage(1);
-            }}
-            className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-red-600 transition-colors font-semibold"
-          >
-            <X className="w-3.5 h-3.5" />
-            ล้างตัวกรองทั้งหมด
-          </button>
-        )}
-      </div>
+        <FilterDateRange
+          icon={Calendar}
+          from={dateFrom}
+          to={dateTo}
+          onFrom={(v) => { setDateFrom(v); setCurrentPage(1); }}
+          onTo={(v) => { setDateTo(v); setCurrentPage(1); }}
+        />
+      </FilterBar>
 
       {/* Error Alert */}
       {error && (
