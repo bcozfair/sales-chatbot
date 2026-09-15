@@ -145,12 +145,19 @@ npm run logworker                                          # worker เขีย
   `{ force: true }` ไม่งั้นจะดูเหมือนรันแล้วแต่ไม่มีอะไรเปลี่ยน
   **ห้ามให้แอป query `customers_data_build` ตรง ๆ** (~2 วิ/ครั้ง) — แอปอ่าน `customers_data_view` เสมอ
 
-- **`date AT TIME ZONE` ที่ไม่มี `::timestamp` เพี้ยนเฉพาะบน prod** — เครื่อง dev อยู่ Asia/Bangkok
-  จึงมองไม่เห็น ส่วน container prod เป็น UTC ต้องการ "วันไทย" ให้เรียกผ่าน `utils/thaiTime.ts`
-  และเงื่อนไขวันที่ใน SQL มีที่เดียวคือ `createdAtFromThaiDayCondition` /
-  `createdAtToThaiDayCondition` ใน `db/repositories.ts` ห้ามเขียน SQL ซ้ำในแต่ละ endpoint
+- **`date AT TIME ZONE` ที่ไม่มี `::timestamp` เพี้ยนตาม TZ ของโปรเซส — และห้ามเดาว่าฝั่งไหนเป็น
+  โซนอะไร** เพราะเคยสลับด้านกันมาแล้ว วัด 2026-09-15: **host (เครื่อง dev) = `Etc/UTC`** ส่วน
+  **คอนเทนเนอร์ prod = `Asia/Bangkok`** (`TZ:` ของทั้ง app/db + postgres `-c timezone=` ใน
+  `docker-compose.yml` ตั้งแต่ `49e5409` 2026-08-05) — คือ **กลับด้านกับที่เอกสารนี้เคยเขียนไว้**
+  ว่า dev เป็นไทย/prod เป็น UTC ⇒ อย่าใช้ "ฝั่งไหนซ่อนบั๊ก" เป็นเหตุผลตัดสินใจ ให้ถือว่า
+  **โผล่ได้ทั้งสองฝั่ง** · คอนเทนเนอร์ไม่ได้ mount `/etc/localtime` จาก host ⇒ เปลี่ยนโซนของ host
+  ไม่กระทบ prod
+  ต้องการ "วันไทย" ให้เรียกผ่าน `utils/thaiTime.ts` และเงื่อนไขวันที่ใน SQL มีที่เดียวคือ
+  `createdAtFromThaiDayCondition` / `createdAtToThaiDayCondition` ใน `db/repositories.ts`
+  ห้ามเขียน SQL ซ้ำในแต่ละ endpoint
   · gate: `npm run diag:date-filter` (เทียบ 3 โซนทั้งสองฝั่ง + assert `pg_typeof` + เรียก
-  `allocateQuotationNo` จริงใต้ `TZ=UTC`)
+  `allocateQuotationNo` จริงใต้ `TZ=UTC`) — ด่านนี้ **ตั้ง `process.env.TZ` เอง ไม่พึ่งโซนของเครื่อง**
+  จึงเชื่อผลได้ไม่ว่ารันจากที่ไหน
 
 - **ห้าม `.trim()` ชื่อลูกค้า/ผู้ติดต่อในทุกเส้นที่ส่งไป Odoo** — Odoo จับคู่ `res.partner` ด้วยการ
   เทียบชื่อ **ตรงตัวทุกอักขระ** และข้อมูลจริงมีช่องว่างหัว/ท้ายอยู่ **17,666 แถว** (`contact_name`)

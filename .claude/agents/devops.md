@@ -57,8 +57,11 @@ npm run diag:app-url · diag:credit-hold          # read-only ทั้งคู
   body parser แบบ global ที่มีใครเพิ่งเติมเข้าไป อาการคือ **บอทหยุดตอบทั้งระบบ**
 - **`logworker` เป็นโปรเซสแยก** (`npm run logworker`) ตายเงียบได้โดยที่แอปยังตอบปกติ
   — ตรวจด้วย `npm run diag:log-worker`
-- **container prod เป็น UTC เครื่อง dev เป็น Asia/Bangkok** ⇒ บั๊กเรื่องวันที่หลายตัว
-  มองไม่เห็นบนเครื่อง dev · `npm run diag:date-filter` เทียบสามโซนให้
+- **อย่าเดาโซนเวลาของแต่ละฝั่ง — เคยสลับด้านกันมาแล้ว** วัด 2026-09-15: **host (dev) = `Etc/UTC`**
+  · **คอนเทนเนอร์ prod = `Asia/Bangkok`** (`TZ:` + postgres `-c timezone=` ใน `docker-compose.yml`)
+  ⇒ กลับด้านกับที่เคยเขียนไว้ ให้ถือว่าบั๊กวันที่โผล่ได้ทั้งสองฝั่ง · เช็คของจริงด้วย
+  `timedatectl` กับ `docker exec <c> date` อย่าเชื่อเอกสาร · `npm run diag:date-filter`
+  เทียบสามโซนให้ (ตั้ง `TZ` เอง ไม่พึ่งโซนของเครื่อง)
 
 ## ก่อนทำอะไรที่เขียนฐานบน PMSV
 
