@@ -686,17 +686,22 @@ export const Quotations: React.FC = () => {
 
       {/* Filters */}
       <div className="bg-card border border-slate-200 rounded-2xl px-5 py-3.5 shadow-sm space-y-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+        {/* ทั้งแถวต้องจบในบรรทัดเดียวบนจอทำงาน — เดิมเป็น 6 ช่องบนกริด 5 คอลัมน์เท่ากันหมด
+            ช่องวันที่ช่องที่สองจึงตกบรรทัดล่างเสมอ และช่องค้นหาได้ที่เท่าช่องวันที่ทั้งที่ข้อความยาวกว่าสามเท่า
+            (placeholder เดิมถูกตัดกลางคำว่า "ชื่อพ")
+            แก้สองชั้น: ยุบวันที่สองช่องเป็นกล่องช่วงเดียว (เหลือ 5 ช่อง) + ให้แต่ละคอลัมน์กว้างตามของที่อยู่ข้างใน
+            จอที่แคบที่สุดที่ยังเข้าเบรกพอยต์ xl คือ 1280 ⇒ พื้นที่เนื้อหา ~1000px ซึ่งสัดส่วนชุดนี้ยังไม่ตัดคำ */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[1.7fr_1.05fr_1.2fr_1.05fr_1.6fr] gap-3">
           {/* Search */}
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
               id="quotation-search-input"
               type="text"
-              placeholder="ค้นหาเลขที่, ชื่อลูกค้า, ชื่อพนักงาน..."
+              placeholder="ค้นหาเลขที่ / ลูกค้า / พนักงาน"
               value={searchQuery}
               onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
-              className="w-full bg-card border border-slate-200 focus:border-[var(--brand-fg)] focus:ring-2 focus:ring-[var(--brand-fg)]/10 focus:outline-none rounded-xl pl-10 pr-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 transition-all"
+              className="w-full bg-card border border-slate-200 focus:border-[var(--brand-fg)] focus:ring-2 focus:ring-[var(--brand-fg)]/10 focus:outline-none rounded-xl pl-10 pr-3 py-2.5 text-sm text-slate-800 placeholder-slate-400 transition-all"
             />
           </div>
 
@@ -706,7 +711,7 @@ export const Quotations: React.FC = () => {
               id="quotation-status-filter"
               value={statusFilter}
               onChange={(e) => { setStatusFilter(e.target.value); setCurrentPage(1); }}
-              className="w-full bg-card border border-slate-200 focus:border-[var(--brand-fg)] focus:ring-2 focus:ring-[var(--brand-fg)]/10 focus:outline-none rounded-xl px-4 py-2.5 text-sm text-slate-800 transition-all appearance-none cursor-pointer"
+              className="w-full bg-card border border-slate-200 focus:border-[var(--brand-fg)] focus:ring-2 focus:ring-[var(--brand-fg)]/10 focus:outline-none rounded-xl pl-3 pr-9 py-2.5 text-sm text-slate-800 transition-all appearance-none cursor-pointer truncate"
             >
               <option value="">สถานะทั้งหมด</option>
               <option value="draft">ร่าง</option>
@@ -719,66 +724,67 @@ export const Quotations: React.FC = () => {
           </div>
 
           {/* Odoo Status Filter — ตั้งต้น "ยังไม่ส่งออก" เพื่อให้กดส่งออกได้เลยโดยไม่ซ้ำ
-              ค่าที่เลือกใช้กับทั้งตารางและปุ่มส่งออก (ส่ง param `exported` ตัวเดียวกัน) */}
+              ค่าที่เลือกใช้กับทั้งตารางและปุ่มส่งออก (ส่ง param `exported` ตัวเดียวกัน)
+              ถ้อยคำตรงกับป้ายสถานะในตาราง (ODOO_STAGE_STYLES) ตัวต่อตัว — คำอธิบายที่เคยอยู่ในวงเล็บ
+              ย้ายไปเป็น title ของตัวเลือก เพราะวงเล็บคือคำอธิบาย ไม่ใช่ชื่อของสถานะ */}
           <div className="relative">
             <select
               id="quotation-exported-filter"
               value={exportedFilter}
               onChange={(e) => { setExportedFilter(e.target.value as ExportedFilter); setCurrentPage(1); }}
-              className="w-full bg-card border border-slate-200 focus:border-[var(--brand-fg)] focus:ring-2 focus:ring-[var(--brand-fg)]/10 focus:outline-none rounded-xl px-4 py-2.5 text-sm text-slate-800 transition-all appearance-none cursor-pointer"
+              className="w-full bg-card border border-slate-200 focus:border-[var(--brand-fg)] focus:ring-2 focus:ring-[var(--brand-fg)]/10 focus:outline-none rounded-xl pl-3 pr-9 py-2.5 text-sm text-slate-800 transition-all appearance-none cursor-pointer truncate"
             >
               <option value="no">ยังไม่ส่งออก</option>
-              <option value="pending">รอนำเข้า Odoo</option>
+              <option value="pending" title="ส่งออกไฟล์แล้วแต่ยังไม่พบใบนี้ใน Odoo">รอนำเข้า</option>
               <option value="imported">นำเข้า Odoo แล้ว</option>
-              <option value="yes">ส่งออกแล้ว (รอนำเข้า + นำเข้าแล้ว)</option>
-              <option value="all">สถานะ Odoo ทั้งหมด</option>
+              <option value="yes" title="รอนำเข้า + นำเข้า Odoo แล้ว">ส่งออกแล้ว</option>
+              <option value="all">Odoo ทั้งหมด</option>
             </select>
             <FileSpreadsheet className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
           </div>
 
           {/* ป้ายของใบ — กรองร่วมกับตัวกรองเดิมได้ทุกตัว
               **สองป้ายเป็นคนละแกน** ⇒ ตัวเลือกจึงไม่ได้แยกกันขาด ใบเดียวติดได้ทั้งคู่
-              ตั้งต้น "ทั้งหมด" เพราะเป็นของที่ดูย้อนหลัง ไม่ใช่คิวงานประจำวันเหมือนสถานะ Odoo */}
+              ตั้งต้น "ทั้งหมด" เพราะเป็นของที่ดูย้อนหลัง ไม่ใช่คิวงานประจำวันเหมือนสถานะ Odoo
+              ชื่อตัวเลือกตรงกับป้ายในตาราง (ทะลุกฎ / แก้มือ) — "เฉพาะใบที่…" เป็นสิ่งที่ตัวกรองทำอยู่แล้ว */}
           <div className="relative">
             <select
               id="quotation-flag-filter"
               value={flagFilter}
               onChange={(e) => { setFlagFilter(e.target.value as QuoteFlagFilter); setCurrentPage(1); }}
-              className="w-full bg-card border border-slate-200 focus:border-[var(--brand-fg)] focus:ring-2 focus:ring-[var(--brand-fg)]/10 focus:outline-none rounded-xl px-4 py-2.5 text-sm text-slate-800 transition-all appearance-none cursor-pointer"
+              className="w-full bg-card border border-slate-200 focus:border-[var(--brand-fg)] focus:ring-2 focus:ring-[var(--brand-fg)]/10 focus:outline-none rounded-xl pl-3 pr-9 py-2.5 text-sm text-slate-800 transition-all appearance-none cursor-pointer truncate"
             >
-              <option value="all">ป้ายของใบ: ทั้งหมด</option>
-              <option value="rule">เฉพาะใบที่ทะลุกฎ</option>
-              <option value="manual">เฉพาะใบที่ต้องแก้มือใน Odoo</option>
-              <option value="clean">ใบปกติ (ไม่ติดทั้งสองอย่าง)</option>
+              <option value="all">ป้ายทั้งหมด</option>
+              <option value="rule" title="ใบที่ติดกฎแต่คนออกใบกดรับทราบแล้ว — ยังอยู่ในไฟล์ส่งออกปกติ">ทะลุกฎ</option>
+              <option value="manual" title="ใบที่มีค่าซึ่งไม่มีอยู่ในฐาน Odoo — ถูกกันออกจากไฟล์ปกติ">ต้องแก้มือ</option>
+              <option value="clean" title="ไม่ติดทั้งทะลุกฎและต้องแก้มือ">ใบปกติ</option>
             </select>
             <AlertTriangle className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
           </div>
 
-          {/* Date From */}
-          <div className="relative">
-            <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 z-10 pointer-events-none" />
+          {/* ช่วงวันที่ — "ตั้งแต่" กับ "ถึง" เป็นค่าคู่กันอยู่แล้ว จึงอยู่ในกรอบเดียว
+              ปฏิทินยังเป็น DateInput สองตัวแยกกัน กดเลือกทีละข้างได้เหมือนเดิม
+              ที่หายไปคือกรอบและไอคอนปฏิทินที่ซ้ำกันเปล่า ๆ — โฟกัสจึงเรืองทั้งกล่อง (focus-within) */}
+          <div className="flex items-center gap-1.5 bg-card border border-slate-200 focus-within:border-[var(--brand-fg)] focus-within:ring-2 focus-within:ring-[var(--brand-fg)]/10 rounded-xl pl-3 pr-2 py-2.5 text-sm text-slate-800 transition-all">
+            <Calendar className="w-4 h-4 shrink-0 text-slate-400 pointer-events-none" />
             <DateInput
               value={dateFrom}
               onChange={(v) => { setDateFrom(v); setCurrentPage(1); }}
               aria-label="กรองตั้งแต่วันที่"
-              className="w-full bg-card border border-slate-200 focus-within:border-[var(--brand-fg)] focus-within:ring-2 focus-within:ring-[var(--brand-fg)]/10 focus:border-[var(--brand-fg)] focus:ring-2 focus:ring-[var(--brand-fg)]/10 focus:outline-none rounded-xl pl-10 pr-4 py-2.5 text-sm text-slate-800 transition-all"
+              className="flex-1 min-w-0 overflow-hidden"
             />
-          </div>
-
-          {/* Date To */}
-          <div className="relative">
-            <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 z-10 pointer-events-none" />
+            <span className="shrink-0 text-slate-400 select-none" aria-hidden="true">–</span>
             <DateInput
               value={dateTo}
               onChange={(v) => { setDateTo(v); setCurrentPage(1); }}
               aria-label="กรองถึงวันที่"
-              className="w-full bg-card border border-slate-200 focus-within:border-[var(--brand-fg)] focus-within:ring-2 focus-within:ring-[var(--brand-fg)]/10 focus:border-[var(--brand-fg)] focus:ring-2 focus:ring-[var(--brand-fg)]/10 focus:outline-none rounded-xl pl-10 pr-4 py-2.5 text-sm text-slate-800 transition-all"
+              className="flex-1 min-w-0 overflow-hidden"
             />
           </div>
         </div>
 
         {/* Clear Filters */}
-        {(searchQuery || statusFilter || dateFrom || dateTo || exportedFilter !== 'no') && (
+        {(searchQuery || statusFilter || dateFrom || dateTo || exportedFilter !== 'no' || flagFilter !== 'all') && (
           <button
             onClick={() => {
               setSearchQuery('');
@@ -787,6 +793,8 @@ export const Quotations: React.FC = () => {
               setDateTo('');
               // กลับไปค่าตั้งต้น 'no' ไม่ใช่ 'all' — "ล้างตัวกรอง" ต้องได้สภาพเดียวกับตอนเปิดหน้า
               setExportedFilter('no');
+              // ป้ายของใบเคยตกหล่นจากทั้งเงื่อนไขแสดงปุ่มและตัวล้าง ⇒ เลือกป้ายไว้แล้วกดล้าง ป้ายยังค้างอยู่เงียบ ๆ
+              setFlagFilter('all');
               setCurrentPage(1);
             }}
             className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-red-600 transition-colors font-semibold"
