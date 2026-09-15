@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import {
   Plus,
   Search,
+  Filter,
   Trash2,
   X,
   Loader2,
@@ -17,6 +18,7 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { PageHeader } from './PageHeader';
+import { FilterBar, FilterSearch, FilterSelect } from './FilterBar';
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
@@ -521,6 +523,10 @@ export const StockRules: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  /** '' = ทุกสถานะ · 'active' / 'inactive' ตรงกับคอลัมน์สถานะในตาราง */
+  const [statusFilter, setStatusFilter] = useState('');
+  /** '' = ทุกฝ่ายผลิต · ตัวเลือกมาจากกฎที่โหลดมาแล้ว ไม่ต้องยิง API เพิ่ม */
+  const [productionFilter, setProductionFilter] = useState('');
 
   // Sort State
   const [sortField, setSortField] = useState<string>('internal_reference');
@@ -736,7 +742,15 @@ export const StockRules: React.FC = () => {
   };
 
   // Filter and Sort rules
+  /** ฝ่ายผลิตที่มีอยู่จริงในตาราง — เรียงไทยเพื่อให้ลำดับในช่องเลือกนิ่ง */
+  const productionOptions = React.useMemo(() => {
+    const set = new Set(rules.map(r => r.production).filter((p): p is string => !!p));
+    return [...set].sort((a, b) => a.localeCompare(b, 'th', { sensitivity: 'base' }));
+  }, [rules]);
+
   const filteredRules = rules.filter(rule => {
+    if (statusFilter && (statusFilter === 'active') !== rule.is_active) return false;
+    if (productionFilter && rule.production !== productionFilter) return false;
     const q = searchQuery.toLowerCase().trim();
     if (!q) return true;
     return (
@@ -818,17 +832,6 @@ export const StockRules: React.FC = () => {
         title="กฎระงับเสนอขายสต็อกหมด"
         description="ป้องกันการเสนอขายสินค้าที่สต็อกหมดหรือติดลบ"
       >
-        <div className="relative flex-1 sm:w-60">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
-          <input
-            type="text"
-            placeholder="ค้นหา..."
-            value={searchQuery}
-            onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
-            className="w-full pl-9 pr-3 py-2 text-sm bg-slate-50 border border-slate-200 hover:border-slate-300 focus:border-[var(--brand-fg)] focus:bg-card rounded-xl outline-none transition-all"
-          />
-        </div>
-
         <button
           onClick={handleCreateOpen}
           className="flex items-center justify-center gap-1.5 px-3.5 btn-h bg-[var(--brand)] hover:bg-[var(--brand-hover)] text-white text-sm font-bold rounded-xl shadow-sm transition-all active:scale-95 flex-shrink-0"
@@ -837,6 +840,37 @@ export const StockRules: React.FC = () => {
           <span className="hidden sm:inline">สร้างกฎใหม่</span>
         </button>
       </PageHeader>
+
+      <FilterBar
+        columns="grid-cols-1 sm:grid-cols-2 xl:grid-cols-[2fr_1fr_1fr]"
+        active={!!(searchQuery || statusFilter || productionFilter)}
+        onClear={() => { setSearchQuery(''); setStatusFilter(''); setProductionFilter(''); setCurrentPage(1); }}
+      >
+        <FilterSearch
+          placeholder="ค้นหารหัส / รุ่น / ชื่อสินค้า / ยี่ห้อ"
+          value={searchQuery}
+          onChange={(v) => { setSearchQuery(v); setCurrentPage(1); }}
+        />
+        <FilterSelect
+          aria-label="กรองตามสถานะของกฎ"
+          icon={Filter}
+          value={statusFilter}
+          onChange={(v) => { setStatusFilter(v); setCurrentPage(1); }}
+        >
+          <option value="">สถานะทั้งหมด</option>
+          <option value="active">เปิดใช้งาน</option>
+          <option value="inactive">ปิดใช้งาน</option>
+        </FilterSelect>
+        <FilterSelect
+          aria-label="กรองตามฝ่ายผลิต"
+          icon={Factory}
+          value={productionFilter}
+          onChange={(v) => { setProductionFilter(v); setCurrentPage(1); }}
+        >
+          <option value="">ฝ่ายผลิตทั้งหมด</option>
+          {productionOptions.map(p => <option key={p} value={p}>{p}</option>)}
+        </FilterSelect>
+      </FilterBar>
 
       {/* Loading & Empty States */}
       {isLoading ? (

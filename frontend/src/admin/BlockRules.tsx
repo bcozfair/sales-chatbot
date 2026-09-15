@@ -11,10 +11,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import {
-  Plus, Search, Edit2, Trash2, X, Loader2, CheckCircle2, AlertTriangle,
+  Plus, Edit2, Trash2, X, Loader2, CheckCircle2, AlertTriangle, Filter,
   ShieldBan, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { PageHeader } from './PageHeader';
+import { FilterBar, FilterSearch, FilterSelect } from './FilterBar';
 import { ProductComboBox, type ProductPick } from './ProductComboBox';
 import { ScopeComboBox } from './ScopeComboBox';
 
@@ -92,6 +93,10 @@ export const BlockRules: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  /** '' = ทุกสถานะ · 'active' / 'inactive' ตรงกับคอลัมน์สถานะในตาราง */
+  const [statusFilter, setStatusFilter] = useState('');
+  /** '' = ทุกระดับ · ที่เหลือคือ Level ซึ่งเป็นคอลัมน์แรกของตารางอยู่แล้ว */
+  const [levelFilter, setLevelFilter] = useState('');
 
   const [sortField, setSortField] = useState<string>('specificity');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
@@ -306,6 +311,8 @@ export const BlockRules: React.FC = () => {
   };
 
   const filteredRules = rules.filter(rule => {
+    if (statusFilter && (statusFilter === 'active') !== rule.is_active) return false;
+    if (levelFilter && levelOf(rule) !== levelFilter) return false;
     const q = searchQuery.toLowerCase().trim();
     if (!q) return true;
     return [rule.production, rule.brand, rule.series, rule.model, rule.internal_reference,
@@ -367,16 +374,6 @@ export const BlockRules: React.FC = () => {
         title="กฎบล็อกสินค้า"
         description="ระงับการเสนอราคาได้ตั้งแต่ระดับฝ่ายผลิตจนถึงรายรหัสสินค้า"
       >
-        <div className="relative flex-1 sm:w-60">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
-          <input
-            type="text"
-            placeholder="ค้นหา..."
-            value={searchQuery}
-            onChange={e => { setSearchQuery(e.target.value); setCurrentPage(1); }}
-            className="w-full pl-9 pr-3 py-2 text-sm bg-slate-50 border border-slate-200 hover:border-slate-300 focus:border-[var(--brand-fg)] focus:bg-card rounded-xl outline-none transition-all"
-          />
-        </div>
         <button
           onClick={handleCreateOpen}
           className="flex items-center justify-center gap-1.5 px-3.5 btn-h bg-[var(--brand)] hover:bg-[var(--brand-hover)] text-white text-sm font-bold rounded-xl shadow-sm transition-all active:scale-95 flex-shrink-0"
@@ -385,6 +382,38 @@ export const BlockRules: React.FC = () => {
           <span className="hidden sm:inline">สร้างกฎใหม่</span>
         </button>
       </PageHeader>
+
+      <FilterBar
+        columns="grid-cols-1 sm:grid-cols-2 xl:grid-cols-[2fr_1fr_1fr]"
+        active={!!(searchQuery || statusFilter || levelFilter)}
+        onClear={() => { setSearchQuery(''); setStatusFilter(''); setLevelFilter(''); setCurrentPage(1); }}
+      >
+        <FilterSearch
+          placeholder="ค้นหาขอบเขต / รหัสสินค้า / รุ่น / ข้อความเตือน"
+          value={searchQuery}
+          onChange={v => { setSearchQuery(v); setCurrentPage(1); }}
+        />
+        <FilterSelect
+          aria-label="กรองตามสถานะของกฎ"
+          icon={Filter}
+          value={statusFilter}
+          onChange={v => { setStatusFilter(v); setCurrentPage(1); }}
+        >
+          <option value="">สถานะทั้งหมด</option>
+          <option value="active">เปิดใช้งาน</option>
+          <option value="inactive">ปิดใช้งาน</option>
+        </FilterSelect>
+        {/* ตัวเลือกมาจาก LEVELS ที่เดียวกับที่ตารางและฟอร์มใช้ — ไม่พิมพ์ชื่อระดับซ้ำ */}
+        <FilterSelect
+          aria-label="กรองตามระดับของกฎ"
+          icon={ShieldBan}
+          value={levelFilter}
+          onChange={v => { setLevelFilter(v); setCurrentPage(1); }}
+        >
+          <option value="">ทุกระดับ</option>
+          {LEVELS.map(lv => <option key={lv.key} value={lv.key}>{lv.label}</option>)}
+        </FilterSelect>
+      </FilterBar>
 
       {isLoading ? (
         <div className="bg-card border border-slate-200 rounded-2xl p-10 text-center shadow-sm flex flex-col items-center justify-center gap-3">

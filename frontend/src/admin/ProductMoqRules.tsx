@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { 
   Plus, 
-  Search, 
+  Filter, 
   Edit2, 
   Trash2, 
   X, 
@@ -17,6 +17,7 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { PageHeader } from './PageHeader';
+import { FilterBar, FilterSearch, FilterSelect } from './FilterBar';
 import { ProductComboBox } from './ProductComboBox';
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
@@ -40,6 +41,8 @@ export const ProductMoqRules: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  /** '' = ทุกสถานะ · 'active' / 'inactive' ตรงกับคอลัมน์สถานะในตาราง */
+  const [statusFilter, setStatusFilter] = useState('');
 
   // Sort State
   const [sortField, setSortField] = useState<string>('internal_reference');
@@ -276,6 +279,7 @@ export const ProductMoqRules: React.FC = () => {
 
   // Filter and Sort rules
   const filteredRules = rules.filter(rule => {
+    if (statusFilter && (statusFilter === 'active') !== rule.is_active) return false;
     const q = searchQuery.toLowerCase().trim();
     if (!q) return true;
     return (
@@ -356,17 +360,6 @@ export const ProductMoqRules: React.FC = () => {
         title="กฎสั่งซื้อขั้นต่ำรายสินค้า (MOQ)"
         description="กำหนดจำนวนขั้นต่ำและข้อความเตือนรายชิ้น"
       >
-        <div className="relative flex-1 sm:w-60">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
-          <input
-            type="text"
-            placeholder="ค้นหา..."
-            value={searchQuery}
-            onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
-            className="w-full pl-9 pr-3 py-2 text-sm bg-slate-50 border border-slate-200 hover:border-slate-300 focus:border-[var(--brand-fg)] focus:bg-card rounded-xl outline-none transition-all"
-          />
-        </div>
-
         <button
           onClick={handleCreateOpen}
           className="flex items-center justify-center gap-1.5 px-3.5 btn-h bg-[var(--brand)] hover:bg-[var(--brand-hover)] text-white text-sm font-bold rounded-xl shadow-sm transition-all active:scale-95 flex-shrink-0"
@@ -375,6 +368,28 @@ export const ProductMoqRules: React.FC = () => {
           <span className="hidden sm:inline">สร้างกฎใหม่</span>
         </button>
       </PageHeader>
+
+      <FilterBar
+        columns="grid-cols-1 sm:grid-cols-[2.4fr_1fr]"
+        active={!!(searchQuery || statusFilter)}
+        onClear={() => { setSearchQuery(''); setStatusFilter(''); setCurrentPage(1); }}
+      >
+        <FilterSearch
+          placeholder="ค้นหารหัส / รุ่น / ชื่อสินค้า / ข้อความเตือน"
+          value={searchQuery}
+          onChange={(v) => { setSearchQuery(v); setCurrentPage(1); }}
+        />
+        <FilterSelect
+          aria-label="กรองตามสถานะของกฎ"
+          icon={Filter}
+          value={statusFilter}
+          onChange={(v) => { setStatusFilter(v); setCurrentPage(1); }}
+        >
+          <option value="">สถานะทั้งหมด</option>
+          <option value="active">เปิดใช้งาน</option>
+          <option value="inactive">ปิดใช้งาน</option>
+        </FilterSelect>
+      </FilterBar>
 
       {/* Loading & Empty States */}
       {isLoading ? (

@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import {
   Plus,
-  Search,
+  Factory,
+  Building2,
   Edit2,
   Trash2,
   FileText,
@@ -20,6 +21,7 @@ import {
   PackageCheck,
 } from 'lucide-react';
 import { PageHeader } from './PageHeader';
+import { FilterBar, FilterSearch, FilterSelect } from './FilterBar';
 import { ScopeComboBox } from './ScopeComboBox';
 
 interface QuotationRule {
@@ -79,6 +81,11 @@ export function QuotationRules() {
   const [options, setOptions] = useState<RuleOptions>({ productions: [], brands: [], series: [], relations: [] });
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  /** ตัวกรองสามช่องนี้ตรงกับคอลัมน์ในตาราง — '' = ไม่กรอง */
+  const [productionFilter, setProductionFilter] = useState('');
+  const [brandFilter, setBrandFilter] = useState('');
+  /** 'PM' · 'THT' · 'auto' (= quote_company เป็น null ซึ่งตารางแสดงว่า "อัตโนมัติ") */
+  const [companyFilter, setCompanyFilter] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   // Pagination state
@@ -352,7 +359,25 @@ export function QuotationRules() {
     return `ฝ่ายผลิต ${rule.production || 'ทั่วไป'}`;
   };
 
+  /**
+   * ตัวเลือกฝ่ายผลิต/ยี่ห้อ เอาจาก "กฎที่มีอยู่จริง" ไม่ใช่ options ทั้งฐาน
+   * เพราะช่องกรองที่เลือกแล้วได้ตารางว่างทุกครั้ง คือช่องที่ไม่ควรมีตัวเลือกนั้นตั้งแต่แรก
+   */
+  const productionOptions = React.useMemo(() => {
+    const set = new Set(rules.map(r => r.production).filter((v): v is string => !!v));
+    return [...set].sort((a, b) => a.localeCompare(b, 'th', { sensitivity: 'base' }));
+  }, [rules]);
+
+  const brandOptions = React.useMemo(() => {
+    const set = new Set(rules.map(r => r.brand).filter((v): v is string => !!v));
+    return [...set].sort((a, b) => a.localeCompare(b, 'th', { sensitivity: 'base' }));
+  }, [rules]);
+
   const filteredRules = rules.filter((rule) => {
+    if (productionFilter && rule.production !== productionFilter) return false;
+    if (brandFilter && rule.brand !== brandFilter) return false;
+    if (companyFilter === 'auto' && rule.quote_company !== null) return false;
+    if (companyFilter && companyFilter !== 'auto' && rule.quote_company !== companyFilter) return false;
     const term = searchQuery.toLowerCase().trim();
     if (!term) return true;
     return (
@@ -437,17 +462,6 @@ export function QuotationRules() {
         title="เงื่อนไขใบเสนอราคา"
         description="ตั้งค่าการรับประกัน/จัดส่งตามฝ่ายผลิต ยี่ห้อ หรือซีรีส์"
       >
-        <div className="relative flex-1 sm:w-60">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
-          <input
-            type="text"
-            placeholder="ค้นหา..."
-            value={searchQuery}
-            onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
-            className="w-full pl-9 pr-3 py-2 text-sm bg-slate-50 border border-slate-200 hover:border-slate-300 focus:border-[var(--brand-fg)] focus:bg-card rounded-xl outline-none transition-all"
-          />
-        </div>
-
         <button
           onClick={openAddModal}
           className="flex items-center justify-center gap-1.5 px-3.5 btn-h bg-[var(--brand)] hover:bg-[var(--brand-hover)] text-white text-sm font-bold rounded-xl shadow-sm transition-all active:scale-95 flex-shrink-0"
@@ -456,6 +470,54 @@ export function QuotationRules() {
           <span className="hidden sm:inline">เพิ่มเงื่อนไข</span>
         </button>
       </PageHeader>
+
+      <FilterBar
+        columns="grid-cols-1 sm:grid-cols-2 xl:grid-cols-[1.6fr_1fr_1fr_1fr]"
+        active={!!(searchQuery || productionFilter || brandFilter || companyFilter)}
+        onClear={() => {
+          setSearchQuery('');
+          setProductionFilter('');
+          setBrandFilter('');
+          setCompanyFilter('');
+          setCurrentPage(1);
+        }}
+      >
+        <FilterSearch
+          placeholder="ค้นหาฝ่ายผลิต / ยี่ห้อ / ซีรีส์"
+          value={searchQuery}
+          onChange={(v) => { setSearchQuery(v); setCurrentPage(1); }}
+        />
+        <FilterSelect
+          aria-label="กรองตามฝ่ายผลิต"
+          icon={Factory}
+          value={productionFilter}
+          onChange={(v) => { setProductionFilter(v); setCurrentPage(1); }}
+        >
+          <option value="">ฝ่ายผลิตทั้งหมด</option>
+          {productionOptions.map(v => <option key={v} value={v}>{v}</option>)}
+        </FilterSelect>
+        <FilterSelect
+          aria-label="กรองตามยี่ห้อ"
+          icon={Layers}
+          value={brandFilter}
+          onChange={(v) => { setBrandFilter(v); setCurrentPage(1); }}
+        >
+          <option value="">ยี่ห้อทั้งหมด</option>
+          {brandOptions.map(v => <option key={v} value={v}>{v}</option>)}
+        </FilterSelect>
+        {/* ถ้อยคำตรงกับคอลัมน์ "เสนอในนาม" ในตารางตัวต่อตัว รวมถึงคำว่า "อัตโนมัติ" ของกฎที่ไม่ระบุบริษัท */}
+        <FilterSelect
+          aria-label="กรองตามบริษัทที่ใช้ออกใบ"
+          icon={Building2}
+          value={companyFilter}
+          onChange={(v) => { setCompanyFilter(v); setCurrentPage(1); }}
+        >
+          <option value="">เสนอในนามทั้งหมด</option>
+          <option value="PM">PM</option>
+          <option value="THT">THT</option>
+          <option value="auto">อัตโนมัติ</option>
+        </FilterSelect>
+      </FilterBar>
 
       {/* Loading & Empty States */}
       {loading ? (
