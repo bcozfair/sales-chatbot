@@ -315,14 +315,14 @@ function AdminContent() {
             การเลือกว่าเป็นหน้าไหนใน 4 หน้าอยู่ที่แถบแท็บใน LogsShell ทั้งหมด */}
         <button
           onClick={() => goTo(lastLogTab)}
-          title={collapsed ? 'Activity Log' : undefined}
+          title={collapsed ? 'รายงานการใช้งาน' : undefined}
           className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${
             collapsed ? 'justify-center' : ''
           } ${LOG_TABS.has(effectiveTab) ? '' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'}`}
           style={LOG_TABS.has(effectiveTab) ? { backgroundColor: BRAND_SOFT_STRONG, color: BRAND } : undefined}
         >
           <ClipboardList className="w-[18px] h-[18px] shrink-0" />
-          {!collapsed && <span className="whitespace-nowrap">Activity Log</span>}
+          {!collapsed && <span className="whitespace-nowrap">รายงานการใช้งาน</span>}
         </button>
 
         <div className="h-px bg-slate-100 my-2.5 mx-1.5" />
