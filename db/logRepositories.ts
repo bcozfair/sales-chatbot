@@ -413,3 +413,100 @@ export function recordLogAccess(info: {
     console.error('[logs] บันทึกการเข้าดู log ไม่สำเร็จ (ไม่กระทบการแสดงผล):', err?.message ?? err);
   });
 }
+
+// ═══════════════════════ รายงานการสำรองฐานข้อมูลอัตโนมัติ ═══════════════════════
+//
+// แถวในตาราง `backup_runs` ถูกเขียนโดย scripts/backup/autoBackup.sh ที่รันบน host ผ่าน cron
+// **ไม่ใช่โดยแอป** — แอปอยู่ในคอนเทนเนอร์และมองไม่เห็นทั้งโฟลเดอร์ backup/ และ crontab
+// (ไฟล์ dump มี PII ทั้งฐาน จึงตั้งใจไม่ mount เข้าไป) ⇒ ตารางนี้คือช่องทางเดียวที่งานเบื้องหลัง
+// บนเครื่องแม่ "เล่าให้แอปฟัง" แบบเดียวกับที่ logworker ใช้ log_worker_state
+//
+// ⚠️ ตารางอาจยังไม่มีจริงในฐาน แม้โค้ดจะขึ้น server แล้ว — "อยู่ใน repo" ไม่ได้แปลว่า
+//   "รัน migration แล้ว" (เกิดจริง 2026-09-15 กับคอลัมน์ของ admin_users ที่ค้าง 6 วัน)
+//   ⇒ ฝั่ง route แปล error 42P01 เป็น "ยังไม่ได้ติดตั้ง" ไม่ใช่ปล่อยให้หน้าเว็บขึ้น 500
+
+export interface BackupRunRow {
+  id: string;
+  started_at: string;
+  finished_at: string;
+  status: string;
+  file_name: string | null;
+  size_bytes: string | null;
+  toc_entries: number | null;
+  duration_ms: number | null;
+  free_mb_after: number | null;
+  kept_files: number | null;
+  message: string | null;
+}
+
+const BACKUP_COLS = `id::text, started_at, finished_at, status, file_name, size_bytes::text,
+                     toc_entries, duration_ms, free_mb_after, kept_files, message`;
+
+/** ประวัติล่าสุดก่อน — ไม่มีตัวกรอง เพราะตารางนี้โตวันละแถวเดียว (365 แถว/ปี) */
+export function listBackupRuns(limit: number, offset: number) {
+  return q<BackupRunRow>(
+    `SELECT ${BACKUP_COLS} FROM backup_runs
+      ORDER BY finished_at DESC, id DESC LIMIT $1 OFFSET $2`, [limit, offset]);
+}
+
+export function countBackupRuns() {
+  return q<{ n: string }>(`SELECT count(*)::text AS n FROM backup_runs`)
+    .then(r => Number(r[0]?.n ?? 0));
+}
+
+/**
+ * สรุปสถานะ — ตอบคำถามเดียวของหน้านี้: "ถ้าฐานพังตอนนี้ เสียงานกี่ชั่วโมง"
+ *
+ * `failing_streak` นับเฉพาะ failed ที่ต่อเนื่องจากรอบล่าสุด และ **ข้าม skipped** เพราะรอบที่ถูกข้าม
+ * แปลว่ามีอีกตัวกำลังทำอยู่ ไม่ใช่ความล้มเหลว — นับรวมแล้วจะขึ้นเตือนทั้งที่ระบบปกติ
+ *
+ * `oldest_kept_at` = รอบสำเร็จลำดับที่ `kept_files` นับจากล่าสุด ⇒ "ไฟล์เก่าสุดที่ยังอยู่บนเครื่อง
+ * มาจากรอบไหน" ซึ่งคือ "ย้อนกลับได้ถึงเมื่อไหร่" ตัวจริง — ไม่ใช่แถวที่เก่าที่สุดในตาราง ซึ่งไฟล์ของมัน
+ * ถูก retention ลบไปนานแล้ว (ตารางเก็บประวัติยาวกว่าไฟล์ที่เก็บจริงเสมอ)
+ */
+export async function getBackupSummary() {
+  const [last] = await q<BackupRunRow>(
+    `SELECT ${BACKUP_COLS} FROM backup_runs ORDER BY finished_at DESC, id DESC LIMIT 1`);
+
+  const [lastSuccess] = await q<BackupRunRow>(
+    `SELECT ${BACKUP_COLS} FROM backup_runs WHERE status = 'success'
+      ORDER BY finished_at DESC, id DESC LIMIT 1`);
+
+  // แยกจาก last_run เพราะรอบล่าสุดมักเป็น skipped ซึ่งมีข้อความว่า "มีตัวอื่นทำงานอยู่" —
+  // เอาไปขึ้นใต้หัวข้อ "ล้มติดกัน N รอบ" แล้วอ่านเหมือนระบบบอกสาเหตุผิด (เจอตอนดูหน้าจริง 2026-09-15)
+  const [lastFailed] = await q<BackupRunRow>(
+    `SELECT ${BACKUP_COLS} FROM backup_runs WHERE status = 'failed'
+      ORDER BY finished_at DESC, id DESC LIMIT 1`);
+
+  // นับรอบที่ล้มติดกันจากล่าสุด: ลำดับของรอบสำเร็จตัวแรก − 1
+  // ไม่มีรอบสำเร็จเลย ⇒ ทุกแถวคือความล้มเหลว
+  const [streak] = await q<{ n: number }>(
+    `WITH ordered AS (
+       SELECT status, row_number() OVER (ORDER BY finished_at DESC, id DESC) AS rn
+         FROM backup_runs WHERE status <> 'skipped'
+     )
+     SELECT (COALESCE((SELECT min(rn) FROM ordered WHERE status = 'success'),
+                      (SELECT count(*) + 1 FROM ordered)) - 1)::int AS n`);
+
+  const kept = lastSuccess?.kept_files ?? null;
+  const oldest = kept && kept > 0
+    ? await q<{ finished_at: string }>(
+        `SELECT finished_at FROM backup_runs WHERE status = 'success'
+          ORDER BY finished_at DESC, id DESC OFFSET $1 LIMIT 1`, [kept - 1])
+    : [];
+
+  const [counts] = await q<{ ok: string; failed: string }>(
+    `SELECT count(*) FILTER (WHERE status = 'success')::text AS ok,
+            count(*) FILTER (WHERE status = 'failed')::text  AS failed
+       FROM backup_runs WHERE finished_at > now() - interval '30 days'`);
+
+  return {
+    last_run: last ?? null,
+    last_success: lastSuccess ?? null,
+    last_failed: lastFailed ?? null,
+    failing_streak: Number(streak?.n ?? 0),
+    kept_files: kept,
+    oldest_kept_at: oldest[0]?.finished_at ?? null,
+    last_30d: { success: Number(counts?.ok ?? 0), failed: Number(counts?.failed ?? 0) },
+  };
+}
