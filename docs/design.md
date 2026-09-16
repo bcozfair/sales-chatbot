@@ -182,7 +182,7 @@
 | ตัวช่วยแสดงผล (`formatDateTime` `relativeTime` `errMsg`) | `admin/logs/format.ts` | เดิมเป็นสำเนาจาก `ApiLogs.tsx` แล้วยุบกลับมาที่เดียว |
 | `SettingsStatus` · `SettingsSaveBar` | `admin/SettingsSaveBar.tsx` | ท้ายฟอร์มตั้งค่าที่ "แก้แล้วกดบันทึก" — ใช้ 2 หน้า (`CreditPolicy` · `ShippingFee`) ตั้งแต่ 2026-09-12 |
 | `FilterBar` + `FilterSearch` · `FilterSelect` · `FilterDateRange` | `admin/FilterBar.tsx` | **ใหม่ 2026-09-15** — แถบตัวกรองเหนือตาราง ใช้ **7 หน้า**: `Quotations` (ต้นแบบเดิม) + ทั้ง 6 หน้าที่มีตารางในกลุ่ม "เงื่อนไข & กฎ" · **คนละชุดกับ `FilterCard` ของ `logs/ui.tsx` โดยตั้งใจ** — ชุดนั้นวางป้ายกำกับเหนือช่อง ส่วนชุดนี้เป็นแถวเดียวไม่มีป้าย |
-| `Modal` (เปลือกกล่องโต้ตอบ) | `admin/Modal.tsx` | **ใหม่ 2026-09-15** — portal + ฉากหลัง + หัวกล่อง + แถบปุ่มท้าย · ใช้ 3 กล่อง (`ChangePasswordModal` · `ConfirmIssueModal` · กล่อง "ไม่อนุมัติ" ใน `PriceApprovals`) · **ไม่ปิดเมื่อคลิกฉากหลัง** โดยตั้งใจ |
+| `Modal` (เปลือกกล่องโต้ตอบ) | `admin/Modal.tsx` | **ใหม่ 2026-09-15** — portal + ฉากหลัง + หัวกล่อง + แถบปุ่มท้าย · ใช้ 4 กล่อง (`ChangePasswordModal` · `ConfirmIssueModal` · กล่อง "ไม่อนุมัติ" ใน `PriceApprovals` · `DeleteQuotationModal`) · **ไม่ปิดเมื่อคลิกฉากหลัง** โดยตั้งใจ · กล่องที่กดพลาดแล้วย้อนไม่ได้ให้ปิดกลางคันไม่ได้ระหว่างที่กำลังทำงาน (ส่ง `onClose` เป็น `undefined` ตอน busy) |
 
 **หน้าที่มีตารางในกลุ่ม "เงื่อนไข & กฎ" ใช้ `FilterBar` ทุกหน้า (2026-09-15)** — ก่อนหน้านั้น 5 หน้า
 เอาช่องค้นหาไปฝากไว้ข้างปุ่ม "สร้างกฎใหม่" บนแถบบน (กว้าง 240px · ไม่มีปุ่มล้าง · กรองได้แค่คำค้น)

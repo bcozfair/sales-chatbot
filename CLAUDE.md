@@ -34,7 +34,7 @@
 | LIFF | HTML + Vanilla JS ล้วน เสิร์ฟผ่าน Express | ห้าม React/Vite เด็ดขาด |
 | ค้นหา | Fuse.js (default import) | |
 
-ขนาดที่ควรรู้ก่อนเปิดไฟล์ (วัด 2026-09-12): `index.ts` **4,531 บรรทัด / 109 route** —
+ขนาดที่ควรรู้ก่อนเปิดไฟล์ (วัด 2026-09-16): `index.ts` **4,774 บรรทัด / 121 route** —
 ใช้ `grep` หา route ที่ต้องการ อย่าอ่านทั้งไฟล์ · `handlers/lineHandler.ts` 101 KB ·
 `services/quotationService.ts` 118 KB · `services/customerService.ts` 104 KB
 
@@ -108,7 +108,7 @@ npm run logworker                                          # worker เขีย
 ```
 
 `npm test` เป็น stub (`exit 1`) โดยตั้งใจ — **ด่านตรวจของโปรเจคนี้คือ typecheck + `scripts/diag/*`**
-(วัด 2026-09-16: 51 รายการใน `scripts/diag/` · 37 npm script `diag:*`) ดูรายการเต็มใน `package.json`
+(วัด 2026-09-16: 55 รายการใน `scripts/diag/` · 38 npm script `diag:*`) ดูรายการเต็มใน `package.json`
 และดูว่าตัวไหนเป็น gate ใน `AGENTS.md` ข้อ 6
 
 ---
@@ -298,8 +298,8 @@ npm run logworker                                          # worker เขีย
 - **ห้าม `COMMENT ON` (COLUMN/TABLE/VIEW/INDEX)** ใน migration หรือยิงเข้า DB เว้นแต่ผู้ใช้สั่งเอง —
   อธิบายด้วย `--` ในไฟล์ migration แทน
 
-- **migration ใหม่ต้องยุบเข้า `migrations/schema.sql` ด้วย** (49 ไฟล์ใน `migrations/changes/`
-  ณ 2026-09-15) ไม่งั้น schema เต็มจะค่อย ๆ ล้าสมัยจนตั้ง DB ใหม่จากศูนย์ไม่ได้ — วิธีตรวจอยู่หัวไฟล์
+- **migration ใหม่ต้องยุบเข้า `migrations/schema.sql` ด้วย** (51 ไฟล์ใน `migrations/changes/`
+  ณ 2026-09-16) ไม่งั้น schema เต็มจะค่อย ๆ ล้าสมัยจนตั้ง DB ใหม่จากศูนย์ไม่ได้ — วิธีตรวจอยู่หัวไฟล์
   **และ "อยู่ใน repo" ไม่ได้แปลว่า "ลงฐาน prod แล้ว"** — `npm run diag:migrations` คือตัวที่ตอบ
   คำถามหลัง (เกิดจริง 2026-09-15: คอลัมน์ของ `admin_users` ค้างไม่ได้รันมา 6 วัน หน้าเว็บขอ
   ใบเสนอราคาจึงขึ้น "โหลดข้อมูลผู้เสนอราคาไม่สำเร็จ" ทั้งที่โค้ดกับไฟล์ migration ขึ้น server ครบแล้ว)
@@ -310,7 +310,7 @@ npm run logworker                                          # worker เขีย
 
 ```
 chatbot/
-├── index.ts              # Express entry + route ทั้งหมด (4,531 บรรทัด · 109 route — ใช้ grep)
+├── index.ts              # Express entry + route ทั้งหมด (4,774 บรรทัด · 121 route — ใช้ grep)
 ├── pdfGenerator.ts       # PDF logic ที่เดียวในระบบ
 ├── config/               # db · clients (LINE+LLM) · auth · jwt · apiLogger · loginRateLimit
 │                         # · syncApiAuth · appUrl (ไม่มีค่าสำรอง ตั้งใจ)

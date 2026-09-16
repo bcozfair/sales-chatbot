@@ -583,8 +583,9 @@ TS ไต่ `node_modules` ขึ้นไปตามลำดับ ⇒ `<ท
 | ค่าขนส่ง · api_logs · sync API · `APP_URL` | `diag:shipping-fee` · `diag:api-log` · `diag:sync-api` · `diag:app-url` |
 | ระบบสำรองฐานข้อมูลอัตโนมัติ | `npm run diag:backup` (`-- --deep` = เปิด TOC ของไฟล์ล่าสุดจริง) — **รันบน host ไม่ใช่ในกล่อง** (crontab/`backup/`/ดิสก์ที่ต้องตรวจอยู่บน host ทั้งหมด) |
 | เพิ่ม migration ใหม่ · ก่อน deploy | `npm run diag:migrations` — **รันบน host ไม่ใช่ในกล่อง** (ในกล่องจะอ่านรายชื่อ migration ของ image เก่าแล้วตอบว่าครบเสมอ) |
+| ลบใบเสนอราคา / audit ของการลบ | `npm run diag:quote-delete` — สร้างใบทดสอบเองแล้ว ROLLBACK เสมอ **ห้ามเปลี่ยนเป็น COMMIT** · ข้อที่ห้ามล้มคือ "พิมพ์ไม่ตรงแล้วใบต้องยังอยู่" (คืน null พร้อมใบที่หายไปแล้วคือบั๊กที่ร้ายที่สุดของฟีเจอร์นี้) |
 
-รายการเต็มอยู่ใน `package.json` (วัด 2026-09-16: 51 รายการใน `scripts/diag/` — 46 `.ts` ·
+รายการเต็มอยู่ใน `package.json` (วัด 2026-09-16: 55 รายการใน `scripts/diag/` — 50 `.ts` ·
 2 `.mjs` · 2 `.sql` · โฟลเดอร์ `fixtures`)
 
 **ด่าน verify ของงานทดลอง/แล็บ รันบน Windows local ผ่านก็พอ** — ไม่ต้องยก
