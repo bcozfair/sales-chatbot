@@ -225,7 +225,7 @@ function scoreOne(e: Entry, ai: any, ms: number, cached: boolean): Scored {
 type Cache = Record<string, { content: string; ms: number }>;
 function loadCache(): Cache { try { return JSON.parse(readFileSync(CACHE, 'utf8')); } catch { return {}; } }
 function cacheKey(prompt: string): string {
-  return createHash('sha256').update(`${LLM_MODEL} ${prompt}`).digest('hex').slice(0, 32);
+  return createHash('sha256').update(`${LLM_MODEL}\u0000${prompt}`).digest('hex').slice(0, 32);
 }
 
 async function main() {
