@@ -16,6 +16,10 @@
 //      ความต่างที่เห็นระหว่าง variant จึงมาจาก prompt ล้วน ๆ ไม่ใช่ความสุ่มของโมเดล
 //   4. เฉลยที่ "ไม่ตรงกับข้อความ" ไม่ถูกนับเป็นคะแนน (`truth_alignment`) — ใบที่เซลส์
 //      ไปแก้รุ่นต่อใน LIFF ไม่ใช่ความผิดของชั้นสกัด
+//      ⚠️ `truth_alignment` ดูแค่ "รุ่น" ไม่ได้ดู "จำนวน" ⇒ เคสที่เซลส์แก้จำนวนทีหลัง
+//      ยังเล็ดลอดมาเป็นคะแนนติดลบได้ วัด 2026-09-16: เหลือ 1 เคส (a-6204 พิมพ์
+//      "จำนวน 1 ตัว" แต่ใบออกมา 2) ⇒ เพดานจริงของ "รายการ+จำนวนครบ" คือ 135/136
+//      ไม่ใช่ 136/136 อย่าไล่แก้โค้ดเพื่อเก็บเคสสุดท้ายนั้น
 //
 //  ผลข้างเคียง: ไม่เขียน DB · ไม่เรียก LINE · ยิง LLM เท่าจำนวนเคสที่ยังไม่มีใน cache
 //
@@ -308,13 +312,16 @@ async function main() {
   // ── โหมดวัดความนิ่ง: ยิงซ้ำ N รอบ ไม่แตะ cache แล้วรายงานเคสที่ตอบไม่เหมือนเดิม ──
   if (STABILITY > 1) {
     console.log(`${BOLD}วัดความนิ่งของคำตอบ${RESET} — ยิงซ้ำ ${STABILITY} รอบ ไม่ใช้ cache (${jobs.length * STABILITY} call)\n`);
-    const intents: Record<string, string[]> = {};
-    const perRound: number[] = [];
+    // เก็บ "ผลให้คะแนนเต็ม" ทุกรอบ ไม่ใช่แค่ intent — กลุ่ม A คือด่าน "ต้องไม่พัง"
+    // ซึ่งพังได้โดย intent ยังถูก (จับลูกค้าผิด / ตกรายการ / ส่วนลดเพี้ยน)
+    const rounds: Scored[][] = [];
     for (let round = 1; round <= STABILITY; round++) {
+      const scored: Scored[] = new Array(jobs.length);
       await Promise.all(Array.from({ length: CONCURRENCY }, (_, w) => (async () => {
         for (let i = w; i < jobs.length; i += CONCURRENCY) {
           const j = jobs[i];
           let content = '';
+          const t0 = Date.now();
           try {
             if (VARIANT === TWO_PASS) {
               const r1: any = await createChatCompletion({ messages: [{ role: 'user', content: j.prompt }], max_tokens: 1024 });
@@ -335,23 +342,47 @@ async function main() {
             }
           } catch { content = ''; }
           const ai = content ? parseAiJson(content) : null;
-          (intents[j.entry.id] ??= []).push(ai?.intent ?? 'ERROR');
+          scored[i] = scoreOne(j.entry, ai, Date.now() - t0, false);
         }
       })()));
-      const q = Object.values(intents).filter(v => v[round - 1] === 'QUOTATION').length;
-      perRound.push(q);
+      rounds.push(scored);
+      const q = scored.filter(r => r.intent === 'QUOTATION').length;
       process.stdout.write(`${DIM}  รอบ ${round}/${STABILITY} เสร็จ — เป็น QUOTATION ${q}/${jobs.length}${RESET}\n`);
     }
-    // ค่าเฉลี่ย ± ช่วง คือสิ่งที่เอาไปเทียบข้าม variant ได้ ตัวเลขรอบเดียวเทียบไม่ได้
-    const mean = perRound.reduce((a, b) => a + b, 0) / perRound.length;
-    console.log(`\n  QUOTATION ต่อรอบ: ${BOLD}${perRound.join(' · ')}${RESET} ⇒ เฉลี่ย ${mean.toFixed(1)} (ต่ำสุด ${Math.min(...perRound)} สูงสุด ${Math.max(...perRound)})`);
-    const unstable = Object.entries(intents).filter(([, v]) => new Set(v).size > 1);
-    console.log(`\n  เคสที่ตอบ ${BOLD}ไม่เหมือนกันทุกรอบ${RESET}: ${unstable.length ? RED : GREEN}${unstable.length}${RESET}/${jobs.length}`);
-    for (const [id, v] of unstable) {
-      const e = entries.find(x => x.id === id)!;
-      console.log(`   ${id}: ${v.join(' · ')}  ${DIM}${e.message.replace(/[\r\n]+/g, ' / ').slice(0, 60)}${RESET}`);
+
+    // ── ตัวชี้วัดต่อรอบ: ต้องอ่านเป็น "ช่วง" ไม่ใช่ตัวเลขเดียว ──
+    const metrics: [string, (r: Scored) => boolean | null][] = [
+      ['intent ถูก', r => r.intent_ok],
+      ['จับลูกค้าถูก', r => r.customer_ok],
+      ['รายการ+จำนวนครบ', r => r.items_ok],
+      ['ส่วนลดตรง', r => r.discount_ok],
+    ];
+    console.log('');
+    for (const [label, pick] of metrics) {
+      const per = rounds.map(rs => rs.filter(r => pick(r) === true).length);
+      const denom = rounds[0].filter(r => pick(r) !== null).length;
+      if (denom === 0) continue;
+      const mean = per.reduce((a, b) => a + b, 0) / per.length;
+      const spread = Math.max(...per) - Math.min(...per);
+      const mark = spread === 0 ? GREEN : YEL;
+      console.log(`  ${label.padEnd(16)} ${BOLD}${per.join(' · ')}${RESET} /${denom}  ⇒ เฉลี่ย ${mean.toFixed(1)}  ${mark}ช่วง ${spread}${RESET}`);
     }
-    console.log(`\n${DIM}ตัวเลขนี้คือ "พื้นเสียง" — ส่วนต่างระหว่าง variant ที่เล็กกว่านี้ อ่านเป็นการปรับปรุงไม่ได้${RESET}`);
+
+    // ── เคสที่ให้คำตอบไม่เหมือนเดิมทุกรอบ ──
+    // ลายเซ็นรวมทุกตัวชี้วัด: intent เท่าเดิมแต่ตกรายการบางรอบ ก็คือไม่นิ่งเหมือนกัน
+    const sig = (r: Scored) => `${r.intent}|${r.intent_ok}|${r.customer_ok}|${r.items_ok}|${r.discount_ok}`;
+    const unstable: { id: string; sigs: string[] }[] = [];
+    for (let i = 0; i < jobs.length; i++) {
+      const sigs = rounds.map(rs => sig(rs[i]));
+      if (new Set(sigs).size > 1) unstable.push({ id: jobs[i].entry.id, sigs });
+    }
+    console.log(`\n  เคสที่ตอบ ${BOLD}ไม่เหมือนกันทุกรอบ${RESET}: ${unstable.length ? RED : GREEN}${unstable.length}${RESET}/${jobs.length}`);
+    for (const u of unstable) {
+      const e = entries.find(x => x.id === u.id)!;
+      console.log(`   ${u.id}: ${DIM}${e.message.replace(/[\r\n]+/g, ' / ').slice(0, 55)}${RESET}`);
+      console.log(`     ${u.sigs.join('  |  ')}`);
+    }
+    console.log(`\n${DIM}ตัวเลขนี้คือ "พื้นเสียง" — ส่วนต่างระหว่าง variant ที่เล็กกว่าช่วงนี้ อ่านเป็นการปรับปรุงไม่ได้${RESET}`);
     return;
   }
 
