@@ -21,8 +21,10 @@ import {
   History,
   RotateCcw,
   AlertTriangle,
-  Ban
+  Ban,
+  Trash2
 } from 'lucide-react';
+import { DeleteQuotationModal } from './DeleteQuotationModal';
 
 interface QuotationItem {
   model?: string;
@@ -252,7 +254,9 @@ function formatDate(dateStr: string) {
 }
 
 export const Quotations: React.FC = () => {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
+  /** ลบใบเป็นสิทธิ์ของ admin ล้วน — endpoint ก็ตรวจซ้ำอีกชั้น การซ่อนปุ่มไม่ใช่ด่าน */
+  const canDelete = user?.role === 'admin';
 
   // Data state
   const [quotations, setQuotations] = useState<Quotation[]>([]);
@@ -295,6 +299,48 @@ export const Quotations: React.FC = () => {
   const [batches, setBatches] = useState<ExportBatch[]>([]);
   const [isLoadingBatches, setIsLoadingBatches] = useState(false);
   const [unmarkingId, setUnmarkingId] = useState<string | null>(null);
+
+  /** ใบที่กำลังถูกถามยืนยันลบ — null = กล่องปิดอยู่ */
+  const [deleteTarget, setDeleteTarget] = useState<Quotation | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  /** ข้อผิดพลาดของการลบแสดงในกล่อง ไม่ใช่แถบ error ของทั้งหน้า — คนอ่านอยู่ในกล่องตอนนั้น */
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const openDelete = (quote: Quotation) => {
+    setDeleteTarget(quote);
+    setDeleteError(null);
+  };
+
+  const closeDelete = () => {
+    setDeleteTarget(null);
+    setDeleteError(null);
+  };
+
+  const handleDelete = async (typedNo: string) => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      const response = await fetch(`/api/admin/quotations/${deleteTarget.id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quotationNo: typedNo }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result?.error || 'ลบใบเสนอราคาไม่สำเร็จ');
+
+      const deletedNo = deleteTarget.quotation_no;
+      closeDelete();
+      showToast(`ลบใบ ${deletedNo} ออกจากระบบแล้ว`);
+      // ยอดรวมและจำนวนหน้าเปลี่ยนไปด้วย ⇒ โหลดใหม่ ไม่ตัดแถวออกจาก state เอง
+      fetchQuotations();
+      void fetchManualCounts();
+    } catch (err: unknown) {
+      setDeleteError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการลบใบเสนอราคา');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const handleSort = (field: string) => {
     if (sortBy === field) {
@@ -975,6 +1021,19 @@ export const Quotations: React.FC = () => {
                                   : <RotateCcw className="w-4 h-4" />}
                               </button>
                             )}
+                            {/* ลบได้เฉพาะ admin และเฉพาะใบที่มีเลขที่ — ใบร่างไม่มีอะไรให้พิมพ์ยืนยัน
+                                (server ก็ปฏิเสธใบไม่มีเลขที่อยู่แล้ว ปุ่มนี้แค่ไม่ชวนให้กดเปล่า) */}
+                            {canDelete && quote.quotation_no && (
+                              <button
+                                type="button"
+                                className="p-2 bg-card hover:bg-red-50 text-slate-500 hover:text-red-600 border border-slate-200 hover:border-red-200 rounded-xl transition-all active:scale-95 shadow-sm"
+                                title="ลบใบเสนอราคาถาวร"
+                                aria-label={`ลบใบเสนอราคา ${quote.quotation_no} ถาวร`}
+                                onClick={(e) => { e.stopPropagation(); openDelete(quote); }}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -1222,6 +1281,24 @@ export const Quotations: React.FC = () => {
             </p>
           </div>
         </div>
+      )}
+
+      {deleteTarget?.quotation_no && (
+        <DeleteQuotationModal
+          quotationNo={deleteTarget.quotation_no}
+          customerName={deleteTarget.customer_name}
+          salespersonName={deleteTarget.salesperson_name}
+          totalText={formatNumber(deleteTarget.total_sum)}
+          createdAtText={formatDate(deleteTarget.created_at)}
+          status={getStatusStyle(deleteTarget.status).label}
+          exported={!!deleteTarget.odoo_exported_at}
+          imported={!!deleteTarget.odoo_imported_at}
+          odooSoId={deleteTarget.odoo_so_id}
+          busy={isDeleting}
+          error={deleteError}
+          onCancel={closeDelete}
+          onConfirm={handleDelete}
+        />
       )}
     </div>
   );

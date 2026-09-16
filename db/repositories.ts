@@ -943,6 +943,36 @@ export async function countExportBatches(): Promise<number> {
   } catch (err) { logErr('countExportBatches', err); return 0; }
 }
 
+/**
+ * ลบใบเสนอราคาถาวร — คืน "ทั้งแถวที่เพิ่งลบ" ไว้ทำ snapshot ลง audit หรือ null ถ้าไม่มีอะไรถูกลบ
+ *
+ * **เลขที่ใบเป็นเงื่อนไขใน SQL ไม่ใช่ `if` ใน JS** — ตรวจก่อนแล้วค่อยสั่งลบเป็นสองคำสั่งที่มีช่องว่าง
+ * ตรงกลางให้ใบถูกแก้/ออกเลขคั่นได้ ⇒ คนกดเห็นเลขหนึ่งแต่ลบอีกใบหนึ่ง ที่นี่จึงเทียบและลบในจังหวะเดียว
+ * (เทียบตรงตัวทุกอักขระ ไม่ trim ไม่แปลงพิมพ์เล็กใหญ่ — ด่านนี้มีไว้ให้ "พิมพ์ผิดแล้วไม่ลบ")
+ *
+ * **ใบที่ยังไม่มีเลขที่ลบทางนี้ไม่ได้โดยตั้งใจ** (เงื่อนไข `TRIM(quotation_no) <> ''`) — ไม่มีอะไรให้
+ * พิมพ์ยืนยันก็ไม่มีด่าน และร่างพวกนั้นถูกกวาดทิ้งเองเมื่อผู้ขายเริ่มใบใหม่อยู่แล้ว (หน้าจอก็ไม่แสดงปุ่ม)
+ *
+ * ของที่ "ไม่" หายตามใบไปด้วย และตั้งใจให้เป็นแบบนั้น:
+ *   · `quotation_export_log` — FK เป็น `ON DELETE SET NULL` และตัวแถวเก็บ `quotation_no` ไว้เอง
+ *     ⇒ ประวัติว่า "ใบนี้เคยอยู่ในไฟล์ส่งออกชุดไหน" ยังตรวจย้อนหลังได้ · `unmarkExportBatch`
+ *     กรอง `quotation_id IS NOT NULL` อยู่แล้ว การถอยทั้งชุดจึงข้ามใบที่ถูกลบไปเงียบ ๆ ไม่พัง
+ *   · `quotation_counters` — เลขเดินหน้าอย่างเดียว ⇒ เลขของใบที่ลบไป **ไม่ถูกนำกลับมาใช้ซ้ำ**
+ *     ซึ่งถูกแล้วสำหรับเอกสารที่ออกไปถึงลูกค้าแล้ว
+ */
+export async function deleteQuotationByNo(
+  db: DbExecutor, id: string, quotationNo: string
+): Promise<Record<string, any> | null> {
+  const { rows } = await db.query(
+    `DELETE FROM quotations
+      WHERE id = $1::uuid
+        AND quotation_no = $2
+        AND TRIM(quotation_no) <> ''
+      RETURNING *`,
+    [id, quotationNo]);
+  return rows[0] ?? null;
+}
+
 // ═══════════════════════════ products ═══════════════════════════
 
 /**

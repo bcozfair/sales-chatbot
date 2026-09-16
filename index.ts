@@ -43,6 +43,7 @@ import {
   unmarkExportBatch,
   getExportBatches,
   countExportBatches,
+  deleteQuotationByNo,
   listApiLogs,
   countApiLogs,
   getApiLogById,
@@ -109,7 +110,7 @@ import jwt from 'jsonwebtoken';
 import { pool, withTransaction, type DbExecutor } from './config/db.js';
 import { getJwtSecret } from './config/jwt.js';
 import { getAppUrl } from './config/appUrl.js';
-import { adminAuthMiddleware, requireRole, type Role } from './config/auth.js';
+import { adminAuthMiddleware, requireRole, type Role, type AdminIdentity } from './config/auth.js';
 import {
   listOdooQuotationMakers,
   isValidQuotationMaker,
@@ -140,6 +141,7 @@ import { isCustomerInfoIncomplete } from './utils/flexTemplates.js';
 import { thaiDateParts } from './utils/thaiTime.js';
 import { parseDeliveryTypeOverride } from './utils/deliveryTerms.js';
 import { apiLogMiddleware, getRequestId } from './config/apiLogger.js';
+import { insertQuotationDeleteAudit } from './db/logRepositories.js';
 import { logsRouter } from './routes/logs.js';
 import {
   initApiLogWriter,
@@ -3802,6 +3804,63 @@ app.post('/api/admin/quotations/:id/unmark-export', adminAuthMiddleware, require
     res.json({ success: true });
   } catch (err: any) {
     console.error("POST /api/admin/quotations/:id/unmark-export error:", err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+/**
+ * --- API Endpoint: ลบใบเสนอราคาถาวร (แอดมินเท่านั้น) ---
+ *
+ * **`requireRole('admin')` ตัวเดียว** — ต่างจาก endpoint อื่นในกลุ่มนี้ที่เปิดถึง approver/subadmin
+ * ด้วย เพราะทุกตัวข้างบนย้อนได้ (ถอยเครื่องหมายส่งออกแล้วส่งใหม่) ส่วนตัวนี้ย้อนไม่ได้
+ *
+ * **เลขที่ใบที่พิมพ์ยืนยันถูกตรวจซ้ำที่นี่ ไม่ใช่เชื่อฝั่งจอ** — ปุ่มที่จอปลดล็อกให้เป็นเรื่องของ
+ * ความสะดวก ส่วนด่านจริงคือเงื่อนไขใน SQL ของ `deleteQuotationByNo()` (กฎเหล็ก "ตรวจทั้งสองฝั่ง")
+ * ⇒ ยิง API ตรงโดยข้ามหน้าจอก็ยังต้องส่งเลขที่ที่ตรงกับในฐานมาอยู่ดี
+ *
+ * **ใบที่ส่งออก/นำเข้า Odoo แล้วลบได้ ไม่บล็อก** (เจ้าของตัดสิน 2026-09-16) — หน้าจอเตือนให้เห็น
+ * ก่อนกดว่าเอกสารฝั่ง Odoo ไม่ถูกลบตาม ระบบนี้ไม่มีทางไปลบของใน Odoo ให้อยู่แล้ว
+ *
+ * การลบกับการเขียน audit อยู่ใน transaction เดียวกัน ⇒ ไม่มีทางเกิด "ใบหายแต่ไม่มีบันทึกว่าใครลบ"
+ * (เหตุผลเต็มอยู่ที่หัวของ `insertQuotationDeleteAudit`)
+ */
+app.delete('/api/admin/quotations/:id', adminAuthMiddleware, requireRole('admin'), express.json(), async (req: any, res: any) => {
+  try {
+    const id = String(req.params.id || '').trim();
+    if (!UUID_RE.test(id)) {
+      return res.status(400).json({ error: 'รหัสใบเสนอราคาไม่ถูกต้อง' });
+    }
+
+    // ไม่ trim ค่าที่พิมพ์มา — ด่านนี้คือ "พิมพ์ให้ตรง" การเก็บกวาดให้ผู้ใช้ทำให้ด่านหลวมลงเปล่า ๆ
+    const confirm = typeof req.body?.quotationNo === 'string' ? req.body.quotationNo : '';
+    if (!confirm) {
+      return res.status(400).json({ error: 'ต้องพิมพ์เลขที่ใบเสนอราคาเพื่อยืนยันการลบ' });
+    }
+
+    const admin = req.admin as AdminIdentity;
+
+    const deleted = await withTransaction(async client => {
+      const row = await deleteQuotationByNo(client, id, confirm);
+      if (!row) return null;
+      await insertQuotationDeleteAudit(client, {
+        actorId: admin.id,
+        actorName: admin.name || admin.username,
+        requestId: getRequestId(req),
+        ip: getClientIp(req),
+        quotation: row,
+      });
+      return row;
+    });
+
+    // แยกไม่ออกว่า "ไม่มีใบนี้" หรือ "เลขที่ไม่ตรง" ด้วย query เดียว และไม่ต้องแยก —
+    // ทั้งสองกรณีคำตอบที่ถูกต้องคือ "ยังไม่ได้ลบอะไร ไปตรวจเลขที่ใหม่"
+    if (!deleted) {
+      return res.status(409).json({ error: 'เลขที่ใบเสนอราคาที่พิมพ์ไม่ตรงกับใบนี้ หรือใบนี้ถูกลบไปแล้ว' });
+    }
+
+    res.json({ success: true, quotation_no: deleted.quotation_no });
+  } catch (err: any) {
+    console.error("DELETE /api/admin/quotations/:id error:", err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

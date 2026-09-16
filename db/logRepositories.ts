@@ -1,4 +1,4 @@
-import { pool } from '../config/db.js';
+import { pool, type DbExecutor } from '../config/db.js';
 
 /**
  * คำสั่งอ่านของหน้า "บันทึกและรายงาน" (traffic_daily / audit_logs / system_logs)
@@ -7,8 +7,10 @@ import { pool } from '../config/db.js';
  * การไปแทรกโค้ดใหม่ในไฟล์เดียวกันคือความเสี่ยงที่ไม่มีใครได้อะไรกลับมา
  * ถอนทั้งแผนออก = ลบไฟล์นี้ + routes/logs.ts + 2 บรรทัดใน index.ts จบ
  *
- * ทุกฟังก์ชันในไฟล์นี้ "อ่านอย่างเดียว" ยกเว้น recordLogAccess ซึ่งเป็นการบันทึกว่าใครมาเปิดดู log
- * (ข้อบังคับของ พ.ร.บ. เรื่องการกำหนดสิทธิ์เข้าถึงและตรวจสอบได้)
+ * ทุกฟังก์ชันในไฟล์นี้ "อ่านอย่างเดียว" ยกเว้นสองตัวที่เขียน `audit_logs`:
+ *   · `recordLogAccess`        — ใครมาเปิดดู/ส่งออก log (ข้อบังคับของ พ.ร.บ. เรื่องสิทธิ์เข้าถึง)
+ *   · `insertQuotationDeleteAudit` — แอดมินลบใบเสนอราคาถาวร
+ * สองตัวนี้ **ลงทะเบียนกันคนละแบบโดยเจตนา** ดูเหตุผลที่หัวของแต่ละตัว
  */
 
 /** ทุก query ในไฟล์นี้อ่านตารางที่โตได้ ⇒ ต้องมีเพดานเวลาเสมอ ไม่ให้ค้างจนบล็อกงานอื่น */
@@ -386,10 +388,11 @@ export function getWorkerStatus() {
 // ═══════════════════════════ บันทึกว่าใครมาเปิดดู log ═══════════════════════════
 
 /**
- * เขียน audit_logs สำหรับการเปิดดู/ส่งออก log — จุดเดียวในแอปทั้งระบบที่เขียนตารางนี้
+ * เขียน audit_logs สำหรับการเปิดดู/ส่งออก log
  *
  * ⚠️ ห้าม await ในเส้นทางของ request และห้าม throw ไม่ว่ากรณีใด
  *   การบันทึกว่า "มีคนมาดู log" ต้องไม่มีวันทำให้ "การดู log" ล้มเหลว
+ *   (ตัวลบใบเสนอราคาข้างล่างเลือกตรงข้ามด้วยเหตุผลที่เขียนไว้ที่นั่น — อย่ายุบสองตัวนี้เข้าหากัน)
  */
 export function recordLogAccess(info: {
   action: 'log.view' | 'log.export';
@@ -412,6 +415,44 @@ export function recordLogAccess(info: {
   ).catch(err => {
     console.error('[logs] บันทึกการเข้าดู log ไม่สำเร็จ (ไม่กระทบการแสดงผล):', err?.message ?? err);
   });
+}
+
+/**
+ * เขียน audit_logs ตอนแอดมินลบใบเสนอราคาถาวร — เก็บทั้งแถวที่ถูกลบไว้ใน `before`
+ *
+ * ⚠️ **ตัวนี้ throw ได้และต้องอยู่ใน transaction เดียวกับ DELETE** ซึ่งตรงข้ามกับ `recordLogAccess`
+ *   ข้างบนโดยเจตนา เหตุผลคือของสองอย่างนี้เสียหายไม่เท่ากัน:
+ *     · log หายไป 1 แถวตอนมีคนเปิดดูรายงาน = รู้น้อยลงหนึ่งครั้ง ของยังอยู่ครบ
+ *     · ใบถูกลบแล้วแถว audit เขียนไม่ติด = **ไม่เหลือร่องรอยว่าเคยมีใบนี้อยู่เลย** และไม่มีทางสร้างคืน
+ *   ⇒ ที่นี่เลือก "ลบไม่สำเร็จทั้งคู่" ดีกว่า "ลบสำเร็จแบบไม่มีใครรู้" · แถวนี้คือสำเนาสุดท้ายของใบ
+ *   (`audit_logs` ถูก REVOKE UPDATE/DELETE ไว้ และเก็บ 2 ปีตาม docs/plan-logging-audit-compliance.md)
+ *
+ * actor_source = 'direct' เพราะแอดมินที่กดมาจาก JWT ของ request นั้นตรง ๆ ไม่ต้องรอ
+ * logworker เดาย้อนหลังจาก api_logs เหมือนแถวที่ trigger เขียน (ซึ่งได้ actor_type 'pending')
+ */
+export async function insertQuotationDeleteAudit(db: DbExecutor, info: {
+  actorId: number;
+  actorName: string | null;
+  requestId?: string;
+  ip?: string | null;
+  quotation: Record<string, any>;
+}): Promise<void> {
+  const q = info.quotation;
+  await db.query(
+    `INSERT INTO audit_logs
+       (request_id, actor_type, actor_id, actor_name, actor_source,
+        action, entity_type, entity_id, entity_label, before, ip, note)
+     VALUES ($1, 'admin', $2, $3, 'direct',
+             'quotation.delete', 'quotation', $4, $5, $6::jsonb, $7, $8)`,
+    [info.requestId ?? null,
+     String(info.actorId),
+     info.actorName,
+     String(q.id),
+     // entity_label กว้าง 200 — เลขที่ใบยาวสุด 100 จึงไม่มีทางล้น
+     q.quotation_no ?? null,
+     JSON.stringify(q),
+     info.ip ?? null,
+     `ลบใบเสนอราคา ${q.quotation_no ?? '(ไม่มีเลขที่)'} · สถานะ ${q.status} · ยอดรวม ${q.total_sum}`]);
 }
 
 // ═══════════════════════ รายงานการสำรองฐานข้อมูลอัตโนมัติ ═══════════════════════
