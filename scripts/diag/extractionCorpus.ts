@@ -243,12 +243,14 @@ async function buildGroupB(): Promise<CorpusEntry[]> {
 
 /** ── กลุ่ม C: ข้อความที่ไม่ควรกลายเป็นใบ (วัด false positive) ───────────────── */
 async function buildGroupC(): Promise<CorpusEntry[]> {
+  // เรียงด้วย md5(id) ไม่ใช่ random() — ชุดตัวอย่างต้องเหมือนเดิมทุกครั้งที่สร้างใหม่
+  // ไม่งั้น baseline ที่สร้างคนละรอบจะเทียบกันไม่ได้ ทั้งที่ดูเหมือนเป็นชุดเดียวกัน
   const { rows } = await pool.query(
     `SELECT id, user_id, content, reply_content, created_at
        FROM messages
       WHERE type = 'text' AND ${UNCLEAR_REPLY_SQL} AND NOT ${LOOKS_REAL_SQL}
         AND ${HUMAN_TYPED_SQL}
-      ORDER BY random() LIMIT $1`, [LIMIT_C]);
+      ORDER BY md5(id::text) LIMIT $1`, [LIMIT_C]);
 
   const out: CorpusEntry[] = [];
   for (const r of rows) {

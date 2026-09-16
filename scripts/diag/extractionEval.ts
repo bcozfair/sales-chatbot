@@ -99,8 +99,17 @@ ${message}
 ห้ามเดาข้อมูลที่ไม่มีในข้อความ — ไม่มีให้เขียนว่า "ไม่ระบุ" · ตอบเป็นข้อความธรรมดา ไม่ใช่ JSON`;
 }
 
-/** normalize รุ่นสินค้า/ชื่อ — ตัดช่องว่าง ขีด จุด แล้ว lower */
-function norm(s: any): string { return String(s ?? '').replace(/[\s\-_.()]/g, '').toLowerCase(); }
+/**
+ * normalize รุ่นสินค้า/ชื่อ — ตัดช่องว่าง ขีด จุด แล้ว lower
+ *
+ * `เเ` (สระเอ สองตัว) → `แ` ด้วย: คนพิมพ์ไทยพิมพ์แบบนี้ประจำ และมันไม่ใช่ความผิดของ
+ * ชั้นสกัด — เจอจริง 3 เคสใน 140 (2026-09-16) ที่เซลส์พิมพ์ "บริษัท เเสงพิทักษ์"
+ * แล้วใบออกมาเป็น "แสงพิทักษ์" ได้ถูกต้อง ⇒ ถ้าไม่พับให้เท่ากัน ตัววัดจะรายงานว่า
+ * ชั้นสกัดจับลูกค้าผิด ทั้งที่มันคืนตามที่เซลส์พิมพ์มาถูกทุกตัวอักษร
+ */
+function norm(s: any): string {
+  return String(s ?? '').replace(/เเ/g, 'แ').replace(/[\s\-_.()"']/g, '').toLowerCase();
+}
 
 /**
  * ประกอบ historyContext แบบเดียวกับ extractQuoteFromText() — คัดตรรกะมา ไม่ใช่เรียกของจริง
@@ -428,6 +437,12 @@ async function main() {
   } else if (existsSync(BASELINE)) {
     const base = JSON.parse(readFileSync(BASELINE, 'utf8'));
     console.log(`\n${BOLD}เทียบกับ baseline${RESET} ${DIM}(${base.variant} · ${base.generated_at?.slice(0, 16)})${RESET}`);
+    // corpus ดูด "ข้อความล่าสุด N เคส" ⇒ ชุดเลื่อนเองทุกวันที่มีแชทใหม่เข้ามา
+    // เทียบข้ามชุดแล้วส่วนต่างจะมาจากเคสที่เปลี่ยนไป ไม่ใช่จาก prompt ที่แก้ — ต้องฟ้อง
+    if (base.corpus_generated_at && base.corpus_generated_at !== corpus.generated_at) {
+      console.log(`   ${RED}⚠ corpus คนละชุดกับตอนบันทึก baseline${RESET} (baseline ใช้ ${base.corpus_generated_at?.slice(0, 16)} · ตอนนี้ ${corpus.generated_at?.slice(0, 16)})`);
+      console.log(`   ${DIM}ส่วนต่างข้างล่างอ่านเป็น "ผลของการแก้ prompt" ไม่ได้ — สร้าง baseline ใหม่ด้วย --save ก่อน${RESET}`);
+    }
     const rows: [string, number, number][] = [
       ['A intent',   summary.A.intent_ok,   base.A.intent_ok],
       ['A ลูกค้า',    summary.A.customer_ok, base.A.customer_ok],
