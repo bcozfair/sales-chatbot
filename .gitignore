@@ -47,3 +47,10 @@ data/eval/customer_search_llm_cache.json
 # เจ้าของเปิดดูผ่าน http://localhost:5174/ ซึ่งเสิร์ฟโฟลเดอร์นี้ตรง ๆ (2026-09-15)
 mockups/
 mockup/
+
+# ชุดวัดชั้นสกัดคำสั่ง — corpus/baseline/cache มีข้อความจริงของลูกค้า (PII) และสร้างใหม่ได้เสมอ
+# (เคสที่มีเฉลยซึ่งตั้งใจ commit จะอยู่ใน data/eval/extraction_cases.json ตามแบบของ customer_search)
+data/eval/extraction_corpus.json
+data/eval/extraction_baseline.json
+data/eval/extraction_llm_cache.json
+data/eval/extraction_result_*.json
