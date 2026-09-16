@@ -58,6 +58,18 @@ const CONCURRENCY = argNum('concurrency', 4);
  */
 const STABILITY = argNum('stability', 0);
 const ONLY_GROUP = argStr('group', '');
+/**
+ * ขอบเขตของ "ประวัติที่เอาเข้า prompt" — ตัวแปรที่อยู่นอก prompt แต่เปลี่ยนคำตอบได้พอกัน
+ *   confirm (ค่าเดิมของ production) ตัดเมื่อบอทตอบว่ายืนยัน/ยกเลิกแล้ว
+ *   draft                          ตัดที่ร่างใบล่าสุด โดยเก็บแถวที่สร้างร่างนั้นไว้ด้วย
+ *   both                           ตัดที่ marker อันไหนก็ได้ที่ใหม่กว่า
+ */
+const HISTORY_CUT = argStr('history-cut', 'confirm') as HistoryCut;
+const HISTORY_WINDOW = argNum('history-window', 15);
+/** ชื่อที่ใช้ตั้งชื่อไฟล์ผล — config ของประวัติเป็นส่วนหนึ่งของ "สิ่งที่ทดลอง" ไม่ใช่ของแถม */
+const RUN_NAME = [VARIANT || 'production',
+  HISTORY_CUT !== 'confirm' ? `cut-${HISTORY_CUT}` : '',
+  HISTORY_WINDOW !== 15 ? `win${HISTORY_WINDOW}` : ''].filter(Boolean).join('_');
 const DIR = 'data/eval';
 const CORPUS = `${DIR}/extraction_corpus.json`;
 const CACHE = `${DIR}/extraction_llm_cache.json`;
@@ -117,15 +129,38 @@ function norm(s: any): string {
  * ⚠️ ตรรกะสองชุดนี้ต้องตรงกัน — เปลี่ยนที่ quoteExtraction.ts เมื่อไหร่ ต้องตามมาแก้ที่นี่
  *    (หน้าต่าง 15 นาที · ตัดตรงที่บอทตอบว่ายืนยัน/ยกเลิกแล้ว · เรียงเก่า→ใหม่)
  */
-export function buildHistoryContext(history: HistoryRow[], windowMinutes = 15): string {
-  let recent = history.filter(h => h.seconds_before <= windowMinutes * 60);
-  const closeIndex = recent.findIndex(h => h.reply_content && (
+export type HistoryCut = 'confirm' | 'draft' | 'both';
+
+/** บอทตอบว่า "จบเรื่องแล้ว" — ยืนยัน/ยกเลิก/ลงทะเบียน (ตรรกะเดิมของ production) */
+function isCloseRow(h: HistoryRow): boolean {
+  return !!h.reply_content && (
     h.reply_content.includes('ยกเลิกการออกใบเสนอราคา') ||
     h.reply_content.includes('ยกเลิกการเสนอราคา') ||
     h.reply_content.includes('ยืนยันสำเร็จ') ||
-    h.reply_content.includes('ลงทะเบียนสำเร็จ')
-  ));
-  if (closeIndex !== -1) recent = recent.slice(0, closeIndex);
+    h.reply_content.includes('ลงทะเบียนสำเร็จ'));
+}
+
+/** บอทตอบด้วย "ร่างใบเสนอราคา" — จุดที่ใบใบหนึ่งเริ่มมีตัวตน */
+function isDraftRow(h: HistoryRow): boolean {
+  return !!h.reply_content && h.reply_content.includes('ร่างใบเสนอราคา');
+}
+
+export function buildHistoryContext(
+  history: HistoryRow[],
+  windowMinutes = 15,
+  cut: HistoryCut = 'confirm',
+): string {
+  let recent = history.filter(h => h.seconds_before <= windowMinutes * 60);
+  // history เรียงใหม่→เก่า (index 0 = ข้อความที่ใกล้ที่สุด) ⇒ "ตัด" = ตัดหางที่เก่ากว่า marker ทิ้ง
+  //   close marker ที่ index i  ⇒ เก็บ 0..i-1  (ไม่เอาแถวที่ปิดเรื่องไปแล้ว)
+  //   draft marker ที่ index j  ⇒ เก็บ 0..j    (**เอาแถวที่สร้างร่างไว้ด้วย** เพราะแถวนั้น
+  //                                             คือที่ที่ลูกค้าและรายการของใบนี้ถูกพิมพ์มา
+  //                                             ตัดทิ้งเมื่อไหร่ ข้อความ "ลด 30%" ที่ตามมา
+  //                                             จะไม่เหลือบริบทอะไรให้เชื่อมเลย)
+  const closeIndex = (cut === 'confirm' || cut === 'both') ? recent.findIndex(isCloseRow) : -1;
+  const draftIndex = (cut === 'draft' || cut === 'both') ? recent.findIndex(isDraftRow) : -1;
+  if (closeIndex !== -1 && (draftIndex === -1 || closeIndex < draftIndex)) recent = recent.slice(0, closeIndex);
+  else if (draftIndex !== -1) recent = recent.slice(0, draftIndex + 1);
   if (!recent.length) return '';
   const chat = [...recent].reverse();
   return 'ประวัติการสนทนาล่าสุดในห้องแชทนี้:\n' +
@@ -225,7 +260,7 @@ function scoreOne(e: Entry, ai: any, ms: number, cached: boolean): Scored {
 type Cache = Record<string, { content: string; ms: number }>;
 function loadCache(): Cache { try { return JSON.parse(readFileSync(CACHE, 'utf8')); } catch { return {}; } }
 function cacheKey(prompt: string): string {
-  return createHash('sha256').update(`${LLM_MODEL} ${prompt}`).digest('hex').slice(0, 32);
+  return createHash('sha256').update(`${LLM_MODEL}\u0000${prompt}`).digest('hex').slice(0, 32);
 }
 
 async function main() {
@@ -247,12 +282,13 @@ async function main() {
     ? 'อ่าน/ตีความก่อน (LLM รอบ 1) แล้วค่อยสกัดด้วย prompt production (รอบ 2) — 2 call ต่อข้อความ'
     : VARIANT ? VARIANTS[VARIANT].description : '';
   console.log(`  prompt: ${VARIANT ? `${YEL}variant "${VARIANT}"${RESET} — ${variantDesc}` : `${GREEN}production ปัจจุบัน${RESET}`}`);
-  console.log(`  model : ${LLM_MODEL}\n`);
+  console.log(`  model : ${LLM_MODEL}`);
+  console.log(`  ประวัติ: ตัดแบบ ${BOLD}${HISTORY_CUT}${RESET} · หน้าต่าง ${BOLD}${HISTORY_WINDOW}${RESET} นาที${HISTORY_CUT === 'confirm' && HISTORY_WINDOW === 15 ? DIM + ' (ค่าเดิมของ production)' + RESET : YEL + ' ← ต่างจาก production' + RESET}\n`);
 
   // ประกอบ prompt ทุกเคสก่อน เพื่อบอกจำนวน call ที่ต้องยิงจริงได้ก่อนเริ่มจ่ายเงิน
   const cache = loadCache();
   const jobs = entries.map(e => {
-    const historyContext = buildHistoryContext(e.history);
+    const historyContext = buildHistoryContext(e.history, HISTORY_WINDOW, HISTORY_CUT);
     // two-pass: prompt รอบ 2 ขึ้นกับผลรอบ 1 ⇒ ประกอบไม่ได้ตอนนี้ ใช้ prompt รอบ 1 ไปก่อน
     // (cache key จึงเป็นของรอบ 1 — รอบ 2 มี key ของตัวเองตอนยิง)
     if (VARIANT === TWO_PASS) {
@@ -378,7 +414,9 @@ async function main() {
 
   const summary = {
     generated_at: new Date().toISOString(),
-    variant: VARIANT || 'production',
+    variant: RUN_NAME,
+    history_cut: HISTORY_CUT,
+    history_window: HISTORY_WINDOW,
     model: LLM_MODEL,
     corpus_generated_at: corpus.generated_at,
     A: {
@@ -468,9 +506,12 @@ async function main() {
       console.log(`     ${f.id}: intent ${b.intent}→${f.intent} · items ${b.items_ok}→${f.items_ok}`);
     }
   }
-  const out = `${DIR}/extraction_result_${VARIANT || 'production'}.json`;
+  const out = `${DIR}/extraction_result_${RUN_NAME}.json`;
   writeFileSync(out, JSON.stringify(summary, null, 2), 'utf8');
   console.log(`${DIM}ผลเต็มอยู่ที่ ${out}${RESET}`);
 }
 
-main().catch(e => { console.error(e); process.exit(1); });
+// รัน main เฉพาะตอนถูกเรียกเป็นสคริปต์ — ไฟล์นี้ export buildHistoryContext ให้ด่านอื่น
+// import ไปใช้ด้วย การ import แล้วเผลอรัน eval ทั้งชุด = ยิง LLM ทั้ง corpus โดยไม่ตั้งใจ
+const isEntry = process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop()!);
+if (isEntry) main().catch(e => { console.error(e); process.exit(1); });
