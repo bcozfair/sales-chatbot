@@ -570,6 +570,7 @@ TS ไต่ `node_modules` ขึ้นไปตามลำดับ ⇒ `<ท
 | อะไรที่เกี่ยวกับวันที่ | `npm run diag:date-filter` |
 | flow ยืนยัน / การออกเลขใบ | `npm run diag:confirm-race` (ต้องเปิด server ก่อน) |
 | กฎสต็อก / validation ของใบ | `npm run diag:stock-rule` · `diag:stock-rule-put` · `diag:quote-validation` |
+| รายการ "รุ่นใกล้เคียง" ที่ให้เซลส์กดเลือก | `npm run diag:product-candidates` — เฉลยมาจากประวัติแชทจริง ไม่มี fixture ในกิต ⇒ **จำนวนเคสขยับได้ ตัวที่เป็น gate คือ "หลุดจากรายการ 0 เคส"** ไม่ใช่เปอร์เซ็นต์ |
 | ชื่อลูกค้า / ส่งออก Odoo | `npm run diag:odoo-export` — ถ้าขึ้น `(ตรวจ 0 ชื่อ)` แปลว่าด่านผ่านแบบว่างเปล่า อย่าเชื่อ |
 | กฎเครดิต | `npm run diag:credit-hold` (read-only รันกับ prod ได้) |
 | `prompt` ของการสกัด / Flex | `npm run diag:line-parity` |
@@ -583,7 +584,7 @@ TS ไต่ `node_modules` ขึ้นไปตามลำดับ ⇒ `<ท
 | ระบบสำรองฐานข้อมูลอัตโนมัติ | `npm run diag:backup` (`-- --deep` = เปิด TOC ของไฟล์ล่าสุดจริง) — **รันบน host ไม่ใช่ในกล่อง** (crontab/`backup/`/ดิสก์ที่ต้องตรวจอยู่บน host ทั้งหมด) |
 | เพิ่ม migration ใหม่ · ก่อน deploy | `npm run diag:migrations` — **รันบน host ไม่ใช่ในกล่อง** (ในกล่องจะอ่านรายชื่อ migration ของ image เก่าแล้วตอบว่าครบเสมอ) |
 
-รายการเต็มอยู่ใน `package.json` (วัด 2026-09-15: 49 รายการใน `scripts/diag/` — 44 `.ts` ·
+รายการเต็มอยู่ใน `package.json` (วัด 2026-09-16: 51 รายการใน `scripts/diag/` — 46 `.ts` ·
 2 `.mjs` · 2 `.sql` · โฟลเดอร์ `fixtures`)
 
 **ด่าน verify ของงานทดลอง/แล็บ รันบน Windows local ผ่านก็พอ** — ไม่ต้องยก

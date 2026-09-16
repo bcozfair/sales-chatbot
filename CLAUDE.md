@@ -108,7 +108,7 @@ npm run logworker                                          # worker เขีย
 ```
 
 `npm test` เป็น stub (`exit 1`) โดยตั้งใจ — **ด่านตรวจของโปรเจคนี้คือ typecheck + `scripts/diag/*`**
-(วัด 2026-09-15: 49 รายการใน `scripts/diag/` · 30+ npm script) ดูรายการเต็มใน `package.json`
+(วัด 2026-09-16: 51 รายการใน `scripts/diag/` · 37 npm script `diag:*`) ดูรายการเต็มใน `package.json`
 และดูว่าตัวไหนเป็น gate ใน `AGENTS.md` ข้อ 6
 
 ---

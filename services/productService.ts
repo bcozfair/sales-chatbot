@@ -137,6 +137,74 @@ function keyTokenMismatchReason(raw: string, product: Product): string | null {
 }
 
 // ─────────────────────────────────────────────
+//  รายการ "รุ่นใกล้เคียง" ที่ส่งกลับให้เซลส์กดเลือก — ยุบรุ่นซ้ำ + ถ่วงน้ำหนักของที่มีสต็อก
+//
+//  วัดกับเคสจริง 342 เคส (ข้อความที่บอทเคยตอบ "พบหลายรุ่นใกล้เคียง" ระหว่าง 2026-06-17 ถึง
+//  2026-09-16 จับคู่กับรุ่นที่เซลส์เลือกจริงในใบที่ออกตามมาภายใน 15 นาที):
+//    ของเดิม — 3 ตัว เรียงตาม similarity ล้วน   รุ่นที่ถูกอยู่ในรายการ 87.4%
+//    ของนี้  — 5 ตัว + โบนัสมีของ + ยุบรุ่นซ้ำ    95.9%  (ดีขึ้น 29 เคส · แย่ลง 0 เคส)
+//
+//  **ทำไมเป็น "โบนัส" ไม่ใช่ "เอาของที่มีสต็อกขึ้นก่อน"** — รุ่นที่เซลส์เลือกจริงมีของ 90.1%
+//  สูงพอให้ถ่วงน้ำหนัก แต่ไม่ใช่ทั้งหมด: 34/342 เคสเขาตั้งใจสั่งรุ่นที่ของเหลือ 0 ⇒ เรียง
+//  "มีของก่อน" แบบแข็ง ๆ วัดแล้วพัง 14 เคส · ค่าโบนัสกวาดตั้งแต่ 0.02 ถึง 1.0 แล้ว
+//  ช่วง 0.05–0.10 ดีที่สุด และตั้งแต่ 0.15 ขึ้นไปผลรวมเริ่มแย่ลง
+//
+//  ⚠️ **โบนัสนี้ใช้ตอน "เลือกว่าจะโชว์อะไร" เท่านั้น ห้ามย้ายไปใส่ใน ORDER BY ของ SQL และ
+//  ห้ามเขียนทับ `_score`** เพราะ `_score` ของแถวแรกคือตัวตัดสินว่าจะ "เชื่อได้เลย (≥0.9)"
+//  หรือ "ให้ AI เลือก (≥0.20)" — วัดกับรหัสที่เซลส์พิมพ์จริง 3,679 รหัส: ย้ายไปไว้ใน SQL
+//  แล้วหัวแถวของเส้น AI เปลี่ยน 90 รหัส (4.8%) ทั้งที่เส้นนั้นเลือกถูกอยู่แล้ว
+//  (เส้น ≥0.9 เปลี่ยน 0 รหัส เพราะรหัสที่ตรงเป๊ะถูก Stage 1 คว้าไปก่อนแล้ว)
+//
+//  **ยุบรุ่นซ้ำ** — ฐานสินค้ามี 453 กลุ่มที่ชื่อรุ่น normalize แล้วตรงกัน (920 แถว) และ 419 กลุ่ม
+//  ชื่อเหมือนกันทุกตัวอักษร เช่น `FP-108EX 220 V.S1BW` (ของ 3,184) กับ `FP-108 EX 220 V.S1BW`
+//  (ของ 0) ⇒ เซลส์เห็นสองบรรทัดที่แยกไม่ออกและเปลืองช่องไปเปล่า ๆ เก็บตัวที่ของเหลือมากกว่าไว้
+//  (ต้นตออยู่ที่ข้อมูล Odoo ไม่ใช่ที่นี่ — ที่นี่แค่ไม่เอามาโชว์ซ้ำ)
+// ─────────────────────────────────────────────
+export const CANDIDATE_LIMIT = 5;
+const IN_STOCK_BONUS = 0.05;
+
+export function buildCandidateList<T extends Product>(rows: T[]): T[] {
+  const byModel = new Map<string, T>();
+  for (const row of rows) {
+    const key = normalize(row.model || '');
+    const kept = byModel.get(key);
+    if (
+      !kept ||
+      Number(row.quantity_on_hand_unreserved || 0) > Number(kept.quantity_on_hand_unreserved || 0)
+    ) {
+      byModel.set(key, row);
+    }
+  }
+
+  const rankOf = (p: T) =>
+    (Number(p._score) || 0) +
+    (Number(p.quantity_on_hand_unreserved || 0) > 0 ? IN_STOCK_BONUS : 0);
+
+  // Array.prototype.sort เสถียรตั้งแต่ ES2019 ⇒ แถวที่คะแนนเท่ากันคงลำดับเดิมที่ต้นทางให้มา
+  // (สำคัญกับ Stage 1.3/legacy ที่ไม่มี `_score` และเรียงมาด้วยเกณฑ์ของตัวเองแล้ว)
+  return [...byModel.values()].sort((a, b) => rankOf(b) - rankOf(a)).slice(0, CANDIDATE_LIMIT);
+}
+
+// ─────────────────────────────────────────────
+//  รายงานข้อความของรายการรุ่นใกล้เคียง — ที่เดียวทั้งสามเส้นทาง (stage 1.3 / stage 2 / legacy)
+// ─────────────────────────────────────────────
+function candidateReport(header: string, candidates: Product[]): string {
+  let report = `${header}\n`;
+  candidates.forEach((p) => {
+    const price = Number(p.sales_price || 0).toLocaleString();
+    const stock = Number(p.quantity_on_hand_unreserved || 0);
+    report += `📌 รุ่น: ${p.model}\n`;
+    report += `💵 ฿${price}  (📦คงเหลือ ${stock})\n`;
+    report += `-------------------------------------\n`;
+  });
+  return report;
+}
+
+// ด่าน scripts/diag/productCandidateEval.ts เรียก normalize ตัวนี้ผ่านชื่อนี้ — ให้ด่านตรวจ
+// ใช้ของจริงร่วมกัน ไม่ใช่สำเนาที่แช่แข็งไว้แล้วเพี้ยนจากกันเงียบ ๆ
+export { normalize as normalizeProductCode };
+
+// ─────────────────────────────────────────────
 //  Main findProduct
 // ─────────────────────────────────────────────
 export async function findProduct(codeRaw: any, chatContext?: string): Promise<FindProductResult> {
@@ -170,16 +238,12 @@ export async function findProduct(codeRaw: any, chatContext?: string): Promise<F
   // Stage 1.3 พบ candidates แต่ AI เลือกไม่ได้ → หยุดเลย ไม่ไป Stage ถัดไป
   // (ป้องกัน Stage 2 fuzzy auto-select ผิดเพราะ query สั้นกว่า model ใน DB)
   if (stage13.candidates.length > 0) {
-    const top3 = stage13.candidates.slice(0, 3);
-    let report = `⚠️ พบหลายรุ่นที่ตรงกับ "${codeTrimmed}" กรุณาระบุเพิ่มเติม\n`;
-    top3.forEach((p) => {
-      const price = Number(p.sales_price || 0).toLocaleString();
-      const stock = Number(p.quantity_on_hand_unreserved || 0);
-      report += `📌 รุ่น: ${p.model}\n`;
-      report += `💵 ฿${price}  (📦คงเหลือ ${stock})\n`;
-      report += `-------------------------------------\n`;
-    });
-    return { found: false, candidates: top3, report };
+    const candidates = buildCandidateList(stage13.candidates);
+    const report = candidateReport(
+      `⚠️ พบหลายรุ่นที่ตรงกับ "${codeTrimmed}" กรุณาระบุเพิ่มเติม`,
+      candidates
+    );
+    return { found: false, candidates, report };
   }
 
   // ── Stage 1.5: Numeric code search (LIKE '%code%' ใน model+name) ─────────
@@ -581,17 +645,10 @@ async function fuzzySearch(codeTrimmed: string, qNorm: string, chatContext?: str
   }
 
   // ── score ต่ำทุกตัว → แสดง candidates ให้ user ระบุเพิ่ม ──────────────
-  const top3 = candidates.slice(0, 3);
-  let report = `⚠️ รุ่นใกล้เคียง "${codeTrimmed}"\n`;
-  top3.forEach((p) => {
-    const price = Number(p.sales_price || 0).toLocaleString();
-    const stock = Number(p.quantity_on_hand_unreserved || 0);
-    report += `📌 รุ่น: ${p.model}\n`;
-    report += `💵 ฿${price}  (📦คงเหลือ ${stock})\n`;
-    report += `-------------------------------------\n`;
-  });
+  const shortlist = buildCandidateList(candidates);
+  const report = candidateReport(`⚠️ รุ่นใกล้เคียง "${codeTrimmed}"`, shortlist);
 
-  return { found: false, candidates: top3, report };
+  return { found: false, candidates: shortlist, report };
 }
 
 // ─────────────────────────────────────────────
@@ -780,16 +837,9 @@ async function legacySearch(codeTrimmed: string, qNorm: string): Promise<FindPro
       return { found: true, product: containsRows[0], candidates: [], report: '' };
     }
 
-    const top3 = containsRows.slice(0, 3);
-    let report = `⚠️ รุ่นใกล้เคียง "${codeTrimmed}"\n`;
-    top3.forEach((p: any) => {
-      const price = Number(p.sales_price || 0).toLocaleString();
-      const stock = Number(p.quantity_on_hand_unreserved || 0);
-      report += `📌 รุ่น: ${p.model}\n`;
-      report += `💵 ฿${price}  (📦คงเหลือ ${stock})\n`;
-      report += `-------------------------------------\n`;
-    });
-    return { found: false, candidates: top3, report };
+    const shortlist = buildCandidateList(containsRows);
+    const report = candidateReport(`⚠️ รุ่นใกล้เคียง "${codeTrimmed}"`, shortlist);
+    return { found: false, candidates: shortlist, report };
   }
 
   return {

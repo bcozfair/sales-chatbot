@@ -56,6 +56,7 @@
     "diag:price-approval": "tsx scripts/diag/priceApprovalSmoke.ts",
     "diag:web-decision": "tsx scripts/diag/webDecisionParity.ts",
     "diag:sp-dedupe": "tsx scripts/diag/salespersonDedupeSmoke.ts",
+    "diag:product-candidates": "tsx scripts/diag/productCandidateEval.ts",
     "diag:migrations": "node scripts/diag/migrationsAudit.mjs",
     "diag:backup": "node scripts/diag/backupHealth.mjs",
     "backfill:contacts": "tsx scripts/backfillContactsFromSaleOrders.ts",

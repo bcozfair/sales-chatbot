@@ -20,7 +20,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { createChatCompletion } from '../config/clients.js';
 import { getRecentMessages, deletePendingQuotations } from '../db/repositories.js';
-import { findProduct } from './productService.js';
+import { findProduct, CANDIDATE_LIMIT } from './productService.js';
 import { calcNetPrice, round2 } from '../utils/pricing.js';
 
 /** สถานะการ resolve ของสินค้า 1 รายการ — เรียงตามลำดับที่เซลส์พิมพ์เสมอ */
@@ -408,7 +408,8 @@ export async function extractQuoteFromText(params: ExtractQuoteParams): Promise<
             itemReports += result.report;
             issueCount++;
             // เก็บ candidate (ถ้ามี) ไว้ทำปุ่มกดเลือก — เฉพาะรุ่นกำกวมที่ระบบเจอตัวใกล้เคียง (ตัวพิมพ์ผิดจะไม่มี candidate)
-            const cands = (result.candidates || []).slice(0, 5).map((c: any) => ({
+            // เพดานมาจาก CANDIDATE_LIMIT ที่เดียว — เลขคงที่สองที่ไม่ตรงกันจะตัดรายการทิ้งเงียบ ๆ
+            const cands = (result.candidates || []).slice(0, CANDIDATE_LIMIT).map((c: any) => ({
               model: c.model,
               sales_price: c.sales_price,
               quantity_on_hand_unreserved: c.quantity_on_hand_unreserved,
