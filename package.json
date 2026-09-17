@@ -23,6 +23,7 @@
     "sync:customers": "tsx scripts/sync/syncCustomers.ts",
     "sync:saleorders": "tsx scripts/sync/syncSaleorders.ts",
     "diag:confirm-race": "tsx scripts/diag/confirmRaceDiag.ts",
+    "diag:data-directory": "tsx scripts/diag/dataDirectorySmoke.ts",
     "diag:shipping-fee": "tsx scripts/diag/shippingFeeSmoke.ts",
     "diag:stock-rule": "tsx scripts/diag/stockRuleSmoke.ts",
     "diag:stock-rule-put": "tsx scripts/diag/stockRulePutSmoke.ts",

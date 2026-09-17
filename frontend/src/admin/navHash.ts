@@ -20,6 +20,8 @@ import { readHash } from './logs/useHashState';
 
 export type MainTab =
   | 'dashboard' | 'quoterequest' | 'approvals' | 'quotations' | 'salespersons' | 'promotions' | 'users' | 'blacklist'
+  // สองหน้าข้อมูลอ้างอิงจาก Odoo (อ่านอย่างเดียว)
+  | 'productsdata' | 'customersdata'
   // กลุ่ม "บันทึกและรายงาน" — 5 หน้าที่อยู่ใต้หัวข้อพับได้อันเดียวกัน
   | 'traffic' | 'apilogs' | 'auditlogs' | 'systemlogs' | 'backups'
   | 'settings';
@@ -50,6 +52,8 @@ export const TAB_SLUG: Record<MainTab, string> = {
   promotions: 'promotions',
   users: 'users',
   blacklist: 'blacklist',
+  productsdata: 'productsdata',
+  customersdata: 'customersdata',
   traffic: 'traffic',
   apilogs: 'apilogs',
   auditlogs: 'audit',

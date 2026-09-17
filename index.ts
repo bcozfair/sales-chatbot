@@ -143,6 +143,7 @@ import { parseDeliveryTypeOverride } from './utils/deliveryTerms.js';
 import { apiLogMiddleware, getRequestId } from './config/apiLogger.js';
 import { insertQuotationDeleteAudit } from './db/logRepositories.js';
 import { logsRouter } from './routes/logs.js';
+import { dataDirectoryRouter } from './routes/dataDirectory.js';
 import {
   initApiLogWriter,
   stopApiLogWriter,
@@ -205,6 +206,11 @@ app.use('/data', express.static(path.join(process.cwd(), 'data')));
 // สิทธิ์บังคับที่บรรทัดนี้บรรทัดเดียว: เปิดให้ role 'admin' เท่านั้น เท่ากับหน้า "บันทึกการเรียก API" เดิม
 // ถอนทั้งแผน log ออก = ลบ 2 บรรทัดนี้ (import ด้านบน + บรรทัดล่าง) แล้วระบบกลับไปเหมือนเดิมทันที
 app.use('/api/admin/logs', adminAuthMiddleware, requireRole('admin'), logsRouter);
+
+// หน้า "ข้อมูลสินค้า" / "ข้อมูลลูกค้า" — อ่านอย่างเดียว ต้นทางคือ Odoo
+// สิทธิ์: admin · approver · subadmin (เจ้าของกำหนด 2026-09-17) — ไม่รวม role 'user'
+// ซึ่งเห็นได้แค่ "บัญชีห้ามเสนอราคา" เมนูเดียว · บังคับที่จุด mount ที่เดียวเหมือน logsRouter
+app.use('/api/admin/data', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), dataDirectoryRouter);
 
 // Serve admin portal dashboard
 app.get('/admin', (req: any, res: any) => {
@@ -3947,6 +3953,7 @@ app.post('/api/admin/optional-links', adminAuthMiddleware, requireRole('admin'),
       VALUES ($1, $2, $3, $4)
       RETURNING *
     `, [trigger_product_id, optional_product_id, is_active !== false, note || '']);
+    invalidateRuleCache('product_optional_links');
     res.json(rows[0]);
   } catch (err: any) {
     console.error("POST /api/admin/optional-links error:", err);
@@ -3973,6 +3980,7 @@ app.put('/api/admin/optional-links/:id', adminAuthMiddleware, requireRole('admin
     if (rows.length === 0) {
       return res.status(404).json({ error: 'Link not found' });
     }
+    invalidateRuleCache('product_optional_links');
     res.json(rows[0]);
   } catch (err: any) {
     console.error("PUT /api/admin/optional-links error:", err);
@@ -3993,6 +4001,7 @@ app.delete('/api/admin/optional-links/:id', adminAuthMiddleware, requireRole('ad
     if (rows.length === 0) {
       return res.status(404).json({ error: 'Link not found' });
     }
+    invalidateRuleCache('product_optional_links');
     res.json({ success: true });
   } catch (err: any) {
     console.error("DELETE /api/admin/optional-links error:", err);
@@ -4135,6 +4144,7 @@ app.post('/api/admin/stock-rules', adminAuthMiddleware, requireRole('admin'), ex
         ON CONFLICT (internal_reference) DO UPDATE SET is_active = EXCLUDED.is_active, updated_at = NOW()
       `, [names, extraRefs, is_active !== false]);
 
+      invalidateRuleCache('product_stock_rules');
       return res.json({ count: rowCount, productions: names });
     }
 
@@ -4157,6 +4167,7 @@ app.post('/api/admin/stock-rules', adminAuthMiddleware, requireRole('admin'), ex
         ON CONFLICT (internal_reference) DO UPDATE SET is_active = EXCLUDED.is_active, updated_at = NOW()
         RETURNING *
       `, [refs, is_active !== false]);
+      invalidateRuleCache('product_stock_rules');
       return res.json(rows);
     }
 
@@ -4170,6 +4181,7 @@ app.post('/api/admin/stock-rules', adminAuthMiddleware, requireRole('admin'), ex
       ON CONFLICT (internal_reference) DO UPDATE SET is_active = EXCLUDED.is_active, updated_at = NOW()
       RETURNING *
     `, [internal_reference, is_active !== false]);
+    invalidateRuleCache('product_stock_rules');
     res.json(rows[0]);
   } catch (err: any) {
     console.error("POST /api/admin/stock-rules error:", err);
@@ -4193,6 +4205,7 @@ app.put('/api/admin/stock-rules/:internal_reference', adminAuthMiddleware, requi
     if (rows.length === 0) {
       return res.status(404).json({ error: 'Stock rule not found' });
     }
+    invalidateRuleCache('product_stock_rules');
     res.json(rows[0]);
   } catch (err: any) {
     console.error("PUT /api/admin/stock-rules error:", err);
@@ -4213,6 +4226,7 @@ app.delete('/api/admin/stock-rules/:internal_reference', adminAuthMiddleware, re
     if (rows.length === 0) {
       return res.status(404).json({ error: 'Stock rule not found' });
     }
+    invalidateRuleCache('product_stock_rules');
     res.json({ success: true });
   } catch (err: any) {
     console.error("DELETE /api/admin/stock-rules error:", err);
@@ -4255,6 +4269,7 @@ app.post('/api/admin/moq-rules', adminAuthMiddleware, requireRole('admin'), expr
       VALUES ($1, $2, $3, $4)
       RETURNING *
     `, [internal_reference, min_order_qty, sale_line_warn_msg, is_active !== false]);
+    invalidateRuleCache('product_moq_rules');
     res.json(rows[0]);
   } catch (err: any) {
     console.error("POST /api/admin/moq-rules error:", err);
@@ -4281,6 +4296,7 @@ app.put('/api/admin/moq-rules/:internal_reference', adminAuthMiddleware, require
     if (rows.length === 0) {
       return res.status(404).json({ error: 'MOQ rule not found' });
     }
+    invalidateRuleCache('product_moq_rules');
     res.json(rows[0]);
   } catch (err: any) {
     console.error("PUT /api/admin/moq-rules error:", err);
@@ -4301,6 +4317,7 @@ app.delete('/api/admin/moq-rules/:internal_reference', adminAuthMiddleware, requ
     if (rows.length === 0) {
       return res.status(404).json({ error: 'MOQ rule not found' });
     }
+    invalidateRuleCache('product_moq_rules');
     res.json({ success: true });
   } catch (err: any) {
     console.error("DELETE /api/admin/moq-rules error:", err);

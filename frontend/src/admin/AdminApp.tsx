@@ -19,6 +19,8 @@ import { ProductMoqRules } from './ProductMoqRules';
 import { BlockRules } from './BlockRules';
 import { ShippingFee } from './ShippingFee';
 import { SyncPanel } from './SyncPanel';
+import { ProductsDirectory } from './ProductsDirectory';
+import { CustomersDirectory } from './CustomersDirectory';
 import { LogsShell } from './logs/LogsShell';
 import type { LogTab } from './logs/LogsShell';
 import { useAdminRoute, type MainTab, type SubTab } from './navHash';
@@ -54,6 +56,8 @@ import {
   ClipboardList,
   FilePlus2,
   BadgeCheck,
+  Database,
+  Package,
 } from 'lucide-react';
 
 // MainTab / SubTab ย้ายไป navHash.ts แล้ว เพราะชื่อแท็บกลายเป็นส่วนหนึ่งของ URL (ดูเหตุผลในไฟล์นั้น)
@@ -130,11 +134,23 @@ const NAV_GROUPS: { key: string; label: string; icon: typeof LayoutDashboard; it
     ],
   },
   {
-    key: 'people',
-    label: 'ข้อมูล & ผู้ใช้งาน',
-    icon: Contact,
+    // แยกจากกลุ่ม "จัดการข้อมูลผู้ใช้งาน" เมื่อ 2026-09-17 ตามที่เจ้าของสั่ง —
+    // กลุ่มนี้คือ "ข้อมูลอ้างอิง" (สินค้า/ลูกค้า/พนักงาน) ส่วนอีกกลุ่มคือ "คนที่ล็อกอินเข้าระบบ"
+    // สองหน้าแรกอ่านอย่างเดียว ต้นทางคือ Odoo
+    key: 'data',
+    label: 'จัดการข้อมูลทั่วไป',
+    icon: Database,
     items: [
+      { tab: 'productsdata', label: 'ข้อมูลสินค้า', icon: Package, roles: ['admin', 'approver', 'subadmin'] },
+      { tab: 'customersdata', label: 'ข้อมูลลูกค้า', icon: Contact, roles: ['admin', 'approver', 'subadmin'] },
       { tab: 'salespersons', label: 'จัดการข้อมูลพนักงาน', icon: UserCheck, roles: ['admin'] },
+    ],
+  },
+  {
+    key: 'people',
+    label: 'จัดการข้อมูลผู้ใช้งาน',
+    icon: UsersIcon,
+    items: [
       { tab: 'users', label: 'จัดการผู้ใช้งานระบบ', icon: UsersIcon, roles: ['admin'] },
       { tab: 'blacklist', label: 'บัญชีห้ามเสนอราคา', icon: Ban, roles: ['admin', 'user'] },
     ],
@@ -170,6 +186,8 @@ const PAGE_TITLES: Record<MainTab, string> = {
   salespersons: 'จัดการข้อมูลพนักงาน',
   users: 'จัดการผู้ใช้งานระบบ',
   blacklist: 'บัญชีห้ามเสนอราคา',
+  productsdata: 'ข้อมูลสินค้า',
+  customersdata: 'ข้อมูลลูกค้า & ผู้ติดต่อ',
   traffic: 'รายงานการใช้งาน',
   apilogs: 'บันทึกการเรียก API',
   auditlogs: 'บันทึกการแก้ไข',
@@ -677,6 +695,14 @@ function AdminContent() {
           ) : effectiveTab === 'promotions' ? (
             <div className="animate-fade-in">
               <Promotions />
+            </div>
+          ) : effectiveTab === 'productsdata' ? (
+            <div className="animate-fade-in">
+              <ProductsDirectory />
+            </div>
+          ) : effectiveTab === 'customersdata' ? (
+            <div className="animate-fade-in">
+              <CustomersDirectory />
             </div>
           ) : effectiveTab === 'salespersons' ? (
             <div className="animate-fade-in">

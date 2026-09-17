@@ -103,6 +103,7 @@ npm run db:dump · db:restore                               # ถ่ายฐา
 npm run backup:auto · backup:cron · diag:backup            # สำรองอัตโนมัติ (cron ตี 3 เก็บ 7 ชุด · รายงานอยู่ในแอดมิน) — runbook ใน DEPLOY.md
 tsx scripts/runMigration.ts                                # รัน migration ที่ยังไม่ได้รัน
 npm run diag:migrations                                    # ไล่เทียบ migrations/changes/ กับฐานจริง (รันบน host)
+npm run diag:data-directory                                # หน้าข้อมูลสินค้า/ลูกค้า (กฎ · ส่วนลด · ตัวกรอง)
 npm run backfill:contacts · backfill:delivery-terms · backfill:print-snapshot
 npm run logworker                                          # worker เขียน log แยกโปรเซส
 ```
@@ -260,6 +261,30 @@ npm run logworker                                          # worker เขีย
   สองเคสที่ยังพลาดอยู่แก้ด้วยตรรกะไม่ได้ (หลักฐานเท่ากันทุกไบต์เพราะสาขาพี่น้องใช้รายชื่อผู้ติดต่อ
   ร่วมกัน) — พฤติกรรมที่ปลอดภัยคือไม่ auto-select ซึ่งเป็นสิ่งที่เกิดขึ้นอยู่แล้ว อย่าเสียเวลาไล่
 
+- **ประวัติส่วนลดกับด่านเครดิตใช้ขอบเขต "บริษัท" คนละแบบ โดยตั้งใจ** (2026-09-17) —
+  ส่วนลดในหน้า "ข้อมูลลูกค้า" นับ **เฉพาะ `company_id` เดียว** (= รหัสลูกค้าเดียว) ส่วน
+  `last_order_at` ของด่านเครดิต **ขยายเป็นนิติบุคคล** (เลขภาษี/รหัสอ้างอิง/ชื่อ ตรงข้อใดข้อหนึ่ง)
+  เหตุผลของเจ้าของ: *"รหัสลูกค้าไม่เหมือนกัน"* — คนละรหัสคือคนละข้อตกลงราคา สาขาที่เจรจาแยกกัน
+  ได้ส่วนลดคนละอัตราจริง เอามารวมจะโชว์ตัวเลขที่ไม่มีใบไหนเคยใช้
+  ⇒ **เห็นสองที่ไม่ตรงกันแล้วห้าม "แก้ให้เหมือนกัน" ต้องถามเจ้าของก่อน**
+  · ตรรกะอยู่ที่ `getCompanyDiscountHistory()` ใน `db/dataDirectoryRepo.ts` ที่เดียว
+  · gate: `npm run diag:data-directory` มีข้อที่พิสูจน์ว่าสองรหัสที่เลขภาษีเดียวกันไม่เห็นใบของกัน
+
+- **`sale_orders` เป็น 1 แถว = 1 ใบ ไม่ใช่ระดับบรรทัด** ถึงจะมีคอลัมน์ `model` / `quantity` อยู่ก็ตาม
+  (วัด 2026-09-17: 320,090 แถว / 320,090 `order_reference`) ⇒ ใช้ `total_discount` เป็นส่วนลดทั้งบิล
+  ได้เลย ไม่ต้อง `GROUP BY` ก่อน · **ห้ามคำนวณส่วนลดใหม่จาก `total_amount − amount_after_discount`**
+  เพราะมี **2,362 ใบ (0.7%)** ที่สามช่องนั้นไม่ลงตัวกันเองจากต้นทาง
+  · ดึง 3 ใบล่าสุดต่อบริษัทเร็ว **1 ms** ถ้าเขียนให้ตรงกับ `idx_so_contact_latest` (กรอง `contact_id`
+  ก่อนแล้วค่อย `ORDER BY order_date DESC NULLS LAST LIMIT n`) — เขียนเป็น CTE `DISTINCT ON`
+  คร่อมทั้งตารางก่อนกรอง = **timeout เกิน 15 วินาที**
+
+- **กฎบล็อกสินค้าบล็อกด้วย "แหล่งผลิต" เป็นหลัก ⇒ 77% ของแค็ตตาล็อกเสนอราคาผ่านระบบไม่ได้**
+  (วัด 2026-09-17) — `product_block_rules` มี 9 แถว แต่ 4 แถวบล็อกทั้ง `production` ⇒
+  **39,987 จาก 51,665 รายการถูกบล็อก** เหลือเสนอได้จริง **11,678** (`Production 2(PM)` 35,326 ·
+  `Buy to Sell` 4,638 · `Buy to Sell(THT)` 6 · `Production 3(PM)`+ซีรีส์ ECM 12)
+  ⇒ จอไหนที่แสดงรายการสินค้า **ต้องมีคอลัมน์ `production`** เพราะมันคือตัวทำนายว่าขายผ่านบอทได้ไหม
+  · `quotation_rules.is_locked` **ถูกลบไปแล้ว** — `product_block_rules` เป็นตัวจริงตัวเดียว
+
 - **`customers_data_view.last_order_at` เป็นชื่อคอลัมน์ที่หลอก** — ไม่ใช่ "วันสั่งซื้อล่าสุด"
   แต่เป็นวันล่าสุดของใบที่ **ออกบิลแล้ว/รอออกบิล** ของนิติบุคคลที่บริษัทนั้นสังกัด และ
   **เฉพาะลูกค้าเครดิต/เช็คล่วงหน้าเท่านั้น** · `NULL` = ไม่เข้าข่ายตรวจ ซึ่งมาได้จาก 3 สาเหตุ
@@ -357,6 +382,7 @@ chatbot/
 | log และรายงาน | `config/apiLogger.ts` · `services/apiLogService.ts` · `db/logRepositories.ts` · `routes/logs.ts` · `scripts/logworker/` |
 | ส่งออก/นำเข้า Odoo | `services/odooSaleOrderExport.ts` · `services/quotationOdooLink.ts` · `services/syncService.ts` |
 | ให้ระบบภายนอกดึงข้อมูล | `services/externalSync.ts` · `docs/SYNC_API.md` |
+| หน้า "ข้อมูลสินค้า" / "ข้อมูลลูกค้า" (อ่านอย่างเดียว) | `routes/dataDirectory.ts` · `services/dataDirectoryService.ts` · `db/dataDirectoryRepo.ts` · `frontend/src/admin/{Products,Customers}Directory.tsx` |
 
 **หัวไฟล์คือเอกสารจริงของไฟล์นั้น** — `chatChannel.ts` `webIdentity.ts` `quoteExtraction.ts`
 `webQuoteService.ts` `salespersonPicker.ts` `externalSync.ts` `quotationOdooLink.ts`
