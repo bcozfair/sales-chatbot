@@ -1,0 +1,139 @@
+{
+  "file": "ราคา BH (Final 02-02-69).xlsx",
+  "sheet": "Sheet1",
+  "code": "BH-01",
+  "label": "Band Heater สแตนเลส+Zinc",
+  "aliases": ["BH-02"],
+  "standard": { "cable_cm": 30 },
+  "derivedDims": [
+    {
+      "name": "area_in2",
+      "label": "พื้นที่ผิว (ตารางนิ้ว)",
+      "formula": "cylinderAreaIn2",
+      "args": ["dia_mm", "width_mm"],
+      "consts": { "pi": 3.14, "mm2PerIn2": 645 },
+      "round": "ceil"
+    }
+  ],
+  "base": {
+    "kind": "banded",
+    "quantity": "area_in2",
+    "labelCol": "A",
+    "priceCol": "B",
+    "rows": [3, 9]
+  },
+  "adders": [
+    {
+      "id": "hold",
+      "label": "Hold (OD)",
+      "order": 20,
+      "kind": "perUnit",
+      "dim": "hold_od_mm",
+      "over": 0,
+      "step": 1,
+      "rate": 5,
+      "unit": "mm",
+      "source": "Sheet1!B11 = '5฿ / mm.' (ข้อความ ไม่ใช่ตัวเลข จึงต้องระบุในไฟล์ map)"
+    },
+    {
+      "id": "conn_pl2",
+      "label": "Male Connector PL-2",
+      "order": 30,
+      "kind": "flat",
+      "when": { "option": "conn:pl2" },
+      "amountFrom": "B12"
+    },
+    {
+      "id": "term_10a",
+      "label": "เต๋าเซรามิค (ตัวเล็ก) 10A",
+      "order": 30,
+      "kind": "flat",
+      "when": { "option": "term:10a" },
+      "amountFrom": "B13"
+    },
+    {
+      "id": "term_30a",
+      "label": "เต๋าเซรามิค (ตัวเล็ก) 30A",
+      "order": 30,
+      "kind": "flat",
+      "when": { "option": "term:30a" },
+      "amountFrom": "B14"
+    },
+    {
+      "id": "nut",
+      "label": "ออกน๊อต",
+      "order": 30,
+      "kind": "flat",
+      "when": { "option": "nut" },
+      "amountFrom": "B15"
+    },
+    {
+      "id": "cable_silicone",
+      "label": "สาย Silicone",
+      "order": 40,
+      "kind": "perUnit",
+      "when": { "option": "cable:silicone" },
+      "dim": "cable_extra_m",
+      "over": 0,
+      "step": 1,
+      "unit": "m",
+      "rate": 80,
+      "source": "Sheet1!B16"
+    },
+    {
+      "id": "cable_ss_braid",
+      "label": "สายถักสแตนเลส",
+      "order": 40,
+      "kind": "perUnit",
+      "when": { "option": "cable:ss_braid" },
+      "dim": "cable_extra_m",
+      "over": 0,
+      "step": 1,
+      "unit": "m",
+      "rate": 200,
+      "source": "Sheet1!B17"
+    },
+    {
+      "id": "flex_tube",
+      "label": "ท่อเฟ็กส์",
+      "order": 40,
+      "kind": "perUnit",
+      "when": { "option": "flex_tube" },
+      "dim": "cable_extra_m",
+      "over": 0,
+      "step": 1,
+      "unit": "m",
+      "rate": 150,
+      "source": "Sheet1!B18"
+    },
+    {
+      "id": "cable_over_30cm",
+      "label": "สายยาวเกิน 30 CM (×2 เส้น)",
+      "order": 45,
+      "kind": "perUnit",
+      "dim": "cable_cm",
+      "step": 100,
+      "round": "ceil",
+      "unit": "cm",
+      "rate": 60,
+      "times": 2,
+      "source": "Sheet1!A20 'ถ้าความยาวสายเกิน 30 CM บวกเพิ่มเมตรละ 60 บาท (คูณ 2 เพราะใช้ 2 เส้น)'"
+    }
+  ],
+  "constraints": [
+    {
+      "id": "MIN_OD",
+      "when": { "dim": "dia_mm", "lt": 65 },
+      "level": "block",
+      "message": "ขนาดเล็กสุดที่ทำได้ OD = 65 mm",
+      "source": "Sheet1!H3"
+    },
+    {
+      "id": "MIN_WIDTH",
+      "when": { "dim": "width_mm", "lt": 25 },
+      "level": "block",
+      "message": "ความกว้างเล็กสุดที่ทำได้ 25 mm",
+      "source": "Sheet1!H4"
+    }
+  ]
+}
