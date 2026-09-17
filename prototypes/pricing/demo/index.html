@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>สารบัญ · เครื่องคิดราคาสินค้าสั่งทำ</title>
+<link rel="stylesheet" href="_theme.css">
+<script src="_pr-labels.js"></script>
+<script src="_pr-ui.js"></script>
+<script src="_pr-engine.js"></script>
+<style>
+  /* โทเคนสีมาจาก _theme.css (คัดจาก frontend/src/index.css) */
+  .doc { max-width: 880px; margin: 0 auto; }
+  .doc h1 { font-size: 22px; font-weight: 800; color: var(--c-text-max); margin: 20px 0 6px; }
+  .doc .sub { color: var(--c-text-muted); font-size: 13px; margin: 0 0 18px; }
+
+  .nav { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 640px) { .nav { grid-template-columns: 1fr; } }
+  a.navcard {
+    display: block; text-decoration: none; padding: 14px;
+    background: var(--c-surface); border: 1px solid var(--c-line); border-radius: 14px;
+  }
+  a.navcard:hover { border-color: var(--brand-border); background: var(--c-surface-2); }
+  a.navcard .t { display: block; font-size: 14px; font-weight: 800; color: var(--c-text-max); }
+  a.navcard .d { display: block; font-size: 12px; color: var(--c-text-muted); margin-top: 3px; }
+  a.navcard .w { display: block; font-size: 11px; color: var(--brand-fg); margin-top: 7px; font-weight: 700; }
+
+  .kpi { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  @media (max-width: 640px) { .kpi { grid-template-columns: 1fr; } }
+  .kpi > div {
+    background: var(--c-surface-2); border: 1px solid var(--c-line);
+    border-left: 3px solid var(--emerald-700); border-radius: 12px; padding: 10px 12px;
+  }
+  .kpi .n { display: block; font-size: 19px; font-weight: 800; color: var(--c-text-max);
+            font-variant-numeric: tabular-nums; }
+  .kpi .c { display: block; font-size: 11.5px; color: var(--c-text-muted); margin-top: 1px; }
+
+  table.g { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.g th, table.g td { padding: 7px 10px; text-align: left; border-bottom: 1px solid var(--c-surface-3);
+                           vertical-align: top; }
+  table.g th { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+               color: var(--c-text-muted); border-bottom: 1px solid var(--c-line); white-space: nowrap; }
+  table.g td.r, table.g th.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  table.g tbody tr:last-child td { border-bottom: 0; }
+  .from { display: block; font-size: 10.5px; color: var(--c-text-faint); margin-top: 2px; overflow-wrap: anywhere; }
+  .ok-mark { color: var(--emerald-700); font-weight: 800; }
+  .bad-mark { color: var(--red-700); font-weight: 800; }
+  .wrapx { overflow-x: auto; margin: 0 -16px; padding: 0 16px; }
+
+  ul.q { margin: 0; padding-left: 18px; font-size: 12.5px; color: var(--c-text-muted); }
+  ul.q li { margin-bottom: 7px; }
+  ul.q li:last-child { margin-bottom: 0; }
+  ul.q b { color: var(--c-text-strong); }
+</style>
+</head>
+<body>
+<div class="mock-stage">
+<div class="doc">
+
+  <h1>เครื่องคิดราคาสินค้าสั่งทำ</h1>
+  <p class="sub">ตัวอย่างสำหรับตัดสินใจ — ยังไม่ได้ต่อกับระบบใบเสนอราคาจริง และยังไม่มีการแก้ระบบเดิมแม้แต่บรรทัดเดียว</p>
+
+  <div class="nav">
+    <a class="navcard" href="pr-manual.html">
+      <span class="t">คู่มือการใช้งาน</span>
+      <span class="d">ระบบนี้แก้ปัญหาอะไร · คำศัพท์ที่ต้องรู้ · ใช้ยังไง 4 ขั้น · ผลลัพธ์ 3 แบบ · คำถามที่น่าจะโดนถาม</span>
+      <span class="w">เริ่มอ่านที่นี่ ถ้าจะอธิบายให้แอดมินฟัง →</span>
+    </a>
+    <a class="navcard" href="pr-calc.html">
+      <span class="t">ลองคิดราคา</span>
+      <span class="d">เลือกสเปกแล้วดูราคากับที่มาของแต่ละก้อน · มีชุดสเปกสำเร็จรูปให้กดโชว์ตอนพรีเซนต์</span>
+      <span class="w">กดเล่นได้เลย →</span>
+    </a>
+    <a class="navcard" href="pr-rules.html">
+      <span class="t">แก้กฎราคา</span>
+      <span class="d">แก้เปอร์เซ็นต์/จำนวนเงิน เพิ่มกฎใหม่จากแม่แบบ ปิดกฎชั่วคราว · ส่งออกทั้งเล่มเป็น .xlsx ไปแก้ใน Excel แล้วนำกลับเข้ามา · ออกตารางราคาให้ Odoo</span>
+      <span class="w">ข้อที่หัวหน้าขอเพิ่ม →</span>
+    </a>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h2 class="sec">ตัวเลขที่ยืนยันได้</h2>
+    <div class="kpi" id="kpi"></div>
+    <p class="tiny faint" style="margin-top:10px">
+      ตัวเลขทั้งหมดในหน้านี้คำนวณสดตอนเปิดหน้า ด้วยโปรแกรมตัวเดียวกับที่รันในเครื่อง
+      ไม่ได้พิมพ์ลงไปเอง ⇒ ถ้าวันไหนคิดผิด ตารางข้างล่างจะขึ้นกากบาทเอง
+    </p>
+  </div>
+
+  <div class="card">
+    <h2 class="sec">ทำไมต้องทำ — เทียบกับวิธีทำงานตอนนี้</h2>
+    <div class="wrapx">
+      <table class="g">
+        <thead>
+          <tr><th>เรื่อง</th><th>ตอนนี้</th><th>ถ้ามีเครื่องมือนี้</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>หาราคา</td>
+            <td>เปิด Excel ไล่หา sheet ของรุ่น แล้วหาแถว-หาคอลัมน์</td>
+            <td>เลือกรุ่นแล้วกรอกสเปก</td>
+          </tr>
+          <tr>
+            <td>บวกตัวเลือก</td>
+            <td>อ่านหมายเหตุที่กระจายรอบตาราง แล้วบวกด้วยเครื่องคิดเลข</td>
+            <td>ติ๊กเลือก ระบบบวกให้</td>
+          </tr>
+          <tr>
+            <td>ความยาวส่วนที่เกิน</td>
+            <td>ต้องจำเองว่าปัดขึ้นทั้งช่วง ไม่ใช่คูณตรง ๆ</td>
+            <td>ปัดให้ถูกเสมอ และเขียนให้เห็นว่าปัดเป็นกี่ช่วง</td>
+          </tr>
+          <tr>
+            <td>สเปกที่ทำไม่ได้</td>
+            <td>ช่องว่างในตาราง มองเผิน ๆ เหมือนลืมใส่ราคา</td>
+            <td>ขึ้นว่า “ไม่รับผลิต” ตั้งแต่ตอนเลือก</td>
+          </tr>
+          <tr>
+            <td>สเปกที่ต้องถามผลิต 2</td>
+            <td>รู้ตอนที่ส่งราคาไปแล้วโดนตีกลับ</td>
+            <td>รู้ตั้งแต่ตอนกรอก</td>
+          </tr>
+          <tr>
+            <td>ลูกค้าทักว่าราคาผิด</td>
+            <td>ไล่ย้อนเองว่าคิดมายังไง</td>
+            <td>เปิดดูได้ว่าเลขแต่ละก้อนมาจากบรรทัดไหนในไฟล์</td>
+          </tr>
+          <tr>
+            <td>ไฟล์ราคารอบใหม่มา</td>
+            <td>ทุกคนต้องจำว่าใช้ไฟล์ไหน</td>
+            <td>นำเข้าใหม่รอบเดียว ทุกคนได้ราคาชุดเดียวกัน</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 class="sec">ด่านตรวจ — เทียบกับเฉลยที่ฝ่ายขายเขียนไว้ในไฟล์เอง</h2>
+    <p class="small muted">
+      ในไฟล์ Excel ฝ่ายขายเขียน “ตัวอย่างวิธีคิดราคา” กำกับไว้ข้างตาราง
+      ระบบเอาตัวอย่างพวกนั้นมาคิดซ้ำทุกครั้งที่เปิดหน้านี้ แล้วเทียบกับคำตอบที่เขาเขียนไว้
+    </p>
+    <div class="wrapx" style="margin-top:10px">
+      <table class="g" id="gate">
+        <thead>
+          <tr><th style="width:1%"></th><th>เคส</th><th class="r">เฉลย</th><th class="r">ระบบคิดได้</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 class="sec">รุ่นที่ทำแล้ว</h2>
+    <div class="wrapx">
+      <table class="g" id="models">
+        <thead>
+          <tr><th>รุ่น</th><th>sheet ในไฟล์</th><th class="r">ช่องที่มีราคา</th><th class="r">ช่องที่ไม่รับผลิต</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p class="tiny faint" style="margin-top:8px">
+      ทำแล้ว 6 รุ่นจากทั้งหมดประมาณ 36 รุ่น — เลือกมาให้ครบทุกแบบการคิดราคาที่มีในไฟล์
+      ที่เหลือเป็นงานกรอกข้อมูล ไม่ใช่งานคิดใหม่
+    </p>
+  </div>
+
+  <div class="card">
+    <h2 class="sec">แก้กฎราคาเองได้ — และแม่แบบ Excel ที่นำกลับเข้าระบบได้</h2>
+    <p class="small muted">
+      ราคาไม่ได้อยู่ในโปรแกรม แต่อยู่ใน “สมุดราคา” ที่เป็นข้อมูล ⇒ เปลี่ยนวิธีคิดราคาได้โดยไม่ต้องรอใครแก้โค้ดและไม่ต้องขึ้นระบบใหม่
+    </p>
+    <div class="wrapx">
+      <table class="g">
+        <thead>
+          <tr><th>อยากทำอะไร</th><th>ทำที่ไหน</th><th>ได้อะไรออกมา</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>แก้เปอร์เซ็นต์ · จำนวนเงิน · จุดที่เริ่มคิดเงิน · ลำดับการคิด</td>
+            <td>หน้า “แก้กฎราคา” ทีละข้อ</td>
+            <td>เห็นผลกับ 11 เคสทดสอบทันทีว่าราคาเปลี่ยนไปเท่าไหร่</td>
+          </tr>
+          <tr>
+            <td>เพิ่มกฎที่ไม่เคยมีในไฟล์ราคา (เช่น ส่วนลดโปรโมชัน −5%)</td>
+            <td>แม่แบบกฎใหม่ 5 แบบ กดแล้วได้กฎที่กรอกค่าไว้ให้แล้ว</td>
+            <td>กฎถูกทำเครื่องหมายว่า “เพิ่มเอง” แยกจากของที่มาจากไฟล์ราคา</td>
+          </tr>
+          <tr>
+            <td>แก้ตารางใหญ่ — ราคาตั้ง <span id="n-cells">303</span> ช่อง · อัตราตามขนาด <span id="n-rates">346</span> แถว</td>
+            <td>ส่งออก <b>แม่แบบกฎราคา .xlsx</b> ไปแก้ใน Excel แล้วนำกลับเข้ามา</td>
+            <td><span id="n-sheets">13</span> ชีต · นำกลับเข้ามาแล้วราคาตรงทุกบาท (มีด่านตรวจ)</td>
+          </tr>
+          <tr>
+            <td>เอาราคาเข้า Odoo</td>
+            <td>ส่งออก <b>ตารางราคาสำหรับ Odoo .xlsx</b></td>
+            <td><span id="n-odoo">303</span> รายการ พร้อมชื่อฟิลด์ที่หน้า import ของ Odoo จับคู่ได้เอง</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="banner amber" style="margin-top:12px">
+      <span>
+        <b>ไฟล์สองตัวนี้คนละเรื่องกัน</b> — แม่แบบกฎราคา = “กฎ” แก้แล้วนำกลับเข้าระบบได้ ·
+        ตารางราคาสำหรับ Odoo = “ผลลัพธ์ ณ วันที่กด” เป็นไฟล์ทางเดียว <b>นำกลับเข้าระบบนี้ไม่ได้</b> ·
+        ใครแก้ราคาในไฟล์ Odoo แล้วนำเข้า จะได้ราคาที่ไม่ตรงกับสมุดราคาโดยไม่มีใครรู้ตัว
+      </span>
+    </div>
+    <p class="tiny faint" style="margin-top:10px">
+      รุ่นที่คิดราคาจากตัวเลขต่อเนื่อง (Band Heater ที่คิดจากพื้นที่ผิว) <b>คลี่เป็นรายการสินค้าใน Odoo ไม่ได้</b>
+      เพราะลูกค้าสั่งขนาดไหนก็ได้ — ไฟล์มีชีตบอกเหตุผลรายแถวไว้แล้ว ไม่ได้ตัดทิ้งเงียบ ๆ
+    </p>
+  </div>
+
+  <div class="card">
+    <h2 class="sec">คำถามที่ต้องให้เจ้าของตัดสิน</h2>
+    <p class="small muted">หกข้อนี้ตอบแล้วถึงจะต่อเข้าระบบจริงได้ — ตอบทีหลังแปลว่าต้องรื้อของที่ทำไปแล้ว</p>
+    <ul class="q" style="margin-top:10px">
+      <li><b>ราคาขั้นต่ำของสินค้าสั่งทำคิดจากอะไร</b> — สินค้ากลุ่มนี้ไม่มีแถวในฐานสินค้า กฎ “ห้ามขายต่ำกว่าราคาขั้นต่ำ” กับคิวอนุมัติราคาจึงมองไม่เห็นเลย</li>
+      <li><b>สินค้าสั่งทำเข้า Odoo ยังไง</b> — สร้างรหัสใหม่ทุกครั้ง · ใช้รหัสกลางแล้วเขียนสเปกในรายละเอียด · หรือให้แอดมินไปสร้างในระบบ Odoo เองก่อน</li>
+      <li><b>ใครแก้กฎราคาได้ และต้องมีคนอนุมัติก่อนมีผลไหม</b> — ตัวอย่างนี้ทำให้ดูแล้วว่าแก้ได้ทั้งในหน้าจอและผ่านไฟล์ Excel แต่ยัง <b>ไม่มีสิทธิ์ผู้ใช้ ไม่มีประวัติ และไม่มีคิวอนุมัติ</b> — ของจริงต้องมีครบสามอย่าง</li>
+      <li><b>ไฟล์ราคารอบใหม่มาแล้วจะทับกฎที่แก้มือไว้ยังไง</b> — ทับทั้งหมด · ทับเฉพาะราคาตั้งแล้วเก็บกฎที่เพิ่มเองไว้ · หรือให้คนเลือกทีละข้อ (ระบบแยก “มาจากไฟล์ราคา” กับ “เพิ่มเอง” ไว้ให้แล้ว)</li>
+      <li><b>สินค้าที่ส่งเข้า Odoo ตั้งค่าอะไร</b> — หมวดสินค้า · หน่วยนับ · เป็นสินค้านับสต็อกหรือไม่นับ ตอนนี้ตั้งค่าเริ่มต้นไว้ (All · Units · ไม่นับสต็อก) ซึ่งต้องให้บัญชี/คลังเคาะก่อนใช้จริง</li>
+      <li><b>เจอเคส “ต้องขอราคาจากผลิต 2” ระบบควรทำอะไร</b> — ค้างใบไว้แล้วแจ้งเตือน · ให้เซลส์ใส่ราคาเอง · หรือเข้าคิวเหมือนคิวอนุมัติราคาที่มีอยู่แล้ว</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2 class="sec">เรื่องที่เจอในไฟล์ราคา ซึ่งควรบอกฝ่ายขาย</h2>
+    <p class="small muted">
+      สามข้อนี้เป็นเรื่องของ<b>ข้อมูลในไฟล์</b> ไม่ใช่ของโปรแกรม — เจอเพราะเอาไฟล์มาคิดซ้ำด้วยเครื่อง
+    </p>
+    <ul class="q" style="margin-top:10px">
+      <li>
+        <b>ตัวอย่างวิธีคิดราคาในชีต TS-18 ใช้ไม่ได้แล้ว</b> —
+        ชีตเขียนว่า <span class="tiny" style="font-family:inherit">TSK-18(2) 6-6x100+50 = 800+650+(5x25) = 1525</span>
+        แต่ 800+650+125 = 1,575 ไม่ใช่ 1,525 และราคาตั้งของแกน 6 มม. ในตารางปัจจุบันคือ 880 ไม่ใช่ 800
+        ⇒ ตารางถูกอัปเดตแต่ตัวอย่างข้าง ๆ ไม่ได้อัปเดตตาม
+      </li>
+      <li>
+        <b>ราคาหน้าแปลน JIS 10K ไม่เท่ากันระหว่างชีต</b> —
+        ชีต TS-18 คิดขนาด 1 นิ้วที่ 650 บาท แต่ชีต TW คิดที่ 800 บาท
+        ⇒ ถ้าตั้งใจให้ต่างกันก็ไม่เป็นไร แต่ถ้าไม่ได้ตั้งใจ แปลว่ามีชีตหนึ่งคิดราคาผิดอยู่
+      </li>
+      <li>
+        <b>ตัวเลขบางช่องมีทศนิยมยาวติดมาจากการคำนวณใน Excel</b> —
+        เช่น 110.00000000000001 · 1595.0000000000002 รวม 28 ช่องในสองรุ่นที่ทำ
+        ⇒ ไม่กระทบราคาจริง แต่ถ้าเอาไปพิมพ์ใส่เอกสารตรง ๆ จะเห็นทศนิยมยาวติดไปด้วย
+      </li>
+    </ul>
+  </div>
+
+  <p class="tiny faint" style="margin:18px 0 40px">
+    ตัวอย่างนี้เปิดจากเครื่องเท่านั้น — ข้อมูลราคาเป็นของจริงของบริษัท จึงไม่เผยแพร่ออกนอกเครื่อง
+  </p>
+
+</div>
+</div>
+
+<script>
+(function () {
+  const U = window.PR_UI, L = window.PR_LABELS, B = window.PR_BOOK, C = window.PR_CASES, el = U.el;
+  U.bar('index');
+
+  // ── ด่านตรวจ ─────────────────────────────────────────────────────────────
+  const tb = document.querySelector('#gate tbody');
+  let pass = 0, sheetPass = 0, sheetTotal = 0;
+  for (const c of C) {
+    const out = PR_ENGINE.computePrice(c.cfg, B);
+    const okPrice = c.expectPrice === undefined || out.unitPrice === c.expectPrice;
+    const okStatus = c.expectStatus === undefined || out.status === c.expectStatus;
+    const ok = okPrice && okStatus;
+    if (ok) pass++;
+    if (c.kind === 'เฉลยจากชีต') { sheetTotal++; if (ok) sheetPass++; }
+
+    const tr = el('tr');
+    tr.append(el('td', ok ? 'ok-mark' : 'bad-mark', ok ? '✓' : '✗'));
+    const nm = el('td');
+    nm.append(el('span', null, c.name));
+    nm.append(el('span', 'from', c.source));
+    tr.append(nm);
+
+    const say = (price, status) =>
+      price !== undefined ? U.baht(price)
+        : status === 'notManufacturable' ? 'ไม่รับผลิต' : 'ต้องขอราคา';
+    tr.append(el('td', 'r', say(c.expectPrice, c.expectStatus)));
+    const got = el('td', 'r',
+      c.expectPrice !== undefined ? U.baht(out.unitPrice) : L.status[out.status].label);
+    if (!ok) got.classList.add('bad-mark');
+    tr.append(got);
+    tb.append(tr);
+  }
+
+  // ── รุ่น ─────────────────────────────────────────────────────────────────
+  const mb = document.querySelector('#models tbody');
+  let cells = 0, empties = 0;
+  for (const [code, m] of Object.entries(B.models)) {
+    const st = m.importStats || {};
+    const n = m.base.kind === 'matrix' ? Object.keys(m.base.cells).length
+      : m.base.kind === 'banded' ? m.base.bands.length : 0;
+    cells += n;
+    empties += st.emptyCells || 0;
+    const info = L.models[code] || {};
+
+    const tr = el('tr');
+    const c0 = el('td');
+    c0.append(el('span', null, code));
+    if (info.short) c0.append(el('span', 'from', info.short + (info.note ? ' · ' + info.note : '')));
+    tr.append(c0);
+    tr.append(el('td', null, m.sheet || '—'));
+    tr.append(el('td', 'r',
+      m.base.kind === 'banded' ? n + ' ช่วงราคา'
+        : m.base.kind === 'ref' ? 'ใช้ของ ' + m.base.model : String(n)));
+    tr.append(el('td', 'r', st.emptyCells ? String(st.emptyCells) : '—'));
+    mb.append(tr);
+  }
+
+  // ── ตัวเลขพาดหัว ─────────────────────────────────────────────────────────
+  const kpi = [
+    [`${sheetPass} / ${sheetTotal}`, 'ตัวอย่างที่ฝ่ายขายคำนวณด้วยมือไว้ในไฟล์ — ระบบคิดตรงทุกบาท'],
+    [`${pass} / ${C.length}`, 'ด่านตรวจทั้งหมด รวมเคสที่ต้องบล็อกและเคสที่ต้องขอราคา'],
+    [String(cells), `ช่องราคาที่อ่านจากไฟล์ Excel เข้ามาได้ · อีก ${empties} ช่องเป็นสเปกที่ไม่รับผลิต`]
+  ];
+  for (const [n, c] of kpi) {
+    const d = el('div');
+    d.append(el('span', 'n', n));
+    d.append(el('span', 'c', c));
+    document.getElementById('kpi').append(d);
+  }
+
+  // ── ตัวเลขของแม่แบบ Excel — คำนวณสดเหมือนตัวเลขอื่นในหน้านี้ ─────────────
+  let rates = 0, matrixCells = 0;
+  for (const m of Object.values(B.models)) {
+    if (m.base.kind === 'matrix') matrixCells += Object.keys(m.base.cells).length;
+    for (const a of m.adders) rates += Object.keys(a.rates || {}).length;
+  }
+  const put = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+  put('n-cells', matrixCells);
+  put('n-rates', rates);
+  put('n-sheets', PR_ENGINE.bookToSheets(B).length);
+  put('n-odoo', PR_ENGINE.bookToOdooSheets(B).rowCount);
+})();
+</script>
+</body>
+</html>

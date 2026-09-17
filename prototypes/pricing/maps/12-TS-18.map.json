@@ -1,0 +1,162 @@
+{
+  "file": "ราคาTC อัพเดต (13-05-69).xlsx",
+  "sheet": "TS-18",
+  "code": "TS-18",
+  "label": "Thermocouple / RTD TS-18 (หน้าแปลน)",
+  "standard": { "L1": 100, "L2": 50 },
+  "base": {
+    "kind": "matrix",
+    "axes": ["D", "sensor"],
+    "rowHeaderCol": "A",
+    "rows": [16, 46],
+    "colHeaderRow": 15,
+    "cols": ["D", "G", "H", "I"]
+  },
+  "adders": [
+    {
+      "id": "len_l1",
+      "label": "ความยาวแกน L1",
+      "order": 20,
+      "kind": "perUnit",
+      "dim": "L1",
+      "step": 100,
+      "round": "ceil",
+      "unit": "mm",
+      "byAxis": "D",
+      "ratesFrom": { "col": "B", "keyCol": "A", "rows": [16, 46] },
+      "source": "TS-18!B15 'L1 บวกเพิ่ม 100 mm ละ'"
+    },
+    {
+      "id": "len_l2",
+      "label": "ความยาว Sleeve L2",
+      "order": 21,
+      "kind": "perUnit",
+      "dim": "L2",
+      "step": 10,
+      "round": "ceil",
+      "unit": "mm",
+      "byAxis": "D",
+      "ratesFrom": { "col": "C", "keyCol": "A", "rows": [16, 46] },
+      "source": "TS-18!C15 'L2 บวกเพิ่ม 10 mm ละ' — คนละ step กับ L1 ในชีตเดียวกัน"
+    },
+    {
+      "id": "sensor_t",
+      "label": "Type T (บวกเพิ่มจาก Type K)",
+      "order": 30,
+      "kind": "flat",
+      "when": { "option": "sensor:T" },
+      "byAxis": "D",
+      "ratesFrom": { "col": "E", "keyCol": "A", "rows": [16, 46] },
+      "source": "TS-18!E14"
+    },
+    {
+      "id": "sensor_ntc",
+      "label": "NTC / PTC (บวกเพิ่มจาก Type K)",
+      "order": 30,
+      "kind": "flat",
+      "when": { "option": "sensor:NTC" },
+      "byAxis": "D",
+      "ratesFrom": { "col": "F", "keyCol": "A", "rows": [16, 46] },
+      "source": "TS-18!F14"
+    },
+    {
+      "id": "elem2_tc",
+      "label": "2 element (Thermocouple)",
+      "order": 32,
+      "kind": "flat",
+      "when": { "all": [{ "option": "element:2" }, { "axis": "sensor", "in": ["Type K/J"] }] },
+      "byAxis": "D",
+      "ratesFrom": { "col": "J", "keyCol": "A", "rows": [16, 46] },
+      "source": "TS-18!J15"
+    },
+    {
+      "id": "elem2_rtd",
+      "label": "2 element (RTD)",
+      "order": 32,
+      "kind": "flat",
+      "when": { "all": [{ "option": "element:2" }, { "axis": "sensor", "notIn": ["Type K/J"] }] },
+      "byAxis": "D",
+      "ratesFrom": { "col": "K", "keyCol": "A", "rows": [16, 46] },
+      "source": "TS-18!K15"
+    },
+    {
+      "id": "head_blacklite_s",
+      "label": "หัวกระโหลก Blacklite เล็ก",
+      "order": 35,
+      "kind": "flat",
+      "when": { "option": "head:blacklite_s" },
+      "byAxis": "D",
+      "ratesFrom": { "col": "L", "keyCol": "A", "rows": [16, 46] },
+      "source": "TS-18!L15"
+    },
+    {
+      "id": "head_alu_l",
+      "label": "หัวกระโหลก อลูมิเนียม ใหญ่",
+      "order": 35,
+      "kind": "flat",
+      "when": { "option": "head:alu_l" },
+      "byAxis": "D",
+      "ratesFrom": { "col": "M", "keyCol": "A", "rows": [16, 46] },
+      "source": "TS-18!M15"
+    },
+    {
+      "id": "head_blacklite_l",
+      "label": "หัวกระโหลก Blacklite ใหญ่",
+      "order": 35,
+      "kind": "flat",
+      "when": { "option": "head:blacklite_l" },
+      "byAxis": "D",
+      "ratesFrom": { "col": "N", "keyCol": "A", "rows": [16, 46] },
+      "source": "TS-18!N15"
+    },
+    {
+      "id": "flange_ferrule",
+      "label": "หน้าแปลน เฟอร์รูล",
+      "order": 40,
+      "kind": "flat",
+      "byAxis": "flange",
+      "skipIfNoRate": true,
+      "ratesFrom": { "col": "M", "keyCol": "L", "rows": [8, 11] },
+      "source": "TS-18!L7:M11"
+    },
+    {
+      "id": "flange_jis",
+      "label": "หน้าแปลน JIS 10K",
+      "order": 40,
+      "kind": "flat",
+      "byAxis": "flange",
+      "skipIfNoRate": true,
+      "ratesFrom": { "col": "O", "keyCol": "N", "rows": [8, 11] },
+      "source": "TS-18!N7:O11 — ⚠️ JIS 10K ของชีต TW ราคาคนละชุด (600/800/910/1100) ห้ามทำตารางหน้าแปลนกลาง"
+    }
+  ],
+  "constraints": [
+    {
+      "id": "FLANGE_UNKNOWN",
+      "when": {
+        "axis": "flange",
+        "notIn": [
+          "",
+          "1 นิ้ว",
+          "1.5 นิ้ว",
+          "2  นิ้ว",
+          "2.5  นิ้ว",
+          "3/4\" , 1/2\"",
+          "1\"",
+          "1 1/2\"",
+          "2\""
+        ]
+      },
+      "level": "quoteOnRequest",
+      "message": "หน้าแปลนนอกเหนือจากรายการนี้ ต้องขอราคาจากผลิต 2",
+      "source": "TW!L34 (กติกาเดียวกันทั้งสองชีต)"
+    },
+    {
+      "id": "WELD_FLANGE_EXCLUDED",
+      "when": { "always": true },
+      "level": "warn",
+      "message": "ราคานี้ไม่รวมหน้าแปลนเชื่อม (หน้าแปลนที่ติดกับตัวถัง)",
+      "source": "TS-18!C48"
+    }
+  ]
+}

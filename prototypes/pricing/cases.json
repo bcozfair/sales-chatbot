@@ -1,0 +1,94 @@
+[
+  {
+    "name": "BH-01C 600×150 + Male Connector PL-2",
+    "source": "BH!E19:E22 — \"600x3.14x150/645 = 438.14 ปัดเป็น 439x25 = 10,975\" → \"+20% = 13,170\" → \"+320 = 13,490\"",
+    "kind": "เฉลยจากชีต",
+    "cfg": { "model": "BH-01C", "dims": { "dia_mm": 600, "width_mm": 150 }, "options": ["conn:pl2"] },
+    "expectPrice": 13490,
+    "show": true
+  },
+  {
+    "name": "TSK-14 6x200+150-BU",
+    "source": "TS-14!A21:A23 — \"4000+(200+150-100=250 mm.)+(150-50=100 mm.)\" → \"= 4000+(3*300)+(1*130) = 5,030\"",
+    "kind": "เฉลยจากชีต",
+    "cfg": {
+      "model": "TS-14",
+      "axes": { "sensor": "K", "dia_group": "Ø6mm./12.7mm." },
+      "dims": { "L1": 200, "L2": 150 }
+    },
+    "expectPrice": 5030,
+    "show": true
+  },
+  {
+    "name": "TSK-04 แกน 6 เกลียว 1/2\" ยาว 300 mm",
+    "source": "TS-04!F25 = 770 (ราคาตั้ง Standard 6x100) · B25 = 120 (บวกเพิ่ม 100 mm ละ)",
+    "kind": "คิดจากตาราง",
+    "cfg": { "model": "TSK-04", "axes": { "D": "6", "thread": "1/2”" }, "dims": { "L1": 300 } },
+    "expectPrice": 1010,
+    "show": true
+  },
+  {
+    "name": "TSK-04 สเปกตรง Standard เป๊ะ (ไม่ต้องบวกอะไรเลย)",
+    "source": "TS-04!C11 = 430",
+    "kind": "คิดจากตาราง",
+    "cfg": { "model": "TSK-04", "axes": { "D": "2", "thread": "1/8”" } },
+    "expectPrice": 430
+  },
+  {
+    "name": "TSJ-04 (alias ของ TSK-04) ต้องได้ราคาเดียวกัน",
+    "source": "TS-04!A1 \"TS_-04\" — TSK/TSJ ใช้ตารางเดียวกัน",
+    "kind": "คิดจากตาราง",
+    "cfg": { "model": "TSJ-04", "axes": { "D": "2", "thread": "1/8”" } },
+    "expectPrice": 430
+  },
+  {
+    "name": "ช่องว่างในตาราง = ไม่รับผลิต ไม่ใช่ราคา 0 (D=19 มีแค่ 3/4\" กับ 1\")",
+    "source": "TS-04 แถว 44: คอลัมน์ C–F ว่าง เหลือแค่ G,H",
+    "kind": "กฎ",
+    "cfg": { "model": "TSK-04", "axes": { "D": "19", "thread": "1/8”" }, "dims": { "L1": 100 } },
+    "expectStatus": "notManufacturable",
+    "show": true
+  },
+  {
+    "name": "2 element กับแกนสำเร็จ (S) ต้องถูกบล็อก",
+    "source": "TS-04!K11 \"รุ่นแกนสำเร็จ ทำ 2 element ไม่ได้\"",
+    "kind": "กฎ",
+    "cfg": { "model": "TSK-04", "axes": { "D": "6S", "thread": "1/8”" }, "options": ["element:2"] },
+    "expectStatus": "notManufacturable"
+  },
+  {
+    "name": "หน้าแปลนนอกรายการ → ต้องขอราคา ไม่ใช่ error และไม่ใช่ราคา 0",
+    "source": "TW!L34 \"หน้าแปลนนอกเหนือจากนี้ให้ขอราคาจากผลิต 2\"",
+    "kind": "กฎ",
+    "cfg": {
+      "model": "TS-18",
+      "axes": { "D": "6", "sensor": "Type K/J", "flange": "ANSI 150# 3\"" },
+      "dims": { "L1": 100, "L2": 50 }
+    },
+    "expectStatus": "quoteOnRequest",
+    "show": true
+  },
+  {
+    "name": "TS-18 สองมิติความยาวคนละ step (L1 ทีละ 100 · L2 ทีละ 10)",
+    "source": "TS-18!B15 (D=6 → 120/100mm) · C15 (D=6 → 25/10mm) · D25 = 880",
+    "kind": "คิดจากตาราง",
+    "cfg": { "model": "TS-18", "axes": { "D": "6", "sensor": "Type K/J" }, "dims": { "L1": 250, "L2": 80 } },
+    "expectPrice": 1195,
+    "show": true
+  },
+  {
+    "name": "BH-03 Ceramic 300×80 @ 2000W — ค่ากำลังไฟ \"หายไป\" อย่างถูกต้อง",
+    "source": "BH!E8 ช่วง \"101 - ขึ้นไป\" = 65฿/in² · G8 เว้นว่าง (ช่วงอื่น G3:G7 = 10)",
+    "kind": "กฎ",
+    "cfg": { "model": "BH-03", "dims": { "dia_mm": 300, "width_mm": 80, "watt": 2000 } },
+    "expectPrice": 7605,
+    "show": true
+  },
+  {
+    "name": "BH ขนาดต่ำกว่าที่ทำได้ ต้องถูกบล็อก",
+    "source": "BH!H3 \"ขนาดเล็กสุดที่ทำได้ OD = 65mm\"",
+    "kind": "กฎ",
+    "cfg": { "model": "BH-01", "dims": { "dia_mm": 50, "width_mm": 40 } },
+    "expectStatus": "notManufacturable"
+  }
+]

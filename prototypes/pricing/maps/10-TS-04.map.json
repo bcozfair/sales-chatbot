@@ -1,0 +1,102 @@
+{
+  "file": "ราคาTC อัพเดต (13-05-69).xlsx",
+  "sheet": "TS-04",
+  "code": "TSK-04",
+  "label": "Thermocouple TS-04 (เกลียว)",
+  "aliases": ["TSJ-04", "TS-04"],
+  "standard": { "L1": 100, "cable_m": 1 },
+  "base": {
+    "kind": "matrix",
+    "axes": ["D", "thread"],
+    "rowHeaderCol": "A",
+    "rows": [11, 47],
+    "colHeaderRow": 9,
+    "cols": ["C", "D", "E", "F", "G", "H"]
+  },
+  "adders": [
+    {
+      "id": "len_l1",
+      "label": "ความยาวแกน L1",
+      "order": 20,
+      "kind": "perUnit",
+      "dim": "L1",
+      "step": 100,
+      "round": "ceil",
+      "unit": "mm",
+      "byAxis": "D",
+      "ratesFrom": { "col": "B", "keyCol": "A", "rows": [11, 47] },
+      "source": "TS-04!B9 'บวกเพิ่ม 100 mm ละ'"
+    },
+    {
+      "id": "sensor_t",
+      "label": "Type T (บวกเพิ่มจาก Type K/J)",
+      "order": 30,
+      "kind": "flat",
+      "when": { "option": "sensor:T" },
+      "byAxis": "D",
+      "ratesFrom": { "col": "I", "keyCol": "A", "rows": [11, 47] },
+      "source": "TS-04!I9"
+    },
+    {
+      "id": "sensor_ntc",
+      "label": "NTC / PTC (บวกเพิ่มจาก Type K/J)",
+      "order": 30,
+      "kind": "flat",
+      "when": { "option": "sensor:NTC" },
+      "byAxis": "D",
+      "ratesFrom": { "col": "J", "keyCol": "A", "rows": [11, 47] },
+      "source": "TS-04!J9"
+    },
+    {
+      "id": "coat_teflon",
+      "label": "หุ้มเทปล่อน",
+      "order": 40,
+      "kind": "perUnit",
+      "when": { "option": "coat:teflon" },
+      "dim": "teflon_mm",
+      "over": 0,
+      "step": 100,
+      "round": "ceil",
+      "unit": "mm",
+      "byAxis": "D",
+      "ratesFrom": { "col": "L", "keyCol": "A", "rows": [11, 47] },
+      "source": "TS-04!L8 'หุ้มเทปล่อน เพิ่ม 100มม. ละ'"
+    }
+  ],
+  "constraints": [
+    {
+      "id": "ELEM2_FINISHED_CORE",
+      "when": {
+        "all": [
+          { "option": "element:2" },
+          { "axis": "D", "in": ["2.5S", "3S", "3.2S", "4.8S", "6S", "6.35S", "8S"] }
+        ]
+      },
+      "level": "block",
+      "message": "รุ่นแกนสำเร็จ (S) ทำ 2 element ไม่ได้",
+      "source": "TS-04!K11"
+    },
+    {
+      "id": "ELEM2_MIN_DIA",
+      "when": {
+        "all": [
+          { "option": "element:2" },
+          {
+            "axis": "D",
+            "in": ["2", "2.5S", "3", "3A", "3S", "3.2", "3.2A", "3.2S", "4", "4A", "4.8", "4.8A", "4.8S", "5"]
+          }
+        ]
+      },
+      "level": "block",
+      "message": "2 element ทำได้ตั้งแต่แกน 6 mm ขึ้นไป",
+      "source": "TS-04!K11"
+    },
+    {
+      "id": "ELEM2_ASK_PRODUCTION",
+      "when": { "option": "element:2" },
+      "level": "quoteOnRequest",
+      "message": "2 Element ต้องนำแกน 1 Element ใส่ในแกนใหญ่ — ปรึกษาผลิต 2 ก่อนยืนยันราคา",
+      "source": "TS-04 หมายเหตุท้ายชีต"
+    }
+  ]
+}

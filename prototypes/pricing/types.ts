@@ -1,0 +1,236 @@
+// ─────────────────────────────────────────────────────────────────────────────
+//  PROTOTYPE — ชนิดข้อมูลกลางของเครื่องคิดราคาแบบ configurator
+//
+//  ⚠️ ของทดลอง ไม่มีใครใน production import ไฟล์นี้ · ดู prototypes/pricing/README.md
+//
+//  ทำไมทุกอย่างเป็น "ข้อมูล" ไม่ใช่ "โค้ด":
+//  สมุดราคามาเป็นไฟล์ Excel รอบใหม่ทุกไม่กี่เดือน (ชื่อไฟล์มีวันที่ติดมา 02-02-69 / 13-05-69)
+//  ถ้าสูตร/การปัดเศษ/ลำดับการคำนวณฝังอยู่ในโค้ด แปลว่าร้านแก้เองไม่ได้ ซึ่งขัดหลักการข้อ 2
+//  ของ AGENTS.md ⇒ ทุกอย่างที่ต่างกันรายรุ่นอยู่ในโครงสร้างข้างล่างนี้ ไม่ใช่ใน engine.ts
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** จำนวนเงิน หน่วยบาท */
+export type Money = number;
+
+/** สเปกที่ผู้ใช้เลือก — input ของ engine */
+export interface ProductConfig {
+  /** รหัสตระกูลรุ่น เช่น 'TS-04' · 'BH-01C' (รับ alias ได้) */
+  model: string;
+  /** ค่าแกนที่เป็นตัวเลือกแบบจำกัด เช่น { D: '6', thread: '1/2”' } — ค่าเป็น string ดิบจากชีต */
+  axes?: Record<string, string>;
+  /** ค่าที่เป็นตัวเลขต่อเนื่อง เช่น { L1: 300, L2: 150, cable_m: 3 } */
+  dims?: Record<string, number>;
+  /** ตัวเลือกแบบติ๊ก เช่น ['head:blacklite_l', 'bend:L'] */
+  options?: string[];
+}
+
+// ── เงื่อนไข ─────────────────────────────────────────────────────────────────
+
+/**
+ * เงื่อนไขแบบประกาศ — ตั้งใจให้เล็กและปิด ไม่ใช่ภาษาสคริปต์
+ * เพราะสมุดราคาถูกแก้โดยแอดมิน การเปิดให้เขียน expression อิสระคือการเปิดช่องให้
+ * คนตั้งราคาเขียนโค้ดลงฐานข้อมูลโดยไม่มีใครรีวิว
+ */
+export type Predicate =
+  | { always: true }
+  | { axis: string; in: string[] }
+  | { axis: string; notIn: string[] }
+  | { option: string }
+  | { dim: string; gt?: number; gte?: number; lt?: number; lte?: number }
+  | { all: Predicate[] }
+  | { any: Predicate[] }
+  | { not: Predicate };
+
+// ── ค่าที่คำนวณมาจากค่าอื่น ───────────────────────────────────────────────────
+
+/**
+ * ค่าที่ไม่ได้กรอกเข้ามาตรง ๆ แต่คำนวณจาก dims อื่น แล้วเขียนกลับเข้า dims
+ * ให้ constraint / adder มองเห็นได้
+ *
+ * ค่าคงที่ของสูตรอยู่ใน `consts` ไม่ใช่ในโค้ด — เช่น BH ใช้ π = **3.14** (ไม่ใช่ Math.PI)
+ * และ 645 (mm² ต่อ 1 ตารางนิ้ว) ทั้งสองค่าเขียนอยู่ในชีต ถ้าวันหนึ่งเขาเปลี่ยนตัวหาร
+ * จะได้แก้ที่สมุดราคา ไม่ใช่มาไล่หาใน engine
+ */
+export interface DerivedDim {
+  /** ชื่อที่จะถูกเขียนลง dims */
+  name: string;
+  label: string;
+  formula: 'sum' | 'cylinderAreaIn2';
+  /** ชื่อ dims ที่เป็น input */
+  args: string[];
+  consts?: Record<string, number>;
+  round?: RoundMode;
+}
+
+export type RoundMode = 'ceil' | 'floor' | 'exact';
+
+// ── ฐานราคา ─────────────────────────────────────────────────────────────────
+
+/** ช่วงค่าหนึ่งแถบ — `flat` = ราคาเหมาทั้งช่วง · `rate` = ต่อหนึ่งหน่วยของปริมาณนั้น */
+export interface Band {
+  min: number;
+  /** null = ไม่มีขอบบน */
+  max: number | null;
+  flat?: Money;
+  rate?: Money;
+  label?: string;
+}
+
+export type BaseSpec =
+  /**
+   * ตารางค้นหาตามแกน — **แถวที่ไม่มี = ไม่รับผลิต ไม่ใช่ราคา 0**
+   * ชีตจริงเบาบางมากโดยตั้งใจ (TS-04: D=2 มีครบ 6 ขนาดเกลียว แต่ D=19 มีแค่ 2)
+   */
+  | { kind: 'matrix'; axes: string[]; cells: Record<string, Money> }
+  /** แถบราคาตามปริมาณ (ใช้กับ BH ที่คิดจากพื้นที่ผิว) */
+  | { kind: 'banded'; quantity: string; bands: Band[] }
+  /** ฐานของรุ่นนี้ = ฐานของอีกรุ่น (เช่น BH-01C ใช้ฐานของ BH-01 แล้วค่อย +20% ด้วย adder) */
+  | { kind: 'ref'; model: string };
+
+// ── ส่วนที่บวกเพิ่ม ──────────────────────────────────────────────────────────
+
+/**
+ * `order` มีอยู่เพราะลำดับมีผลจริง — ตัวอย่างในชีต BH:
+ *   10,975 → +20% = 13,170 → +320 = 13,490
+ * ถ้าสลับเป็น (10,975+320) × 1.2 = 13,554 ผิดไป 64 บาท
+ */
+export interface Adder {
+  id: string;
+  label: string;
+  order: number;
+  when?: Predicate;
+  kind: 'flat' | 'percent' | 'perUnit';
+
+  /** flat: จำนวนคงที่ */
+  amount?: Money;
+
+  /** percent: คิดจากยอดสะสม ณ ลำดับนั้น */
+  percent?: number;
+
+  /** perUnit: คิดจากส่วนที่เกิน baseline */
+  dim?: string;
+  /** ส่วนที่เกินค่านี้จึงคิดเงิน — ไม่ระบุ = ใช้ standard[dim] ?? 0 */
+  over?: number;
+  step?: number;
+  round?: RoundMode;
+  /** ตัวคูณ เช่น สายของ BH คิด ×2 เพราะใช้ 2 เส้น */
+  times?: number;
+
+  /** ราคาเดียวทุกกรณี */
+  rate?: Money;
+  /** ราคาต่างกันตามค่าแกน (เช่น "บวกเพิ่ม 100 mm ละ" ของ TS-04 ต่างกันตาม D) */
+  byAxis?: string;
+  rates?: Record<string, Money>;
+  /**
+   * true = ถ้าไม่มีราคาสำหรับค่าแกนนี้ ให้ข้ามเงียบ ๆ
+   * false/ไม่ระบุ = ถือเป็น "ทำไม่ได้" (ชีตเว้นว่างไว้แปลว่าไม่รับทำ)
+   */
+  skipIfNoRate?: boolean;
+  /** หน่วยที่จะพิมพ์ใน breakdown เช่น 'mm' · 'm' */
+  unit?: string;
+  /** ที่มาในชีต เช่น "TS-14!A19" — ไว้ตามกลับไปตรวจเวลาราคาเพี้ยน */
+  source?: string;
+
+  // ── สามช่องข้างล่างนี้มีไว้ให้ "คนตั้งราคา" ไม่ใช่ให้ importer ──────────────
+  /**
+   * ปิดกฎไว้ชั่วคราวโดยไม่ต้องลบ — ลบแล้วประวัติหาย และกฎที่เคยใช้ก็ตามกลับไม่ได้ว่า
+   * เมื่อก่อนคิดเท่าไหร่ ⇒ โปรโมชันที่ "หยุดไว้ก่อน" ต้องเป็นการปิด ไม่ใช่การลบ
+   */
+  disabled?: boolean;
+  /** กฎที่คนเพิ่มเองทีหลัง ไม่ได้มาจากไฟล์ราคา — ต้องแยกให้เห็นเวลาสมุดราคารอบใหม่มา */
+  custom?: boolean;
+  /** เหตุผลที่คนตั้งกฎเขียนไว้เอง (ต่างจาก `source` ที่เป็นที่มาในชีต) */
+  note?: string;
+}
+
+// ── กฎที่ไม่ใช่ราคา ──────────────────────────────────────────────────────────
+
+/**
+ * `quoteOnRequest` ไม่ใช่ error และไม่ใช่ราคา 0 — ชีตเขียนไว้ตรง ๆ หลายที่ว่า
+ * "หน้าแปลนนอกเหนือจากนี้ให้ขอราคาจากผลิต 2" / "2 Element ให้ปรึกษาผลิต 2 ก่อน"
+ */
+export interface Constraint {
+  id: string;
+  when: Predicate;
+  level: 'block' | 'quoteOnRequest' | 'warn';
+  message: string;
+  /** ที่มาในชีต เช่น "TS-14!A19" — ไว้ตามกลับไปตรวจเวลาเถียงกันว่ากฎนี้มาจากไหน */
+  source?: string;
+  /** ปิดไว้ชั่วคราว — เหตุผลเดียวกับ `Adder.disabled` */
+  disabled?: boolean;
+  custom?: boolean;
+  note?: string;
+}
+
+// ── สมุดราคา ─────────────────────────────────────────────────────────────────
+
+export interface PriceModel {
+  code: string;
+  label: string;
+  /** ชีตต้นทาง — ไว้ตามกลับไปหาที่มาเวลาราคาเพี้ยน */
+  sheet?: string;
+  /** รหัสรุ่นอื่นที่ใช้ตารางเดียวกัน (BH-02 ใช้ของ BH-01 · TSJ-04 ใช้ของ TSK-04) */
+  aliases?: string[];
+  /**
+   * สเปกที่ "รวมอยู่ในราคาตั้งแล้ว" — ทุกชีตประกาศไว้ที่หัวตาราง
+   * เช่น TS-04 เขียนว่า "ราคาตั้ง Standard TS_-04(S_) 6x100+1M" ⇒ { L1: 100, cable_m: 1 }
+   * ถ้าไม่เก็บค่านี้ จะไม่รู้ว่าจะคิดส่วนต่างจากอะไร
+   */
+  standard: Record<string, number>;
+  derivedDims?: DerivedDim[];
+  base: BaseSpec;
+  adders: Adder[];
+  constraints: Constraint[];
+  /**
+   * สถิติตอนนำเข้า ติดมากับสมุดราคาเพื่อให้ผู้อ่านไม่ต้องนับเอง
+   * จำเป็นเพราะ **นับจากคีย์ของ `cells` ให้ผลผิด**: แถวที่ว่างทั้งแถว (D = "7TN" ของ TS-04)
+   * ไม่โผล่ในคีย์สักตัว นับเองได้ช่องว่าง 46 ขณะที่ของจริง 52 (วัด 2026-09-17)
+   */
+  importStats?: {
+    code: string;
+    sheet: string;
+    baseCells: number;
+    emptyCells: number;
+    adderRates: number;
+    floatNoiseFixed: number;
+  };
+}
+
+export interface PriceBook {
+  version: string;
+  source: string;
+  models: Record<string, PriceModel>;
+  /**
+   * ติดมาเมื่อสมุดราคาถูกแก้โดยคน (ผ่านหน้าแก้กฎ หรือผ่านไฟล์ .xlsx ที่ส่งออกไปแก้แล้วนำกลับเข้ามา)
+   * **ไม่มีค่านี้ = ของที่แปลงจากไฟล์ราคาตรง ๆ ยังไม่มีใครแตะ** — ต้องแยกให้ออก เพราะเวลาราคา
+   * ที่ลูกค้าได้ไม่ตรงกับที่ฝ่ายขายคิด คำถามแรกคือ "ใครแก้ เมื่อไหร่"
+   */
+  edited?: { at: string; by?: string; note?: string };
+}
+
+// ── ผลลัพธ์ ──────────────────────────────────────────────────────────────────
+
+export interface BreakdownLine {
+  step: string;
+  label: string;
+  detail?: string;
+  amount: Money;
+  /** ยอดสะสมหลังบรรทัดนี้ */
+  running: Money;
+}
+
+export interface Violation {
+  id: string;
+  level: 'block' | 'quoteOnRequest' | 'warn';
+  message: string;
+}
+
+export interface PriceOutcome {
+  status: 'priced' | 'quoteOnRequest' | 'notManufacturable';
+  model: string;
+  unitPrice: Money;
+  /** ทั้งจุดประสงค์ของสเปรดชีตคือตอบว่า "5,030 มาจากไหน" — ถ้าคืนแค่ตัวเลขก็ทิ้งของที่มีค่าที่สุดไป */
+  breakdown: BreakdownLine[];
+  violations: Violation[];
+  bookVersion: string;
+}

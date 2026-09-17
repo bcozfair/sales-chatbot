@@ -28,3 +28,6 @@ backup
 DEPLOY.md
 # ของสำหรับรันบน host เท่านั้น (systemd unit + dependency ของ logworker) ไม่เกี่ยวกับ image
 deploy
+
+# ของทดลอง — ไม่มีอะไรในเส้นทางรันจริงเรียกใช้ ไม่ต้องแบกเข้า image
+prototypes

@@ -1,0 +1,688 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>แก้กฎราคา · เครื่องคิดราคาสินค้าสั่งทำ</title>
+<link rel="stylesheet" href="_theme.css">
+<script src="_pr-labels.js"></script>
+<script src="_pr-ui.js"></script>
+<script src="_pr-engine.js"></script>
+<style>
+  /* โทเคนสีมาจาก _theme.css (คัดจาก frontend/src/index.css) — ที่นี่มีแต่โครงเฉพาะหน้านี้ */
+  .doc { max-width: 1180px; margin: 0 auto; }
+  .doc h1 { font-size: 20px; font-weight: 800; color: var(--c-text-max); margin: 20px 0 4px; }
+  .doc .sub { color: var(--c-text-muted); font-size: 12.5px; margin: 0 0 16px; }
+
+  .cols { display: grid; grid-template-columns: minmax(0,1fr) 400px; gap: 16px; align-items: start; }
+  @media (max-width: 1023px) { .cols { grid-template-columns: minmax(0,1fr); } }
+
+  .io { display: flex; flex-wrap: wrap; gap: 8px; }
+  .io .btn { flex: 1 1 220px; justify-content: center; }
+  .io-what { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 4px 14px; margin-top: 10px; }
+  .io-what div { font-size: 11px; color: var(--c-text-faint); line-height: 1.55; }
+  .io-what b { color: var(--c-text-soft); font-weight: 700; }
+
+  .rule { border: 1px solid var(--c-line); border-radius: 12px; padding: 10px 12px;
+          background: var(--c-surface-2); margin-bottom: 10px; }
+  .rule.off { opacity: .5; }
+  .rule.new { border-color: var(--brand-border); }
+  .rule-top { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; }
+  .rule-name { flex: 1 1 160px; min-width: 0; }
+  .rule-name input { width: 100%; background: transparent; border: 0; padding: 0; font: inherit;
+                     font-size: 13px; font-weight: 700; color: var(--c-text-max); }
+  .rule-name input:focus { outline: 1px dashed var(--c-line-strong); outline-offset: 3px; }
+  .rule-title { font-size: 12.5px; font-weight: 700; color: var(--c-text-max); }
+  .rule-id { font-size: 10.5px; color: var(--c-text-faint); line-height: 1.5; overflow-wrap: anywhere; }
+  .rule-acts { display: flex; gap: 4px; flex: none; }
+  .rule-acts .btn { padding: 4px 8px; font-size: 11px; }
+
+  .ff-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); gap: 10px; margin-top: 10px; }
+  .ff { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .ff > label { font-size: 11px; font-weight: 700; color: var(--c-text-soft); }
+  .ff .hint { font-size: 10.5px; color: var(--c-text-faint); line-height: 1.45; }
+  .ff .row { display: flex; align-items: center; gap: 5px; }
+  .ff .row input.cell { min-width: 0; }
+  .ff .row .u { font-size: 11.5px; color: var(--c-text-muted); flex: none; }
+
+  .cond { margin-top: 10px; }
+  .cond > label { display: block; font-size: 11px; font-weight: 700; color: var(--c-text-soft); margin-bottom: 4px; }
+  .cond .row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .cond .row input.cell { flex: 1 1 230px; font-size: 11.5px; }
+  .cond .row select.cell { flex: 0 1 200px; }
+  .cond .msg { font-size: 11px; margin-top: 4px; line-height: 1.5; overflow-wrap: anywhere; }
+  .cond .msg.ok { color: var(--c-text-faint); }
+  .cond .msg.bad { color: var(--red-700); }
+
+  .tmpl { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 8px; }
+  .tmpl button { text-align: left; display: block; padding: 10px 12px; border-radius: 12px;
+                 border: 1px dashed var(--c-line-strong); background: transparent; cursor: pointer;
+                 font: inherit; color: var(--c-text); }
+  .tmpl button:hover { border-color: var(--brand-border); background: var(--brand-soft); }
+  .tmpl b { display: block; font-size: 12.5px; color: var(--c-text-max); margin-bottom: 2px; }
+  .tmpl span { font-size: 11px; color: var(--c-text-faint); line-height: 1.5; }
+
+  .imp { position: sticky; top: 16px; }
+  @media (max-width: 1023px) { .imp { position: static; } }
+  .imp-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 7px 0;
+             border-bottom: 1px dashed var(--c-surface-3); }
+  .imp-row .n { font-size: 12px; color: var(--c-text-strong); overflow-wrap: anywhere; }
+  .imp-row .v { font-size: 12px; font-weight: 700; text-align: right; white-space: nowrap;
+                font-variant-numeric: tabular-nums; color: var(--c-text-faint); }
+  .imp-row.changed .v { color: var(--amber-800); }
+  .imp-row .src { grid-column: 1/-1; font-size: 10.5px; color: var(--c-text-faint); }
+  .imp-sum { font-size: 12.5px; font-weight: 700; color: var(--c-text-strong); }
+
+  .issues { margin: 8px 0 0; padding-left: 18px; }
+  .issues li { font-size: 11.5px; line-height: 1.6; overflow-wrap: anywhere; }
+  .issues li.bad { color: var(--red-700); }
+  .issues li.warn { color: var(--amber-800); }
+
+  .basebox { font-size: 11.5px; color: var(--c-text-muted); line-height: 1.7; }
+  .basebox code { font-size: 11px; color: var(--c-text-strong); background: var(--c-surface-3);
+                  padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div class="mock-stage">
+<div class="doc">
+
+  <h1>แก้กฎราคา</h1>
+  <p class="sub">
+    เปลี่ยนวิธีคิดราคาได้โดยไม่ต้องให้ใครแก้โปรแกรม · แก้ทีละข้อในหน้านี้ หรือส่งออกทั้งเล่มไปแก้ใน Excel แล้วนำกลับเข้ามา ·
+    ยังไม่รู้จักคำไหน ดูได้ที่ <a href="pr-manual.html" style="color:var(--brand-fg)">คู่มือการใช้งาน</a>
+  </p>
+
+  <div id="state-banner"></div>
+
+  <div class="card" id="card-io">
+    <h2 class="sec">แม่แบบ Excel</h2>
+    <div class="io">
+      <button class="btn" type="button" id="dl-rules">⬇ ดาวน์โหลดแม่แบบกฎราคา (.xlsx)</button>
+      <button class="btn" type="button" id="up-rules">⬆ นำเข้าไฟล์ที่แก้แล้ว</button>
+      <button class="btn" type="button" id="dl-odoo">⬇ ตารางราคาสำหรับ Odoo (.xlsx)</button>
+      <button class="btn" type="button" id="reset">↺ คืนค่าเดิมทั้งหมด</button>
+    </div>
+    <input type="file" id="file" accept=".xlsx" hidden>
+    <div class="io-what">
+      <div><b>แม่แบบกฎราคา</b> = กฎทั้งเล่ม แก้ในไฟล์แล้วนำกลับเข้ามาได้ · ตารางใหญ่อย่างราคาตั้ง 303 ช่อง
+        กับอัตราตามขนาด 346 แถว แก้ใน Excel เร็วกว่าแก้ทีละช่องบนหน้าจอมาก</div>
+      <div><b>ตารางราคาสำหรับ Odoo</b> = ภาพนิ่งของราคา ณ วันที่กด คลี่เป็นรายการสินค้าทีละตัว
+        พร้อมชื่อฟิลด์ของ Odoo · <b>นำกลับเข้าระบบนี้ไม่ได้</b> เป็นไฟล์ทางเดียว</div>
+    </div>
+    <div id="io-msg"></div>
+  </div>
+
+  <div class="cols">
+    <div>
+      <div class="card">
+        <h2 class="sec">รุ่นที่กำลังแก้</h2>
+        <select class="cell" id="model" style="height:38px;font-size:13px;max-width:440px"></select>
+        <div class="basebox" id="basebox" style="margin-top:10px"></div>
+      </div>
+
+      <div class="card">
+        <h2 class="sec" id="rules-head">กฎบวกเพิ่ม</h2>
+        <p class="tiny faint" style="margin:-6px 0 12px">
+          กฎถูกคิดเรียงจากบนลงล่างตามเลข “ลำดับ” และเปอร์เซ็นต์คิดจาก<b>ยอดสะสม ณ ตอนนั้น</b> ⇒ สลับลำดับแล้วยอดเปลี่ยน ·
+          กฎที่ยังไม่อยากให้มีผล ให้กด “ปิดไว้” แทนการลบ จะได้ตามย้อนได้ว่าเมื่อก่อนคิดยังไง
+        </p>
+        <div id="rules"></div>
+        <h2 class="sec" style="margin:18px 0 8px">เพิ่มกฎใหม่จากแม่แบบ</h2>
+        <div class="tmpl" id="templates"></div>
+      </div>
+
+      <div class="card">
+        <h2 class="sec" id="cons-head">ข้อห้ามและข้อควรระวัง</h2>
+        <div id="cons"></div>
+      </div>
+    </div>
+
+    <div class="card imp" id="impact"></div>
+  </div>
+
+  <p class="tiny faint" style="margin:18px 0 40px">
+    ตัวอย่างนี้เก็บกฎที่แก้ไว้ใน<b>เบราว์เซอร์ของเครื่องนี้เท่านั้น</b> ไม่ได้ส่งไปไหนและไม่กระทบระบบจริง ·
+    ของจริงต้องเก็บในฐานข้อมูล มีประวัติว่าใครแก้เมื่อไหร่ และควรต้องมีคนอนุมัติก่อนมีผล — เป็นข้อที่ต้องให้หัวหน้าเคาะ
+  </p>
+
+</div>
+</div>
+
+<script>
+(function () {
+  const U = window.PR_UI, L = window.PR_LABELS, E = window.PR_ENGINE, el = U.el;
+  const ORIGINAL = window.PR_BOOK;   // ของที่แปลงจากไฟล์ราคา — ห้ามแก้ ใช้เป็นตัวเทียบ
+  const CASES = window.PR_CASES;
+  U.bar('rules');
+
+  const clone = (x) => JSON.parse(JSON.stringify(x));
+
+  // ก๊อปเสมอ ไม่ว่าจะมาจาก localStorage หรือจากสมุดต้นฉบับ — ถ้าไม่ก๊อป การแก้กฎจะไปแก้
+  // ตัวต้นฉบับด้วย แล้วช่อง "ราคาเดิม → ราคาใหม่" จะเท่ากันตลอดโดยไม่มีใครรู้ว่าทำไม
+  let book = clone(U.book());
+  let modelCode = Object.keys(book.models)[0];
+
+  function model() { return book.models[modelCode]; }
+
+  /**
+   * มีการแก้เกิดขึ้น
+   * full = true เมื่อ "รายการเปลี่ยนรูป" (เพิ่ม/ลบ/ปิด/สลับลำดับ) ⇒ ต้องวาดใหม่ทั้งหน้า
+   * full = false เมื่อแก้แค่ตัวเลขในช่อง ⇒ วาดใหม่เฉพาะแถบสถานะกับแผงผลกระทบ
+   *        ไม่งั้นช่องที่กำลังกรอกจะถูกสร้างใหม่ทุกครั้งที่ออกจากช่อง
+   */
+  function touched(note, full) {
+    book.edited = {
+      at: new Date().toISOString().slice(0, 16).replace('T', ' '),
+      note: note || 'แก้จากหน้าแก้กฎราคา'
+    };
+    if (!U.saveBook(book)) {
+      msg('เบราว์เซอร์นี้เก็บของที่แก้ไม่ได้ (โหมดส่วนตัว?) — แก้ต่อได้ แต่รีเฟรชแล้วจะหาย', 'amber');
+    }
+    if (full) render();
+    else { renderState(); renderImpact(); }
+  }
+
+  // ── ชื่อที่คนอ่านรู้เรื่อง ────────────────────────────────────────────────
+  function dimName(k) {
+    const u = U.unit(k);
+    return U.dim(k) + (u ? ' (' + u + ')' : '');
+  }
+
+  /** เงื่อนไขในรูปข้อความ → คำไทยอ่านเอาเรื่อง (ใช้โชว์อย่างเดียว ไม่ได้แปลงกลับ) */
+  function humanCond(text) {
+    if (!text || text === 'ทุกกรณี') return 'มีผลทุกกรณี';
+    let s = text;
+    s = s.replace(/ติ๊ก\[([^\]]+)\]/g, (_, id) => 'เมื่อสั่ง “' + U.opt(id) + '”');
+    s = s.replace(/แกน\[([^\]]+)\]=([^,)]+)/g, (_, a, v) => 'เมื่อ' + U.axis(a) + 'เป็น ' + v.trim());
+    s = s.replace(/แกน\[([^\]]+)\]≠([^,)]+)/g, (_, a, v) => 'เมื่อ' + U.axis(a) + 'ไม่ใช่ ' + v.trim());
+    s = s.replace(/ขนาด\[([^\]]+)\]\s*(>=|<=|>|<)\s*([\d.]+)/g, (_, d, op, n) => {
+      const word = op === '>' ? 'มากกว่า' : op === '>=' ? 'ตั้งแต่' : op === '<' ? 'น้อยกว่า' : 'ไม่เกิน';
+      return 'เมื่อ' + U.dim(d) + word + ' ' + n + ' ' + U.unit(d);
+    });
+    s = s.replace(/และ\(/g, '(ทั้ง ').replace(/หรือ\(/g, '(อย่างใดอย่างหนึ่ง ').replace(/ไม่\(/g, '(ไม่ใช่ ');
+    return s.replace(/ , /g, ' และ ');
+  }
+
+  // ── ช่องกรอก ──────────────────────────────────────────────────────────────
+  function numField(label, hint, value, unit, onChange) {
+    const f = el('div', 'ff');
+    f.appendChild(el('label', null, label));
+    const row = el('div', 'row');
+    const i = document.createElement('input');
+    i.className = 'cell r';
+    i.type = 'number';
+    i.step = 'any';
+    i.value = value === undefined || value === null ? '' : value;
+    i.addEventListener('change', () => onChange(i.value === '' ? undefined : Number(i.value)));
+    row.appendChild(i);
+    if (unit) row.appendChild(el('span', 'u', unit));
+    f.appendChild(row);
+    if (hint) f.appendChild(el('div', 'hint', hint));
+    return f;
+  }
+
+  function selectField(label, hint, options, value, onChange) {
+    const f = el('div', 'ff');
+    f.appendChild(el('label', null, label));
+    const s = document.createElement('select');
+    s.className = 'cell';
+    options.forEach((o) => {
+      const opt = new Option(o.t, o.v);
+      if (o.v === value) opt.selected = true;
+      s.appendChild(opt);
+    });
+    s.addEventListener('change', () => onChange(s.value));
+    f.appendChild(s);
+    if (hint) f.appendChild(el('div', 'hint', hint));
+    return f;
+  }
+
+  function noteField(label, hint) {
+    const f = el('div', 'ff');
+    f.appendChild(el('label', null, label));
+    f.appendChild(el('div', 'hint', hint));
+    return f;
+  }
+
+  // ── ตัวช่วยเขียนเงื่อนไข ──────────────────────────────────────────────────
+  //
+  // เขียนเป็น "ข้อความ" ชุดเดียวกับที่อยู่ในไฟล์ .xlsx โดยตั้งใจ — คนที่แก้บนหน้าจอเป็น
+  // จะแก้ในไฟล์เป็นทันที และตัวตรวจไวยากรณ์ก็เป็นตัวเดียวกับที่ตรวจตอนนำเข้าไฟล์
+  // ⇒ ไม่มีทางที่หน้าจอยอมรับเงื่อนไขที่ไฟล์ไม่ยอมรับ หรือกลับกัน
+  function condSuggestions(m) {
+    const out = [{ v: 'ทุกกรณี', t: 'ทุกกรณี (ไม่มีเงื่อนไข)' }];
+    Object.keys(L.options).forEach((o) => out.push({ v: 'ติ๊ก[' + o + ']', t: 'เมื่อสั่ง ' + U.opt(o) }));
+    if (m.base.kind === 'matrix') {
+      const axes = m.base.axes;
+      const cells = Object.keys(m.base.cells);
+      axes.forEach((a, ai) => {
+        const vals = [];
+        cells.forEach((k) => {
+          const p = k.split(' | ')[ai];
+          if (p && vals.indexOf(p) < 0) vals.push(p);
+        });
+        vals.slice(0, 8).forEach((v) => out.push({ v: 'แกน[' + a + ']=' + v, t: 'เมื่อ' + U.axis(a) + 'เป็น ' + v }));
+      });
+    }
+    Object.keys(m.standard).forEach((d) =>
+      out.push({ v: 'ขนาด[' + d + ']>' + m.standard[d], t: 'เมื่อ' + U.dim(d) + 'เกิน ' + m.standard[d] })
+    );
+    return out;
+  }
+
+  function condEditor(getText, setText, m) {
+    const box = el('div', 'cond');
+    box.appendChild(el('label', null, 'เงื่อนไข — กฎนี้จะมีผลเมื่อไหร่'));
+
+    const row = el('div', 'row');
+    const input = document.createElement('input');
+    input.className = 'cell';
+    input.value = getText();
+
+    const sel = document.createElement('select');
+    sel.className = 'cell';
+    sel.appendChild(new Option('＋ แทรกเงื่อนไขสำเร็จรูป…', ''));
+    condSuggestions(m).forEach((s) => sel.appendChild(new Option(s.t, s.v)));
+
+    const msgEl = el('div', 'msg ok');
+
+    function validate(save) {
+      const r = E.parsePredicate(input.value);
+      if (r.ok) {
+        msgEl.className = 'msg ok';
+        msgEl.textContent = '→ ' + humanCond(input.value.trim() || 'ทุกกรณี');
+        if (save) setText(input.value.trim());
+      } else {
+        msgEl.className = 'msg bad';
+        msgEl.textContent = '✗ ' + r.reason;
+      }
+    }
+
+    input.addEventListener('input', () => validate(false));
+    input.addEventListener('change', () => validate(true));
+    sel.addEventListener('change', () => {
+      if (!sel.value) return;
+      const cur = input.value.trim();
+      input.value = cur === '' || cur === 'ทุกกรณี' ? sel.value : 'และ(' + cur + ' , ' + sel.value + ')';
+      sel.value = '';
+      validate(true);
+    });
+
+    row.appendChild(input);
+    row.appendChild(sel);
+    box.appendChild(row);
+    box.appendChild(msgEl);
+    validate(false);
+    return box;
+  }
+
+  // ── การ์ดของกฎหนึ่งข้อ ────────────────────────────────────────────────────
+  function ruleCard(a, m) {
+    const K = L.rules.kinds[a.kind];
+    const card = el('div', 'rule' + (a.disabled ? ' off' : '') + (a.custom ? ' new' : ''));
+
+    const top = el('div', 'rule-top');
+    const nameBox = el('div', 'rule-name');
+    const nameInput = document.createElement('input');
+    nameInput.value = a.label;
+    nameInput.addEventListener('change', () => {
+      a.label = nameInput.value.trim() || a.id;
+      touched('เปลี่ยนชื่อกฎ ' + a.id);
+    });
+    nameBox.appendChild(nameInput);
+    nameBox.appendChild(el('div', 'rule-id',
+      'รหัส ' + a.id + ' · ' + (a.source ? 'มาจากไฟล์ราคา ' + a.source : 'เพิ่มเองในระบบ ไม่ได้มาจากไฟล์ราคา')));
+    top.appendChild(nameBox);
+
+    top.appendChild(el('span', 'tag ' + (a.kind === 'percent' ? 'opt' : a.kind === 'flat' ? 'ship' : 'warn'), K.label));
+
+    const acts = el('div', 'rule-acts');
+    const toggle = el('button', 'btn', a.disabled ? 'เปิดใช้' : 'ปิดไว้');
+    toggle.type = 'button';
+    toggle.addEventListener('click', () => {
+      a.disabled = !a.disabled;
+      touched((a.disabled ? 'ปิด' : 'เปิด') + 'กฎ ' + a.label, true);
+    });
+    acts.appendChild(toggle);
+    if (a.custom) {
+      const del = el('button', 'btn', 'ลบ');
+      del.type = 'button';
+      del.addEventListener('click', () => {
+        m.adders = m.adders.filter((x) => x !== a);
+        touched('ลบกฎ ' + a.label, true);
+      });
+      acts.appendChild(del);
+    }
+    top.appendChild(acts);
+    card.appendChild(top);
+
+    const grid = el('div', 'ff-grid');
+    grid.appendChild(numField('ลำดับ', '', a.order, '', (v) => {
+      a.order = v === undefined ? 999 : v;
+      touched('สลับลำดับกฎ ' + a.label, true);
+    }));
+
+    if (a.kind === 'percent') {
+      grid.appendChild(numField('เปอร์เซ็นต์', 'ใส่เลขติดลบ = ส่วนลด', a.percent, '%', (v) => {
+        a.percent = v === undefined ? 0 : v;
+        touched('แก้เปอร์เซ็นต์ของ ' + a.label);
+      }));
+    } else if (a.kind === 'flat') {
+      if (a.byAxis) {
+        grid.appendChild(noteField('จำนวนเงิน',
+          'ราคาต่างกันตาม' + U.axis(a.byAxis) + ' ' + Object.keys(a.rates || {}).length +
+          ' ค่า — แก้ได้ในไฟล์แม่แบบ ชีต “อัตราตามแกน”'));
+      } else {
+        grid.appendChild(numField('จำนวนเงิน', '', a.amount, 'บาท', (v) => {
+          a.amount = v === undefined ? 0 : v;
+          touched('แก้จำนวนเงินของ ' + a.label);
+        }));
+      }
+    } else {
+      const dims = Object.keys(L.dims).concat(Object.keys(L.derived));
+      if (a.dim && dims.indexOf(a.dim) < 0) dims.push(a.dim);
+      grid.appendChild(selectField('คิดจากขนาด', '', dims.map((d) => ({ v: d, t: dimName(d) })), a.dim, (v) => {
+          a.dim = v;
+          touched('เปลี่ยนขนาดที่ใช้คิดของ ' + a.label, true);
+        }));
+      grid.appendChild(numField('เกินกว่า', 'ไม่ใส่ = ใช้ค่าที่รวมในราคาตั้ง',
+        a.over !== undefined ? a.over : m.standard[a.dim], U.unit(a.dim), (v) => {
+          a.over = v;
+          touched('แก้จุดเริ่มคิดเงินของ ' + a.label);
+        }));
+      grid.appendChild(numField('คิดทีละ', 'เศษปัดขึ้นเป็นช่วงเต็ม', a.step, U.unit(a.dim), (v) => {
+        a.step = v === undefined ? 1 : v;
+        touched('แก้ขนาดช่วงของ ' + a.label);
+      }));
+      if (a.byAxis) {
+        grid.appendChild(noteField('ช่วงละ',
+          'ราคาต่างกันตาม' + U.axis(a.byAxis) + ' ' + Object.keys(a.rates || {}).length +
+          ' ค่า — แก้ได้ในไฟล์แม่แบบ ชีต “อัตราตามแกน”'));
+      } else {
+        grid.appendChild(numField('ช่วงละ', 'ราคาต่อหนึ่งช่วง', a.rate, 'บาท', (v) => {
+          a.rate = v === undefined ? 0 : v;
+          touched('แก้ราคาต่อช่วงของ ' + a.label);
+        }));
+      }
+      grid.appendChild(numField('คูณ', 'ของชิ้นเดียวใช้หลายเส้น', a.times, 'เท่า', (v) => {
+        a.times = v;
+        touched('แก้ตัวคูณของ ' + a.label);
+      }));
+    }
+
+    card.appendChild(grid);
+    card.appendChild(condEditor(
+      () => (a.when ? E.predicateToText(a.when) : 'ทุกกรณี'),
+      (text) => {
+        const r = E.parsePredicate(text);
+        if (!r.ok) return;
+        if (text === '' || text === 'ทุกกรณี') delete a.when;
+        else a.when = r.value;
+        touched('แก้เงื่อนไขของ ' + a.label);
+      },
+      m
+    ));
+    return card;
+  }
+
+  // ── แม่แบบกฎใหม่ ──────────────────────────────────────────────────────────
+  const TEMPLATES = [
+    {
+      title: 'บวกเป็นเปอร์เซ็นต์',
+      what: 'เช่น รุ่นพิเศษที่คิดเพิ่มจากราคาปกติ 20% · คิดจากยอดสะสม ณ ลำดับนั้น',
+      make: () => ({ kind: 'percent', percent: 10, label: 'บวกเพิ่ม 10%' })
+    },
+    {
+      title: 'ส่วนลดเป็นเปอร์เซ็นต์',
+      what: 'เปอร์เซ็นต์ติดลบ · ใช้ทำโปรโมชันช่วงสั้น ๆ แล้วค่อยกด “ปิดไว้” ตอนหมดโปร',
+      make: () => ({ kind: 'percent', percent: -5, label: 'ส่วนลดโปรโมชัน 5%' })
+    },
+    {
+      title: 'บวกเงินคงที่',
+      what: 'จำนวนเงินตายตัว ไม่ขึ้นกับขนาด เช่น ค่าอุปกรณ์เสริมชิ้นหนึ่ง',
+      make: () => ({ kind: 'flat', amount: 100, label: 'ค่าอุปกรณ์เพิ่ม' })
+    },
+    {
+      title: 'บวกตามส่วนที่เกิน',
+      what: 'เช่น ยาวเกินที่รวมในราคาตั้ง คิดเป็นช่วง ๆ ช่วงละเท่านี้ · เศษปัดขึ้นเป็นช่วงเต็ม',
+      make: (m) => {
+        const d = Object.keys(m.standard)[0] || Object.keys(L.dims)[0];
+        return { kind: 'perUnit', dim: d, step: 100, rate: 50, round: 'ceil', unit: U.unit(d),
+                 label: 'ค่า' + U.dim(d) + 'ส่วนที่เกิน' };
+      }
+    },
+    {
+      title: 'บวกเมื่อสั่งตัวเลือกพิเศษ',
+      what: 'เงินคงที่ที่คิดเฉพาะตอนลูกค้าติ๊กตัวเลือกนั้น',
+      make: () => ({ kind: 'flat', amount: 200, label: 'ค่าตัวเลือกพิเศษ', when: { option: 'nut' } })
+    }
+  ];
+
+  function addFromTemplate(t) {
+    const m = model();
+    const base = t.make(m);
+    let n = 1;
+    while (m.adders.some((x) => x.id === 'custom_' + n)) n++;
+    const maxOrder = m.adders.reduce((s, x) => Math.max(s, x.order), 0);
+    m.adders.push(Object.assign({ id: 'custom_' + n, order: maxOrder + 10, custom: true }, base));
+    touched('เพิ่มกฎ “' + base.label + '” ให้รุ่น ' + m.code, true);
+  }
+
+  // ── ข้อห้าม ───────────────────────────────────────────────────────────────
+  function consCard(c) {
+    const box = el('div', 'rule' + (c.disabled ? ' off' : ''));
+    const top = el('div', 'rule-top');
+    const nm = el('div', 'rule-name');
+    nm.appendChild(el('div', 'rule-title', c.message || '(ไม่มีข้อความ)'));
+    nm.appendChild(el('div', 'rule-id', 'รหัส ' + c.id + (c.source ? ' · ' + c.source : '')));
+    top.appendChild(nm);
+    const lv = L.rules.levels[c.level];
+    top.appendChild(el('span', 'tag ' + (c.level === 'block' ? 'low' : c.level === 'warn' ? 'warn' : 'ship'), lv.label));
+    const acts = el('div', 'rule-acts');
+    const t = el('button', 'btn', c.disabled ? 'เปิดใช้' : 'ปิดไว้');
+    t.type = 'button';
+    t.addEventListener('click', () => {
+      c.disabled = !c.disabled;
+      touched((c.disabled ? 'ปิด' : 'เปิด') + 'ข้อห้าม ' + c.id, true);
+    });
+    acts.appendChild(t);
+    top.appendChild(acts);
+    box.appendChild(top);
+    box.appendChild(el('div', 'rule-id', humanCond(E.predicateToText(c.when)) + ' → ' + lv.label + ' · ' + lv.what));
+    return box;
+  }
+
+  // ── ผลกระทบกับเคสจริง ─────────────────────────────────────────────────────
+  function renderImpact() {
+    const box = document.getElementById('impact');
+    box.innerHTML = '';
+    box.appendChild(el('h2', 'sec', 'แก้แล้วกระทบอะไรบ้าง'));
+
+    let changed = 0;
+    const rows = CASES.map((c) => {
+      const before = E.computePrice(c.cfg, ORIGINAL);
+      const after = E.computePrice(c.cfg, book);
+      const diff = after.unitPrice !== before.unitPrice || after.status !== before.status;
+      if (diff) changed++;
+      return { c, before, after, diff };
+    });
+
+    box.appendChild(el('div', 'imp-sum',
+      changed === 0
+        ? (book.edited ? 'กฎที่แก้ไม่กระทบเคสทดสอบชุดนี้สักเคส' : 'ยังไม่ได้แก้อะไร — ราคาตรงกับไฟล์ราคาต้นฉบับ')
+        : 'ราคาเปลี่ยน ' + changed + ' จาก ' + CASES.length + ' เคส'));
+    box.appendChild(el('p', 'tiny faint',
+      'สองเคสแรกคือตัวอย่างการคิดราคาที่ฝ่ายขายเขียนไว้ในไฟล์ราคาเอง — ถ้าสองเคสนี้เปลี่ยน แปลว่ากฎที่แก้ขัดกับไฟล์ราคาต้นฉบับ ต้องตั้งใจจริง ๆ เท่านั้น'));
+
+    rows.forEach((r) => {
+      const row = el('div', 'imp-row' + (r.diff ? ' changed' : ''));
+      row.appendChild(el('div', 'n', r.c.name));
+      row.appendChild(el('div', 'v',
+        r.diff ? U.baht(r.before.unitPrice) + ' → ' + U.baht(r.after.unitPrice) : U.baht(r.after.unitPrice)));
+      if (r.diff && r.before.status !== r.after.status) {
+        row.appendChild(el('div', 'src',
+          'สถานะเปลี่ยน: ' + L.status[r.before.status].label + ' → ' + L.status[r.after.status].label));
+      }
+      box.appendChild(row);
+    });
+  }
+
+  // ── วาด ───────────────────────────────────────────────────────────────────
+  function renderState() {
+    const sb = document.getElementById('state-banner');
+    sb.innerHTML = '';
+    if (!book.edited) return;
+    const b = el('div', 'banner amber');
+    b.innerHTML = '<span><b>กำลังใช้กฎที่แก้ไว้</b> · ' + book.edited.at + ' · ' + (book.edited.note || '') +
+      ' — เก็บไว้ในเบราว์เซอร์ของเครื่องนี้เท่านั้น และหน้า “ลองคิดราคา” จะคิดด้วยกฎชุดนี้ด้วย</span>';
+    sb.appendChild(b);
+  }
+
+  function renderBase(m) {
+    const bb = document.getElementById('basebox');
+    const sheetName = 'ฐาน-' + m.code;
+    const std = Object.keys(m.standard)
+      .map((k) => U.dim(k) + ' ' + m.standard[k] + ' ' + U.unit(k))
+      .join(' · ') || '—';
+    if (m.base.kind === 'matrix') {
+      bb.innerHTML = 'ราคาตั้งเป็น<b>ตาราง</b> ' + Object.keys(m.base.cells).length + ' ช่อง (' +
+        m.base.axes.map((a) => U.axis(a)).join(' × ') + ')<br>สเปกที่รวมในราคาตั้งแล้ว: ' + std +
+        '<br>แก้ราคาตั้งได้ที่ชีต <code>' + sheetName + '</code> ในไฟล์แม่แบบ — ตารางขนาดนี้แก้ใน Excel เร็วกว่าแก้ทีละช่องบนหน้าจอ';
+    } else if (m.base.kind === 'banded') {
+      bb.innerHTML = 'ราคาตั้งคิดเป็น<b>ช่วง</b>ของ' + U.dim(m.base.quantity) + ' ทั้งหมด ' + m.base.bands.length +
+        ' ช่วง<br>สเปกที่รวมในราคาตั้งแล้ว: ' + std +
+        '<br>แก้ราคาแต่ละช่วงได้ที่ชีต <code>' + sheetName + '</code> ในไฟล์แม่แบบ';
+    } else {
+      bb.innerHTML = 'รุ่นนี้ <b>ใช้ราคาตั้งของรุ่น ' + m.base.model + '</b> แล้วค่อยบวกเพิ่มด้วยกฎข้างล่าง — ' +
+        'แก้ราคาตั้งต้องไปแก้ที่รุ่น ' + m.base.model;
+    }
+  }
+
+  function render() {
+    renderState();
+
+    const sel = document.getElementById('model');
+    sel.innerHTML = '';
+    Object.keys(book.models).forEach((code) => {
+      const nick = L.models[code] ? ' — ' + L.models[code].short : '';
+      sel.appendChild(new Option(code + nick, code));
+    });
+    sel.value = modelCode;
+
+    const m = model();
+    renderBase(m);
+
+    const host = document.getElementById('rules');
+    host.innerHTML = '';
+    const sorted = m.adders.slice().sort((x, y) => x.order - y.order);
+    document.getElementById('rules-head').textContent =
+      'กฎบวกเพิ่ม ' + sorted.length + ' ข้อ — คิดเรียงจากบนลงล่าง';
+    if (sorted.length === 0) host.appendChild(el('p', 'small faint', 'รุ่นนี้ยังไม่มีกฎบวกเพิ่ม'));
+    sorted.forEach((a) => host.appendChild(ruleCard(a, m)));
+
+    const th = document.getElementById('templates');
+    th.innerHTML = '';
+    TEMPLATES.forEach((t) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.appendChild(el('b', null, '＋ ' + t.title));
+      b.appendChild(el('span', null, t.what));
+      b.addEventListener('click', () => addFromTemplate(t));
+      th.appendChild(b);
+    });
+
+    const ch = document.getElementById('cons');
+    ch.innerHTML = '';
+    document.getElementById('cons-head').textContent = 'ข้อห้ามและข้อควรระวัง ' + m.constraints.length + ' ข้อ';
+    if (m.constraints.length === 0) ch.appendChild(el('p', 'small faint', 'รุ่นนี้ไม่มีข้อห้าม'));
+    m.constraints.forEach((c) => ch.appendChild(consCard(c)));
+
+    renderImpact();
+  }
+
+  document.getElementById('model').addEventListener('change', (e) => {
+    modelCode = e.target.value;
+    render();
+  });
+
+  // ── ไฟล์ ──────────────────────────────────────────────────────────────────
+  function msg(html, cls) {
+    const box = document.getElementById('io-msg');
+    box.innerHTML = '';
+    const b = el('div', 'banner ' + (cls || 'ok'));
+    b.innerHTML = '<span>' + html + '</span>';
+    box.appendChild(b);
+    return b;
+  }
+
+  document.getElementById('dl-rules').addEventListener('click', () => {
+    const sheets = E.bookToSheets(book, { exportedAt: U.today() });
+    U.download(E.writeXlsx(sheets), 'แม่แบบกฎราคา ' + U.today() + '.xlsx');
+    msg('ดาวน์โหลดแล้ว ' + sheets.length + ' ชีต · แก้ในไฟล์แล้วกด “นำเข้าไฟล์ที่แก้แล้ว” เพื่อเอากลับเข้ามา', 'ok');
+  });
+
+  document.getElementById('dl-odoo').addEventListener('click', () => {
+    const axisLabels = {};
+    Object.keys(L.axes).forEach((k) => { axisLabels[k] = L.axes[k].label; });
+    const r = E.bookToOdooSheets(book, { exportedAt: U.today(), axisLabels });
+    U.download(E.writeXlsx(r.sheets), 'ตารางราคา Odoo ' + U.today() + '.xlsx');
+    msg('ออกได้ <b>' + r.rowCount + ' รายการ</b> · คลี่เป็นรายการสินค้าไม่ได้ ' + r.skipped.length +
+      ' รายการ (มีเหตุผลกำกับทุกแถวในชีต “ออกไม่ได้เพราะอะไร”) · ไฟล์นี้นำกลับเข้าระบบนี้ไม่ได้', 'ok');
+  });
+
+  document.getElementById('up-rules').addEventListener('click', () => document.getElementById('file').click());
+
+  document.getElementById('file').addEventListener('change', async (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    e.target.value = '';
+    try {
+      const bytes = new Uint8Array(await f.arrayBuffer());
+      const grids = await E.readXlsxInBrowser(bytes);
+      const res = E.sheetsToBook(grids);
+      const errors = res.issues.filter((i) => i.level === 'error');
+      const warns = res.issues.filter((i) => i.level === 'warn');
+
+      if (!res.book || errors.length) {
+        const b = msg('<b>ยังนำเข้าไม่ได้</b> — ไฟล์นี้มีจุดที่ต้องแก้ ' + errors.length +
+          ' จุด · กฎเดิมยังใช้อยู่ ไม่มีอะไรเปลี่ยน', 'amber');
+        const ul = el('ul', 'issues');
+        errors.slice(0, 25).forEach((i) =>
+          ul.appendChild(el('li', 'bad', i.sheet + (i.row ? ' แถว ' + i.row : '') + ' — ' + i.message)));
+        b.appendChild(ul);
+        return;
+      }
+
+      book = res.book;
+      modelCode = book.models[modelCode] ? modelCode : Object.keys(book.models)[0];
+      U.saveBook(book);
+      render();
+
+      const b = msg('นำเข้าสำเร็จจากไฟล์ <b>' + f.name + '</b> · ' + grids.length + ' ชีต · ' +
+        Object.keys(book.models).length + ' รุ่น · ดูผลกระทบกับราคาได้ที่แผงขวา', 'ok');
+      if (warns.length) {
+        const ul = el('ul', 'issues');
+        warns.slice(0, 15).forEach((i) =>
+          ul.appendChild(el('li', 'warn', i.sheet + (i.row ? ' แถว ' + i.row : '') + ' — ' + i.message)));
+        b.appendChild(ul);
+      }
+    } catch (err) {
+      msg('เปิดไฟล์ไม่ได้ — ' + (err && err.message ? err.message : err), 'amber');
+    }
+  });
+
+  document.getElementById('reset').addEventListener('click', () => {
+    if (!confirm('คืนกฎทั้งหมดกลับเป็นของที่แปลงจากไฟล์ราคาต้นฉบับ\nสิ่งที่แก้ไว้ในเครื่องนี้จะหายทั้งหมด')) return;
+    U.clearBook();
+    book = clone(ORIGINAL);
+    modelCode = book.models[modelCode] ? modelCode : Object.keys(book.models)[0];
+    render();
+    msg('คืนค่าเดิมแล้ว — กฎทั้งหมดกลับเป็นของที่แปลงจากไฟล์ราคา ' + book.version, 'ok');
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

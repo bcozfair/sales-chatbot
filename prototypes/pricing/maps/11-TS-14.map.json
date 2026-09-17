@@ -1,0 +1,80 @@
+{
+  "file": "ราคาTC อัพเดต (13-05-69).xlsx",
+  "sheet": "TS-14",
+  "code": "TS-14",
+  "label": "Thermocouple TS-14 (Ceramic)",
+  "standard": { "L1": 100, "L2": 50 },
+  "derivedDims": [
+    {
+      "name": "L_total",
+      "label": "ความยาวรวม (L1 + Sleeve)",
+      "formula": "sum",
+      "args": ["L1", "L2"]
+    }
+  ],
+  "base": {
+    "kind": "matrix",
+    "axes": ["sensor", "dia_group"],
+    "rowHeaderCol": "A",
+    "rows": [14, 17],
+    "colHeaderRow": 12,
+    "cols": ["C", "E", "G", "I", "K", "M"]
+  },
+  "adders": [
+    {
+      "id": "len_total",
+      "label": "ส่วนต่างความยาวรวม",
+      "order": 20,
+      "kind": "perUnit",
+      "dim": "L_total",
+      "over": 100,
+      "step": 100,
+      "round": "ceil",
+      "unit": "mm",
+      "byAxis": "sensor",
+      "ratesFrom": { "col": "B", "keyCol": "A", "rows": [14, 17] },
+      "source": "TS-14!B12 'ส่วนต่าง L รวมบวกเพิ่ม 100 mm ละ'"
+    },
+    {
+      "id": "sleeve_over_50",
+      "label": "Sleeve ส่วนที่เกิน 50 mm",
+      "order": 21,
+      "kind": "perUnit",
+      "dim": "L2",
+      "over": 50,
+      "step": 100,
+      "round": "ceil",
+      "unit": "mm",
+      "rate": 130,
+      "source": "TS-14!A19 'L2=Sleeve Length เพิ่ม 100 mm ละ 130 บาท (Standard 50 mm.)' — ⚠️ sleeve ถูกนับไปแล้วรอบหนึ่งใน L รวม การนับซ้ำนี้เป็นกติกาของเขา ไม่ใช่บั๊ก (ยืนยันด้วยตัวอย่างในชีต 5,030)"
+    },
+    {
+      "id": "thread",
+      "label": "รุ่นมีเกลียว",
+      "order": 30,
+      "kind": "flat",
+      "when": { "option": "thread" },
+      "amount": 900,
+      "source": "TS-14!A18 'รุ่นมีเกลียวบวกเพิ่ม 900 บาท'"
+    },
+    {
+      "id": "head_blacklite_l",
+      "label": "หัวกระโหลก Blacklite ใหญ่",
+      "order": 35,
+      "kind": "flat",
+      "when": { "option": "head:blacklite_l" },
+      "byAxis": "sensor",
+      "ratesFrom": { "col": "O", "keyCol": "A", "rows": [14, 17] },
+      "source": "TS-14!O11"
+    }
+  ],
+  "constraints": [
+    {
+      "id": "MAX_LENGTH",
+      "when": { "dim": "L_total", "gt": 1000 },
+      "level": "block",
+      "message": "ความยาวรวม (L1 + Sleeve) สูงสุด 1000 mm",
+      "source": "TS-14!C11"
+    }
+  ]
+}
