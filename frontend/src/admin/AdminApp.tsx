@@ -401,15 +401,26 @@ function AdminContent() {
       >
         <Icon className={nested ? 'w-4 h-4 shrink-0' : 'w-[18px] h-[18px] shrink-0'} />
         {!collapsed && <span className="whitespace-nowrap">{item.label}</span>}
+        {/* ป้ายจำนวนใช้ **สีแบรนด์พื้นทึบ** (เจ้าของสั่ง 2026-09-17) ไม่ใช่ม่วงจาง ๆ ของหน้าอนุมัติ
+            — ม่วงจางบนแถบเมนูได้คอนทราสต์ 2.56:1 (ธีมมืด) และ 1.02:1 (ธีมสว่าง) คือมองไม่เห็น
+            ใช้คู่ `--btn-primary-bg` + `--btn-primary-ink` ซึ่งเป็นคู่ "พื้น + หมึก" ที่วัดมาแล้ว
+            ในทั้งสองธีม (ดู index.css) · พื้นทึบยังอ่านออกตอนเมนูนี้ถูกเลือกอยู่ ซึ่งพื้นแถวเป็น
+            เขียวจาง — ป้ายพื้นจางบนแถวพื้นจางจะกลายเป็นป้ายที่ไม่มีรูปร่าง */}
         {item.tab === 'approvals' && approvalBadge > 0 && !collapsed && (
-          <span className="ml-auto px-1.5 min-w-5 text-center rounded-lg text-[11px] font-bold bg-violet-100 text-violet-700">
+          <span
+            className="ml-auto px-1.5 min-w-5 text-center rounded-lg text-[11px] font-bold"
+            style={{ backgroundColor: 'var(--btn-primary-bg)', color: 'var(--btn-primary-ink)' }}
+          >
             {approvalBadge}
           </span>
         )}
         {/* ย่ออยู่แล้วตัวเลขไม่มีที่อยู่ — เหลือจุดบอกว่ามีของค้าง ส่วนจำนวนอยู่ใน title ของปุ่ม
             (ระบบนี้ห้ามใช้ LINE push ⇒ ถ้าตรงนี้ไม่บอก จะไม่มีอะไรบอกใครเลยว่ามีของรออยู่) */}
         {item.tab === 'approvals' && approvalBadge > 0 && collapsed && (
-          <span className="absolute translate-x-3 -translate-y-2.5 w-1.5 h-1.5 rounded-full bg-violet-700" />
+          <span
+            className="absolute translate-x-3 -translate-y-2.5 w-1.5 h-1.5 rounded-full"
+            style={{ backgroundColor: BRAND }}
+          />
         )}
       </button>
     );
