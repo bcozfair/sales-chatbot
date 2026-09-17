@@ -13,9 +13,16 @@ import { errMsg, formatNumber, formatDateTime, tdCls, numCls, downloadCsv } from
  *
  * ทำไมคอลัมน์ "แหล่งผลิต" ถึงสำคัญกว่าที่ชื่อมันฟัง (วัด 2026-09-17):
  *   กฎบล็อกที่เปิดอยู่มี 9 ข้อ แต่ 4 ข้อบล็อกด้วย `production` ทั้งกลุ่ม ⇒ สินค้า
- *   **39,987 จาก 51,665 ตัว (77%) เสนอราคาผ่านระบบไม่ได้** และเหลือที่เสนอได้จริง 11,678 ตัว
+ *   **39,987 จาก 51,665 ตัว (77%) เสนอราคาผ่าน LINE ไม่ได้** และเหลือที่เสนอได้จริง 11,678 ตัว
  *   คอลัมน์นี้จึงเป็น "ตัวทำนายว่าสินค้าตัวนั้นขายผ่านบอทได้ไหม" ไม่ใช่ข้อมูลประกอบ
  *   — ค่าจึงถูกย้อมแดงเมื่อกลุ่มนั้นถูกบล็อก
+ *
+ * ทำไมทุกถ้อยคำบนจอนี้เขียนว่า "LINE" ไม่ใช่ "ระบบ" (เจ้าของสั่ง 2026-09-17):
+ *   กฎบล็อกเดินเส้นทั้งสองทางจริง แต่**ผลไม่เหมือนกัน** — `BLOCKED` ไม่ใช่ `SYSTEM_ERROR`
+ *   จึงเป็นข้อที่ `isBypassableViolation()` ยอมให้ทะลุได้ ⇒ **หน้าเว็บขอใบเสนอราคา
+ *   ติ๊กรับทราบแล้วออกใบต่อได้** ส่วนใบจาก LINE มี `rule_overrides` เป็น NULL เสมอ
+ *   ⇒ **บล็อกจริงทางเดียวคือ LINE** ตัวเลข 11,678 จึงแปลว่า "เสนอผ่าน LINE ได้"
+ *   เห็นแล้วอย่าแก้กลับเป็น "ระบบ" ด้วยเหตุผลว่ากฎถูกเรียกจากสองทาง
  *
  * ทำไมไม่มีคอลัมน์ `incoming` / `outgoing`:
  *   ทั้งสองช่องเป็น 0 ทั้ง 51,665 แถว (gateway ยังไม่ส่งมา) ⇒ ขึ้นจอแล้วอ่านว่า
@@ -509,7 +516,7 @@ const ProductDetail: React.FC<{ product: ProductRow; onClose: () => void }> = ({
             </h4>
             {p.rules.block.blocked ? (
               <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-xs text-red-800 space-y-1">
-                <div className="font-bold flex items-center gap-1.5"><Ban className="w-3.5 h-3.5" /> ห้ามเสนอราคาผ่านระบบ</div>
+                <div className="font-bold flex items-center gap-1.5"><Ban className="w-3.5 h-3.5" /> ห้ามเสนอราคาผ่าน LINE</div>
                 <div>กฎตั้งไว้ที่ <b>{p.rules.block.scope}</b></div>
                 {p.rules.block.warn && <div className="text-red-600">ข้อความที่เซลส์จะเห็น: “{p.rules.block.warn}”</div>}
               </div>
