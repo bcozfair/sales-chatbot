@@ -74,6 +74,8 @@
   <h1>ลองคิดราคา</h1>
   <p class="sub">เลือกสเปกทางซ้าย ราคาและที่มาจะขึ้นทางขวาทันที · ยังไม่รู้จักคำไหน ดูได้ที่ <a href="pr-manual.html" style="color:var(--brand-fg)">คู่มือการใช้งาน</a></p>
 
+  <div id="edited-banner"></div>
+
   <div class="pick" id="pick"></div>
 
   <div class="cols">
@@ -115,8 +117,13 @@
 
 <script>
 (function () {
-  const U = window.PR_UI, L = window.PR_LABELS, B = window.PR_BOOK, el = U.el;
+  // สมุดราคาที่หน้านี้ใช้ = ของที่แก้ไว้ในหน้า "แก้กฎราคา" ถ้ามี ไม่งั้นคือของจากไฟล์ราคา
+  // ต้องเป็นเล่มเดียวกันจริง ๆ ไม่งั้นแอดมินแก้กฎแล้วมาลองคิดราคาจะเห็นเลขเดิม แล้วสรุปว่าแก้ไม่ติด
+  const U = window.PR_UI, L = window.PR_LABELS, B = window.PR_UI.book(), el = U.el;
   U.bar('calc');
+
+  const editedNote = U.editedBanner(B);
+  if (editedNote) document.getElementById('edited-banner').appendChild(editedNote);
 
   // ── ชุดสเปกสำเร็จรูป ไว้กดโชว์ตอนพรีเซนต์ ────────────────────────────────
   const PRESETS = [

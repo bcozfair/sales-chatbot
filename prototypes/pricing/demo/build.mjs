@@ -36,8 +36,11 @@ if (!existsSync(join(MOCKUP, '_theme.css'))) {
 }
 
 // ── 1. engine (ตัวจริง) + สมุดราคา + เคสทดสอบ → _pr-engine.js ───────────────
+//
+// entry เป็น demo/browser.ts ไม่ใช่ engine.ts เพราะหน้าแก้กฎต้องใช้ตัวอ่าน/เขียน .xlsx
+// และตัวแปลงสมุดราคา ⇄ ตาราง ด้วย — ทั้งหมดต้องเป็น "ตัวเดียวกับที่ด่านตรวจใน Node รัน"
 const bundled = await build({
-  entryPoints: [join(PRICING, 'engine.ts')],
+  entryPoints: [join(HERE, 'browser.ts')],
   bundle: true,
   format: 'iife',
   globalName: 'PR_ENGINE',
@@ -46,7 +49,7 @@ const bundled = await build({
 });
 
 const engineJs =
-  '/* สร้างจาก prototypes/pricing/engine.ts ด้วย esbuild — ห้ามแก้ไฟล์นี้ตรง ๆ */\n' +
+  '/* สร้างจาก prototypes/pricing/demo/browser.ts ด้วย esbuild — ห้ามแก้ไฟล์นี้ตรง ๆ */\n' +
   bundled.outputFiles[0].text +
   '\nwindow.PR_BOOK = ' +
   readFileSync(join(PRICING, 'book.json'), 'utf8').trim() +
@@ -61,7 +64,7 @@ copyFileSync(join(HERE, 'labels.js'), join(MOCKUP, '_pr-labels.js'));
 copyFileSync(join(HERE, 'ui.js'), join(MOCKUP, '_pr-ui.js'));
 
 // ── 3. หน้า ────────────────────────────────────────────────────────────────
-const PAGES = ['index', 'manual', 'calc'];
+const PAGES = ['index', 'manual', 'calc', 'rules'];
 for (const p of PAGES) {
   copyFileSync(join(HERE, `${p}.html`), join(MOCKUP, `pr-${p}.html`));
 }

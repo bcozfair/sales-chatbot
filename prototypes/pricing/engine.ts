@@ -287,6 +287,7 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
 
   const violations: Violation[] = [];
   for (const c of model.constraints) {
+    if (c.disabled) continue;
     if (evalPredicate(c.when, axes, dims, options)) {
       violations.push({ id: c.id, level: c.level, message: c.message });
     }
@@ -304,7 +305,9 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
   }
 
   if (base.ok) {
-    const ordered = [...model.adders].sort((x, y) => x.order - y.order);
+    // `disabled` ถูกกรองทิ้งตรงนี้ ไม่ใช่ตอนโหลดสมุดราคา — เพื่อให้กฎที่ปิดไว้ยังอยู่ในสมุด
+    // (ส่งออกไป Excel แล้วยังเห็น เปิดกลับมาใช้ได้) แค่ไม่มีผลกับราคา
+    const ordered = [...model.adders].filter((a) => !a.disabled).sort((x, y) => x.order - y.order);
     for (const a of ordered) {
       if (a.when && !evalPredicate(a.when, axes, dims, options)) continue;
       const r = computeAdder(a, model, running, axes, dims);

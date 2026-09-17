@@ -20,7 +20,8 @@ window.PR_UI = {
     const pages = [
       { href: 'pr-index.html', text: 'สารบัญ', key: 'index' },
       { href: 'pr-manual.html', text: 'คู่มือการใช้งาน', key: 'manual' },
-      { href: 'pr-calc.html', text: 'ลองคิดราคา', key: 'calc' }
+      { href: 'pr-calc.html', text: 'ลองคิดราคา', key: 'calc' },
+      { href: 'pr-rules.html', text: 'แก้กฎราคา', key: 'rules' }
     ];
     const bar = document.createElement('div');
     bar.className = 'mock-bar';
@@ -52,6 +53,81 @@ window.PR_UI = {
 
   baht(n) {
     return Number(n).toLocaleString('en-US', { maximumFractionDigits: 2 });
+  },
+
+  // ── สมุดราคาที่หน้าจอกำลังใช้ ────────────────────────────────────────────
+  //
+  // ของจริงจะเก็บกฎที่แก้แล้วไว้ในฐานข้อมูล แต่ตัวอย่างนี้ไม่มีหลังบ้าน จึงเก็บไว้ใน
+  // localStorage ของเครื่องที่เปิด — **แปลว่าของที่แก้ไม่ข้ามเครื่องและไม่ข้ามเบราว์เซอร์**
+  // ซึ่งตรงกับข้อจำกัดที่ต้องพูดตอนพรีเซนต์อยู่แล้ว: นี่คือตัวอย่าง ไม่ใช่ระบบ
+  EDIT_KEY: 'pr-book-edits',
+
+  book() {
+    try {
+      const saved = localStorage.getItem(this.EDIT_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch (_) {
+      /* โหมดส่วนตัว / ข้อมูลเสีย — ใช้สมุดราคาต้นฉบับ ดีกว่าหน้าจอพัง */
+    }
+    return window.PR_BOOK;
+  },
+
+  isEdited() {
+    try {
+      return !!localStorage.getItem(this.EDIT_KEY);
+    } catch (_) {
+      return false;
+    }
+  },
+
+  saveBook(book) {
+    try {
+      localStorage.setItem(this.EDIT_KEY, JSON.stringify(book));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  },
+
+  clearBook() {
+    try {
+      localStorage.removeItem(this.EDIT_KEY);
+    } catch (_) {
+      /* ไม่มีอะไรให้ลบ */
+    }
+  },
+
+  /** แถบเตือนบนหน้าอื่น ๆ ว่ากำลังคิดราคาด้วยกฎที่แก้ไว้ ไม่ใช่กฎจากไฟล์ราคา */
+  editedBanner(book) {
+    if (!book || !book.edited) return null;
+    const b = this.el('div', 'banner amber');
+    b.innerHTML =
+      '<span>กำลังใช้ <b>กฎที่แก้ไว้ในเครื่องนี้</b> ไม่ใช่กฎจากไฟล์ราคาต้นฉบับ' +
+      (book.edited.note ? ' · ' + book.edited.note : '') +
+      ' · <a href="pr-rules.html" style="color:inherit;text-decoration:underline">ดู/คืนค่าเดิม</a></span>';
+    return b;
+  },
+
+  /** ยิงไฟล์ให้ผู้ใช้ดาวน์โหลด — ไม่ผ่าน server ไฟล์ถูกปั้นในเบราว์เซอร์ทั้งก้อน */
+  download(bytes, filename) {
+    const blob = new Blob([bytes], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // ปล่อยช้าหน่อย — Safari ยกเลิกการดาวน์โหลดถ้า revoke ทันที
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  },
+
+  today() {
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
   },
 
   el(tag, cls, txt) {
