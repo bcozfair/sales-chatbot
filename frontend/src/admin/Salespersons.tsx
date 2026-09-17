@@ -463,7 +463,7 @@ export function Salespersons() {
       {/* หัวเรื่อง + ช่องค้นหา ขึ้นไปอยู่บนแถบบน (ดู PageHeader.tsx) */}
       <PageHeader
         icon={UserCheck}
-        title="จัดการข้อมูลพนักงาน"
+        title="จัดการพนักงานขาย"
         description="แก้ไขชื่อ/เบอร์โทร/รหัสพนักงาน และอัปโหลดลายเซ็น (PNG, JPG/JPEG)"
       >
         <div className="relative w-48 sm:w-64 lg:w-80">

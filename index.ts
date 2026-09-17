@@ -2662,7 +2662,7 @@ app.get('/api/admin/stats', adminAuthMiddleware, requireRole('admin'), async (re
         (SELECT COUNT(*) FROM quotations)             AS quotations,
         (SELECT COUNT(*) FROM promotions)             AS promotions,
         -- ไม่นับแถวพร็อกซีของหน้าเว็บแอดมิน (ไม่ใช่คน) — การ์ดหน้าแดชบอร์ดต้องตรงกับ
-        -- จำนวนแถวในหน้า "จัดการข้อมูลพนักงาน" ซึ่งกรอง web:% ออกไปแล้ว
+        -- จำนวนแถวในหน้า "จัดการพนักงานขาย" ซึ่งกรอง web:% ออกไปแล้ว
         (SELECT COUNT(*) FROM salesperson
           WHERE user_id NOT LIKE 'web:%')             AS salespersons,
         (SELECT COUNT(*) FROM quotation_rules)        AS quotation_rules,
