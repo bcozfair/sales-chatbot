@@ -78,7 +78,7 @@ const FLAG_OPTIONS: FilterOption[] = [
 
 const RULE_OPTIONS: FilterOption[] = [
   { id: 'block', name: 'ห้ามเสนอราคา (ถูกบล็อก)' },
-  { id: 'free', name: 'เสนอราคาผ่านระบบได้' },
+  { id: 'free', name: 'เสนอราคาผ่าน LINE ได้' },
 ];
 
 /** ราคา 0 ไม่ใช่ "ยังไม่โหลด" — 9,444 รายการเป็นแบบนี้จริง และทุกใบที่เสนอจะติด MIN_PRICE_VIOLATION */
@@ -255,7 +255,7 @@ export const ProductsDirectory: React.FC = () => {
         icon={Package}
         title="ข้อมูลสินค้า"
         description={summary
-          ? `${formatNumber(summary.total)} รายการ · เสนอราคาผ่านระบบได้ ${formatNumber(summary.quotable)} · อ่านอย่างเดียว แก้ที่ Odoo`
+          ? `${formatNumber(summary.total)} รายการ · เสนอราคาผ่าน LINE ได้ ${formatNumber(summary.quotable)} · อ่านอย่างเดียว แก้ที่ Odoo`
           : 'อ่านอย่างเดียว แก้ที่ Odoo'}
       />
 
@@ -263,7 +263,7 @@ export const ProductsDirectory: React.FC = () => {
       <div className="grid gap-2.5 grid-cols-2 xl:grid-cols-4">
         <StatTile icon={Database} label="ทั้งหมดในตาราง" value={summary ? formatNumber(summary.total) : '—'}
           active={!rule && !flag} onClick={() => { setRule(''); setFlag(''); setPage(1); }} />
-        <StatTile icon={CheckCircle2} label="เสนอราคาผ่านระบบได้" value={summary ? formatNumber(summary.quotable) : '—'}
+        <StatTile icon={CheckCircle2} label="เสนอราคาผ่าน LINE ได้" value={summary ? formatNumber(summary.quotable) : '—'}
           tone="text-emerald-600" active={rule === 'free'}
           onClick={() => { setFlag(''); setRule(rule === 'free' ? '' : 'free'); setPage(1); }} />
         <StatTile icon={Ban} label="ถูกกฎบล็อกไว้" value={summary ? formatNumber(summary.blocked) : '—'}
@@ -515,7 +515,7 @@ const ProductDetail: React.FC<{ product: ProductRow; onClose: () => void }> = ({
               </div>
             ) : (
               <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-xs text-emerald-800 flex items-center gap-1.5">
-                <CheckCircle2 className="w-3.5 h-3.5" /> เสนอราคาผ่านระบบได้ ไม่ติดกฎบล็อก
+                <CheckCircle2 className="w-3.5 h-3.5" /> เสนอราคาผ่าน LINE ได้ ไม่ติดกฎบล็อก
               </div>
             )}
             {p.rules.moq && (
