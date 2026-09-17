@@ -166,6 +166,19 @@ export interface PriceModel {
   base: BaseSpec;
   adders: Adder[];
   constraints: Constraint[];
+  /**
+   * สถิติตอนนำเข้า ติดมากับสมุดราคาเพื่อให้ผู้อ่านไม่ต้องนับเอง
+   * จำเป็นเพราะ **นับจากคีย์ของ `cells` ให้ผลผิด**: แถวที่ว่างทั้งแถว (D = "7TN" ของ TS-04)
+   * ไม่โผล่ในคีย์สักตัว นับเองได้ช่องว่าง 46 ขณะที่ของจริง 52 (วัด 2026-09-17)
+   */
+  importStats?: {
+    code: string;
+    sheet: string;
+    baseCells: number;
+    emptyCells: number;
+    adderRates: number;
+    floatNoiseFixed: number;
+  };
 }
 
 export interface PriceBook {

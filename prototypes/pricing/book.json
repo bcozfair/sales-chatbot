@@ -209,7 +209,15 @@
           "message": "ความกว้างเล็กสุดที่ทำได้ 25 mm",
           "source": "Sheet1!H4"
         }
-      ]
+      ],
+      "importStats": {
+        "code": "BH-01",
+        "sheet": "Sheet1",
+        "baseCells": 7,
+        "emptyCells": 0,
+        "adderRates": 0,
+        "floatNoiseFixed": 0
+      }
     },
     "BH-01C": {
       "code": "BH-01C",
@@ -379,7 +387,15 @@
           "message": "ความกว้างเล็กสุดที่ทำได้ 25 mm",
           "source": "Sheet1!H4"
         }
-      ]
+      ],
+      "importStats": {
+        "code": "BH-01C",
+        "sheet": "Sheet1",
+        "baseCells": 0,
+        "emptyCells": 0,
+        "adderRates": 0,
+        "floatNoiseFixed": 0
+      }
     },
     "BH-03": {
       "code": "BH-03",
@@ -583,7 +599,15 @@
           "message": "ความกว้างเล็กสุดที่ทำได้ 25 mm",
           "source": "Sheet1!H4"
         }
-      ]
+      ],
+      "importStats": {
+        "code": "BH-03",
+        "sheet": "Sheet1",
+        "baseCells": 6,
+        "emptyCells": 0,
+        "adderRates": 0,
+        "floatNoiseFixed": 0
+      }
     },
     "TSK-04": {
       "code": "TSK-04",
@@ -994,7 +1018,15 @@
           "message": "2 Element ต้องนำแกน 1 Element ใส่ในแกนใหญ่ — ปรึกษาผลิต 2 ก่อนยืนยันราคา",
           "source": "TS-04 หมายเหตุท้ายชีต"
         }
-      ]
+      ],
+      "importStats": {
+        "code": "TSK-04",
+        "sheet": "TS-04",
+        "baseCells": 170,
+        "emptyCells": 52,
+        "adderRates": 91,
+        "floatNoiseFixed": 13
+      }
     },
     "TS-14": {
       "code": "TS-14",
@@ -1121,7 +1153,15 @@
           "message": "ความยาวรวม (L1 + Sleeve) สูงสุด 1000 mm",
           "source": "TS-14!C11"
         }
-      ]
+      ],
+      "importStats": {
+        "code": "TS-14",
+        "sheet": "TS-14",
+        "baseCells": 24,
+        "emptyCells": 0,
+        "adderRates": 8,
+        "floatNoiseFixed": 0
+      }
     },
     "TS-18": {
       "code": "TS-18",
@@ -1689,7 +1729,15 @@
           "message": "ราคานี้ไม่รวมหน้าแปลนเชื่อม (หน้าแปลนที่ติดกับตัวถัง)",
           "source": "TS-18!C48"
         }
-      ]
+      ],
+      "importStats": {
+        "code": "TS-18",
+        "sheet": "TS-18",
+        "baseCells": 109,
+        "emptyCells": 15,
+        "adderRates": 247,
+        "floatNoiseFixed": 15
+      }
     }
   }
 }

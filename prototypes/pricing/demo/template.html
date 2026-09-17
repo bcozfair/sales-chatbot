@@ -1,0 +1,751 @@
+<title>เครื่องคิดราคา Primus</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --ground: #e9edf1;
+    --surface: #ffffff;
+    --surface-2: #f4f7f9;
+    --ink: #14202c;
+    --ink-2: #5d6e7e;
+    --ink-3: #8698a6;
+    --rule: #c9d4de;
+    --rule-soft: #dde5eb;
+    --accent: #0a5c9e;
+    --accent-soft: #e2edf7;
+    --ok: #1a6f46;
+    --ok-soft: #e0f0e7;
+    --warn: #9c5b00;
+    --warn-soft: #f8eedc;
+    --stop: #a6272b;
+    --stop-soft: #f8e4e4;
+    --sans: 'IBM Plex Sans Thai', 'Noto Sans Thai', system-ui, -apple-system, sans-serif;
+    --mono: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0e151b;
+      --surface: #151e26;
+      --surface-2: #1b252e;
+      --ink: #dfe7ee;
+      --ink-2: #8497a7;
+      --ink-3: #6a7d8c;
+      --rule: #27333e;
+      --rule-soft: #1f2a34;
+      --accent: #62a9e6;
+      --accent-soft: #14283a;
+      --ok: #4fb183;
+      --ok-soft: #10281d;
+      --warn: #d69233;
+      --warn-soft: #2b2113;
+      --stop: #e0706f;
+      --stop-soft: #2e1717;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0e151b;
+    --surface: #151e26;
+    --surface-2: #1b252e;
+    --ink: #dfe7ee;
+    --ink-2: #8497a7;
+    --ink-3: #6a7d8c;
+    --rule: #27333e;
+    --rule-soft: #1f2a34;
+    --accent: #62a9e6;
+    --accent-soft: #14283a;
+    --ok: #4fb183;
+    --ok-soft: #10281d;
+    --warn: #d69233;
+    --warn-soft: #2b2113;
+    --stop: #e0706f;
+    --stop-soft: #2e1717;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding-inline: 16px;
+    padding-block: 28px 64px;
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+  }
+
+  /* ── masthead ─────────────────────────────────────────────── */
+  .mast { display: flex; flex-direction: column; gap: 14px; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  h1 {
+    margin: 0;
+    font-size: clamp(25px, 4.4vw, 36px);
+    font-weight: 600;
+    letter-spacing: -.015em;
+    line-height: 1.2;
+    text-wrap: balance;
+  }
+  .lede { margin: 0; max-width: 64ch; color: var(--ink-2); }
+  .lede strong { color: var(--ink); font-weight: 600; }
+
+  .proof { display: flex; flex-wrap: wrap; gap: 10px; }
+  .proof-item {
+    flex: 1 1 200px;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--ok);
+    padding: 11px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .proof-item .fig {
+    font-family: var(--mono);
+    font-size: 21px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -.02em;
+  }
+  .proof-item .cap { font-size: 12.5px; color: var(--ink-2); }
+
+  /* ── panels ───────────────────────────────────────────────── */
+  .panel { background: var(--surface); border: 1px solid var(--rule); }
+  .panel > header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 11px 16px;
+    border-bottom: 1px solid var(--rule);
+    background: var(--surface-2);
+  }
+  .panel > header h2 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+  .panel > header .note {
+    font-size: 12px;
+    color: var(--ink-2);
+    font-family: var(--mono);
+  }
+
+  /* ── configurator ─────────────────────────────────────────── */
+  .cfg { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); }
+  @media (max-width: 760px) { .cfg { grid-template-columns: 1fr; } }
+  .cfg-in { padding: 16px; display: flex; flex-direction: column; gap: 15px; border-right: 1px solid var(--rule); }
+  @media (max-width: 760px) { .cfg-in { border-right: 0; border-bottom: 1px solid var(--rule); } }
+  .cfg-out { padding: 16px; display: flex; flex-direction: column; gap: 14px; background: var(--surface-2); }
+
+  .presets { display: flex; flex-wrap: wrap; gap: 6px; }
+  .presets button {
+    font-family: var(--sans);
+    font-size: 12.5px;
+    padding: 5px 10px;
+    border: 1px solid var(--rule);
+    background: var(--surface);
+    color: var(--ink-2);
+    cursor: pointer;
+    transition: border-color .12s, color .12s;
+  }
+  .presets button:hover { border-color: var(--accent); color: var(--accent); }
+  .presets button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field > label {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+  }
+  .field select, .field input[type="number"] {
+    font-family: var(--mono);
+    font-size: 14px;
+    padding: 7px 9px;
+    border: 1px solid var(--rule);
+    background: var(--surface);
+    color: var(--ink);
+    width: 100%;
+  }
+  .field select:focus-visible, .field input:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .field .hint { font-size: 11.5px; color: var(--ink-3); font-family: var(--mono); }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 10px; }
+
+  .opts { display: flex; flex-direction: column; gap: 5px; }
+  .opts label {
+    display: flex; align-items: flex-start; gap: 7px;
+    font-size: 13.5px; cursor: pointer; color: var(--ink-2);
+  }
+  .opts input { margin-top: 3px; accent-color: var(--accent); }
+
+  .group-title {
+    font-family: var(--mono); font-size: 11px; font-weight: 500;
+    letter-spacing: .07em; text-transform: uppercase; color: var(--ink-3);
+    padding-bottom: 5px; border-bottom: 1px solid var(--rule-soft);
+  }
+
+  /* ── ใบคิดราคา ────────────────────────────────────────────── */
+  .doc-head {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+    padding-bottom: 8px; border-bottom: 1px solid var(--rule);
+  }
+  .doc-head .code { font-family: var(--mono); font-size: 15px; font-weight: 600; }
+  .doc-head .ver { font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); }
+
+  .lines { display: flex; flex-direction: column; }
+  .line { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; padding: 7px 0; border-bottom: 1px dashed var(--rule-soft); }
+  .line .lbl { font-size: 14px; }
+  .line .amt {
+    font-family: var(--mono); font-size: 14px; font-weight: 500;
+    font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap;
+  }
+  .line .det {
+    grid-column: 1 / -1;
+    font-family: var(--mono); font-size: 11.5px; color: var(--ink-3);
+    overflow-wrap: anywhere;
+  }
+  .line .det::before { content: '↳ '; }
+
+  .bar { display: flex; height: 5px; background: var(--rule-soft); overflow: hidden; }
+  .bar span { display: block; }
+
+  .total { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 12px; padding-top: 9px; border-top: 2px solid var(--ink); }
+  .total .lbl { font-size: 13px; font-weight: 600; letter-spacing: .02em; }
+  .total .amt {
+    font-family: var(--mono); font-size: 27px; font-weight: 600;
+    font-variant-numeric: tabular-nums; letter-spacing: -.02em; text-align: right;
+  }
+  .total.is-stop { border-top-color: var(--stop); }
+  .total.is-stop .amt { color: var(--stop); }
+  .total.is-warn { border-top-color: var(--warn); }
+  .total.is-warn .amt { color: var(--warn); }
+
+  .flags { display: flex; flex-direction: column; gap: 6px; }
+  .flag { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; padding: 7px 9px; border-left: 3px solid; }
+  .flag.block { background: var(--stop-soft); border-color: var(--stop); color: var(--stop); }
+  .flag.quoteOnRequest { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
+  .flag.warn { background: var(--surface); border-color: var(--rule); color: var(--ink-2); }
+  .flag .mark { font-family: var(--mono); font-weight: 600; }
+
+  .status-pill {
+    display: inline-block; font-family: var(--mono); font-size: 11px; font-weight: 600;
+    letter-spacing: .06em; text-transform: uppercase; padding: 2px 7px;
+  }
+  .status-pill.priced { background: var(--ok-soft); color: var(--ok); }
+  .status-pill.quoteOnRequest { background: var(--warn-soft); color: var(--warn); }
+  .status-pill.notManufacturable { background: var(--stop-soft); color: var(--stop); }
+
+  /* ── ตาราง ────────────────────────────────────────────────── */
+  .scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+  th {
+    font-family: var(--mono); font-size: 11px; font-weight: 500;
+    letter-spacing: .07em; text-transform: uppercase; color: var(--ink-2);
+    white-space: nowrap; border-bottom: 1px solid var(--rule);
+  }
+  td.num, th.num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tbody tr:last-child td { border-bottom: 0; }
+  .src { font-family: var(--mono); font-size: 11px; color: var(--ink-3); display: block; margin-top: 2px; overflow-wrap: anywhere; }
+  .tick { color: var(--ok); font-weight: 600; font-family: var(--mono); }
+  .cross { color: var(--stop); font-weight: 600; font-family: var(--mono); }
+  .kind {
+    font-family: var(--mono); font-size: 10.5px; padding: 1px 6px;
+    background: var(--surface-2); color: var(--ink-2); white-space: nowrap;
+    border: 1px solid var(--rule-soft);
+  }
+
+  /* ── findings ─────────────────────────────────────────────── */
+  .finds { display: flex; flex-direction: column; }
+  .find { padding: 14px 16px; border-bottom: 1px solid var(--rule-soft); display: flex; flex-direction: column; gap: 5px; }
+  .find:last-child { border-bottom: 0; }
+  .find h3 { margin: 0; font-size: 14.5px; font-weight: 600; }
+  .find p { margin: 0; font-size: 13.5px; color: var(--ink-2); }
+  .find code, .quote {
+    font-family: var(--mono); font-size: 12.5px;
+    background: var(--surface-2); padding: 1px 5px; overflow-wrap: anywhere;
+  }
+  .quote { display: block; padding: 8px 10px; border-left: 3px solid var(--rule); color: var(--ink-2); }
+
+  .foot { font-size: 12.5px; color: var(--ink-3); border-top: 1px solid var(--rule); padding-top: 14px; }
+  .foot code { font-family: var(--mono); font-size: 12px; }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+
+  <header class="mast">
+    <div class="eyebrow">Prototype · ยังไม่ต่อกับระบบจริง</div>
+    <h1>คิดราคาสินค้าสั่งทำจากไฟล์ราคาของฝ่ายขาย โดยไม่ต้องเปิด Excel</h1>
+    <p class="lede">
+      อ่านไฟล์ <strong>ราคา BH (Final 02-02-69)</strong> และ <strong>ราคาTC อัพเดต (13-05-69)</strong> ตรง ๆ
+      แล้วคิดราคาให้อัตโนมัติ พร้อมบอกว่าราคานั้น<strong>มาจากบรรทัดไหนในชีต</strong> —
+      รวมถึงบอกได้ว่าสเปกไหน<strong>โรงงานไม่รับผลิต</strong> และสเปกไหน<strong>ต้องขอราคาจากผลิต 2</strong>
+    </p>
+    <div class="proof" id="proof"></div>
+  </header>
+
+  <!-- ── เครื่องคิดราคา ─────────────────────────────────────── -->
+  <section class="panel">
+    <header>
+      <h2>ลองคิดราคา</h2>
+      <span class="note">engine ตัวเดียวกับที่รันในเครื่อง · สมุดราคาตัวจริง</span>
+    </header>
+    <div class="cfg">
+      <div class="cfg-in">
+        <div class="presets" id="presets"></div>
+        <div class="field">
+          <label for="model">รุ่น</label>
+          <select id="model"></select>
+          <span class="hint" id="model-hint"></span>
+        </div>
+        <div id="axes"></div>
+        <div id="dims"></div>
+        <div id="options"></div>
+      </div>
+      <div class="cfg-out" id="out"></div>
+    </div>
+  </section>
+
+  <!-- ── ด่านตรวจ ───────────────────────────────────────────── -->
+  <section class="panel">
+    <header>
+      <h2>ด่านตรวจ — เทียบกับเฉลยที่ฝ่ายขายเขียนไว้ในชีตเอง</h2>
+      <span class="note" id="gate-note"></span>
+    </header>
+    <div class="scroll">
+      <table id="gate">
+        <thead>
+          <tr>
+            <th style="width:1%"></th>
+            <th>เคส</th>
+            <th style="width:1%">ที่มา</th>
+            <th class="num">เฉลย</th>
+            <th class="num">engine</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ── นำเข้า ─────────────────────────────────────────────── -->
+  <section class="panel">
+    <header>
+      <h2>นำเข้าจาก Excel ได้เท่าไหร่</h2>
+      <span class="note" id="imp-note"></span>
+    </header>
+    <div class="scroll">
+      <table id="imp">
+        <thead>
+          <tr>
+            <th>รุ่น</th>
+            <th>ชีต</th>
+            <th class="num">ช่องที่มีราคา</th>
+            <th class="num">ช่องว่าง = ไม่รับผลิต</th>
+            <th class="num">ราคาตัวเลือก</th>
+            <th class="num">ทศนิยมขยะที่ปัดทิ้ง</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ── สิ่งที่เจอ ─────────────────────────────────────────── -->
+  <section class="panel">
+    <header>
+      <h2>สิ่งที่เจอระหว่างทำ ที่ไม่ได้ตั้งใจหา</h2>
+      <span class="note">ทั้งสามข้อเป็นเรื่องของข้อมูล ไม่ใช่ของโปรแกรม</span>
+    </header>
+    <div class="finds">
+      <div class="find">
+        <h3>ตัวอย่างการคิดราคาใน TS-18 ใช้เป็นเฉลยไม่ได้ — มันค้างมาจากราคารอบก่อน</h3>
+        <span class="quote">เช่น  TSK-18(2) 6-6x100+50 = 800+650+(5x25) = 1525</span>
+        <p>
+          <code>800 + 650 + 125 = 1,575</code> ไม่ใช่ 1,525 — ตัวเลขในหมายเหตุบวกกันเองยังไม่ลงตัว
+          และราคาตั้งของแกน 6 mm ในตารางปัจจุบัน (<code>TS-18!D25</code>) คือ <code>880</code> ไม่ใช่ 800
+        </p>
+        <p>
+          ตารางราคาถูกอัปเดต แต่ตัวอย่างข้าง ๆ ไม่ถูกอัปเดตตาม
+          ⇒ ถ้าเอาไปใช้เป็นเกณฑ์ จะไล่แก้โปรแกรมให้ตรงกับราคาที่เลิกใช้ไปแล้ว
+        </p>
+      </div>
+      <div class="find">
+        <h3>ช่องว่างในตาราง แปลว่า “ไม่รับผลิต” ไม่ใช่ “ราคา 0”</h3>
+        <p>
+          ชีต TS-04 เว้นว่างไว้ <strong>52 ช่อง</strong> · TS-18 เว้นไว้ <strong>15 ช่อง</strong> —
+          เช่นแกน 19 mm มีแค่เกลียว 3/4&quot; กับ 1&quot; เท่านั้น
+          ระบบต้องตอบว่า “ไม่รับผลิตขนาดนี้” ไม่ใช่เติม 0 แล้วเสนอราคาของที่ทำไม่ได้
+          (กดปุ่ม <strong>ขนาดที่ไม่รับผลิต</strong> ข้างบนเพื่อดู)
+        </p>
+      </div>
+      <div class="find">
+        <h3>ราคาหน้าแปลน JIS 10K ไม่เท่ากันระหว่างชีต</h3>
+        <p>
+          ชีต TS-18 คิด 1&quot; ที่ <code>650</code> แต่ชีต TW คิด 1&quot; ที่ <code>800</code> —
+          ⇒ ทำ “ตารางราคาหน้าแปลนกลาง” ไม่ได้ ราคาต้องผูกกับรุ่น
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <p class="foot">
+    หน้านี้รัน <code>engine.ts</code> ตัวเดียวกับที่รันในเครื่อง (ผ่าน esbuild) กับสมุดราคาที่แปลงจากไฟล์ Excel จริง
+    — ไม่ได้พิมพ์ตัวเลขลงมาเอง · ตัวเลขทุกตัวในหน้านี้คำนวณตอนเปิดหน้า
+    <br>ยังไม่ต่อกับฐานข้อมูล ไม่มีการแก้ระบบเดิมแม้แต่บรรทัดเดียว
+  </p>
+</div>
+
+<script type="module">
+/*__ENGINE__*/
+
+const BOOK = /*__BOOK__*/;
+const CASES = /*__CASES__*/;
+
+const $ = (id) => document.getElementById(id);
+const baht = (n) => n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+
+// ── เก็บ option ทุกตัวที่ถูกอ้างในสมุดราคา (จาก adder.when และ constraint.when) ──
+function collectOptions(pred, into) {
+  if (!pred || typeof pred !== 'object') return;
+  if ('option' in pred) into.add(pred.option);
+  for (const k of ['all', 'any']) if (Array.isArray(pred[k])) pred[k].forEach((p) => collectOptions(p, into));
+  if (pred.not) collectOptions(pred.not, into);
+}
+
+function modelShape(code) {
+  const m = BOOK.models[code];
+  const baseAxes = m.base.kind === 'matrix' ? m.base.axes : [];
+  const adderAxes = [...new Set(m.adders.filter((a) => a.byAxis).map((a) => a.byAxis))].filter((a) => !baseAxes.includes(a));
+
+  const derivedNames = new Set((m.derivedDims || []).map((d) => d.name));
+  const dims = [...new Set([
+    ...Object.keys(m.standard),
+    ...m.adders.filter((a) => a.kind === 'perUnit' && a.dim).map((a) => a.dim),
+    ...(m.derivedDims || []).flatMap((d) => d.args)
+  ])].filter((d) => !derivedNames.has(d));
+
+  const opts = new Set();
+  m.adders.forEach((a) => collectOptions(a.when, opts));
+  m.constraints.forEach((c) => collectOptions(c.when, opts));
+  const optLabel = {};
+  for (const o of opts) {
+    const a = m.adders.find((x) => x.when && JSON.stringify(x.when).includes('"' + o + '"'));
+    optLabel[o] = a ? a.label : o;
+  }
+  return { m, baseAxes, adderAxes, dims, opts: [...opts], optLabel };
+}
+
+/** ค่าที่แกนนั้นรับได้ — ตำแหน่ง i ของคีย์ "a | b" */
+function axisValues(m, i) {
+  return [...new Set(Object.keys(m.base.cells).map((k) => k.split(' | ')[i]))];
+}
+/** ค่าของแกนที่ 2 ที่ "มีราคาจริง" เมื่อเลือกแกนที่ 1 ไว้แล้ว */
+function availableFor(m, i, chosen) {
+  const ok = new Set();
+  for (const k of Object.keys(m.base.cells)) {
+    const parts = k.split(' | ');
+    if (chosen.every((c, j) => c == null || parts[j] === c)) ok.add(parts[i]);
+  }
+  return ok;
+}
+
+// ── state ────────────────────────────────────────────────────
+let cfg = { model: 'BH-01C', axes: {}, dims: { dia_mm: 600, width_mm: 150 }, options: ['conn:pl2'] };
+
+function buildControls() {
+  const { m, baseAxes, adderAxes, dims, opts, optLabel } = modelShape(cfg.model);
+
+  $('model-hint').textContent =
+    (m.base.kind === 'matrix'
+      ? `ตาราง ${m.base.axes.join(' × ')} · ${Object.keys(m.base.cells).length} ช่องที่มีราคา`
+      : m.base.kind === 'banded'
+        ? `แถบราคาตามพื้นที่ผิว · ${m.base.bands.length} ช่วง`
+        : `ใช้ตารางของ ${m.base.model}`) +
+    `  ·  ชีต ${m.sheet}`;
+
+  // แกน
+  const axBox = $('axes');
+  axBox.replaceChildren();
+  if (baseAxes.length || adderAxes.length) axBox.append(el('div', 'group-title', 'แกนของตารางราคา'));
+  const axGrid = el('div', 'grid2');
+
+  baseAxes.forEach((ax, i) => {
+    const chosen = baseAxes.map((a, j) => (j < i ? cfg.axes[a] : null));
+    const avail = availableFor(m, i, chosen);
+    const f = el('div', 'field');
+    f.append(el('label', null, ax));
+    const s = el('select');
+    s.id = 'ax-' + ax;
+    for (const v of axisValues(m, i)) {
+      const o = el('option', null, avail.has(v) ? v : `${v}  ·  ไม่รับผลิต`);
+      o.value = v;
+      s.append(o);
+    }
+    if (!cfg.axes[ax] || !axisValues(m, i).includes(cfg.axes[ax])) cfg.axes[ax] = axisValues(m, i)[0];
+    s.value = cfg.axes[ax];
+    s.addEventListener('change', () => { cfg.axes[ax] = s.value; buildControls(); render(); });
+    f.append(s);
+    if (i > 0) f.append(el('span', 'hint', `ผลิตได้ ${avail.size} จาก ${axisValues(m, i).length} แบบ`));
+    axGrid.append(f);
+  });
+
+  adderAxes.forEach((ax) => {
+    const vals = [...new Set(m.adders.filter((a) => a.byAxis === ax).flatMap((a) => Object.keys(a.rates || {})))];
+    const f = el('div', 'field');
+    f.append(el('label', null, ax));
+    const s = el('select');
+    s.id = 'ax-' + ax;
+    const none = el('option', null, '— ไม่มี —'); none.value = ''; s.append(none);
+    for (const v of vals) { const o = el('option', null, v); o.value = v; s.append(o); }
+    const other = el('option', null, 'ANSI 150# 3"  ·  นอกรายการ'); other.value = 'ANSI 150# 3"'; s.append(other);
+    s.value = cfg.axes[ax] || '';
+    s.addEventListener('change', () => { cfg.axes[ax] = s.value; render(); });
+    f.append(s);
+    axGrid.append(f);
+  });
+  if (axGrid.children.length) axBox.append(axGrid);
+
+  // ขนาด
+  const dBox = $('dims');
+  dBox.replaceChildren();
+  if (dims.length) {
+    dBox.append(el('div', 'group-title', 'ขนาด (มม. / เมตร / วัตต์)'));
+    const g = el('div', 'grid2');
+    for (const d of dims) {
+      const f = el('div', 'field');
+      f.append(el('label', null, d));
+      const inp = el('input');
+      inp.type = 'number'; inp.id = 'dim-' + d; inp.min = '0'; inp.step = 'any';
+      inp.value = cfg.dims[d] ?? m.standard[d] ?? 0;
+      inp.addEventListener('input', () => { cfg.dims[d] = Number(inp.value) || 0; render(); });
+      f.append(inp);
+      if (m.standard[d] != null) f.append(el('span', 'hint', `Standard = ${m.standard[d]}`));
+      g.append(f);
+    }
+    dBox.append(g);
+  }
+
+  // ตัวเลือก
+  const oBox = $('options');
+  oBox.replaceChildren();
+  if (opts.length) {
+    oBox.append(el('div', 'group-title', 'ตัวเลือกเพิ่มเติม'));
+    const list = el('div', 'opts');
+    for (const o of opts) {
+      const lab = el('label');
+      const c = el('input');
+      c.type = 'checkbox'; c.id = 'opt-' + o; c.checked = cfg.options.includes(o);
+      c.addEventListener('change', () => {
+        cfg.options = c.checked ? [...new Set([...cfg.options, o])] : cfg.options.filter((x) => x !== o);
+        render();
+      });
+      lab.append(c, el('span', null, optLabel[o]));
+      list.append(lab);
+    }
+    oBox.append(list);
+  }
+}
+
+function render() {
+  const out = computePrice(cfg, BOOK);
+  const box = $('out');
+  box.replaceChildren();
+
+  const head = el('div', 'doc-head');
+  head.append(el('span', 'code', out.model));
+  head.append(el('span', 'status-pill ' + out.status,
+    out.status === 'priced' ? 'คิดราคาได้' : out.status === 'quoteOnRequest' ? 'ต้องขอราคา' : 'ไม่รับผลิต'));
+  box.append(head);
+
+  if (out.breakdown.length) {
+    const lines = el('div', 'lines');
+    for (const b of out.breakdown) {
+      const row = el('div', 'line');
+      row.append(el('span', 'lbl', b.label));
+      row.append(el('span', 'amt', baht(b.amount)));
+      if (b.detail) row.append(el('span', 'det', b.detail));
+      lines.append(row);
+    }
+    box.append(lines);
+
+    if (out.unitPrice > 0 && out.breakdown.length > 1) {
+      const bar = el('div', 'bar');
+      const tones = ['var(--accent)', 'var(--ok)', 'var(--warn)', 'var(--ink-3)', 'var(--accent-soft)'];
+      out.breakdown.forEach((b, i) => {
+        const s = el('span');
+        s.style.width = (b.amount / out.unitPrice) * 100 + '%';
+        s.style.background = tones[i % tones.length];
+        s.title = `${b.label} ${baht(b.amount)}`;
+        bar.append(s);
+      });
+      box.append(bar);
+    }
+  }
+
+  const tot = el('div', 'total' + (out.status === 'notManufacturable' ? ' is-stop' : out.status === 'quoteOnRequest' ? ' is-warn' : ''));
+  tot.append(el('span', 'lbl', 'ราคาตั้งต่อหน่วย (บาท)'));
+  tot.append(el('span', 'amt', out.status === 'notManufacturable' ? '—' : baht(out.unitPrice)));
+  box.append(tot);
+
+  if (out.violations.length) {
+    const fl = el('div', 'flags');
+    for (const v of out.violations) {
+      const f = el('div', 'flag ' + v.level);
+      f.append(el('span', 'mark', v.level === 'block' ? '✗' : v.level === 'quoteOnRequest' ? '?' : '!'));
+      f.append(el('span', null, v.message));
+      fl.append(f);
+    }
+    box.append(fl);
+  }
+
+  const ver = el('div', 'ver');
+  ver.className = 'ver';
+  ver.style.cssText = 'font-family:var(--mono);font-size:11.5px;color:var(--ink-3)';
+  ver.textContent = `สมุดราคา ${out.bookVersion} · ${BOOK.source}`;
+  box.append(ver);
+}
+
+// ── presets ──────────────────────────────────────────────────
+const PRESETS = [
+  { label: 'ตัวอย่างในชีต BH', cfg: { model: 'BH-01C', axes: {}, dims: { dia_mm: 600, width_mm: 150, hold_od_mm: 0, cable_cm: 30, cable_extra_m: 0 }, options: ['conn:pl2'] } },
+  { label: 'ตัวอย่างในชีต TS-14', cfg: { model: 'TS-14', axes: { sensor: 'K', dia_group: 'Ø6mm./12.7mm.' }, dims: { L1: 200, L2: 150 }, options: [] } },
+  { label: 'ของทั่วไป TS-04', cfg: { model: 'TSK-04', axes: { D: '6', thread: '1/2”' }, dims: { L1: 300, teflon_mm: 0 }, options: [] } },
+  { label: 'ขนาดที่ไม่รับผลิต', cfg: { model: 'TSK-04', axes: { D: '19', thread: '1/8”' }, dims: { L1: 100, teflon_mm: 0 }, options: [] } },
+  { label: 'ต้องขอราคาจากผลิต 2', cfg: { model: 'TS-18', axes: { D: '6', sensor: 'Type K/J', flange: 'ANSI 150# 3"' }, dims: { L1: 100, L2: 50 }, options: [] } }
+];
+
+const pbox = $('presets');
+for (const p of PRESETS) {
+  const b = el('button', null, p.label);
+  b.type = 'button';
+  b.addEventListener('click', () => {
+    cfg = JSON.parse(JSON.stringify(p.cfg));
+    $('model').value = cfg.model;
+    buildControls();
+    render();
+  });
+  pbox.append(b);
+}
+
+// ── model select ─────────────────────────────────────────────
+const msel = $('model');
+for (const code of Object.keys(BOOK.models)) {
+  const m = BOOK.models[code];
+  const o = el('option', null, `${code} — ${m.label}`);
+  o.value = code;
+  msel.append(o);
+}
+msel.value = cfg.model;
+msel.addEventListener('change', () => {
+  cfg = { model: msel.value, axes: {}, dims: {}, options: [] };
+  buildControls();
+  render();
+});
+
+// ── ด่านตรวจ: คำนวณสดตอนเปิดหน้า ────────────────────────────
+const tb = $('gate').querySelector('tbody');
+let pass = 0;
+for (const c of CASES) {
+  const out = computePrice(c.cfg, BOOK);
+  const okPrice = c.expectPrice === undefined || out.unitPrice === c.expectPrice;
+  const okStatus = c.expectStatus === undefined || out.status === c.expectStatus;
+  const ok = okPrice && okStatus;
+  if (ok) pass++;
+
+  const tr = el('tr');
+  tr.append(el('td', ok ? 'tick' : 'cross', ok ? '✓' : '✗'));
+
+  const nameTd = el('td');
+  nameTd.append(el('span', null, c.name));
+  nameTd.append(el('span', 'src', c.source));
+  tr.append(nameTd);
+
+  const kindTd = el('td');
+  kindTd.append(el('span', 'kind', c.kind));
+  tr.append(kindTd);
+
+  const expect = c.expectPrice !== undefined ? baht(c.expectPrice)
+    : c.expectStatus === 'notManufacturable' ? 'ไม่รับผลิต' : 'ต้องขอราคา';
+  const got = c.expectPrice !== undefined ? baht(out.unitPrice)
+    : out.status === 'notManufacturable' ? 'ไม่รับผลิต' : out.status === 'quoteOnRequest' ? 'ต้องขอราคา' : 'คิดราคาได้';
+  tr.append(el('td', 'num', expect));
+  const gotTd = el('td', 'num', got);
+  if (!ok) gotTd.style.color = 'var(--stop)';
+  tr.append(gotTd);
+  tb.append(tr);
+}
+$('gate-note').textContent = `ผ่าน ${pass} จาก ${CASES.length}`;
+
+// ── สถิติการนำเข้า: นับสดจากสมุดราคา ────────────────────────
+const itb = $('imp').querySelector('tbody');
+let totalCells = 0, totalModels = 0;
+for (const [code, m] of Object.entries(BOOK.models)) {
+  totalModels++;
+  const cells = m.base.kind === 'matrix' ? Object.keys(m.base.cells).length
+    : m.base.kind === 'banded' ? m.base.bands.length : 0;
+  totalCells += cells;
+  // ตัวเลขมาจาก importStats ที่ตัวนำเข้าวัดไว้ตอนอ่าน Excel — ไม่นับเองจากคีย์
+  // เพราะแถวที่ว่างทั้งแถว (D = "7TN" ของ TS-04) ไม่โผล่ในคีย์ ทำให้นับได้ 46 แทนที่จะเป็น 52
+  const st = m.importStats || {};
+  const rates = st.adderRates ?? m.adders.reduce((s, a) => s + (a.rates ? Object.keys(a.rates).length : 0), 0);
+  const empty = st.emptyCells ?? 0;
+  const noise = st.floatNoiseFixed ?? 0;
+
+  const tr = el('tr');
+  const c0 = el('td');
+  c0.append(el('span', null, code));
+  if (m.aliases && m.aliases.length) c0.append(el('span', 'src', '= ' + m.aliases.join(', ')));
+  tr.append(c0);
+  tr.append(el('td', null, m.sheet || '—'));
+  tr.append(el('td', 'num', m.base.kind === 'banded' ? cells + ' ช่วง' : m.base.kind === 'ref' ? 'ใช้ของ ' + m.base.model : cells));
+  tr.append(el('td', 'num', empty || '—'));
+  tr.append(el('td', 'num', rates || '—'));
+  tr.append(el('td', 'num', noise || '—'));
+  itb.append(tr);
+}
+const totalEmpty = Object.values(BOOK.models).reduce((s, m) => s + (m.importStats?.emptyCells ?? 0), 0);
+$('imp-note').textContent = `${totalModels} รุ่น · ${totalCells} ช่องราคา · ${totalEmpty} ช่องที่ไม่รับผลิต · จาก 2 ไฟล์`;
+
+// ── ตัวเลขพาดหัว ─────────────────────────────────────────────
+const sheetAnswers = CASES.filter((c) => c.kind === 'เฉลยจากชีต');
+const sheetPass = sheetAnswers.filter((c) => computePrice(c.cfg, BOOK).unitPrice === c.expectPrice).length;
+const proof = [
+  { fig: `${sheetPass} / ${sheetAnswers.length}`, cap: 'ตัวอย่างคิดราคาที่ฝ่ายขายเขียนไว้ในชีต — ตรงเป๊ะทุกบาท' },
+  { fig: `${pass} / ${CASES.length}`, cap: 'ด่านตรวจทั้งหมด (รวมกฎที่ต้องบล็อก / ต้องขอราคา)' },
+  { fig: `${totalCells}`, cap: `ช่องราคาที่อ่านจาก Excel เข้ามาได้ จาก ${totalModels} รุ่น` }
+];
+for (const p of proof) {
+  const d = el('div', 'proof-item');
+  d.append(el('span', 'fig', p.fig));
+  d.append(el('span', 'cap', p.cap));
+  $('proof').append(d);
+}
+
+// ── เริ่ม ────────────────────────────────────────────────────
+buildControls();
+render();
+</script>

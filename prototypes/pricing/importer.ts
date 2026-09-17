@@ -230,7 +230,7 @@ function importSheet(map: SheetMap, ws: ExcelJS.Worksheet): { model: PriceModel;
     return a;
   });
 
-  const model: PriceModel = {
+  const model: PriceModel & { importStats?: ImportReport } = {
     code: map.code,
     label: map.label,
     sheet: map.sheet,
@@ -239,7 +239,11 @@ function importSheet(map: SheetMap, ws: ExcelJS.Worksheet): { model: PriceModel;
     derivedDims: map.derivedDims,
     base,
     adders,
-    constraints: map.constraints
+    constraints: map.constraints,
+    // ติดสถิติการนำเข้าไปกับสมุดราคาเลย เพราะหน้าเดโมนับเองจากคีย์ไม่ได้:
+    // แถวที่ว่างทั้งแถว (เช่น D = "7TN" ของ TS-04) ไม่โผล่ในคีย์ของ cells สักตัว
+    // นับจากคีย์จึงได้ช่องว่าง 46 ขณะที่ของจริงคือ 52 — ตัวเลขที่เอาไปให้คนดูต้องมาจากที่เดียว
+    importStats: report
   };
 
   return { model, report };
