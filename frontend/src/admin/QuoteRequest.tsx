@@ -1,40 +1,43 @@
-// ─────────────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────────
 //  หน้า "ขอใบเสนอราคา" — หน้าเดียวจบ (เฟส E · ขั้น 9′)
-//  แผน: docs/plan-web-quote-request.md §0 (form-first) · ขั้น 9′
+//  แผน: docs/plan-web-quote-request.md §0 (form-first) · §P.8 (ยุบสองขั้นเป็นขั้นเดียว)
 //
 //  v5 ตัดการจำลองแชท LINE ทิ้งทั้งก้อน — หน้านี้ไม่มี Flex ไม่มีฟองแชท ไม่มี postback
 //  มีแค่ 3 ส่วนเรียงลงมาในหน้าเดียว ไม่มีการเปลี่ยนหน้า:
 //    ส่วนที่ 0  แถบตัวตนของใบ            → QuoteIssuerProfile.tsx
 //    ส่วนที่ 1  ช่องวางข้อความ            → POST /api/admin/webquote/propose  (ยังไม่เขียน DB)
-//    ส่วนที่ 2  ร่างใบเสนอราคา (ฟอร์ม)    → POST /api/admin/webquote/preview  (ยังไม่เขียน DB)
-//    ส่วนที่ 3  revise จากเลขที่ใบ        → POST /api/admin/webquote/revise   → เติมกลับเข้าฟอร์ม
+//    ส่วนที่ 2  **ตัวเอกสาร**             → POST /api/admin/webquote/preview  (ยังไม่เขียน DB)
+//    ส่วนที่ 3  revise จากเลขที่ใบ        → POST /api/admin/webquote/revise   → เติมกลับเข้าใบ
 //
-//  **ส่วนที่ 2 เปิดค้างไว้ตั้งแต่โหลดหน้า แม้ยังไม่มีรายการสักบรรทัด** (2026-09-14) — การวางข้อความ
-//  เป็นทางเข้า *ทางหนึ่ง* ไม่ใช่ทางเดียว แอดมินกรอกทั้งใบเองได้ ⇒ `rows` เป็น `Row[]` ที่ว่างได้
-//  ไม่ใช่ `null` ที่แปลว่า "ยังไม่มีฟอร์ม"
+//  ── "เอกสารคือฟอร์ม" — ไม่มีขั้นฟอร์มแยกจากขั้นใบร่างอีกแล้ว (เจ้าของเคาะ 2026-09-17) ──────
+//  เดิมหน้านี้เดินสองขั้น (`stage: form → review`) คือกรอกในตาราง 8 คอลัมน์ก่อน แล้วกด "ดูใบร่าง"
+//  ไปดูเอกสารอีกจอ · ตอนนี้**เหลือจอเดียว**: ช่องกรอกอยู่ในคอลัมน์ของใบเอง (จำนวน · หน่วยละ ·
+//  ส่วนลด) และของที่เคยอยู่ในฟอร์ม (เลือกบริษัท/ผู้ติดต่อ · เครดิต · กำหนดส่ง · แถบเพิ่มสินค้า ·
+//  เลือกรุ่นที่กำกวม · ค้นรุ่นที่ไม่พบ) ย้ายเข้าไปอยู่ในหัวใบและในตารางของใบ
 //
-//  ── ทั้งหน้ามีจุดเดียวที่เขียน DB: ปุ่ม "ยืนยัน" (2026-09-14) ────────────────────────────
-//  หน้านี้เดินสองขั้น `stage`: **form → review** · ขั้น review คือ "ใบร่าง" ที่เรนเดอร์จากผลของ
-//  `/preview` ล้วน ๆ ซึ่งเป็น dry-run ที่ไม่แตะฐานข้อมูล ⇒ ใบร่างที่แอดมินเห็น **ไม่มีแถวใน DB**
-//  ปุ่ม "แก้ไข" จึงเป็นแค่การกลับไป `form` ไม่มีอะไรต้องล้าง และ "ยกเลิก" ไม่ต้องไปแตะใบไหน
+//  เหตุผลที่ยุบได้โดยไม่เสียอะไร: ขั้น review ไม่เคยเป็น "ขั้น" ของข้อมูลเลย มันเรนเดอร์จากผล
+//  `/preview` ชุดเดียวกับที่ฟอร์มใช้อยู่แล้ว ⇒ การมีสองจอคือการวาดข้อมูลชุดเดียวกันสองแบบ
+//  ซึ่งต้องคอยทำให้ตรงกันตลอดไป · ราคาที่จ่ายแทนคือเอกสารต้องยอมให้พิมพ์ทับได้ ซึ่งถูกกว่า
+//
+//  ── ทั้งหน้ายังมีจุดเดียวที่เขียน DB: ปุ่ม "ยืนยัน" (2026-09-14 · ยืนยันซ้ำ 2026-09-17) ──────
+//  **ไม่มีปุ่ม "บันทึกร่าง"** โดยตั้งใจ — ถ้ามี จะเกิดร่างค้างในระบบที่ต้องมีเมนูให้เปิดต่อ
+//  ต้องมีตัวกวาดทิ้ง และต้องตอบให้ได้ว่าร่างที่ค้างคิดราคาด้วยกฎของวันไหน · หน้านี้ทำงานจบใน
+//  หนึ่งเซสชัน ไม่มีใครได้ประโยชน์จากร่างค้าง ⇒ "ยกเลิก" ไม่ต้องไปแตะใบไหนเลย
 //  "ยืนยัน" เท่านั้นที่ยิง `/drafts` (สร้างจริง) แล้วต่อด้วย `/confirm` ทีละใบจนได้เลขที่ + PDF
+//  ราคาที่ต้องจ่ายคือ "ยืนยันแล้วล้มกลางคัน" ซึ่งหน้าจอรายงานตามจริงว่าออกได้กี่ใบ และใบไหน
+//  ค้างเป็นร่างอยู่ในระบบ (`strandedIds`)
 //
-//  ที่ทำแบบนี้เพราะขั้น "ใบร่างใน DB ที่รอยืนยัน" ไม่มีใครใช้ประโยชน์: หน้านี้ทำงานจบในหนึ่ง
-//  เซสชัน ไม่มีที่ให้กลับมาเปิดร่างค้างต่อ ⇒ สิ่งที่มันทิ้งไว้จริงคือแถว `draft` ที่ไม่มีวันถูก
-//  ยืนยันทุกครั้งที่แอดมินเปลี่ยนใจ · ราคาที่ต้องจ่ายแทนคือ "ยืนยันแล้วล้มกลางคัน" ซึ่งจอ
-//  ขั้น review รายงานตามจริงว่าออกได้กี่ใบ และใบไหนค้างเป็นร่างอยู่ในระบบ
-//
-//  ความกำกวมทั้งหมด (บริษัทซ้ำ · รุ่นกำกวม · รุ่นพิมพ์ผิด) ถูกเคาะในฟอร์ม **ก่อน** ยืนยัน
+//  ความกำกวมทั้งหมด (บริษัทซ้ำ · รุ่นกำกวม · รุ่นพิมพ์ผิด) ถูกเคาะในใบ **ก่อน** ยืนยัน
 //  ⇒ ไม่มี state `pending_product`/`pending_company` ใน DB จากเส้นทางนี้เลย
 //
 //  `/confirm` เป็น endpoint เดิมของ LIFF ซึ่งตรวจสิทธิ์ด้วย `userId` ใน body ⇒ ต้องแนบ
 //  `web_user_id` ที่ได้จาก /drafts ไปด้วยทุกครั้ง (ขั้น 8′)
-// ─────────────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────────
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '../context/AuthContext';
 import { PageHeader } from './PageHeader';
-import { QuoteIssuerProfile } from './QuoteIssuerProfile';
+import { QuoteIssuerProfile, type QuoteIssuerIdentity } from './QuoteIssuerProfile';
 import { Button } from './Button';
 import { ComboBox, type ComboOption } from './PersonComboBox';
 import { ConfirmIssueModal } from './ConfirmIssueModal';
@@ -44,24 +47,17 @@ import {
   ArrowRight,
   BadgeCheck,
   Ban,
-  Building2,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
   CreditCard,
   Eye,
-  Factory,
   FilePlus2,
   FileText,
-  Hash,
   Link2,
   Loader2,
-  Mail,
-  MapPin,
-  Pencil,
-  Phone,
+  MessageSquarePlus,
   Plus,
-  Receipt,
   RotateCcw,
   Search,
   Send,
@@ -112,6 +108,8 @@ export interface ApprovalReloadPayload {
     price: number;
     discount_1?: number;
     discount_2?: number;
+    /** หมายเหตุที่ขึ้นบนใบจริง — ต้องกลับเข้าฟอร์มด้วย ไม่งั้นแก้ใบทีไรหมายเหตุหายทุกที */
+    remark?: string | null;
     is_manual_service?: boolean;
   }[];
 }
@@ -195,6 +193,7 @@ interface QuoteItem {
   price: number;
   discount_1: number;
   discount_2: number;
+  remark?: string | null;
   is_shipping_fee?: boolean;
   /** สินค้าพ่วงที่กฎเติมให้เอง — ห้ามเติมกลับเข้าฟอร์ม เดี๋ยวถูกขยายซ้ำเป็นสองชุด */
   is_optional?: boolean;
@@ -248,6 +247,10 @@ interface PreviewItem {
   is_shipping_fee: boolean;
   is_manual_service: boolean;
   warranty_display: string;
+  /** คำอธิบายสินค้าที่จะขึ้นใต้ชื่อบนใบจริง (มาจาก snapshot ตัวเดียวกับที่ PDF พิมพ์) */
+  sales_description: string;
+  /** หมายเหตุรายบรรทัดที่แอดมินพิมพ์ */
+  remark: string;
   violations: PreviewViolation[];
 }
 
@@ -267,6 +270,28 @@ interface PreviewQuote {
   delivery_type_auto: DeliveryTypeKey;
   delivery_days_auto: number;
   delivery_auto_label: string;
+  /** ยอดท้ายใบ 5 ช่อง — server คิดด้วยฟังก์ชันเดียวกับ PDF ห้ามบวกเองบนจอ */
+  totals: {
+    subtotal: number;
+    discount: number;
+    after_discount: number;
+    vat: number;
+    grand_total: number;
+    amount_text: string;
+    /** ส่วนลดที่หักไปแล้วจริง — ใช้ได้เฉพาะแถบสรุปของแอดมิน ห้ามเอาไปลงช่อง "ส่วนลด" ของใบ */
+    discount_total: number;
+  };
+  warranty_note: string;
+  /** หัวกระดาษของบริษัทผู้ขายใบนี้ — มาจาก utils/companyProfile.ts ที่ PDF ใช้ */
+  company: {
+    key: 'PM' | 'THT';
+    logo_file: string;
+    name_th: string;
+    name_en: string;
+    address_lines: string[];
+    tax_id: string;
+    closing_lines: string[];
+  };
 }
 
 interface PreviewResult {
@@ -331,7 +356,7 @@ interface ServiceCfg {
 //  ถ้อยคำของ violation มาจาก server (buildViolationDisplay) แต่ในแถวใช้คำสั้นกว่าเพื่อไม่ให้
 //  ตารางบวม — ข้อความเต็มอยู่ในกล่องสรุปด้านล่างซึ่งเป็นที่เดียวที่ต้องอ่านครบ
 
-type TagTone = 'ok' | 'warn' | 'bad' | 'info';
+type TagTone = 'ok' | 'warn' | 'bad' | 'info' | 'link';
 type TagKind = 'check' | 'alert' | 'ban' | 'link' | 'truck' | 'wrench' | 'shield';
 interface RowTag {
   tone: TagTone;
@@ -352,7 +377,7 @@ const VIOLATION_LABEL: Record<string, string> = {
 const shortViolation = (v: PreviewViolation): string => {
   const base = VIOLATION_LABEL[v.type] ?? 'ติดกฎ';
   if (v.type === 'MIN_PRICE_VIOLATION' && v.min_price !== undefined) {
-    return `${base} ฿${money(v.min_price)}`;
+    return `${base} ฿${money2(v.min_price)}`;
   }
   if (v.type === 'MOQ_VIOLATION' && v.min_order_qty !== undefined) {
     return `${base} ${money(v.min_order_qty)}`;
@@ -375,6 +400,49 @@ const TAG_CLASS: Record<TagTone, string> = {
   warn: 'border-amber-200 bg-amber-50 text-amber-800',
   bad: 'border-red-200 bg-red-50 text-red-700',
   info: 'border-slate-200 bg-slate-50 text-slate-600',
+  // พ่วง = น้ำเงิน — แยกจาก info ที่เป็นสีเทา เพราะบรรทัดที่ระบบผูกให้เองต้องหาเจอง่ายในตารางที่มีหลายป้าย
+  // (คำว่า "พ่วง" + ไอคอนโซ่ยังคงอยู่ — ไม่ได้สื่อด้วยสีอย่างเดียว)
+  link: 'border-blue-200 bg-blue-50 text-blue-700',
+};
+
+/**
+ * หมายเหตุรายบรรทัดที่จะไปขึ้น**บนใบจริง** — ยกทรงมาจากหน้า LIFF (`quote-edit.html`
+ * ปุ่ม "📝 เพิ่มหมายเหตุ") ที่เซลส์ใช้อยู่ทุกวัน ⇒ สองพื้นผิวสอนเรื่องเดียวกันด้วยท่าเดียวกัน
+ *
+ * ซ่อนอยู่หลังปุ่มจนกว่าจะมีคนกด เพราะแถวส่วนใหญ่ไม่มีหมายเหตุ — ถ้าโชว์ช่องว่างทุกแถว
+ * ตารางจะสูงขึ้นเท่าตัวโดยไม่ได้อะไรกลับมา · มีค่าอยู่แล้วต้องกางเสมอ ไม่งั้นของที่พิมพ์ไว้
+ * จะหายไปจากสายตาคนที่กำลังตรวจใบ
+ */
+const RemarkField: React.FC<{
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+}> = ({ value, onChange, disabled }) => {
+  const [open, setOpen] = useState(false);
+  if (disabled) return null;
+  if (!open && !value) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="mt-1 inline-flex items-center gap-1 text-[10.5px] font-semibold text-slate-500 hover:text-slate-800"
+      >
+        <MessageSquarePlus className="w-3 h-3 shrink-0" />
+        เพิ่มหมายเหตุ
+      </button>
+    );
+  }
+  return (
+    <input
+      value={value}
+      autoFocus={open && !value}
+      onChange={(e) => onChange(e.target.value)}
+      maxLength={REMARK_MAX}
+      placeholder="หมายเหตุที่จะขึ้นบนใบ เช่น ลูกค้าขอรุ่นเดิมกับล็อตที่แล้ว"
+      aria-label="หมายเหตุของรายการนี้ (ขึ้นบนใบเสนอราคา)"
+      className="mt-1 w-full h-8 px-2 rounded-lg border border-slate-200 bg-card text-[11px] text-slate-700 outline-none"
+    />
+  );
 };
 
 const RowTags: React.FC<{ tags: RowTag[]; dim: boolean; checking: boolean }> = ({ tags, dim, checking }) => {
@@ -407,21 +475,6 @@ const RowTags: React.FC<{ tags: RowTag[]; dim: boolean; checking: boolean }> = (
   );
 };
 
-/** หนึ่งช่องในแถบข้อมูลลูกค้า — ไอคอน + ป้าย + ค่า (ว่างแล้วบอกว่าว่าง ไม่ปล่อยเป็นช่องเปล่า) */
-const CustField: React.FC<{
-  icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  value: string;
-}> = ({ icon: Icon, label, value }) => (
-  <div className="flex items-start gap-1.5 min-w-0">
-    <Icon className="w-3 h-3 shrink-0 mt-0.5 text-slate-400" />
-    <span className="text-slate-500 shrink-0">{label}</span>
-    <span className={`font-semibold break-words ${value ? 'text-slate-800' : 'text-slate-400'}`}>
-      {value || 'ไม่มีข้อมูล'}
-    </span>
-  </div>
-);
-
 // ── เครดิตที่แอดมินเขียนทับได้เฉพาะใบนี้ (2026-09-14) ────────────────────────
 //
 //  ค่าจริงมาจาก Odoo และแก้ที่นี่ไม่ได้ — แต่ "ใบนี้ตกลงเครดิตกันไว้แบบไหน" เป็นข้อเท็จจริง
@@ -439,16 +492,24 @@ const CreditField: React.FC<{
   hasCredit: boolean;
   options: string[];
   onChange: (v: string | null) => void;
-}> = ({ effective, customerValue, overridden, hasCredit, options, onChange }) => {
+  /** ในหัวใบมีป้าย "เครดิต" ของบล็อก meta อยู่แล้ว ⇒ ตัวมันเองต้องไม่พิมพ์ป้ายซ้ำอีกอัน */
+  bare?: boolean;
+}> = ({ effective, customerValue, overridden, hasCredit, options, onChange, bare }) => {
   /** โหมด "พิมพ์เอง" — เป็น state ของหน้าจอ ไม่ใช่ของค่า เพราะคนกดเลือกแล้วยังไม่ได้พิมพ์อะไร */
   const [other, setOther] = useState(false);
   const custom = other || (overridden && !options.includes(effective));
 
   return (
-    <>
+    /* คำอธิบายอยู่ในช่องเดียวกับช่องเลือก — ก่อนหน้านี้เคยให้มันกินเต็มความกว้างของ grid
+       แล้วไปตกที่หัวแถวถัดไป ซึ่งอยู่คนละฝั่งจอกับช่องที่มันอธิบาย — คำเตือนที่อยู่ไกลจากของที่มันเตือนคือคำเตือนที่ไม่มีใครอ่าน */
+    <div className="min-w-0">
       <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
-        <CreditCard className="w-3 h-3 shrink-0 text-slate-400" />
-        <span className="text-slate-500 shrink-0">เครดิต</span>
+        {!bare && (
+          <>
+            <CreditCard className="w-3 h-3 shrink-0 text-slate-400" />
+            <span className="text-slate-500 shrink-0">เครดิต</span>
+          </>
+        )}
         <select
           value={!overridden ? '' : custom ? '__other' : effective}
           onChange={(e) => {
@@ -494,7 +555,7 @@ const CreditField: React.FC<{
         )}
       </div>
       {overridden && (
-        <p className="sm:col-span-2 lg:col-span-3 text-[10.5px] text-slate-500 leading-relaxed">
+        <p className="mt-1 text-[10.5px] text-slate-500 leading-relaxed">
           ค่าจริงของลูกค้า: <span className="font-semibold">{customerValue || 'ไม่มีข้อมูล'}</span> —
           ใบนี้จะบันทึกเป็น “{effective || '(ว่าง)'}”
           {/* คำเตือนสำคัญกว่าเรื่องกฎค่าบริการ: ค่านี้ไหลตรงเข้าคอลัมน์ payment_term_id ของไฟล์
@@ -512,7 +573,7 @@ const CreditField: React.FC<{
           )}
         </p>
       )}
-    </>
+    </div>
   );
 };
 
@@ -535,29 +596,6 @@ const deliveryTone = (allInStock: boolean) =>
   allInStock
     ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
     : 'border-amber-200 bg-amber-50 text-amber-800';
-
-/** ป้ายอ่านอย่างเดียว — ขั้นใบร่างเป็นจอ "อ่านแล้วยืนยัน" การแก้อยู่ที่ขั้นฟอร์มที่เดียว */
-const DeliveryBadge: React.FC<{ quote: PreviewQuote }> = ({ quote }) => (
-  <span className="flex flex-wrap items-center gap-1.5">
-    <span
-      className={`flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-lg border ${deliveryTone(
-        quote.delivery_all_in_stock,
-      )}`}
-    >
-      {quote.delivery_all_in_stock ? (
-        <CheckCircle2 className="w-3 h-3 shrink-0" />
-      ) : (
-        <AlertTriangle className="w-3 h-3 shrink-0" />
-      )}
-      กำหนดส่ง: {quote.delivery_text}
-    </span>
-    {(quote.delivery_type_override !== null || quote.delivery_days_override !== null) && (
-      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full border border-blue-600 text-blue-700">
-        ตั้งเอง
-      </span>
-    )}
-  </span>
-);
 
 const DeliveryStrip: React.FC<{
   quote: PreviewQuote;
@@ -651,6 +689,11 @@ interface Row {
   price: string;
   disc1: string;
   disc2: string;
+  /**
+   * หมายเหตุที่จะขึ้น**บนใบจริง**ใต้ชื่อสินค้า (pdfGenerator พิมพ์ว่า "หมายเหตุ: …")
+   * ไม่ใช่โน้ตภายใน — ลูกค้าเห็น · ทางเดิมของ LINE พิมพ์ผ่าน LIFF (quote-edit ปุ่ม "📝 เพิ่มหมายเหตุ")
+   */
+  remark: string;
   candidates: Candidate[];
   status: RowStatus;
   /** บรรทัดค่าบริการ (สินค้าระบบตัวเดียวของทั้งระบบ) — ชื่อแก้ได้ จำนวน/ส่วนลดถูกล็อก */
@@ -659,13 +702,27 @@ interface Row {
   company?: 'PM' | 'THT';
 }
 
+/** ต้องเท่ากับ `ITEM_REMARK_MAX` ใน services/webQuoteService.ts — server ตัดให้อยู่ดี
+ *  แต่ตัดบนจอด้วยดีกว่า เพราะคนจะได้รู้ตั้งแต่ตอนพิมพ์ ไม่ใช่ตอนเห็นใบว่าหายไปครึ่งประโยค */
+const REMARK_MAX = 200;
+
 const num = (v: unknown): number => {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 };
 
+/** ของที่ไม่ใช่เงิน — จำนวนชิ้น · สต๊อก · เปอร์เซ็นต์ (ยอดเงินใช้ `money2()` เสมอ) */
 const money = (v: unknown): string =>
   num(v).toLocaleString('th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+
+/**
+ * ตัวเลขทศนิยม 2 ตำแหน่งเสมอ — **ยอดเงินทุกตัวในหน้านี้ใช้ตัวนี้** (เจ้าของสั่ง 2026-09-17)
+ * เพราะใบ PDF พิมพ์ `1,234.00` ไม่ใช่ `1,234` ⇒ ถ้าจอตัด `.00` ทิ้ง คนจะเทียบกับไฟล์ไม่ตรง
+ * และ `฿274,628.5` อ่านผิดเป็นจำนวนสตางค์ได้ · `money()` เหลือไว้สำหรับของที่ **ไม่ใช่เงิน**
+ * เท่านั้น — จำนวนชิ้น · สต๊อกคงเหลือ · เปอร์เซ็นต์ส่วนลด (ตรงนั้น `.00` คือขยะ)
+ */
+const money2 = (v: unknown): string =>
+  num(v).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /** ยอดรวมของแถว — ตรรกะเดียวกับ calcNetPrice ฝั่ง server (แสดงผลอย่างเดียว server ตัดสินจริงเสมอ) */
 const rowTotal = (r: Row): number =>
@@ -689,6 +746,7 @@ function rowsFromSlots(slots: Slot[], quoteData: Record<string, unknown> | null)
         price: String(num(it.price)),
         disc1: String(num(it.discount_1) || ''),
         disc2: String(num(it.discount_2) || ''),
+        remark: String(it.remark ?? ''),
         candidates: [],
         status: 'ok' as RowStatus,
       };
@@ -705,11 +763,87 @@ function rowsFromSlots(slots: Slot[], quoteData: Record<string, unknown> | null)
       // ส่วนลดตั้งต้นตามกติกาเดียวกับตอนสกัด: ระบุรายบรรทัดมา = ใช้ของบรรทัด ไม่งั้นใช้ของท้ายบิล
       disc1: String(num(raw.discount_1) || '') || billD1,
       disc2: String(num(raw.discount_1) || '') ? String(num(raw.discount_2) || '') : billD2,
+      remark: String(raw.remark ?? ''),
       candidates: cands,
       status: (cands.length > 0 ? 'ambiguous' : 'notfound') as RowStatus,
     };
   });
 }
+
+/**
+ * วันที่บนเอกสาร — ต้องเป็นค่าเดียวกับที่ `thaiDateDMY()` ฝั่ง server พิมพ์ลง PDF
+ * (`en-GB` + โซนกรุงเทพ ⇒ dd/mm/yyyy **ปี ค.ศ.** ไม่ใช่ พ.ศ.) · ผูกกับโซนไทยตายตัว
+ * ไม่ใช่โซนของเครื่องที่เปิดหน้าจอ ไม่งั้นแอดมินคนละโซนเห็นคนละวันกับที่ใบจะพิมพ์จริง
+ */
+const THAI_DATE_FMT = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Asia/Bangkok',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+const thaiToday = () => THAI_DATE_FMT.format(new Date());
+
+/**
+ * ── เอกสาร = "ใบที่จะได้" และเป็นฟอร์มไปในตัว (2026-09-17 · จาก mockup ชุด ed-) ────────
+ *
+ * ลำดับการอ่านและถ้อยคำทุกบล็อกยกมาจากใบ PDF จริง (หัวบริษัท → ผู้ซื้อ/เลขที่ → ตาราง 6
+ * คอลัมน์ → สรุปยอดพร้อม VAT และตัวอักษร → เงื่อนไข 3 บรรทัด → ช่องลงนาม 3 ช่อง)
+ * แต่วาดด้วยโทเคนของแอดมิน **ไม่ใช่รูปถ่ายของกระดาษ** — เหตุผลที่ไม่ทำเป็นกระดาษ A4 จำลอง:
+ *   1. หน้าตาใบมีเจ้าของอยู่แล้วคือ `pdfGenerator.ts` ก๊อป HTML/CSS มาไว้ที่นี่ = สองสำเนา
+ *      ที่ไม่มีวันถูกแก้พร้อมกัน วันหนึ่งใบบนจอกับใบที่ลูกค้าได้รับจะไม่ใช่ใบเดียวกันเงียบ ๆ
+ *   2. A4 บนจอ 390px ย่อจนอ่านไม่ออก ต้องมีดีไซน์ที่สองไว้ดูแลคู่กันตลอดไป
+ * ⇒ "ของจริงหน้าตาเป๊ะแบบไหน" ตอบด้วยปุ่ม **พรีวิว PDF** ซึ่งเจนจาก generateQuotationPDF()
+ *   ตัวเดียวกับใบจริง ไม่ใช่ด้วยการวาดเลียนแบบ
+ *
+ * ตัวเลขทุกตัวในบล็อกสรุปมาจาก `q.totals` ของ server — **ห้ามบวกเองบนจอ**
+ * (`ส่วนลด` เป็น 0.00 เสมอเพราะใบจริงพิมพ์แบบนั้นมาตลอด · เหตุผลอยู่ที่ utils/pricing.ts)
+ * ⇒ ยังไม่ได้ตรวจก็ยังไม่มียอดท้ายใบให้โชว์ บอกว่า "รอผลตรวจ" ตรง ๆ ดีกว่าเดาเลขให้ดูครบ
+ *
+ * **ยกเว้นคอลัมน์ "ราคา" รายบรรทัด** ที่คิดบนจอด้วย `rowTotal()` — มันต้องขยับทันทีที่พิมพ์
+ * ไม่งั้นช่องกรอกจะรู้สึกเหมือนพัง · ตัวตัดสินจริงยังเป็น server เสมอ และยอดท้ายใบไม่เคยใช้ค่านี้
+ */
+const deHtml = (s: string) => s.replace(/&nbsp;/g, ' ');
+
+/** แถวข้อมูลของบล็อกหัวใบ — คู่ label/value ที่ตัดบรรทัดได้โดยไม่ดันคอลัมน์ */
+const DocField: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
+  <div className="flex gap-2 py-[2px] text-[11.5px] items-start">
+    <span className="text-slate-400 shrink-0 w-[86px]">{label}</span>
+    <span className="text-slate-700 min-w-0 break-words">{children}</span>
+  </div>
+);
+
+const SumRow: React.FC<{ label: string; value: string; strong?: boolean; big?: boolean }> = ({
+  label, value, strong, big,
+}) => (
+  <div
+    className={`flex justify-between gap-3 py-[3px] ${
+      big
+        ? 'mt-1.5 pt-2 border-t border-slate-200 text-[15px] font-extrabold text-slate-900'
+        : strong
+          ? 'text-xs font-bold text-slate-800'
+          : 'text-xs text-slate-600'
+    }`}
+  >
+    <span>{label}</span>
+    <span className="tabular-nums">{value}</span>
+  </div>
+);
+
+const SignCell: React.FC<{ role: string; name: string | null; phone?: string | null; sig?: string | null }> = ({
+  role, name, phone, sig,
+}) => (
+  <div className="px-4 py-3 text-center border-t sm:border-t-0 sm:border-l border-slate-200 sm:first:border-l-0">
+    <div className="h-10 flex items-center justify-center">
+      {sig ? <img src={sig} alt="" className="max-h-10 object-contain" /> : null}
+    </div>
+    <div className="border-t border-slate-300 mx-6 mt-1 mb-1.5" />
+    <p className="text-[12px] font-bold text-slate-700">{name || '—'}</p>
+    <p className="text-[10.5px] text-slate-400">
+      {role}
+      {phone ? ` · ${phone}` : ''}
+    </p>
+  </div>
+);
 
 // ── ช่องค้นหาสินค้าแบบกะทัดรัด — ใช้สองที่: ในแถวตาราง และแถบเพิ่มสินค้าใต้ตาราง ────
 //  ไม่ใช้ ProductComboBox ของหน้าตั้งค่า เพราะตัวนั้นเป็นฟิลด์เต็มความสูง 44px พร้อม label
@@ -1003,7 +1137,7 @@ const ProductSearchBox: React.FC<{
                         ตอนเลือกรุ่น การวางไว้ท้ายบรรทัดที่สามทำให้ต้องอ่านทั้งการ์ดก่อนถึงจะเจอ */}
                     <span className="flex flex-col items-end gap-1 shrink-0">
                       <span className="text-xs font-bold tabular-nums" style={{ color: BRAND }}>
-                        ฿{money(h.price)}
+                        ฿{money2(h.price)}
                       </span>
                       <StockBadge stock={num(h.stock)} need={needQty} />
                     </span>
@@ -1018,6 +1152,735 @@ const ProductSearchBox: React.FC<{
   );
 };
 
+/** หนึ่ง "ใบที่จะออกจริง" · `quote` ว่าง = ยังไม่ได้ตรวจ จึงยังไม่รู้ว่าบรรทัดไหนไปบริษัทไหน */
+interface DocGroup {
+  co: 'PM' | 'THT';
+  label: string;
+  rows: Row[];
+  extras: PreviewItem[];
+  quote: PreviewQuote | undefined;
+}
+
+/**
+ * ทุกอย่างที่เอกสารต้องใช้เพื่อ "เป็นฟอร์ม" มัดรวมเป็นก้อนเดียว — prop เรียงกัน 20 ตัวไม่มีใครอ่าน
+ * และไม่ต้องกลัวว่าก้อนใหม่ทุกเรนเดอร์จะทำให้ช้า เพราะเอกสารต้องวาดใหม่อยู่แล้วทุกครั้งที่ตัวเลขขยับ
+ */
+interface DocCtx {
+  customer: PreviewResult['customer'] | null;
+  identity: QuoteIssuerIdentity | null;
+  svcCfg: ServiceCfg | null;
+  /** ผลตรวจของแต่ละแถว (จับคู่ด้วย `Row.key` มาแล้ว) — ไม่มี = แถวนี้ยังไม่เคยผ่านการตรวจ */
+  matched: Map<string, PreviewItem>;
+  staleNow: boolean;
+  previewing: boolean;
+  /** ยังไม่เลือกบริษัท/ผู้ติดต่อ แล้วมีของจะเสนอแล้ว = ต้องไฮไลต์ว่าต้องเคาะ */
+  mustPick: boolean;
+  patchRow: (key: string, patch: Partial<Row>) => void;
+  removeRow: (key: string) => void;
+  pickCandidate: (key: string, c: Candidate) => void;
+  /** พิมพ์ส่วนลดเสร็จแล้วเสนอ "ใช้กับทุกรายการ" — ผู้เรียกเป็นคนหน่วงเวลาและวางตำแหน่งเอง */
+  offerBulk: (key: string, el: HTMLInputElement) => void;
+  rowTagsOf: (r: Row, hit: PreviewItem | null) => RowTag[];
+  extraTagsOf: (it: PreviewItem) => RowTag[];
+  // ── หัวใบ: ลูกค้า · เครดิต · กำหนดส่ง ──
+  customerOpt: CustomerOpt | null;
+  customerOpts: CustomerOpt[];
+  onPickCustomer: (o: CustomerOpt) => void;
+  onCustomerQuery: (q: string) => void;
+  custSearching: boolean;
+  contactOpt: { id: string; name: string; phone: string } | null;
+  contactOpts: { id: string; name: string; phone: string }[];
+  onPickContact: (id: number) => void;
+  paymentTerms: string | null;
+  paymentTermOpts: string[];
+  setPaymentTerms: (v: string | null) => void;
+  deliveryTypes: { key: DeliveryTypeKey; label: string }[];
+  deliveryOv: Partial<Record<'PM' | 'THT', DeliveryOv>>;
+  setDeliveryOv: (co: 'PM' | 'THT', v: DeliveryOv | undefined) => void;
+  // ── แถบเพิ่มรายการท้ายตาราง ──
+  addProductRow: (h: SearchHit) => void;
+  addRow: () => void;
+  addServiceRow: () => void;
+  canAddService: boolean;
+  serviceHint: string;
+  justAdded: string | null;
+  // ── พรีวิว PDF ──
+  onPdf: (co: 'PM' | 'THT') => void;
+  pdfBusy: 'PM' | 'THT' | null;
+}
+
+const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
+  const q = g.quote;
+  const co = q?.company ?? null;
+  const cust = ctx.customer;
+  const t = q?.totals ?? null;
+  const empty = g.rows.length === 0 && g.extras.length === 0;
+
+  /* ชั้นเดียวกันทุกเซลล์ตัวเลข: จอแคบเป็นบรรทัด "ป้าย — ค่า" · จอกว้างกลับเป็นคอลัมน์ตาราง
+     (ย่อตาราง 6 คอลัมน์ลงมาเฉย ๆ = ตารางที่อ่านไม่ออก — docs/design.md หัวข้อ responsive) */
+  const cell =
+    'flex justify-between items-center gap-3 px-4 py-0.5 text-xs text-slate-600 tabular-nums ' +
+    'before:content-[attr(data-k)] before:text-slate-400 ' +
+    'md:table-cell md:px-2 md:py-2 md:text-right md:align-top md:before:content-none';
+  /** ของในเซลล์ชิดขวาเสมอ ทั้งโหมดการ์ดและโหมดตาราง */
+  const inner = 'inline-flex items-center justify-end gap-1.5';
+  const inp =
+    'h-8 px-2 rounded-lg border border-slate-300 bg-card text-xs text-right text-slate-800 outline-none ' +
+    'focus:border-[var(--brand-fg)] disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-200';
+
+  /**
+   * ปุ่มลบเป็นไอคอน **ในเซลล์ "ราคา"** ไม่ใช่คอลัมน์ที่ 7 (เจ้าของเคาะ 2026-09-17)
+   * — ใบจริงมี 6 คอลัมน์ เพิ่มคอลัมน์เมื่อไหร่ หัวตารางบนจอกับบนกระดาษจะเริ่มไม่ตรงกัน
+   * และในโหมดการ์ดมันก็ยังชิดขวาของบรรทัดราคาเหมือนกัน
+   */
+  const DelBtn: React.FC<{ onClick?: () => void; locked?: boolean; label: string }> = ({
+    onClick, locked, label,
+  }) => (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={locked}
+      title={locked ? 'บรรทัดที่กฎเติมให้เอง — ถอดออกได้ที่กฎ ไม่ใช่ที่ใบ' : 'ลบบรรทัดนี้'}
+      aria-label={`ลบบรรทัด ${label}`}
+      className="shrink-0 w-[26px] h-[26px] rounded-lg flex items-center justify-center text-slate-400
+        hover:text-red-600 hover:bg-red-50 disabled:opacity-30 disabled:hover:text-slate-400 disabled:hover:bg-transparent"
+    >
+      <Trash2 className="w-3.5 h-3.5" />
+    </button>
+  );
+
+  return (
+    <div className="bg-card border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+      {/* ── หัวเอกสาร ──
+          ยังไม่ได้ตรวจ = **พูดตรง ๆ ว่ารอผลตรวจ** (เจ้าของเคาะ 2026-09-17) ไม่ใช่เดาบริษัท
+          แล้วเอาโลโก้ผิดขึ้นไว้ก่อน — หัวใบที่ผิดคือสิ่งที่คนเชื่อโดยไม่ตรวจซ้ำ */}
+      <div
+        className={`flex flex-wrap items-start gap-3 px-4 py-3 border-b border-slate-200 ${
+          co ? 'bg-slate-50' : 'bg-slate-100'
+        }`}
+      >
+        {co ? (
+          <img src={`/data/${co.logo_file}`} alt="" className="w-16 h-auto object-contain shrink-0" />
+        ) : (
+          <span className="w-[76px] h-[46px] shrink-0 rounded-lg border border-dashed border-slate-300 flex items-center justify-center text-center text-[10px] leading-tight text-slate-400 px-1">
+            ใบของบริษัทไหน
+            <br />
+            รอผลตรวจ
+          </span>
+        )}
+        <div className="flex-1 min-w-[200px]">
+          {co ? (
+            <>
+              <p className="text-[13px] font-extrabold text-slate-800">{co.name_th}</p>
+              <p className="text-xs text-slate-500">{co.name_en}</p>
+              <p className="text-[10.5px] text-slate-400 leading-snug mt-0.5">
+                {deHtml(co.address_lines[0] ?? '')}
+                <br />
+                เลขประจำตัวผู้เสียภาษี {co.tax_id}
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-[13px] font-extrabold text-slate-600">ระบบจัดใบให้เองตอนตรวจ</p>
+              <p className="text-xs text-slate-500">
+                บรรทัดของ Primus กับ Themtech จะถูกแยกเป็นคนละใบอัตโนมัติ
+              </p>
+              <p className="text-[10.5px] text-slate-400 leading-snug mt-0.5">
+                หัวบริษัท ที่อยู่ และเลขผู้เสียภาษี มาจากที่เดียวกับที่ไฟล์ PDF ใช้
+              </p>
+            </>
+          )}
+        </div>
+        <div className="text-right ml-auto">
+          <p className="text-sm font-extrabold text-slate-800">ใบเสนอราคา</p>
+          <p className="text-[10.5px] text-slate-500">Quotation · F-MK-04 REV.6</p>
+        </div>
+      </div>
+
+      {/* ── ผู้ซื้อ / ข้อมูลเอกสาร — ช่องกรอกอยู่ตรงที่มันไปโผล่บนใบ ไม่ใช่ในฟอร์มอีกใบข้างบน ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 border-b border-slate-200">
+        <div className="px-4 py-3">
+          <DocField label="รหัสลูกค้า">
+            {cust?.reference || '—'}
+            <span className="text-slate-300 mx-1.5">·</span>
+            เลขผู้เสียภาษี {cust?.tax_id || '—'}
+          </DocField>
+          {/* นามผู้ซื้อ = ช่องเลือกบริษัท · ไม่มีฟอร์มแยกข้างบนอีกแล้ว ⇒ ต้องเลือกได้จากในใบ */}
+          <div className="flex gap-2 py-[2px] text-[11.5px] items-start">
+            <span className="text-slate-400 shrink-0 w-[86px] mt-2">นามผู้ซื้อ</span>
+            <span className="min-w-0 flex-1 max-w-[320px]">
+              <ComboBox<CustomerOpt>
+                value={ctx.customerOpt}
+                options={ctx.customerOpts}
+                onPick={ctx.onPickCustomer}
+                onQueryChange={ctx.onCustomerQuery}
+                placeholder="— เลือกบริษัท —"
+                emptyText="พิมพ์ชื่อหรือรหัสลูกค้าเพื่อค้นหา"
+                ariaLabel="บริษัท / ลูกค้า"
+                searchPlaceholder="พิมพ์ชื่อหรือรหัสลูกค้าเพื่อค้นหา..."
+                invalid={!ctx.customerOpt && ctx.mustPick}
+                busy={ctx.custSearching}
+                facts={(o) => <CustomerFacts row={o.row} />}
+              />
+            </span>
+          </div>
+          <div className="flex gap-2 py-[2px] text-[11.5px] items-start">
+            <span className="text-slate-400 shrink-0 w-[86px] mt-2">ผู้ติดต่อ</span>
+            <span className="min-w-0 flex-1 max-w-[320px]">
+              <ComboBox
+                value={ctx.contactOpt}
+                options={ctx.contactOpts}
+                onPick={(o) => ctx.onPickContact(Number(o.id))}
+                placeholder={ctx.customerOpt ? '— เลือกผู้ติดต่อ —' : '— เลือกบริษัทก่อน —'}
+                emptyText="บริษัทนี้ยังไม่มีผู้ติดต่อในระบบ"
+                ariaLabel="ผู้ติดต่อ"
+                searchPlaceholder="พิมพ์ชื่อหรือเบอร์เพื่อค้นหา..."
+                invalid={!ctx.contactOpt && ctx.mustPick}
+                disabled={!ctx.customerOpt}
+                searchText={(o) => `${o.name} ${o.phone}`}
+                facts={(o) => (
+                  <span className="shrink-0 text-[11px] text-slate-500 whitespace-nowrap">{o.phone || '—'}</span>
+                )}
+              />
+            </span>
+          </div>
+          <DocField label="โทรศัพท์">{cust?.contact_phone || ctx.contactOpt?.phone || '—'}</DocField>
+          <DocField label="อีเมล">{cust?.contact_email || '—'}</DocField>
+          <DocField label="ที่อยู่">{cust?.address || '—'}</DocField>
+        </div>
+        <div className="px-4 py-3 border-t sm:border-t-0 sm:border-l border-slate-200">
+          {/* เลขที่ใบออกตอนกดยืนยันเท่านั้น (allocateQuotationNo) — เขียนตรง ๆ ว่ายังไม่มี
+              ดีกว่าปล่อยช่องว่างที่อ่านได้ว่า "ระบบลืมใส่" */}
+          <DocField label="เลขที่">
+            <span className="italic text-slate-400">ออกให้เมื่อกดยืนยัน</span>
+          </DocField>
+          <DocField label="วันที่">{thaiToday()}</DocField>
+          <DocField label="PO Ref.">
+            <span className="text-slate-400">—</span>
+          </DocField>
+          <DocField label="สถานที่ส่งของ">{cust?.address || '—'}</DocField>
+          <div className="flex gap-2 py-[2px] text-[11.5px] items-start">
+            <span className="text-slate-400 shrink-0 w-[86px] mt-1">เครดิต</span>
+            <span className="min-w-0 flex-1 text-[11px]">
+              <CreditField
+                effective={ctx.paymentTerms ?? cust?.payment_terms ?? ''}
+                customerValue={cust?.customer_payment_terms ?? ''}
+                overridden={ctx.paymentTerms !== null}
+                hasCredit={cust?.has_credit_terms ?? false}
+                options={ctx.paymentTermOpts}
+                onChange={ctx.setPaymentTerms}
+                bare
+              />
+            </span>
+          </div>
+          <div className="flex gap-2 py-[2px] text-[11.5px] items-start">
+            <span className="text-slate-400 shrink-0 w-[86px] mt-1.5">กำหนดส่ง</span>
+            <span className="min-w-0 flex-1 text-[11px]">
+              {ctx.previewing && !q ? (
+                <span className="flex items-center gap-1 text-slate-500">
+                  <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+                  กำลังคำนวณกำหนดส่ง...
+                </span>
+              ) : q ? (
+                <DeliveryStrip
+                  quote={q}
+                  types={ctx.deliveryTypes}
+                  ov={ctx.deliveryOv[q.quote_company]}
+                  onChange={(v) => ctx.setDeliveryOv(q.quote_company, v)}
+                />
+              ) : (
+                <span className="text-slate-400">ระบบคำนวณให้ตอนตรวจรายละเอียด</span>
+              )}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* ── ตารางรายการ 6 คอลัมน์เหมือนใบจริง — และเป็นที่ที่แก้ของได้จริง ── */}
+      <table className="w-full text-sm">
+        <thead className="hidden md:table-header-group">
+          <tr className="text-[10.5px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
+            <th className="text-left font-bold py-2 pl-4 pr-2 w-12">ลำดับ</th>
+            <th className="text-left font-bold py-2">รายการ</th>
+            <th className="text-right font-bold py-2 w-[104px]">จำนวน</th>
+            <th className="text-right font-bold py-2 w-[116px]">หน่วยละ</th>
+            <th className="text-right font-bold py-2 w-[132px]">ส่วนลด</th>
+            <th className="text-right font-bold py-2 w-[148px] pr-4">ราคา</th>
+          </tr>
+        </thead>
+        <tbody>
+          {empty && (
+            <tr className="block md:table-row">
+              <td className="block md:table-cell px-4 py-6 text-center" colSpan={6}>
+                <FileText className="w-5 h-5 mx-auto text-slate-400" />
+                <p className="mt-1.5 text-xs font-semibold text-slate-600">ยังไม่มีรายการในใบ</p>
+                <p className="mt-0.5 text-[11px] text-slate-500">
+                  เพิ่มสินค้าจากช่องด้านล่างได้เลย — หรือวางข้อความที่ลูกค้าส่งมาไว้ด้านบน แล้วกด “สร้างร่าง”
+                  ให้ระบบเคาะรายการให้
+                </p>
+              </td>
+            </tr>
+          )}
+
+          {g.rows.map((r, idx) => {
+            const hit = ctx.matched.get(r.key) ?? null;
+            const vios = ctx.staleNow ? [] : (hit?.violations ?? []);
+            const bad = vios.length > 0;
+            const editable = r.status === 'ok';
+            return (
+              <tr
+                key={r.key}
+                className={`block md:table-row border-b border-slate-100 last:border-0 py-2 md:py-0 ${
+                  bad
+                    ? 'bg-red-50/60 md:border-l-[3px] md:border-l-red-500'
+                    : r.status === 'notfound'
+                      ? 'bg-red-50/60'
+                      : r.status === 'ambiguous'
+                        ? 'bg-amber-50/60'
+                        : ''
+                }`}
+              >
+                <td className="hidden md:table-cell align-top py-2.5 pl-4 text-xs text-slate-400">{idx + 1}</td>
+                <td className="block md:table-cell align-top px-4 md:pl-0 md:pr-3 py-1 md:py-2">
+                  {r.isService ? (
+                    <div className="space-y-1 pt-1">
+                      <input
+                        value={r.name}
+                        onChange={(e) => ctx.patchRow(r.key, { name: e.target.value })}
+                        placeholder="ชื่อรายการที่จะขึ้นในใบ เช่น ค่าติดตั้งหน้างาน"
+                        aria-label="ชื่อรายการค่าบริการ"
+                        className="w-full max-w-xs h-8 px-2.5 rounded-lg border border-slate-300 bg-card text-xs text-slate-800 outline-none focus:border-[var(--brand-fg)]"
+                      />
+                      <p className="text-[11px] text-slate-400">
+                        {r.model} · {ctx.svcCfg?.internal_reference} · {ctx.svcCfg?.odoo_name} (Odoo)
+                      </p>
+                    </div>
+                  ) : r.status === 'ok' ? (
+                    <>
+                      <p className="font-semibold text-slate-800 text-[13px]">{r.model}</p>
+                      <p className="text-[11px] text-slate-500">{r.name}</p>
+                      {/* สองบรรทัดนี้ขึ้นบนใบจริง ⇒ ต้องอ่านได้ตอนทำใบ ไม่ใช่ไปเจอตอนเปิด PDF */}
+                      {hit?.sales_description && (
+                        <p className="text-[11px] text-slate-400 whitespace-pre-line leading-snug mt-0.5">
+                          {hit.sales_description.trim()}
+                        </p>
+                      )}
+                    </>
+                  ) : r.status === 'ambiguous' ? (
+                    // คำเตือนอยู่ "ใต้" ตัวเลือก — ของที่ต้องลงมือทำมาก่อน คำอธิบายว่าทำไมตามหลัง
+                    <div className="space-y-1 pt-1">
+                      <select
+                        defaultValue=""
+                        onChange={(e) => {
+                          const c = r.candidates.find((x) => String(x.product_template_id) === e.target.value);
+                          if (c) ctx.pickCandidate(r.key, c);
+                        }}
+                        aria-label={`เลือกรุ่นที่ถูกต้องแทน ${r.model}`}
+                        className="w-full max-w-sm h-8 px-2.5 rounded-lg border border-amber-400 bg-card text-xs outline-none"
+                      >
+                        <option value="">— เลือกรุ่น —</option>
+                        {r.candidates.map((c) => (
+                          <option key={c.product_template_id} value={c.product_template_id}>
+                            {c.model} · ฿{money2(c.sales_price)} · คงเหลือ {money(c.quantity_on_hand_unreserved)}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-[11px] text-amber-800">
+                        “{r.model}” ตรงกับหลายรุ่น — เลือกรุ่นที่ถูกต้อง
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1 pt-1 max-w-sm">
+                      <ProductSearchBox
+                        initialQuery={r.model}
+                        placeholder="ค้นหารุ่นที่ถูกต้อง..."
+                        tone="danger"
+                        needQty={num(r.quantity) || 1}
+                        onPick={(h) =>
+                          ctx.patchRow(r.key, {
+                            productTemplateId: h.product_id,
+                            model: h.model,
+                            name: h.name,
+                            price: String(num(h.price)),
+                            status: 'ok',
+                            candidates: [],
+                          })
+                        }
+                      />
+                      <p className="text-[11px] text-red-700">
+                        {r.model ? `ไม่พบรุ่น “${r.model}” ในระบบ` : 'ยังไม่ได้เลือกสินค้า'}
+                      </p>
+                    </div>
+                  )}
+                  <RowTags
+                    tags={ctx.rowTagsOf(r, hit)}
+                    dim={ctx.staleNow}
+                    checking={ctx.previewing && !hit && r.status === 'ok'}
+                  />
+                  <RemarkField
+                    value={r.remark}
+                    onChange={(v) => ctx.patchRow(r.key, { remark: v })}
+                    /* บรรทัดค่าบริการรับหมายเหตุไม่ได้ — buildShippingFeeSnapshot ประกอบบรรทัดนี้
+                       ใหม่ทุกครั้งด้วย remark: '' ⇒ โชว์ช่องให้พิมพ์ = สัญญาว่าจะเก็บให้ทั้งที่เก็บไม่ได้ */
+                    disabled={r.isService || r.status !== 'ok'}
+                  />
+                </td>
+                <td data-k="จำนวน" className={cell}>
+                  <span className={inner}>
+                    <input
+                      value={r.quantity}
+                      onChange={(e) => ctx.patchRow(r.key, { quantity: e.target.value })}
+                      inputMode="decimal"
+                      aria-label="จำนวน"
+                      disabled={r.isService}
+                      title={r.isService ? 'ค่าบริการนับเป็น 1 รายการเสมอ' : undefined}
+                      className={`${inp} w-[62px]`}
+                    />
+                    <span className="text-[11px] text-slate-400">Pcs</span>
+                  </span>
+                </td>
+                <td data-k="หน่วยละ" className={cell}>
+                  <span className={inner}>
+                    <input
+                      value={r.price}
+                      onChange={(e) => ctx.patchRow(r.key, { price: e.target.value })}
+                      inputMode="decimal"
+                      placeholder="ราคาตั้ง"
+                      aria-label="ราคาต่อหน่วย"
+                      disabled={!editable}
+                      className={`${inp} w-[92px]`}
+                    />
+                  </span>
+                </td>
+                <td data-k="ส่วนลด" className={cell}>
+                  <span className={inner}>
+                    {!editable || r.isService ? (
+                      <span className="text-slate-400">—</span>
+                    ) : (
+                      <>
+                        <input
+                          value={r.disc1}
+                          /* ล้างชั้น 1 แล้วชั้น 2 ต้องหายด้วย — ไม่งั้นจะเหลือช่องที่กรอกไม่ได้แต่ยังหักเงินอยู่ */
+                          onChange={(e) => {
+                            const el = e.currentTarget;
+                            const v = el.value;
+                            ctx.patchRow(r.key, num(v) > 0 ? { disc1: v } : { disc1: v, disc2: '' });
+                            ctx.offerBulk(r.key, el);
+                          }}
+                          inputMode="decimal"
+                          aria-label="ส่วนลดชั้นที่ 1 (%)"
+                          className={`${inp} w-[46px]`}
+                        />
+                        <span className="text-[11px] text-slate-400">%</span>
+                        <span className="text-[11px] text-slate-300">,</span>
+                        <input
+                          value={r.disc2}
+                          onChange={(e) => {
+                            const el = e.currentTarget;
+                            ctx.patchRow(r.key, { disc2: el.value });
+                            ctx.offerBulk(r.key, el);
+                          }}
+                          inputMode="decimal"
+                          aria-label="ส่วนลดชั้นที่ 2 (%)"
+                          /* ล็อกเฉพาะตอนที่ "ไม่มีอะไรอยู่เลย" — ใบเก่าที่มีชั้น 2 มาโดยไม่มีชั้น 1
+                             (ใบเก่าจาก LINE เป็นแบบนี้ได้) ต้องแก้ไขได้ ไม่งั้นกลายเป็นเลขที่ใครก็แก้ไม่ได้ */
+                          disabled={num(r.disc1) <= 0 && num(r.disc2) <= 0}
+                          title={num(r.disc1) > 0 ? undefined : 'กรอกส่วนลดชั้นที่ 1 ก่อน'}
+                          className={`${inp} w-[46px]`}
+                        />
+                        <span className="text-[11px] text-slate-400">%</span>
+                      </>
+                    )}
+                  </span>
+                </td>
+                <td data-k="ราคา" className={`${cell} md:pr-4 font-bold text-slate-800`}>
+                  <span className={inner}>
+                    <span>{editable ? money2(rowTotal(r)) : '—'}</span>
+                    <DelBtn onClick={() => ctx.removeRow(r.key)} label={r.model || 'ที่ยังไม่ได้เลือกสินค้า'} />
+                  </span>
+                </td>
+              </tr>
+            );
+          })}
+
+          {/* บรรทัดที่ระบบเติมให้เอง (สินค้าพ่วง · ค่าขนส่งอัตโนมัติ) — แก้ในใบไม่ได้ เพราะเจ้าของมัน
+              คือกฎฝั่ง server แต่ต้องเห็น ไม่งั้นยอดรวมจะอธิบายไม่ได้ */}
+          {g.extras.map((it, i) => (
+            <tr
+              key={`x-${g.co}-${it.model}-${i}`}
+              className="block md:table-row border-b border-slate-100 last:border-0 py-2 md:py-0 bg-slate-50/70"
+            >
+              <td className="hidden md:table-cell align-top py-2.5 pl-4 text-xs text-slate-400">
+                {g.rows.length + i + 1}
+              </td>
+              <td className="block md:table-cell align-top px-4 md:pl-0 md:pr-3 py-1 md:py-2">
+                {/* ค่าบริการ/ค่าขนส่งใช้รหัสสินค้าร่วมกันทั้งระบบ ⇒ ตัวที่ต้องอ่านคือชื่อรายการ */}
+                {it.is_shipping_fee || it.is_manual_service ? (
+                  <>
+                    <p className="font-semibold text-slate-800 text-[13px]">{it.name}</p>
+                    <p className="text-[11px] text-slate-400">{it.model}</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="font-semibold text-slate-800 text-[13px]">{it.model}</p>
+                    <p className="text-[11px] text-slate-500">{it.name}</p>
+                  </>
+                )}
+                {it.sales_description && (
+                  <p className="text-[11px] text-slate-400 whitespace-pre-line leading-snug mt-0.5">
+                    {it.sales_description.trim()}
+                  </p>
+                )}
+                <RowTags tags={ctx.extraTagsOf(it)} dim={ctx.staleNow} checking={false} />
+              </td>
+              <td data-k="จำนวน" className={cell}>
+                <span className={inner}>{money(it.quantity)} Pcs</span>
+              </td>
+              <td data-k="หน่วยละ" className={cell}>
+                <span className={inner}>{money2(it.price)}</span>
+              </td>
+              <td data-k="ส่วนลด" className={cell}>
+                <span className={inner}>
+                  {it.discount_1 || it.discount_2
+                    ? [it.discount_1, it.discount_2].filter(Boolean).map((d) => `${money(d)} %`).join(' , ')
+                    : '—'}
+                </span>
+              </td>
+              <td data-k="ราคา" className={`${cell} md:pr-4 font-bold text-slate-800`}>
+                <span className={inner}>
+                  <span>{money2(it.line_total)}</span>
+                  <DelBtn locked label={it.model} />
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {/* ── แถบเพิ่มรายการ — อยู่ "ในใบ" แต่เป็นเส้นประ ⇒ อ่านออกว่าไม่ใช่บรรทัดของเอกสาร ── */}
+      <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 border-t border-dashed border-slate-300 bg-slate-50">
+        <Plus className="w-4 h-4 shrink-0" style={{ color: BRAND }} />
+        <div className="flex-1 min-w-[180px]">
+          <ProductSearchBox
+            placeholder="เพิ่มสินค้า — พิมพ์รุ่นหรือชื่อ แล้วกด Enter"
+            tone="plain"
+            clearOnPick
+            onPick={ctx.addProductRow}
+          />
+        </div>
+        <Button variant="neutral" tone="soft" onClick={ctx.addRow}>
+          แถวเปล่า
+        </Button>
+        <Button variant="secondary" icon={Wrench} disabled={!ctx.canAddService} onClick={ctx.addServiceRow}>
+          เพิ่มค่าบริการ
+        </Button>
+        {ctx.justAdded && (
+          <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-700">
+            <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+            เพิ่ม {ctx.justAdded} แล้ว
+          </span>
+        )}
+        <p className="basis-full text-[11px] text-slate-400">
+          ระบบวางแถวลงใบของบริษัทผู้ผลิตให้เอง — เพิ่มจากใบไหนก็ได้ ไม่ต้องเลือกว่าจะไปใบไหน ·{' '}
+          {ctx.serviceHint}
+        </p>
+      </div>
+
+      {/* ── สรุปยอด + หมายเหตุท้ายใบ ──
+          ทุกตัวเลขมาจาก `q.totals` ที่ server คิดด้วยฟังก์ชันเดียวกับ PDF — ห้ามบวกเองบนจอ
+          ⇒ ยังไม่ได้ตรวจก็ยังไม่มีตัวเลขให้โชว์ พูดว่า “รอผลตรวจ” ตรง ๆ ดีกว่าโชว์เลขที่เดาเอง */}
+      <div className="grid grid-cols-1 sm:grid-cols-[1fr_300px] border-t border-slate-200">
+        <div className="px-4 py-3 text-[11px] text-slate-400 leading-relaxed">
+          <span className="font-bold text-slate-500">หมายเหตุ:</span> {q?.warranty_note ?? '—'}
+          <p className="mt-2">
+            ขอแจ้งนโยบายขอข้อมูลส่วนบุคคล เพื่อประโยชน์ในการได้รับข้อมูลผลิตภัณฑ์หรือบริการของเรา
+            อาทิ ใบเสนอราคา, การติดต่อกลับเพื่อสอบถามหรือนำเสนอข้อมูล
+          </p>
+        </div>
+        <div
+          className={`px-4 py-3 border-t sm:border-t-0 sm:border-l border-slate-200 ${
+            ctx.staleNow ? 'opacity-50' : ''
+          }`}
+        >
+          <SumRow label="รวมเงิน" value={t ? money2(t.subtotal) : '—'} />
+          <SumRow label="ส่วนลด" value={t ? money2(t.discount) : '—'} />
+          <SumRow label="มูลค่าหลังหักส่วนลด" value={t ? money2(t.after_discount) : '—'} strong />
+          <SumRow label="ภาษีมูลค่าเพิ่ม 7%" value={t ? money2(t.vat) : '—'} />
+          <SumRow label="ยอดเงินสุทธิ" value={t ? `฿${money2(t.grand_total)}` : '—'} big />
+          <p className="text-[10.5px] text-slate-400 text-right mt-1">
+            {t ? `ตัวอักษร: ${t.amount_text}` : 'ยอดท้ายใบมาจากผลตรวจ — ยังไม่ได้ตรวจจึงยังไม่มีตัวเลข'}
+          </p>
+        </div>
+      </div>
+
+      {/* ── เงื่อนไข 3 บรรทัดท้ายใบ ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 border-t border-slate-200">
+        {[
+          ['Price Validity', '7 Day'],
+          ['Term Payment', ctx.paymentTerms ?? cust?.payment_terms ?? '—'],
+          ['Delivery Time', q?.delivery_text ?? '—'],
+        ].map(([k, v], i) => (
+          <div
+            key={k}
+            className={`px-4 py-2.5 ${i > 0 ? 'border-t sm:border-t-0 sm:border-l border-slate-200' : ''}`}
+          >
+            <p className="text-[10px] uppercase tracking-wider text-slate-400">{k}</p>
+            <p className="text-xs font-semibold text-slate-700 mt-0.5">{v || '—'}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* ── ช่องลงนาม 3 ช่องเหมือนใบจริง ──
+          ไม่มีชื่อ/ลายเซ็น = ใบจริงก็จะไม่มี ⇒ ต้องเห็นตั้งแต่ตอนนี้ ไม่ใช่ไปรู้ตอนลูกค้าถาม */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 bg-slate-50">
+        <SignCell role="ลูกค้า (ผู้มีอำนาจ)" name="ลงนาม / วันที่" />
+        <SignCell
+          role="พนักงานขาย"
+          name={ctx.identity?.salesperson?.name ?? null}
+          phone={ctx.identity?.salesperson?.phone}
+          sig={ctx.identity?.salesperson?.sig_url}
+        />
+        <SignCell
+          role="ผู้เสนอราคา"
+          name={ctx.identity?.issuer.name ?? null}
+          phone={ctx.identity?.issuer.phone}
+          sig={ctx.identity?.issuer.sig_url}
+        />
+      </div>
+
+      {/* ── ท้ายการ์ด: ชื่อใบ · ส่วนลดที่หักไปแล้วจริง · ปุ่มดูไฟล์จริง ──
+          ช่อง "ส่วนลด" บนกระดาษพิมพ์ 0.00 เสมอตามแบบฟอร์มของบริษัท ⇒ ยอดที่หักไปจริงต้องมีที่อยู่
+          ของมันเองบนจอ ไม่งั้นไม่มีใครตอบลูกค้าได้ว่าลดไปเท่าไหร่ (ดู utils/pricing.ts) */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 border-t border-slate-200">
+        <span className="text-[11px] text-slate-400">{q ? q.company_label : 'ยังไม่ได้แยกใบ'}</span>
+        {t && (
+          <span className="text-[11px] text-slate-400">
+            ส่วนลดที่หักไปแล้วในใบนี้{' '}
+            <span className="font-semibold text-red-700 tabular-nums">฿{money2(t.discount_total)}</span>
+          </span>
+        )}
+        <div className="ml-auto">
+          <Button
+            variant="neutral"
+            tone="soft"
+            icon={FileText}
+            busy={ctx.pdfBusy === g.co}
+            disabled={!q}
+            title={q ? undefined : 'ต้องตรวจก่อน ระบบจึงรู้ว่าใบนี้เป็นของบริษัทไหน'}
+            onClick={() => q && ctx.onPdf(q.quote_company)}
+          >
+            พรีวิว PDF ของใบนี้
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ── ป๊อปอัป "ใช้ส่วนลดนี้กับทุกรายการ" (เจ้าของสั่ง 2026-09-17) ───────────────
+//
+//  **เป็นข้อเสนอ ไม่ใช่คำถามที่ต้องตอบ** จึงไม่ใช่โมดัล — พิมพ์ต่อ เลื่อนจอ กดที่อื่น หรือ Esc
+//  ก็หายไปโดยไม่มีอะไรเปลี่ยน · โมดัลที่เด้งทุกครั้งที่กรอกส่วนลดคือโมดัลที่ขวางงานมากกว่าช่วย
+//
+//  ขอบเขตที่มันแตะได้คือ "สินค้าที่แก้ได้" เท่านั้น — ค่าขนส่ง/ค่าบริการรับส่วนลดไม่ได้อยู่แล้ว
+//  และบรรทัดที่กฎเติมให้เองไม่ได้อยู่ใน `rows` ตั้งแต่ต้น ⇒ ถูกกันออกโดยโครงสร้าง ไม่ใช่โดยเงื่อนไข
+
+/** ขนาดของป๊อปอัป — ต้องตรงกับคลาสข้างล่าง เพราะมันคือตัวเลขที่ใช้วางตำแหน่งโดยไม่ต้องวัด DOM
+ *  (`POP_H` เป็นความสูงโดยประมาณ ใช้แค่ตัดสินว่าจะเด้งขึ้นหรือลง วัดจริงได้ 131px) */
+const POP_W = 272;
+const POP_H = 150;
+
+interface BulkOffer {
+  rowKey: string;
+  co: 'PM' | 'THT';
+  d1: number;
+  d2: number;
+  /** จำนวนบรรทัดที่จะโดน — ไม่นับบรรทัดต้นทางเอง */
+  inDoc: number;
+  inAll: number;
+  anchor: DOMRect;
+}
+
+const BulkDiscountPopup: React.FC<{
+  offer: BulkOffer;
+  multiDoc: boolean;
+  onApply: (scope: 'doc' | 'all') => void;
+  onDismiss: () => void;
+}> = ({ offer, multiDoc, onApply, onDismiss }) => {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onDismiss(); };
+    const onPointer = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) onDismiss();
+    };
+    // `scroll` ต้องดักแบบ capture เพราะกล่องที่เลื่อนอาจไม่ใช่ตัวหน้าเว็บ
+    window.addEventListener('scroll', onDismiss, true);
+    window.addEventListener('resize', onDismiss);
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onPointer);
+    return () => {
+      window.removeEventListener('scroll', onDismiss, true);
+      window.removeEventListener('resize', onDismiss);
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('mousedown', onPointer);
+    };
+  }, [onDismiss]);
+
+  /* วางด้วย right/top-หรือ-bottom ไม่ใช่ left/top ที่คำนวณจากขนาดของตัวเอง — ไม่ต้องวัดก่อนวาด
+     (ป๊อปอัปที่ต้องวัดตัวเองก่อนถึงจะรู้ที่อยู่ = ป๊อปอัปที่กระพริบตอนเปิด)
+     แต่ความกว้างรู้ล่วงหน้าอยู่แล้วจากคลาสของตัวเอง ⇒ เอามากันขอบซ้ายได้โดยไม่ต้องวัด
+     — วัดจริงที่ 390px: ยึดขอบขวาอย่างเดียวแล้วขอบซ้ายเลยจอไป 3px */
+  const w = Math.min(POP_W, window.innerWidth - 24);
+  const style: React.CSSProperties = {
+    position: 'fixed',
+    right: Math.min(
+      Math.max(8, window.innerWidth - offer.anchor.right),
+      Math.max(8, window.innerWidth - w - 8),
+    ),
+    // ไม่มีที่ข้างล่างก็เด้งขึ้นข้างบนแทน — ป๊อปอัปที่โผล่นอกจอเท่ากับไม่ได้โผล่
+    ...(offer.anchor.bottom + POP_H <= window.innerHeight
+      ? { top: offer.anchor.bottom + 6 }
+      : { bottom: Math.max(8, window.innerHeight - offer.anchor.top + 6) }),
+  };
+  const label = offer.d2 > 0 ? `${money(offer.d1)}% , ${money(offer.d2)}%` : `${money(offer.d1)}%`;
+
+  return createPortal(
+    <div
+      ref={ref}
+      role="dialog"
+      aria-label="ใช้ส่วนลดนี้กับทุกรายการ"
+      style={style}
+      className="z-50 w-[272px] max-w-[calc(100vw-24px)] bg-card border border-slate-200 rounded-2xl shadow-xl px-3.5 py-3"
+    >
+      <p className="text-[12.5px] font-extrabold text-slate-900">ใช้ส่วนลดนี้กับทุกรายการ?</p>
+      <p className="mt-1 text-[11px] text-slate-500 leading-relaxed">
+        ลด {label} — ใส่ให้สินค้าบรรทัดอื่นด้วย (ไม่รวมค่าขนส่ง ค่าบริการ และบรรทัดที่กฎเติมให้เอง)
+      </p>
+      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+        {offer.inDoc > 0 && (
+          <Button variant="primary" onClick={() => onApply('doc')}>
+            ใช้กับใบนี้ ({offer.inDoc})
+          </Button>
+        )}
+        {multiDoc && offer.inAll > offer.inDoc && (
+          <Button variant="neutral" tone="soft" onClick={() => onApply('all')}>
+            ใช้กับทุกใบ ({offer.inAll})
+          </Button>
+        )}
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="text-[11px] font-semibold text-slate-500 hover:text-slate-800 px-1.5 py-1"
+        >
+          ไม่ใช้
+        </button>
+      </div>
+    </div>,
+    document.body,
+  );
+};
+
 // ── หน้าหลัก ─────────────────────────────────────────────────────────────────
 
 export const QuoteRequest: React.FC = () => {
@@ -1027,6 +1890,9 @@ export const QuoteRequest: React.FC = () => {
   const [profileReady, setProfileReady] = useState(false);
   const [spUserId, setSpUserId] = useState('');
   const onReadyChange = useCallback((v: boolean) => setProfileReady(v), []);
+  /** ตัวตนที่จะไปขึ้นช่องลงนามของใบ — คอมโพเนนต์แถบบนโหลดมาแล้ว ไม่ยิง API ซ้ำที่นี่ */
+  const [identity, setIdentity] = useState<QuoteIssuerIdentity | null>(null);
+  const onIdentityChange = useCallback((v: QuoteIssuerIdentity) => setIdentity(v), []);
 
   // ── ส่วนที่ 1 ──
   const [text, setText] = useState('');
@@ -1050,10 +1916,10 @@ export const QuoteRequest: React.FC = () => {
   const [contacts, setContacts] = useState<ContactRow[]>([]);
   const [contactId, setContactId] = useState<number | null>(null);
   /**
-   * ขั้นที่หน้าอยู่ · `review` = การ์ด "ใบร่าง" ซึ่งเรนเดอร์จากผลตรวจล้วน ๆ ยังไม่มีแถวใน DB
-   * ⇒ เป็น state ของหน้าจอ ไม่ใช่ของข้อมูล การกลับไป `form` จึงไม่ต้องล้างอะไรทั้งสิ้น
+   * ช่องวางข้อความกางอยู่ไหม — พับเองเมื่อสกัดสำเร็จ เพราะตั้งแต่นั้นงานอยู่ในใบแล้ว
+   * เป็น state ของหน้าจอล้วน ๆ ไม่ใช่ "ขั้น" ที่ผ่านไปแล้วผ่านเลย (กางกลับมาได้ตลอด)
    */
-  const [stage, setStage] = useState<'form' | 'review'>('form');
+  const [pasteOpen, setPasteOpen] = useState(true);
 
   // ── ผลตรวจก่อนสร้างร่าง ──
   const [preview, setPreview] = useState<PreviewResult | null>(null);
@@ -1062,7 +1928,6 @@ export const QuoteRequest: React.FC = () => {
   const [previewAt, setPreviewAt] = useState('');
   /** ลายเซ็นของข้อมูลที่ถูกตรวจไปแล้ว — ต่างจากของปัจจุบันเมื่อไหร่ = ผลที่เห็นเก่าแล้ว */
   const [previewSig, setPreviewSig] = useState('');
-  const [custOpen, setCustOpen] = useState(true);
   const [svcCfg, setSvcCfg] = useState<ServiceCfg | null>(null);
 
   // ── ค่าที่แอดมินตั้งทับของที่ระบบหามาให้ (2026-09-14) ──
@@ -1104,8 +1969,6 @@ export const QuoteRequest: React.FC = () => {
   const [reviseError, setReviseError] = useState('');
   const [reviseFrom, setReviseFrom] = useState('');
 
-  const selectedCustomer = customerOptions.find((c) => c.id === customerId) ?? null;
-
   // อ่าน customerId ล่าสุดจากใน effect ค้นหาได้โดยไม่ต้องยิงค้นใหม่ทุกครั้งที่เปลี่ยนบริษัท
   const customerIdRef = useRef<number | null>(null);
   useEffect(() => { customerIdRef.current = customerId; }, [customerId]);
@@ -1119,7 +1982,7 @@ export const QuoteRequest: React.FC = () => {
     setCustomerQuery('');
     setContacts([]);
     setContactId(null);
-    setStage('form');
+    setPasteOpen(true);
     setResults([]);
     setStrandedIds([]);
     setReviseFrom('');
@@ -1159,6 +2022,7 @@ export const QuoteRequest: React.FC = () => {
           price: String(num(it.price)),
           disc1: num(it.discount_1) ? String(num(it.discount_1)) : '',
           disc2: num(it.discount_2) ? String(num(it.discount_2)) : '',
+          remark: String(it.remark ?? ''),
           candidates: [],
           status: 'ok' as RowStatus,
           isService: it.is_manual_service === true,
@@ -1171,7 +2035,6 @@ export const QuoteRequest: React.FC = () => {
       setPaymentTerms(String(data.payment_terms_override ?? '').trim() || null);
       setApprovalNote(String(data.note ?? ''));
       setReplacesRequestId(String(data.request_id));
-      setStage('form');
     })();
     return () => { cancelled = true; };
   }, []);
@@ -1195,7 +2058,7 @@ export const QuoteRequest: React.FC = () => {
         setContacts(list);
         // ผู้ติดต่อที่ระบบเดาไว้ให้อาจไม่มีในลิสต์ของบริษัทที่เลือก — findContactCandidates ค้นข้าม
         // ทุกรหัสสาขาของนิติบุคคลเดียวกัน คนที่ได้มาจึงอาจอยู่ใต้อีก company_id
-        // ปล่อยค้างไว้ = dropdown ว่างแต่ปุ่ม "ดูใบร่าง" กดได้ แล้วใบไปโผล่ผิดผู้ติดต่อ
+        // ปล่อยค้างไว้ = ช่องผู้ติดต่อว่างแต่ปุ่ม "ยืนยัน" กดได้ แล้วใบไปโผล่ผิดผู้ติดต่อ
         setContactId((cur) => (cur !== null && list.some((c) => c.id === cur) ? cur : null));
       } catch {
         if (!cancelled) setContacts([]);
@@ -1218,7 +2081,7 @@ export const QuoteRequest: React.FC = () => {
         if (!Array.isArray(data)) return;
         setCustomerOptions((prev) => {
           // บริษัทที่เลือกไว้ต้องอยู่ในลิสต์เสมอ ไม่งั้น <select> แสดงว่างทั้งที่ customerId ยังตั้งอยู่
-          // (ผู้ใช้เห็น "ยังไม่เลือก" แต่ปุ่มไปขั้นใบร่างกดได้ = ออกใบให้บริษัทที่มองไม่เห็นบนจอ)
+          // (ผู้ใช้เห็น "ยังไม่เลือก" แต่ปุ่มยืนยันกดได้ = ออกใบให้บริษัทที่มองไม่เห็นบนจอ)
           const keep = prev.find((c) => c.id === customerIdRef.current);
           return keep && !data.some((c: CustomerRow) => c.id === keep.id) ? [keep, ...data] : data;
         });
@@ -1261,7 +2124,6 @@ export const QuoteRequest: React.FC = () => {
 
       setWebUserId(data.web_user_id);
       setProposeMsgId(data.propose_msg_id ?? null);
-      setStage('form');
       setResults([]);
       setStrandedIds([]);
       setReviseFrom('');
@@ -1280,6 +2142,8 @@ export const QuoteRequest: React.FC = () => {
 
       setAiMessage('');
       setRows(rowsFromSlots(data.slots, data.quote_data));
+      // สกัดสำเร็จ = งานย้ายไปอยู่ในใบแล้ว ⇒ พับช่องข้อความเก็บ (กางกลับมาได้ตลอด)
+      setPasteOpen(false);
 
       const custs = data.customer_candidates.map((c) => c.item);
       // ชื่อบริษัทซ้ำกันได้หลายรหัส — ตัดซ้ำด้วย id ไม่ใช่ชื่อ
@@ -1323,7 +2187,7 @@ export const QuoteRequest: React.FC = () => {
   const addRow = () =>
     setRows((rs) => [
       ...(rs ?? []),
-      { key: newKey(), productTemplateId: null, model: '', name: '', quantity: '1', price: '', disc1: '', disc2: '', candidates: [], status: 'notfound' },
+      { key: newKey(), productTemplateId: null, model: '', name: '', quantity: '1', price: '', disc1: '', disc2: '', remark: '', candidates: [], status: 'notfound' },
     ]);
 
   const removeRow = (key: string) => setRows((rs) => (rs ? rs.filter((r) => r.key !== key) : rs));
@@ -1345,6 +2209,7 @@ export const QuoteRequest: React.FC = () => {
         price: String(num(h.price)),
         disc1: '',
         disc2: '',
+        remark: '',
         candidates: [],
         status: 'ok',
       },
@@ -1367,6 +2232,7 @@ export const QuoteRequest: React.FC = () => {
         price: num(r.price) || null,
         discount_1: num(r.disc1) || 0,
         discount_2: num(r.disc2) || 0,
+        remark: r.remark || '',
         // ชื่อส่งไปเฉพาะบรรทัดค่าบริการ — สินค้าจริงเอาชื่อจาก DB เสมอ (กติกาของ resolveItems)
         ...(r.isService ? { name: r.name } : {}),
       })),
@@ -1505,6 +2371,7 @@ export const QuoteRequest: React.FC = () => {
         price: String(svcCfg.default_price),
         disc1: '',
         disc2: '',
+        remark: '',
         candidates: [],
         status: 'ok' as RowStatus,
         isService: true,
@@ -1540,30 +2407,23 @@ export const QuoteRequest: React.FC = () => {
     return { byRow, coByRow, extras };
   }, [preview, rows]);
 
-  const groups = useMemo(() => {
+  /**
+   * แตกแถวในหน้าจอเป็น "ใบที่จะออกจริง" — และ**คืนอย่างน้อยหนึ่งใบเสมอ** (2026-09-17)
+   * เพราะตั้งแต่ยุบสองขั้นเป็นขั้นเดียว เอกสารคือฟอร์ม ⇒ ใบเปล่าคือที่ที่คนเริ่มพิมพ์
+   * ไม่ใช่สิ่งที่ต้องซ่อนจนกว่าจะมีของ (ใบเปล่าบอกเองในตารางว่ายังไม่มีรายการ)
+   */
+  const groups = useMemo<DocGroup[]>(() => {
     const all = rows;
-    const sumRows = (rs: Row[]) => rs.reduce((s, r) => s + (r.status === 'ok' ? rowTotal(r) : 0), 0);
     // ก่อนตรวจครั้งแรกยังไม่รู้ว่าแถวไหนไปใบไหน — resolveQuoteCompany อยู่ฝั่ง server เท่านั้น
-    if (!preview) {
-      return all.length === 0
-        ? []
-        : [{
-            co: 'PM' as const,
-            label: 'รายการทั้งหมด',
-            rows: all,
-            extras: [] as PreviewItem[],
-            quote: undefined as PreviewQuote | undefined,
-            subtotal: sumRows(all),
-          }];
-    }
-    const out: {
-      co: 'PM' | 'THT';
-      label: string;
-      rows: Row[];
-      extras: PreviewItem[];
-      quote: PreviewQuote | undefined;
-      subtotal: number;
-    }[] = [];
+    const pending: DocGroup[] = [{
+      co: 'PM',
+      label: 'รายการทั้งหมด',
+      rows: all,
+      extras: [],
+      quote: undefined,
+    }];
+    if (!preview) return pending;
+    const out: DocGroup[] = [];
     for (const co of ['PM', 'THT'] as const) {
       const rs = all.filter((r) => (matched.coByRow.get(r.key) ?? r.company ?? 'PM') === co);
       const ex = matched.extras.filter((e) => e.co === co).map((e) => e.item);
@@ -1575,13 +2435,11 @@ export const QuoteRequest: React.FC = () => {
         rows: rs,
         extras: ex,
         quote,
-        subtotal: sumRows(rs) + ex.reduce((s, it) => s + num(it.line_total), 0),
       });
     }
-    return out;
+    return out.length > 0 ? out : pending;
   }, [preview, rows, matched]);
 
-  const grandTotal = groups.reduce((s, g) => s + g.subtotal, 0);
   /**
    * ข้อที่ต้องให้ผู้อนุมัติตัดสิน — **แยกออกจาก `blockers` ตั้งแต่ต้นทาง** (2026-09-15)
    * เพราะสองกองนี้จบคนละแบบ: กองนี้ส่งคำขอแล้วรอคน · อีกกองติ๊กรับทราบแล้วออกใบได้เลย
@@ -1618,12 +2476,12 @@ export const QuoteRequest: React.FC = () => {
     }));
     if (systemAdded) {
       tags.push({
-        tone: 'info',
+        tone: it.linked_to_model ? 'link' : 'info',
         kind: 'link',
         text: it.linked_to_model ? `สินค้าพ่วงของ ${it.linked_to_model} — ระบบเพิ่มให้เอง` : 'ระบบเพิ่มให้เอง',
       });
     } else if (it.linked_to_model) {
-      tags.push({ tone: 'info', kind: 'link', text: `พ่วงกับ ${it.linked_to_model}` });
+      tags.push({ tone: 'link', kind: 'link', text: `พ่วงกับ ${it.linked_to_model}` });
     }
     tags.push(
       it.stock >= it.quantity
@@ -1642,7 +2500,8 @@ export const QuoteRequest: React.FC = () => {
     if (r.isService && !hit) {
       return [{ tone: 'info', kind: 'wrench', text: 'ค่าบริการของใบนี้ · ตั้งชื่อและราคาได้ — มีได้บรรทัดเดียว' }];
     }
-    return hit ? itemTagsOf(hit, false) : [];
+    // `true` = โชว์ป้ายรับประกันด้วย — ข้อความนี้ขึ้นบนใบจริง และใบนี้คือจอสุดท้ายก่อนกดยืนยัน
+    return hit ? itemTagsOf(hit, false, true) : [];
   };
 
   const extraTagsOf = (it: PreviewItem): RowTag[] => itemTagsOf(it, true);
@@ -1652,13 +2511,17 @@ export const QuoteRequest: React.FC = () => {
   //  เพราะกฎค่าขนส่งอัตโนมัติคิดจากยอดรวมของทุกใบในกลุ่ม (applyShippingFeeToQuoteGroup)
   //  ถ้าสร้างแยก ค่าขนส่งที่ได้จะไม่ใช่ค่าเดียวกับที่พรีวิวโชว์ไว้ก่อนกด
 
-  /** ไปขั้นใบร่างได้ไหม — ต้องมีผลตรวจที่ "สด" จริง เพราะการ์ดใบร่างเรนเดอร์จากผลตรวจล้วน ๆ */
-  const canReview =
+  /**
+   * ออกใบได้ไหม — ต้องมีผลตรวจที่ "สด" จริง เพราะยอดท้ายใบทุกตัวมาจากผลตรวจ
+   * (ตั้งแต่ยุบสองขั้นเป็นขั้นเดียว 2026-09-17 เงื่อนไขชุดนี้คุมปุ่ม "ยืนยัน" โดยตรง
+   *  แทนที่จะคุมปุ่ม "ดูใบร่าง" ที่ถูกถอดออกไปแล้ว — แต่เงื่อนไขไม่เปลี่ยนสักข้อ)
+   */
+  const canIssue =
     rows.length > 0 && unresolved === 0 && customerId !== null && contactId !== null && !!spUserId &&
     !previewing && !!preview && !staleNow && preview.can_create_draft;
 
   /** ปุ่มที่จางอยู่เฉย ๆ โดยไม่บอกเหตุผล คือปุ่มที่ผู้ใช้สรุปว่าระบบพัง */
-  const reviewBlockedBecause = (): string => {
+  const issueBlockedBecause = (): string => {
     if (!spUserId) return 'เลือกพนักงานขายที่จะออกใบในนามก่อน';
     if (rows.length === 0) return 'ยังไม่มีรายการในใบ — เพิ่มสินค้าก่อน';
     if (unresolved > 0) return `ยังมี ${unresolved} รายการที่ยังไม่ได้เลือกสินค้า`;
@@ -1700,18 +2563,60 @@ export const QuoteRequest: React.FC = () => {
     return { done, left, errors };
   };
 
+  // ── พรีวิว PDF ของใบร่าง ────────────────────────────────────────────────────
+  //  จอใบร่างเลียนแบบใบจริงได้ใกล้แค่ไหนก็ยังเป็น HTML คนละตัวกับไฟล์ที่ลูกค้าเปิด
+  //  ปุ่มนี้คือคำตอบสุดท้าย — server เจนด้วย generateQuotationPDF() ตัวเดียวกับใบจริง
+  //  โดยไม่เขียน DB และไม่กินเลขที่ใบ (ดู previewQuotePdf ใน webQuoteService.ts)
+  const [pdfBusy, setPdfBusy] = useState<'PM' | 'THT' | null>(null);
+  const [pdfError, setPdfError] = useState('');
+
+  const openPdfPreview = async (company: 'PM' | 'THT') => {
+    if (pdfBusy) return;
+    setPdfError('');
+    setPdfBusy(company);
+    // เปิดแท็บ "ตอนกด" ไม่ใช่หลัง await — เบราว์เซอร์บล็อก window.open ที่ไม่ได้เกิดจากการกดโดยตรง
+    const tab = window.open('', '_blank');
+    try {
+      const res = await fetch('/api/admin/webquote/preview-pdf', {
+        method: 'POST',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        // ค่าชุดเดียวกับที่ส่งให้ /preview เป๊ะ ๆ — ส่งไม่เท่ากันเมื่อไหร่ ไฟล์ที่เปิดดูจะไม่ใช่ใบที่เห็น
+        body: JSON.stringify({
+          sp_user_id: spUserId,
+          quote_company: company,
+          customer_id: customerId,
+          contact_id: contactId,
+          items: itemsPayload,
+          payment_terms_override: paymentTerms,
+          delivery: deliveryPayload,
+        }),
+      });
+      if (!res.ok) throw new Error(await readError(res, 'เปิดพรีวิว PDF ไม่สำเร็จ'));
+      const url = URL.createObjectURL(await res.blob());
+      if (tab) tab.location.href = url;
+      else window.open(url, '_blank');
+      // คืน objectURL ทีหลัง ไม่ใช่ทันที — คืนเร็วไปแท็บที่เพิ่งเปิดจะได้ไฟล์ว่าง
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e) {
+      tab?.close();
+      setPdfError(e instanceof Error ? e.message : 'เปิดพรีวิว PDF ไม่สำเร็จ');
+    } finally {
+      setPdfBusy(null);
+    }
+  };
+
   /**
-   * ปุ่ม "ยืนยัน" ของขั้นใบร่าง — มีอะไรให้รับทราบก็เด้งโมดัลก่อน ไม่ออกใบทันที
+   * ปุ่ม "ยืนยัน" ท้ายจอ — มีอะไรให้รับทราบก็เด้งโมดัลก่อน ไม่ออกใบทันที
    * ไม่มีอะไรติดเลยก็ออกใบตรง ๆ เหมือนเดิม — โมดัลที่เด้งทั้งที่ไม่มีอะไรให้อ่าน คือโมดัลที่ถูกกดผ่าน
    */
   const requestConfirm = () => {
-    if (!canReview || confirming) return;
+    if (!canIssue || confirming) return;
     if (needsApproval || blockers.length > 0 || manualReasons.length > 0) { setConfirmOpen(true); return; }
     void confirmAll();
   };
 
   const confirmAll = async () => {
-    if (!canReview || confirming) return;
+    if (!canIssue || confirming) return;
     setConfirmOpen(false);
     setConfirming(true);
     setConfirmError('');
@@ -1815,6 +2720,7 @@ export const QuoteRequest: React.FC = () => {
           price: String(num(it.price)),
           disc1: num(it.discount_1) ? String(num(it.discount_1)) : '',
           disc2: num(it.discount_2) ? String(num(it.discount_2)) : '',
+          remark: String(it.remark ?? ''),
           candidates: [],
           status: 'ok' as RowStatus,
           isService: it.is_manual_service === true,
@@ -1845,7 +2751,6 @@ export const QuoteRequest: React.FC = () => {
       setProposeMsgId(null);
       setPreview(null);
       setPreviewSig('');
-      setStage('form');
       setResults([]);
       setStrandedIds([]);
       setText('');
@@ -1857,8 +2762,9 @@ export const QuoteRequest: React.FC = () => {
   };
 
   const blocked = !profileReady;
-  /** อยู่ในขั้นใบร่างแล้ว — พับส่วนที่ 1/2/3 ไว้ ให้เหลือของที่ต้องอ่านก่อนกดยืนยันอย่างเดียว */
-  const reviewing = stage === 'review';
+  /** บวกยอดข้ามใบจาก `q.totals` ที่ server คิดมาแล้ว — รวมเฉย ๆ ไม่ใช่คิดสูตรเองบนจอ */
+  const sumQuotes = (pick: (t: PreviewQuote['totals']) => number): number =>
+    (preview?.quotes ?? []).reduce((n, q) => n + pick(q.totals), 0);
   /** ออกใบไปแล้ว — ไม่มีอะไรให้ยืนยันซ้ำ เหลือแค่ลิงก์ PDF กับทางเริ่มใบใหม่ */
   const issued = results.length > 0;
   /** ส่งคำขอไปแล้ว — เหมือน issued ตรงที่ "จบรอบแล้ว" แต่ไม่มีเลขใบให้โชว์ */
@@ -1866,9 +2772,126 @@ export const QuoteRequest: React.FC = () => {
   /** มีอะไรให้ล้างไหม — การ์ดร่างที่เปิดค้างไว้เปล่า ๆ ไม่ใช่ "งานที่เริ่มแล้ว" */
   const hasWork = rows.length > 0 || text.trim().length > 0 || customerId !== null || issued || requested;
 
+  // ── ป๊อปอัป "ใช้ส่วนลดนี้กับทุกรายการ" (เจ้าของสั่ง 2026-09-17) ────────────
+  //  หน่วง 650ms หลังหยุดพิมพ์แล้วค่อยเสนอ — เด้งทุกตัวอักษรคือป๊อปอัปที่กระพริบใส่หน้าคน
+  const [bulkOffer, setBulkOffer] = useState<BulkOffer | null>(null);
+  const bulkTimer = useRef<number | null>(null);
+  /** ค่าล่าสุดสำหรับตอนตัวจับเวลาเด้ง — closure ของ setTimeout ถือ rows ของตอนที่พิมพ์ตัวนั้น */
+  const bulkRef = useRef<{ rows: Row[]; coByRow: Map<string, 'PM' | 'THT'> }>({ rows, coByRow: matched.coByRow });
+  useEffect(() => { bulkRef.current = { rows, coByRow: matched.coByRow }; }, [rows, matched]);
+  useEffect(() => () => { if (bulkTimer.current) window.clearTimeout(bulkTimer.current); }, []);
+
+  const coOfRow = (r: Row, map: Map<string, 'PM' | 'THT'>): 'PM' | 'THT' => map.get(r.key) ?? r.company ?? 'PM';
+  /** บรรทัดที่รับส่วนลดได้จริง — ค่าบริการรับไม่ได้ · ของที่กฎเติมให้เองไม่ได้อยู่ใน `rows` ตั้งแต่ต้น */
+  const discountable = (r: Row) => r.status === 'ok' && !r.isService;
+
+  const dismissBulk = useCallback(() => {
+    if (bulkTimer.current) window.clearTimeout(bulkTimer.current);
+    setBulkOffer(null);
+  }, []);
+
+  const offerBulk = (key: string, el: HTMLInputElement) => {
+    if (bulkTimer.current) window.clearTimeout(bulkTimer.current);
+    setBulkOffer(null);
+    bulkTimer.current = window.setTimeout(() => {
+      const { rows: rs, coByRow } = bulkRef.current;
+      const src = rs.find((r) => r.key === key);
+      // ล้างส่วนลดทิ้งแล้วไม่ต้องเสนออะไร · ช่องที่หายไปจากจอแล้วก็ไม่มีที่ให้ป๊อปอัปเกาะ
+      if (!src || !discountable(src) || num(src.disc1) <= 0 || !el.isConnected) return;
+      const co = coOfRow(src, coByRow);
+      const others = rs.filter((r) => r.key !== key && discountable(r));
+      if (others.length === 0) return; // มีสินค้าบรรทัดเดียวก็ไม่มีอะไรให้ "ใช้กับทุกรายการ"
+      setBulkOffer({
+        rowKey: key,
+        co,
+        d1: num(src.disc1),
+        d2: num(src.disc2),
+        inDoc: others.filter((r) => coOfRow(r, coByRow) === co).length,
+        inAll: others.length,
+        anchor: el.getBoundingClientRect(),
+      });
+    }, 650);
+  };
+
+  const applyBulk = (scope: 'doc' | 'all') => {
+    const o = bulkOffer;
+    if (!o) return;
+    const d1 = String(o.d1);
+    const d2 = o.d2 > 0 ? String(o.d2) : '';
+    setRows((rs) =>
+      rs.map((r) =>
+        discountable(r) && (scope === 'all' || coOfRow(r, bulkRef.current.coByRow) === o.co)
+          ? { ...r, disc1: d1, disc2: d2 }
+          : r,
+      ),
+    );
+    dismissBulk();
+  };
+
+  /** ทุกอย่างที่เอกสารต้องใช้เพื่อเป็นฟอร์ม — ก้อนเดียว ส่งให้ทุกใบใช้ร่วมกัน */
+  const docCtx: DocCtx = {
+    customer: preview?.customer ?? null,
+    identity,
+    svcCfg,
+    matched: matched.byRow,
+    staleNow,
+    previewing,
+    mustPick,
+    patchRow,
+    removeRow,
+    pickCandidate,
+    offerBulk,
+    rowTagsOf,
+    extraTagsOf,
+    customerOpt,
+    customerOpts,
+    onPickCustomer: (o) => {
+      setCustomerId(Number(o.id));
+      setContactId(null);
+      // เครดิตเป็นของ "บริษัทนี้" — เปลี่ยนบริษัทแล้วค่าที่ตั้งทับไว้หมดความหมาย
+      // (กติกาเดียวกับ quote-edit.html ที่เขียนเครดิตใหม่ทุกครั้งที่เปลี่ยนบริษัท)
+      setPaymentTerms(null);
+    },
+    onCustomerQuery: setCustomerQuery,
+    custSearching,
+    contactOpt,
+    contactOpts,
+    onPickContact: setContactId,
+    paymentTerms,
+    paymentTermOpts,
+    setPaymentTerms,
+    deliveryTypes: preview?.delivery_types ?? [],
+    deliveryOv,
+    setDeliveryOv: (co, v) =>
+      setDeliveryOv((cur) => {
+        const next = { ...cur };
+        if (v) next[co] = v;
+        else delete next[co];
+        return next;
+      }),
+    addProductRow,
+    addRow,
+    addServiceRow,
+    canAddService: !!svcCfg && !serviceRow && !autoFeeShown,
+    serviceHint: !svcCfg
+      ? 'ยังอ่านค่าตั้งต้นของค่าบริการไม่ได้ — ลองรีเฟรชหน้า'
+      : autoFeeShown
+        ? 'ระบบเติมบรรทัดค่าขนส่งให้แล้ว — ค่าบริการมีได้บรรทัดเดียว จึงเพิ่มอีกไม่ได้'
+        : serviceRow
+          ? 'มีบรรทัดค่าบริการแล้ว 1 บรรทัด — แก้ชื่อและราคาได้ที่แถวนั้น ลบก่อนจึงเพิ่มใหม่ได้'
+          : `ค่าบริการมีได้บรรทัดเดียว และอยู่ในใบ Primus (PM) เสมอ (สินค้าระบบ ${svcCfg.internal_reference})`,
+    justAdded,
+    onPdf: (co) => void openPdfPreview(co),
+    pdfBusy,
+  };
+
   return (
     <div className="space-y-5">
-      <PageHeader icon={FilePlus2} title="ขอใบเสนอราคา" description="วางข้อความหรือกรอกเอง → เคาะในฟอร์ม → ยืนยัน">
+      <PageHeader
+        icon={FilePlus2}
+        title="ขอใบเสนอราคา"
+        description="วางข้อความหรือกรอกเอง → แก้ในใบ → ยืนยัน"
+      >
         {hasWork && (
           <Button variant="neutral" tone="soft" icon={RotateCcw} onClick={resetAll}>
             เริ่มใหม่
@@ -1877,14 +2900,31 @@ export const QuoteRequest: React.FC = () => {
       </PageHeader>
 
       {/* ── ส่วนที่ 0 — แถบตัวตนของใบ ── */}
-      <QuoteIssuerProfile spUserId={spUserId} onSpUserIdChange={setSpUserId} onReadyChange={onReadyChange} />
+      <QuoteIssuerProfile
+        spUserId={spUserId}
+        onSpUserIdChange={setSpUserId}
+        onReadyChange={onReadyChange}
+        onIdentityChange={onIdentityChange}
+      />
 
-      {/* ── ส่วนที่ 1 — ช่องพิมพ์ข้อความ · พับหายตอนขึ้นขั้นใบร่าง ── */}
-      {!reviewing && (
+      {/* ── ส่วนที่ 1 — ช่องพิมพ์ข้อความ ──
+          พับเองเมื่อสกัดสำเร็จ เพราะตั้งแต่นั้นงานอยู่ในใบแล้ว — แต่ยังกางกลับมาวางข้อความชุดใหม่
+          ได้ตลอด (การวางข้อความเป็นทางเข้าทางหนึ่ง ไม่ใช่ขั้นที่ผ่านไปแล้วผ่านเลย) */}
+      {pasteOpen ? (
         <div className={`bg-card border border-slate-200 rounded-2xl shadow-sm p-4 space-y-3 ${blocked ? 'opacity-50 pointer-events-none' : ''}`}>
           <div className="flex items-center gap-2">
             <FileText className="w-[18px] h-[18px]" style={{ color: BRAND }} />
             <h3 className="text-sm font-bold text-slate-800">วางข้อความขอใบเสนอราคา</h3>
+            {rows.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setPasteOpen(false)}
+                className="ml-auto flex items-center gap-1 text-[11px] font-semibold text-slate-500 hover:text-slate-800"
+              >
+                พับเก็บ
+                <ChevronUp className="w-3.5 h-3.5 shrink-0" />
+              </button>
+            )}
           </div>
           <textarea
             value={text}
@@ -1907,7 +2947,7 @@ export const QuoteRequest: React.FC = () => {
             {!spUserId && <span className="text-xs text-amber-700">เลือกพนักงานขายที่จะออกใบในนามก่อน</span>}
             {proposing && <span className="text-xs text-slate-400">ระบบมีเวลาสกัดสูงสุด 60 วินาที</span>}
             <p className="basis-full text-[11px] text-slate-400">
-              ไม่มีข้อความก็ได้ — กรอกเองในฟอร์ม “ร่างใบเสนอราคา” ด้านล่างได้เลย
+              ไม่มีข้อความก็ได้ — พิมพ์รายการลงในใบด้านล่างได้เลย
             </p>
           </div>
 
@@ -1933,793 +2973,276 @@ export const QuoteRequest: React.FC = () => {
             </div>
           )}
         </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setPasteOpen(true)}
+          className={`w-full flex flex-wrap items-center gap-2 bg-card border border-slate-200 rounded-2xl shadow-sm px-4 py-3 text-left hover:bg-slate-50 transition-colors ${blocked ? 'opacity-50 pointer-events-none' : ''}`}
+        >
+          <FileText className="w-[18px] h-[18px] shrink-0" style={{ color: BRAND }} />
+          <span className="text-sm font-bold text-slate-800">วางข้อความขอใบเสนอราคา</span>
+          <span className="text-[11px] text-slate-400">พับไว้เพราะมีรายการในใบแล้ว — กางเพื่อวางข้อความชุดใหม่</span>
+          <ChevronDown className="w-4 h-4 ml-auto shrink-0 text-slate-400" />
+        </button>
       )}
 
-      {/* ── ส่วนที่ 2 — ฟอร์มร่าง ──
-          เปิดค้างไว้ตั้งแต่โหลดหน้า แม้ยังไม่มีรายการสักบรรทัด เพราะการวางข้อความเป็นทางเข้า
-          *ทางหนึ่ง* ไม่ใช่ทางเดียว — แอดมินกรอกทั้งใบเองได้ · ซ่อนเฉพาะตอนขึ้นขั้นใบร่างแล้ว */}
-      {!reviewing && (
-        <div className={`bg-card border border-slate-200 rounded-2xl shadow-sm p-4 space-y-4 ${blocked ? 'opacity-50 pointer-events-none' : ''}`}>
-          <div className="flex items-center gap-2">
-            <FilePlus2 className="w-[18px] h-[18px]" style={{ color: BRAND }} />
-            <h3 className="text-sm font-bold text-slate-800">ร่างใบเสนอราคา</h3>
-          </div>
-
-          {/* ธง revision มองไม่เห็นไม่ได้ — ตอนยืนยัน มันจะไป "ยกเลิกใบเก่า" ที่เลขที่นี้ด้วย
-              ⇒ คนที่แก้ลูกค้าเป็นอีกรายระหว่างทาง ต้องถอดธงออกได้ก่อนที่จะเกิดเรื่องนั้น */}
-          {reviseFrom && (
-            <div className="flex flex-wrap items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-600">
-              <RotateCcw className="w-3.5 h-3.5 shrink-0" />
-              <span className="flex-1 min-w-[180px]">
-                ใบนี้จะออกเป็น <span className="font-semibold text-slate-800">revision ของ {reviseFrom}</span>
-                {' '}— ยืนยันแล้วใบเดิมจะถูกยกเลิกให้อัตโนมัติ
-              </span>
-              <Button variant="neutral" tone="soft" onClick={() => setReviseFrom('')}>
-                ออกเป็นใบใหม่แทน
-              </Button>
-            </div>
-          )}
-
-          {/* หัวฟอร์ม */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider">
-                บริษัท / ลูกค้า
-              </label>
-              {/* ช่องเดียวจบ: กดแล้วกลายเป็นช่องค้น — เลิกมี <select> คู่กับช่องค้นแยกใบ
-                  ซึ่งบังคับให้พิมพ์ที่หนึ่งแล้วไปเลือกอีกที่ · โครงเดียวกับช่องเลือกชื่อแอดมิน
-                  `onQueryChange` = ผู้เรียกเป็นคนค้นเอง (ยิง /api/customers/search) ⇒ ComboBox
-                  ต้องไม่กรองผลซ้ำด้วยคำเดิม ไม่งั้นชื่อที่สะกดต่างจากคำค้นจะหายไปทั้งที่ server ส่งมา */}
-              <ComboBox<CustomerOpt>
-                value={customerOpt}
-                options={customerOpts}
-                onPick={(o) => {
-                  setCustomerId(Number(o.id));
-                  setContactId(null);
-                  // เครดิตเป็นของ "บริษัทนี้" — เปลี่ยนบริษัทแล้วค่าที่ตั้งทับไว้หมดความหมาย
-                  // (กติกาเดียวกับ quote-edit.html ที่เขียนเครดิตใหม่ทุกครั้งที่เปลี่ยนบริษัท)
-                  setPaymentTerms(null);
-                }}
-                onQueryChange={setCustomerQuery}
-                placeholder="— เลือกบริษัท —"
-                emptyText={
-                  customerQuery.trim()
-                    ? `ไม่พบบริษัทที่ตรงกับ “${customerQuery.trim()}”`
-                    : 'พิมพ์ชื่อหรือรหัสลูกค้าเพื่อค้นหา'
-                }
-                ariaLabel="บริษัท / ลูกค้า"
-                searchPlaceholder="พิมพ์ชื่อหรือรหัสลูกค้าเพื่อค้นหา..."
-                invalid={customerId === null && mustPick}
-                busy={custSearching}
-                facts={(o) => <CustomerFacts row={o.row} />}
-              />
-              {customerId === null && (
-                <p className={`text-[11px] ${mustPick ? 'text-amber-700' : 'text-slate-500'}`}>
-                  {customerOptions.length > 0
-                    ? 'พบบริษัทใกล้เคียงหลายราย — ต้องเลือกก่อนไปขั้นใบร่าง'
-                    : 'กดที่ช่องแล้วพิมพ์ชื่อหรือรหัสลูกค้าเพื่อค้นหา'}
-                </p>
-              )}
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider">ผู้ติดต่อ</label>
-              {/* ผู้ติดต่อเป็นรายชื่อในเครื่อง (โหลดมาทั้งชุดตอนเลือกบริษัท) ⇒ ไม่ส่ง onQueryChange
-                  ให้ ComboBox กรองเองได้เลย · ไม่ใช้ PersonComboBox เพราะตัวนั้นบังคับเตือน
-                  "ไม่มีเบอร์" ซึ่งเป็นกติกาของคนที่ไปเซ็นบน PDF ไม่ใช่ของผู้ติดต่อฝั่งลูกค้า */}
-              <ComboBox
-                value={contactOpt}
-                options={contactOpts}
-                onPick={(o) => setContactId(Number(o.id))}
-                placeholder={customerId === null ? '— เลือกบริษัทก่อน —' : '— เลือกผู้ติดต่อ —'}
-                emptyText="บริษัทนี้ยังไม่มีผู้ติดต่อในระบบ"
-                ariaLabel="ผู้ติดต่อ"
-                searchPlaceholder="พิมพ์ชื่อหรือเบอร์เพื่อค้นหา..."
-                invalid={contactId === null && mustPick}
-                disabled={customerId === null}
-                searchText={(o) => `${o.name} ${o.phone}`}
-                facts={(o) => (
-                  <span className="shrink-0 text-[11px] text-slate-500 whitespace-nowrap">{o.phone || '—'}</span>
-                )}
-              />
-              {/* ก่อนตรวจครั้งแรกยังมีแค่ค่าที่ติดมากับ candidates ซึ่งว่างได้บ่อย — พอผลตรวจมาถึง
-                  แถบข้อมูลลูกค้ากับชิปกำหนดส่งของแต่ละใบเป็นของจริงกว่า จึงเลิกโชว์บรรทัดนี้
-                  ไม่งั้นหน้าจอเดียวกันจะบอกเครดิตสองค่าที่ไม่ตรงกัน · ยังไม่เลือกบริษัทก็ไม่โชว์
-                  เพราะ "เครดิต: —" ของลูกค้าที่ยังไม่มีตัวตน อ่านได้เป็น "ลูกค้ารายนี้ไม่มีเครดิต" */}
-              {!preview && customerId !== null && (
-                <p className="text-[11px] text-slate-500">
-                  เครดิต:{' '}
-                  <span className="font-semibold text-slate-700">
-                    {selectedCustomer?.payment_terms || selectedCustomer?.customer_payment_terms || '—'}
-                  </span>
-                  <span className="text-slate-300 mx-1.5">·</span>
-                  เงื่อนไขจัดส่ง: <span className="text-slate-600">ระบบคำนวณให้ตอนตรวจรายละเอียด</span>
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* ── ข้อมูลลูกค้าที่จะถูกบันทึกลงใบ — พับได้ เพราะคนดูซ้ำแค่ตอนสงสัย ── */}
-          {preview && (
-            <div className="rounded-xl border border-slate-200 bg-slate-50 overflow-hidden">
-              <button
-                type="button"
-                onClick={() => setCustOpen((v) => !v)}
-                aria-expanded={custOpen}
-                /* แถบทั้งแถบคือปุ่ม — ถ้าชี้แล้วไม่มีอะไรขยับ คนจะไม่รู้ว่ากดตรงนี้ได้ */
-                className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors"
-              >
-                <Building2 className="w-3.5 h-3.5 shrink-0" style={{ color: BRAND }} />
-                ข้อมูลลูกค้าที่จะถูกบันทึกลงใบ
-                {custOpen ? (
-                  <ChevronUp className="w-3.5 h-3.5 ml-auto shrink-0" />
-                ) : (
-                  <ChevronDown className="w-3.5 h-3.5 ml-auto shrink-0" />
-                )}
-              </button>
-              {custOpen && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-1.5 px-3 pb-3 text-[11px]">
-                  <CustField icon={Hash} label="Ref" value={preview.customer.reference} />
-                  <CustField icon={Receipt} label="เลขเสียภาษี" value={preview.customer.tax_id} />
-                  <CreditField
-                    effective={paymentTerms ?? preview.customer.payment_terms}
-                    customerValue={preview.customer.customer_payment_terms}
-                    overridden={paymentTerms !== null}
-                    hasCredit={preview.customer.has_credit_terms}
-                    options={paymentTermOpts}
-                    onChange={setPaymentTerms}
-                  />
-                  <CustField icon={Phone} label="โทร" value={preview.customer.contact_phone} />
-                  <CustField icon={Mail} label="อีเมล" value={preview.customer.contact_email} />
-                  <CustField icon={MapPin} label="ที่อยู่" value={preview.customer.address} />
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ── ตารางสินค้า แยกกลุ่มตาม "ใบที่จะออกจริง" ──
-              ก่อนตรวจครั้งแรกยังไม่รู้ว่าแถวไหนไปใบไหน (resolveQuoteCompany อยู่ฝั่ง server)
-              จึงรวมเป็นกลุ่มเดียวไว้ก่อน แล้วค่อยแตกเป็น PM/THT เมื่อผลตรวจกลับมา */}
-          {groups.map((g) => (
-            <div key={g.co} className="rounded-xl border border-slate-200 overflow-hidden">
-              <div className="flex flex-wrap items-center gap-2 px-3 py-2 bg-slate-50 border-b border-slate-200">
-                <Factory className="w-3.5 h-3.5 shrink-0" style={{ color: BRAND }} />
-                <span className="text-xs font-bold text-slate-800">{g.label}</span>
-                <span className="text-[11px] text-slate-500">
-                  {g.rows.length + g.extras.length} รายการ
-                </span>
-                {/* กำหนดส่งไม่อยู่ตรงนี้แล้ว — ย้ายลงไปอยู่แถวเดียวกับยอดรวมท้ายการ์ด
-                    เพราะมันเป็นเงื่อนไขของทั้งใบ และตอนนี้แก้ได้ (2026-09-14) */}
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[820px] text-sm">
-                  <thead>
-                    <tr className="text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
-                      <th className="text-left py-2 pl-3 w-8">#</th>
-                      <th className="text-left py-2">รายการ</th>
-                      <th className="text-right py-2 w-20">จำนวน</th>
-                      <th className="text-right py-2 w-28">ราคา/หน่วย</th>
-                      <th className="text-right py-2 w-20">ลด 1 %</th>
-                      <th className="text-right py-2 w-20">ลด 2 %</th>
-                      <th className="text-right py-2 w-28">รวม</th>
-                      <th className="w-10 pr-3"></th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {g.rows.map((r, i) => {
-                      const hit = matched.byRow.get(r.key) ?? null;
-                      const vios = staleNow ? [] : (hit?.violations ?? []);
-                      const bad = vios.length > 0;
-                      return (
-                        <tr
-                          key={r.key}
-                          className={
-                            bad
-                              ? 'bg-red-50/60 border-l-[3px] border-l-red-500'
-                              : r.status === 'notfound'
-                                ? 'bg-red-50/60'
-                                : r.status === 'ambiguous'
-                                  ? 'bg-amber-50/60'
-                                  : ''
-                          }
-                        >
-                          <td className="py-2 pl-3 text-xs text-slate-400 align-top pt-4">{i + 1}</td>
-                          <td className="py-2 pr-3 align-top">
-                            {r.isService ? (
-                              <div className="space-y-1 pt-1">
-                                <input
-                                  value={r.name}
-                                  onChange={(e) => patchRow(r.key, { name: e.target.value })}
-                                  placeholder="ชื่อรายการที่จะขึ้นในใบ เช่น ค่าติดตั้งหน้างาน"
-                                  aria-label="ชื่อรายการค่าบริการ"
-                                  className="w-full max-w-xs h-9 px-2.5 rounded-lg border border-slate-200 bg-card text-xs text-slate-800 outline-none"
-                                />
-                                <p className="text-[11px] text-slate-400">
-                                  {r.model} · {svcCfg?.internal_reference} · {svcCfg?.odoo_name} (Odoo)
-                                </p>
-                              </div>
-                            ) : r.status === 'ok' ? (
-                              <div className="pt-1.5">
-                                <p className="font-semibold text-slate-800 text-sm">{r.model}</p>
-                                <p className="text-[11px] text-slate-500 line-clamp-1">{r.name}</p>
-                              </div>
-                            ) : r.status === 'ambiguous' ? (
-                              // คำเตือนอยู่ "ใต้" ตัวเลือก เหมือนแถวที่หาสินค้าไม่เจอ —
-                              // ของที่ต้องลงมือทำมาก่อน คำอธิบายว่าทำไมตามหลัง
-                              <div className="space-y-1">
-                                <select
-                                  defaultValue=""
-                                  onChange={(e) => {
-                                    const c = r.candidates.find(
-                                      (x) => String(x.product_template_id) === e.target.value,
-                                    );
-                                    if (c) pickCandidate(r.key, c);
-                                  }}
-                                  className="w-full h-9 px-2.5 rounded-lg border border-amber-400 bg-card text-xs outline-none"
-                                >
-                                  <option value="">— เลือกรุ่น —</option>
-                                  {r.candidates.map((c) => (
-                                    <option key={c.product_template_id} value={c.product_template_id}>
-                                      {c.model} · ฿{money(c.sales_price)} · คงเหลือ{' '}
-                                      {money(c.quantity_on_hand_unreserved)}
-                                    </option>
-                                  ))}
-                                </select>
-                                <p className="text-[11px] text-amber-800">
-                                  “{r.model}” ตรงกับหลายรุ่น — เลือกรุ่นที่ถูกต้อง
-                                </p>
-                              </div>
-                            ) : (
-                              // คำเตือนอยู่ "ใต้" ช่องค้น ไม่ใช่เหนือ — ของที่ต้องลงมือทำมาก่อน
-                              // คำอธิบายว่าทำไมถึงต้องทำ เพราะสายตาไล่จากบนลงล่างแล้วหยุดที่ช่องกรอก
-                              <div className="space-y-1">
-                                <ProductSearchBox
-                                  initialQuery={r.model}
-                                  placeholder="ค้นหารุ่นที่ถูกต้อง..."
-                                  tone="danger"
-                                  needQty={num(r.quantity) || 1}
-                                  onPick={(h) =>
-                                    patchRow(r.key, {
-                                      productTemplateId: h.product_id,
-                                      model: h.model,
-                                      name: h.name,
-                                      price: String(num(h.price)),
-                                      status: 'ok',
-                                      candidates: [],
-                                    })
-                                  }
-                                />
-                                <p className="text-[11px] text-red-700">
-                                  {r.model ? `ไม่พบรุ่น “${r.model}” ในระบบ` : 'ยังไม่ได้เลือกสินค้า'}
-                                </p>
-                              </div>
-                            )}
-                            <RowTags
-                              tags={rowTagsOf(r, hit)}
-                              dim={staleNow}
-                              checking={previewing && !preview}
-                            />
-                          </td>
-                          <td className="py-2 align-top">
-                            <input
-                              value={r.quantity}
-                              onChange={(e) => patchRow(r.key, { quantity: e.target.value })}
-                              inputMode="decimal"
-                              aria-label="จำนวน"
-                              disabled={r.isService}
-                              className="w-full h-9 px-2 rounded-lg border border-slate-200 bg-card text-xs text-right outline-none disabled:bg-slate-100"
-                            />
-                          </td>
-                          <td className="py-2 pl-2 align-top">
-                            <input
-                              value={r.price}
-                              onChange={(e) => patchRow(r.key, { price: e.target.value })}
-                              inputMode="decimal"
-                              placeholder="ราคาตั้ง"
-                              aria-label="ราคาต่อหน่วย"
-                              disabled={r.status !== 'ok'}
-                              className="w-full h-9 px-2 rounded-lg border border-slate-200 bg-card text-xs text-right outline-none disabled:bg-slate-100"
-                            />
-                          </td>
-                          <td className="py-2 pl-2 align-top">
-                            <input
-                              value={r.disc1}
-                              onChange={(e) => patchRow(r.key, { disc1: e.target.value })}
-                              inputMode="decimal"
-                              aria-label="ส่วนลดที่ 1"
-                              disabled={r.status !== 'ok' || r.isService}
-                              className="w-full h-9 px-2 rounded-lg border border-slate-200 bg-card text-xs text-right outline-none disabled:bg-slate-100"
-                            />
-                          </td>
-                          <td className="py-2 pl-2 align-top">
-                            <input
-                              value={r.disc2}
-                              onChange={(e) => patchRow(r.key, { disc2: e.target.value })}
-                              inputMode="decimal"
-                              aria-label="ส่วนลดที่ 2"
-                              disabled={r.status !== 'ok' || r.isService}
-                              className="w-full h-9 px-2 rounded-lg border border-slate-200 bg-card text-xs text-right outline-none disabled:bg-slate-100"
-                            />
-                          </td>
-                          <td className="py-2 pl-2 text-right align-top pt-4 tabular-nums text-slate-800 font-semibold">
-                            {r.status === 'ok' ? money(rowTotal(r)) : '—'}
-                          </td>
-                          <td className="py-2 pr-3 text-right align-top pt-3">
-                            <button
-                              onClick={() => removeRow(r.key)}
-                              className="w-7 h-7 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 flex items-center justify-center"
-                              aria-label="ลบแถว"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-
-                    {/* บรรทัดที่ระบบเติมให้เอง (สินค้าพ่วง · ค่าขนส่งอัตโนมัติ) — แก้ในฟอร์มนี้ไม่ได้
-                        เพราะเจ้าของมันคือกฎฝั่ง server แต่ต้องเห็น ไม่งั้นยอดรวมจะอธิบายไม่ได้ */}
-                    {g.extras.map((it, i) => (
-                      <tr key={`x-${g.co}-${i}`} className="bg-slate-50/60">
-                        <td className="py-2 pl-3 text-xs text-slate-400 align-top pt-4">
-                          {g.rows.length + i + 1}
-                        </td>
-                        <td className="py-2 pr-3 align-top">
-                          {/* บรรทัดค่าบริการใช้ model ร่วมกันทั้งระบบ (N/A) ⇒ ตัวที่คนอ่านต้องเห็นคือ
-                              "ชื่อรายการ" ส่วนรหัสสินค้าเป็นแค่ที่มา — สลับลำดับให้ตรงกับแถวที่แก้ได้ */}
-                          {it.is_shipping_fee ? (
-                            <div className="pt-1.5">
-                              <p className="font-semibold text-slate-800 text-sm">{it.name}</p>
-                              <p className="text-[11px] text-slate-400">
-                                {it.model} · {svcCfg?.internal_reference} · {svcCfg?.odoo_name} (Odoo)
-                              </p>
-                            </div>
-                          ) : (
-                            <div className="pt-1.5">
-                              <p className="font-semibold text-slate-800 text-sm">{it.model}</p>
-                              <p className="text-[11px] text-slate-500 line-clamp-1">{it.name}</p>
-                            </div>
-                          )}
-                          <RowTags tags={extraTagsOf(it)} dim={staleNow} checking={false} />
-                        </td>
-                        <td className="py-2 pl-2 text-right align-top pt-4 text-xs text-slate-500 tabular-nums">
-                          {money(it.quantity)}
-                        </td>
-                        <td className="py-2 pl-2 text-right align-top pt-4 text-xs text-slate-500 tabular-nums">
-                          {money(it.price)}
-                        </td>
-                        <td className="py-2 pl-2 text-right align-top pt-4 text-xs text-slate-400 tabular-nums">
-                          {it.discount_1 ? money(it.discount_1) : '—'}
-                        </td>
-                        <td className="py-2 pl-2 text-right align-top pt-4 text-xs text-slate-400 tabular-nums">
-                          {it.discount_2 ? money(it.discount_2) : '—'}
-                        </td>
-                        <td className="py-2 pl-2 text-right align-top pt-4 tabular-nums text-slate-800 font-semibold">
-                          {money(it.line_total)}
-                        </td>
-                        <td className="py-2 pr-3"></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* แถวท้ายการ์ด: กำหนดส่ง (ชิดซ้าย แก้ได้) คู่กับยอดรวมของใบนี้ (ชิดขวา)
-                  จอแคบแล้ว flex-wrap พาชุดกำหนดส่งขึ้นบรรทัดบน ยอดรวมตกลงบรรทัดล่างชิดขวา */}
-              <div className="flex flex-wrap items-center gap-2 px-3 py-2 bg-slate-50 border-t border-slate-200">
-                {previewing ? (
-                  <span className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-lg border border-slate-200 bg-card text-slate-500">
-                    <Loader2 className="w-3 h-3 animate-spin shrink-0" />
-                    กำลังคำนวณกำหนดส่ง...
-                  </span>
-                ) : g.quote && preview ? (
-                  <DeliveryStrip
-                    quote={g.quote}
-                    types={preview.delivery_types}
-                    ov={deliveryOv[g.quote.quote_company]}
-                    onChange={(v) =>
-                      setDeliveryOv((cur) => {
-                        const next = { ...cur };
-                        if (v) next[g.quote!.quote_company] = v;
-                        else delete next[g.quote!.quote_company];
-                        return next;
-                      })
-                    }
-                  />
-                ) : (
-                  <span className="text-[11px] px-2 py-0.5 rounded-lg border border-slate-200 bg-card text-slate-500">
-                    กำหนดส่ง: ยังไม่ได้ตรวจ
-                  </span>
-                )}
-                <span className="ml-auto text-[11px] text-slate-500">รวมใบนี้ (ก่อน VAT)</span>
-                <span className="text-sm font-extrabold text-slate-900 tabular-nums">
-                  ฿{money(g.subtotal)}
-                </span>
-              </div>
-            </div>
-          ))}
-
-          {/* ว่างเปล่าต้องบอกว่าทำไมถึงว่าง (docs/design.md §8) — การ์ดนี้เปิดค้างไว้ตั้งแต่หน้าโหลด
-              คนที่เพิ่งเข้ามาจึงต้องอ่านออกทันทีว่ามีสองทางเข้า ไม่ใช่เห็นกล่องเปล่าแล้วเดาว่าพัง */}
-          {groups.length === 0 && (
-            <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center">
-              <FileText className="w-5 h-5 mx-auto text-slate-400" />
-              <p className="mt-1.5 text-xs font-semibold text-slate-600">ยังไม่มีรายการในใบ</p>
-              <p className="mt-0.5 text-[11px] text-slate-500">
-                เพิ่มสินค้าจากช่องด้านล่างได้เลย — หรือวางข้อความที่ลูกค้าส่งมาไว้ด้านบน แล้วกด “สร้างร่าง” ให้ระบบเคาะรายการให้
-              </p>
-            </div>
-          )}
-
-          {/* แถบเพิ่มสินค้า — พิมพ์แล้ว Enter ได้แถวที่เคาะเสร็จทันที โฟกัสค้างไว้ให้พิมพ์ตัวถัดไปต่อ
-              ปุ่ม "แถวเปล่า" คือของเดิม เก็บไว้สำหรับกรณีที่ยังไม่รู้ว่าจะใส่รุ่นอะไร */}
-          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-2">
-            <Plus className="w-4 h-4 shrink-0" style={{ color: BRAND }} />
-            <div className="flex-1 min-w-[180px]">
-              <ProductSearchBox
-                placeholder="เพิ่มสินค้า — พิมพ์รุ่นหรือชื่อ แล้วกด Enter"
-                tone="plain"
-                clearOnPick
-                onPick={addProductRow}
-              />
-            </div>
-            <Button variant="neutral" tone="soft" onClick={addRow}>
-              แถวเปล่า
-            </Button>
-            {justAdded && (
-              <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-700">
-                <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                เพิ่ม {justAdded} แล้ว
-              </span>
-            )}
-            <p className="basis-full text-[11px] text-slate-400">
-              ระบบวางแถวลงใบของบริษัทผู้ผลิตให้เอง — ไม่ต้องเลือกว่าจะไปใบไหน
-            </p>
-
-            {/* ── ค่าบริการ: มีได้บรรทัดเดียวต่อการเสนอราคา (ข้อตกลง 2026-09-14) ──
-                ใช้สินค้าระบบตัวเดียวกับกฎค่าขนส่งอัตโนมัติ ⇒ ปุ่มต้องปิดตัวเองเมื่อบรรทัดนั้น
-                มีอยู่แล้ว ไม่ว่าจะมาจากกฎหรือจากที่แอดมินกดเพิ่ม */}
-            <div className="basis-full border-t border-slate-200 pt-2 flex flex-wrap items-center gap-2">
-              <Button
-                variant="secondary"
-                icon={Wrench}
-                disabled={!svcCfg || !!serviceRow || autoFeeShown}
-                onClick={addServiceRow}
-              >
-                เพิ่มค่าบริการ
-              </Button>
-              <span className="flex-1 min-w-[200px] text-[11px] text-slate-400">
-                {!svcCfg
-                  ? 'ยังอ่านค่าตั้งต้นของค่าบริการไม่ได้ — ลองรีเฟรชหน้า'
-                  : autoFeeShown
-                    ? 'ระบบเติมบรรทัดค่าขนส่งให้แล้ว — ค่าบริการมีได้บรรทัดเดียว จึงเพิ่มอีกไม่ได้'
-                    : serviceRow
-                      ? 'มีบรรทัดค่าบริการแล้ว 1 บรรทัด — แก้ชื่อและราคาได้ที่แถวนั้น ลบก่อนจึงเพิ่มใหม่ได้'
-                      : `ใช้สินค้าระบบ ${svcCfg.internal_reference} (${svcCfg.odoo_name}) · ตั้งชื่อรายการเองได้ · มีได้บรรทัดเดียว และอยู่ในใบ Primus (PM) เสมอ`}
-              </span>
-            </div>
-          </div>
-
-          {groups.length > 0 && (
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="ml-auto text-sm">
-                <span className="text-slate-500">ยอดรวมทุกใบ (ก่อน VAT): </span>
-                <span className="font-extrabold text-slate-900 tabular-nums">฿{money(grandTotal)}</span>
-              </div>
-            </div>
-          )}
-
-          {/* ── แถบสถานะการตรวจ — บอกว่าสิ่งที่เห็นตรงกับข้อมูลล่าสุดแค่ไหน ── */}
-          {previewError ? (
-            <div className="flex flex-wrap items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2 text-xs text-red-700">
-              <AlertTriangle className="w-4 h-4 shrink-0 mt-px" />
-              <span className="flex-1 min-w-[180px]">
-                ตรวจรายละเอียดไม่สำเร็จ — {previewError} · ข้อมูลในฟอร์มยังอยู่ครบ กดตรวจใหม่ได้เลย
-              </span>
-              <Button variant="danger" tone="soft" icon={Eye} onClick={() => void runPreview()}>
-                ตรวจใหม่
-              </Button>
-            </div>
-          ) : previewing ? (
-            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-600">
-              <Loader2 className="w-4 h-4 shrink-0 animate-spin" />
-              <span>กำลังตรวจสต็อก กฎระงับ ราคาขั้นต่ำ ค่าบริการ และกำหนดส่ง...</span>
-            </div>
-          ) : staleNow ? (
-            <div className="flex flex-wrap items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs text-amber-800">
-              <AlertTriangle className="w-4 h-4 shrink-0" />
-              <span className="flex-1 min-w-[180px]">
-                ฟอร์มถูกแก้หลังตรวจครั้งล่าสุด — สต็อกและกฎที่เห็นอาจไม่ใช่ของล่าสุด
-              </span>
-              <Button variant="warning" tone="soft" icon={Eye} onClick={() => void runPreview()}>
-                ตรวจใหม่
-              </Button>
-            </div>
-          ) : preview ? (
-            <div className="flex flex-wrap items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-600">
-              <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
-              <span className="flex-1 min-w-[180px]">
-                ตรวจกับข้อมูลล่าสุดเมื่อ {previewAt} น. — ทั้งหน้ายังไม่เขียนอะไรลงฐานข้อมูลจนกว่าจะกด “ยืนยัน”
-              </span>
-              <Button variant="neutral" tone="soft" icon={Eye} onClick={() => void runPreview()}>
-                ตรวจใหม่
-              </Button>
-            </div>
-          ) : null}
-
-          {unresolved > 0 && (
-            <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs text-amber-800">
-              <AlertTriangle className="w-4 h-4 shrink-0 mt-px" />
-              <span>ยังมี {unresolved} รายการที่ยังไม่ได้เลือกสินค้า — เคาะให้ครบก่อนไปขั้นใบร่าง</span>
-            </div>
-          )}
-
-          {/* ติดกฎ = **ออกใบได้ แต่ต้องยืนยันอีกชั้น** (2026-09-15) — คำเตือนยังอยู่ครบเหมือนเดิม
-              เปลี่ยนแค่บทสรุปบรรทัดแรกให้ตรงกับสิ่งที่ปุ่มทำจริง ไม่งั้นจอบอกว่า "ออกไม่ได้"
-              แล้วปุ่มออกใบได้ ซึ่งคือจอที่ไม่มีใครเชื่ออีกเลยหลังจากนั้น */}
-          {/* ราคาต่ำกว่าขั้นต่ำ = **ติ๊กเองไม่ได้** ต้องส่งให้คนอื่นตัดสิน ⇒ กล่องคนละใบกับกล่องแดง
-              ไม่งั้นคนอ่านรวมกันว่า "ติดกฎ แต่กดผ่านได้" ซึ่งเป็นสิ่งที่ปุ่มไม่ทำแล้ว */}
-          {needsApproval && !staleNow && (
-            <div className="bg-violet-50 border border-violet-200 rounded-xl px-3 py-2.5 text-xs text-violet-800">
-              <p className="flex items-center gap-2 font-bold">
-                <BadgeCheck className="w-4 h-4 shrink-0" />
-                ต้องขออนุมัติราคา {approvalRequired.length} รายการ — ออกใบเองไม่ได้
-              </p>
-              <ul className="mt-1 pl-6 list-disc space-y-0.5">
-                {approvalRequired.map((v, i) => (
-                  <li key={`${v.type}-${v.model}-${i}`}>{v.display_message}</li>
-                ))}
-              </ul>
-              <p className="mt-1.5 pl-6">กด “ยืนยัน” จะเป็นการ<b>ส่งคำขอ</b>ให้ผู้มีสิทธิ์อนุมัติ — ใบจะออกเมื่อได้รับอนุมัติแล้วเท่านั้น</p>
-            </div>
-          )}
-
-          {blockers.length > 0 && !staleNow && (
-            <div className="bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 text-xs text-red-700">
-              <p className="flex items-center gap-2 font-bold">
-                <AlertTriangle className="w-4 h-4 shrink-0" />
-                ติดด่านตรวจ {blockers.length} ข้อ — ออกใบได้ แต่ต้องยืนยันอีกชั้น
-              </p>
-              <ul className="mt-1 pl-6 list-disc space-y-0.5">
-                {blockers.map((v, i) => (
-                  <li key={`${v.type}-${v.model}-${i}`}>{v.display_message}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* คนละแกนกับกล่องแดง: ใบยังนำเข้า Odoo ได้หรือไม่ ไม่ใช่ผิดกฎของร้านหรือไม่ */}
-          {manualReasons.length > 0 && !staleNow && (
-            <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 text-xs text-amber-800">
-              <p className="flex items-center gap-2 font-bold">
-                <AlertTriangle className="w-4 h-4 shrink-0" />
-                ต้องแก้มือใน Odoo ก่อนนำเข้า {manualReasons.length} เรื่อง
-              </p>
-              <ul className="mt-1 pl-6 list-disc space-y-0.5">
-                {manualReasons.map((r, i) => (
-                  <li key={`${r.kind}-${i}`}>{r.display_message}</li>
-                ))}
-              </ul>
-              <p className="mt-1.5 pl-6">ใบชุดนี้จะ<b>ไม่อยู่ในไฟล์ส่งออก Odoo ชุดปกติ</b> — ส่งออกจากเมนู “ต้องแก้มือก่อน” ในหน้าประวัติ</p>
-            </div>
-          )}
-          <div className="flex flex-wrap items-center gap-3">
-            <Button variant="primary" size="md" icon={ArrowRight} disabled={!canReview} onClick={() => setStage('review')}>
-              ดูใบร่าง
-            </Button>
-            {/* ปุ่มนี้ไม่ได้เขียนอะไรลงฐาน มันพาไปหน้าตรวจก่อนยืนยันเท่านั้น — ปุ่มที่จางอยู่เฉย ๆ
-                โดยไม่บอกว่าติดอะไร คือปุ่มที่ผู้ใช้สรุปเองว่าระบบพัง */}
-            {!canReview && <span className="text-xs text-amber-700">{reviewBlockedBecause()}</span>}
-          </div>
+      {/* ธง revision มองไม่เห็นไม่ได้ — ตอนยืนยัน มันจะไป "ยกเลิกใบเก่า" ที่เลขที่นี้ด้วย
+          ⇒ คนที่แก้ลูกค้าเป็นอีกรายระหว่างทาง ต้องถอดธงออกได้ก่อนที่จะเกิดเรื่องนั้น */}
+      {reviseFrom && (
+        <div className="flex flex-wrap items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-600">
+          <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+          <span className="flex-1 min-w-[180px]">
+            ใบนี้จะออกเป็น <span className="font-semibold text-slate-800">revision ของ {reviseFrom}</span>
+            {' '}— ยืนยันแล้วใบเดิมจะถูกยกเลิกให้อัตโนมัติ
+          </span>
+          <Button variant="neutral" tone="soft" onClick={() => setReviseFrom('')}>
+            ออกเป็นใบใหม่แทน
+          </Button>
         </div>
       )}
 
-      {/* ── ขั้นใบร่าง — เรนเดอร์จากผลตรวจล้วน ๆ ยังไม่มีแถวไหนอยู่ในฐานข้อมูล ──
-          ใช้ข้อมูลชุดเดียวกับที่ฟอร์มโชว์ (preview) ⇒ สิ่งที่เห็นตรงนี้คือสิ่งที่จะถูกบันทึกจริง
-          ไม่ใช่ "ใบที่บันทึกไปแล้ว" — คำว่าบันทึกเกิดขึ้นครั้งแรกตอนกด "ยืนยัน" เท่านั้น */}
-      {reviewing && preview && (
-        <div className="space-y-4">
-          {reviseFrom && (
-            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-600">
-              <RotateCcw className="w-3.5 h-3.5 shrink-0" />
-              แก้ไขจากใบเลขที่ <span className="font-semibold text-slate-800">{reviseFrom}</span>
-            </div>
-          )}
+      {/* ── ส่วนที่ 2 — เอกสารคือฟอร์ม ──
+          แถบสถานะการตรวจกับกล่องเตือนอยู่ "เหนือใบ" เพราะมันพูดถึงทั้งชุด ไม่ใช่ของใบใดใบหนึ่ง
+          และแถบสรุป+ปุ่มอยู่ท้ายกลุ่มนี้แบบติดขอบล่าง ⇒ ปุ่มตามคนไปตลอดที่ยังอยู่กับเอกสาร */}
+      <div className={`space-y-4 ${blocked ? 'opacity-50 pointer-events-none' : ''}`}>
+        {/* ── แถบสถานะการตรวจ — บอกว่าสิ่งที่เห็นตรงกับข้อมูลล่าสุดแค่ไหน ── */}
+        {previewError ? (
+          <div className="flex flex-wrap items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2 text-xs text-red-700">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-px" />
+            <span className="flex-1 min-w-[180px]">
+              ตรวจรายละเอียดไม่สำเร็จ — {previewError} · ข้อมูลในใบยังอยู่ครบ กดตรวจใหม่ได้เลย
+            </span>
+            <Button variant="danger" tone="soft" icon={Eye} onClick={() => void runPreview()}>
+              ตรวจใหม่
+            </Button>
+          </div>
+        ) : previewing ? (
+          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-600">
+            <Loader2 className="w-4 h-4 shrink-0 animate-spin" />
+            <span>กำลังตรวจสต็อก กฎระงับ ราคาขั้นต่ำ ค่าบริการ และกำหนดส่ง...</span>
+          </div>
+        ) : staleNow ? (
+          <div className="flex flex-wrap items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs text-amber-800">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span className="flex-1 min-w-[180px]">
+              ใบถูกแก้หลังตรวจครั้งล่าสุด — ยอดท้ายใบ สต็อก และกฎที่เห็นยังเป็นของรอบก่อน
+            </span>
+            <Button variant="warning" tone="soft" icon={Eye} onClick={() => void runPreview()}>
+              ตรวจใหม่
+            </Button>
+          </div>
+        ) : preview ? (
+          <div className="flex flex-wrap items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-600">
+            <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+            <span className="flex-1 min-w-[180px]">
+              ตรวจกับข้อมูลล่าสุดเมื่อ {previewAt} น. — ทั้งหน้ายังไม่เขียนอะไรลงฐานข้อมูลจนกว่าจะกด “ยืนยัน”
+            </span>
+            <Button variant="neutral" tone="soft" icon={Eye} onClick={() => void runPreview()}>
+              ตรวจใหม่
+            </Button>
+          </div>
+        ) : rows.length > 0 ? (
+          <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs text-amber-800">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span>
+              ยังไม่ได้ตรวจกับข้อมูลล่าสุด — ระบบจะตรวจให้เองเมื่อเลือกบริษัท ผู้ติดต่อ และเคาะรายการครบแล้ว
+            </span>
+          </div>
+        ) : null}
 
-          {/* ข้อมูลลูกค้าที่จะถูกบันทึกลงใบ — ขั้นนี้กางไว้เสมอ (ต่างจากในฟอร์มที่พับได้)
-              เพราะนี่คือจอสุดท้ายก่อนออกใบจริง ของที่ต้องตรวจห้ามอยู่หลังการกดเพิ่มอีกครั้ง */}
-          <div className="bg-card border border-slate-200 rounded-2xl shadow-sm p-4 space-y-3">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <Building2 className="w-[18px] h-[18px] shrink-0" style={{ color: BRAND }} />
-              <h3 className="text-sm font-bold text-slate-800">{preview.customer.display_name}</h3>
-              <span className="text-xs text-slate-500">{preview.customer.contact_name}</span>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-1.5 text-[11px]">
-              <CustField icon={Hash} label="Ref" value={preview.customer.reference} />
-              <CustField icon={Receipt} label="เลขเสียภาษี" value={preview.customer.tax_id} />
-              {/* ขั้นใบร่างอ่านอย่างเดียว — แต่ต้องเห็นว่าเครดิตนี้ "ตั้งเอง" ไม่ใช่ของลูกค้า
-                  ไม่งั้นคนกดยืนยันจะอ่านค่าที่ถูกทับว่าเป็นข้อมูลจริงจาก Odoo */}
-              <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
-                <CustField icon={CreditCard} label="เครดิต" value={preview.customer.payment_terms} />
-                {preview.customer.payment_terms_overridden && (
-                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full border border-blue-600 text-blue-700">
-                    ตั้งเอง (ของลูกค้า: {preview.customer.customer_payment_terms || 'ไม่มีข้อมูล'})
-                  </span>
-                )}
-              </div>
-              <CustField icon={Phone} label="โทร" value={preview.customer.contact_phone} />
-              <CustField icon={Mail} label="อีเมล" value={preview.customer.contact_email} />
-              <CustField icon={MapPin} label="ที่อยู่" value={preview.customer.address} />
+        {unresolved > 0 && (
+          <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs text-amber-800">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-px" />
+            <span>ยังมี {unresolved} รายการที่ยังไม่ได้เลือกสินค้า — เคาะให้ครบก่อนจึงจะออกใบได้</span>
+          </div>
+        )}
+
+        {/* ราคาต่ำกว่าขั้นต่ำ = **ติ๊กเองไม่ได้** ต้องส่งให้คนอื่นตัดสิน ⇒ กล่องคนละใบกับกล่องแดง
+            ไม่งั้นคนอ่านรวมกันว่า "ติดกฎ แต่กดผ่านได้" ซึ่งเป็นสิ่งที่ปุ่มไม่ทำแล้ว */}
+        {needsApproval && !staleNow && (
+          <div className="bg-violet-50 border border-violet-200 rounded-xl px-3 py-2.5 text-xs text-violet-800">
+            <p className="flex items-center gap-2 font-bold">
+              <BadgeCheck className="w-4 h-4 shrink-0" />
+              ต้องขออนุมัติราคา {approvalRequired.length} รายการ — ออกใบเองไม่ได้
+            </p>
+            <ul className="mt-1 pl-6 list-disc space-y-0.5">
+              {approvalRequired.map((v, i) => (
+                <li key={`${v.type}-${v.model}-${i}`}>{v.display_message}</li>
+              ))}
+            </ul>
+            <p className="mt-1.5 pl-6">กด “ยืนยัน” จะเป็นการ<b>ส่งคำขอ</b>ให้ผู้มีสิทธิ์อนุมัติ — ใบจะออกเมื่อได้รับอนุมัติแล้วเท่านั้น</p>
+          </div>
+        )}
+
+        {/* ติดกฎ = **ออกใบได้ แต่ต้องยืนยันอีกชั้น** (2026-09-15) — บทสรุปบรรทัดแรกต้องตรงกับสิ่งที่
+            ปุ่มทำจริง ไม่งั้นจอบอกว่า "ออกไม่ได้" แล้วปุ่มออกใบได้ = จอที่ไม่มีใครเชื่ออีกเลย */}
+        {blockers.length > 0 && !staleNow && (
+          <div className="bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 text-xs text-red-700">
+            <p className="flex items-center gap-2 font-bold">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              ติดด่านตรวจ {blockers.length} ข้อ — ออกใบได้ แต่ต้องยืนยันอีกชั้น
+            </p>
+            <ul className="mt-1 pl-6 list-disc space-y-0.5">
+              {blockers.map((v, i) => (
+                <li key={`${v.type}-${v.model}-${i}`}>{v.display_message}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* คนละแกนกับกล่องแดง: ใบยังนำเข้า Odoo ได้หรือไม่ ไม่ใช่ผิดกฎของร้านหรือไม่ */}
+        {manualReasons.length > 0 && !staleNow && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 text-xs text-amber-800">
+            <p className="flex items-center gap-2 font-bold">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              ต้องแก้มือใน Odoo ก่อนนำเข้า {manualReasons.length} เรื่อง
+            </p>
+            <ul className="mt-1 pl-6 list-disc space-y-0.5">
+              {manualReasons.map((r, i) => (
+                <li key={`${r.kind}-${i}`}>{r.display_message}</li>
+              ))}
+            </ul>
+            <p className="mt-1.5 pl-6">ใบชุดนี้จะ<b>ไม่อยู่ในไฟล์ส่งออก Odoo ชุดปกติ</b> — ส่งออกจากเมนู “ต้องแก้มือก่อน” ในหน้าประวัติ</p>
+          </div>
+        )}
+
+        {/* ── ใบ ── ก่อนตรวจครั้งแรกเป็นใบเดียวที่ยังไม่รู้ว่าเป็นของบริษัทไหน
+            (resolveQuoteCompany อยู่ฝั่ง server) แล้วค่อยแตกเป็น PM/THT เมื่อผลตรวจกลับมา */}
+        {groups.map((g) => (
+          <QuoteDocument key={g.co} g={g} ctx={docCtx} />
+        ))}
+
+        {/* เปิดไฟล์ไม่ได้ต้องบอกเหตุผล — แท็บที่ไม่เปิดเฉย ๆ คนอ่านว่าระบบพัง */}
+        {pdfError && (
+          <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2 text-xs text-red-700">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-px" />
+            <span>{pdfError}</span>
+          </div>
+        )}
+
+        {confirmError && (
+          <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2 text-xs text-red-700 whitespace-pre-wrap">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-px" />
+            <span>{confirmError}</span>
+          </div>
+        )}
+
+        {/* สร้างไปแล้วแต่ยืนยันไม่ผ่าน = มีแถวค้างอยู่ในฐานจริง ๆ ห้ามเงียบ และห้ามให้กด
+            "ยืนยัน" ซ้ำจากศูนย์ ไม่งั้นจะได้ร่างสองชุดของลูกค้าคนเดียวกัน */}
+        {strandedIds.length > 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 text-xs text-amber-800 space-y-1.5">
+            <p className="flex items-center gap-2 font-bold">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              ยืนยันไม่ครบ — ใบที่เหลือถูกบันทึกเป็นร่างไว้ในระบบแล้ว {strandedIds.length} ใบ
+            </p>
+            <p className="pl-6">รหัสร่าง: {strandedIds.join(', ')}</p>
+            <p className="pl-6">
+              กด “ยกเลิก” ได้ — ร่างที่ค้างจะถูกล้างเองตอนออกใบครั้งถัดไปในนามพนักงานขายคนเดิม
+            </p>
+            <div className="pl-6">
+              <Button variant="warning" tone="soft" icon={CheckCircle2} busy={confirming} onClick={retryStranded}>
+                ยืนยันใบที่เหลืออีกครั้ง
+              </Button>
             </div>
           </div>
+        )}
 
-          {preview.quotes.map((q) => (
-            <div key={q.quote_company} className="bg-card border border-slate-200 rounded-2xl shadow-sm p-4 space-y-3">
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                <Factory className="w-[18px] h-[18px] shrink-0" style={{ color: BRAND }} />
-                <h3 className="text-sm font-bold text-slate-800">ใบร่าง ({q.quote_company})</h3>
-                <span className="text-xs text-slate-500">{q.company_label}</span>
-                {/* กำหนดส่งย้ายลงไปอยู่แถวยอดรวมเหมือนขั้นฟอร์ม — ตำแหน่งเดียวกันทั้งสองขั้น
-                    แต่ขั้นนี้อ่านอย่างเดียว การแก้อยู่ที่ขั้นฟอร์มที่เดียว (ปุ่ม "แก้ไข") */}
+        {/* ส่งคำขอแล้ว = ใบถูกบันทึกเป็นร่างจริงในระบบ แต่ยังไม่ใช่ใบเสนอราคา —
+            ต้องพูดสองเรื่องนี้พร้อมกัน ไม่งั้นคนกดจะไปตามหา PDF ที่ยังไม่มี */}
+        {approvalSent && (
+          <div className="bg-violet-50 border border-violet-200 rounded-2xl p-4 space-y-2 text-sm">
+            <p className="flex items-center gap-2 font-bold text-violet-800">
+              <BadgeCheck className="w-4 h-4 shrink-0" />
+              ส่งขออนุมัติราคาแล้ว {approvalSent.count} ใบ — รอผู้อนุมัติ
+            </p>
+            <p className="text-xs text-violet-800">
+              ใบชุดนี้ถูกบันทึกเป็นร่างที่รออนุมัติ <b>ยังไม่มีเลขที่ใบและยังไม่มี PDF</b> ·
+              ติดตามสถานะได้ที่เมนู “อนุมัติราคา”
+            </p>
+          </div>
+        )}
+
+        {issued && (
+          <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 space-y-2">
+            <p className="text-sm font-bold text-emerald-800">ออกใบเสนอราคาสำเร็จ {results.length} ใบ</p>
+            {results.map((r) => (
+              <div key={r.quotation_no} className="flex flex-wrap items-center gap-3 text-sm">
+                <span className="font-semibold text-slate-800 tabular-nums">{r.quotation_no}</span>
+                <a
+                  href={r.pdf_link}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-emerald-300 text-emerald-800 hover:bg-emerald-100"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  เปิดไฟล์ PDF
+                </a>
               </div>
+            ))}
+          </div>
+        )}
 
-              <div className="overflow-x-auto -mx-4 px-4">
-                <table className="w-full min-w-[760px] text-sm">
-                  <thead>
-                    <tr className="text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
-                      <th className="text-left py-2 w-8">#</th>
-                      <th className="text-left py-2">รายการ</th>
-                      <th className="text-right py-2 w-20">จำนวน</th>
-                      <th className="text-right py-2 w-28">ราคา/หน่วย</th>
-                      <th className="text-right py-2 w-20">ลด 1 %</th>
-                      <th className="text-right py-2 w-20">ลด 2 %</th>
-                      <th className="text-right py-2 w-28">รวม</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {q.items.map((it, idx) => (
-                      <tr key={`${q.quote_company}-${it.model}-${idx}`}>
-                        <td className="py-2 text-xs text-slate-400 align-top pt-3">{idx + 1}</td>
-                        <td className="py-2 pr-3 align-top">
-                          {/* ค่าบริการ/ค่าขนส่งใช้รหัสสินค้าร่วมกันทั้งระบบ ⇒ ตัวที่คนต้องอ่านคือ
-                              "ชื่อรายการ" ส่วนรหัสเป็นแค่ที่มา — ลำดับเดียวกับตารางในฟอร์ม */}
-                          {it.is_shipping_fee ? (
-                            <>
-                              <p className="font-semibold text-slate-800 text-sm">{it.name}</p>
-                              <p className="text-[11px] text-slate-400">{it.model}</p>
-                            </>
-                          ) : (
-                            <>
-                              <p className="font-semibold text-slate-800 text-sm">{it.model}</p>
-                              <p className="text-[11px] text-slate-500 line-clamp-1">{it.name}</p>
-                            </>
-                          )}
-                          <RowTags tags={itemTagsOf(it, false, true)} dim={false} checking={false} />
-                        </td>
-                        <td className="py-2 pl-2 text-right align-top pt-3 tabular-nums text-slate-600">
-                          {money(it.quantity)}
-                        </td>
-                        <td className="py-2 pl-2 text-right align-top pt-3 tabular-nums text-slate-600">
-                          {money(it.price)}
-                        </td>
-                        <td className="py-2 pl-2 text-right align-top pt-3 tabular-nums text-slate-500">
-                          {it.discount_1 ? money(it.discount_1) : '—'}
-                        </td>
-                        <td className="py-2 pl-2 text-right align-top pt-3 tabular-nums text-slate-500">
-                          {it.discount_2 ? money(it.discount_2) : '—'}
-                        </td>
-                        <td className="py-2 pl-2 text-right align-top pt-3 tabular-nums font-semibold text-slate-800">
-                          {money(it.line_total)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-200">
-                <DeliveryBadge quote={q} />
-                <span className="ml-auto text-[11px] text-slate-500">รวมใบนี้ (ก่อน VAT)</span>
-                <span className="text-sm font-extrabold text-slate-900 tabular-nums">฿{money(q.subtotal)}</span>
-              </div>
-            </div>
-          ))}
-
-          {/* ใบเดียวไม่ต้องมียอดรวมสองชั้น — บรรทัด "รวมใบนี้" ข้างบนก็คือเลขเดียวกัน */}
-          {preview.quotes.length > 1 && (
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="ml-auto text-sm">
-                <span className="text-slate-500">ยอดรวมทุกใบ (ก่อน VAT): </span>
-                <span className="font-extrabold text-slate-900 tabular-nums">฿{money(preview.grand_total)}</span>
-              </div>
-            </div>
-          )}
-
-          {/* คำว่า "ใบร่าง" ชวนให้เข้าใจว่าระบบเก็บไว้ให้แล้ว — ต้องพูดตรงนี้ว่ายังไม่ได้เก็บ */}
-          {!issued && (
-            <div className="flex items-start gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-600">
-              <FileText className="w-4 h-4 shrink-0 mt-px" />
-              <span>
-                {needsApproval
-                  ? 'ใบร่างนี้ยังไม่ถูกบันทึกลงระบบ — กด “ยืนยัน” จะเป็นการส่งคำขออนุมัติราคา ยังไม่ออกเลขที่ใบ'
-                  : 'ใบร่างนี้ยังไม่ถูกบันทึกลงระบบ — กด “ยืนยัน” เมื่อไหร่จึงจะออกเลขที่และบันทึกจริง'}
+        {/* ── แถบสรุป + ปุ่ม ติดขอบล่างจอ ──
+            หน้ายาวขึ้นเพราะยุบสองขั้นเป็นขั้นเดียว ⇒ ปุ่มต้องตามคนไป ไม่ใช่ให้เลื่อนลงไปหา
+            **ยอดทุกตัวบวกจาก `q.totals` ที่ server คิดด้วยฟังก์ชันเดียวกับ PDF** — จอไม่คิดสูตรเอง
+            และ "ส่วนลดรวม" คือสิ่งที่กระดาษไม่มีวันบอก (ช่อง "ส่วนลด" บนใบพิมพ์ 0.00 เสมอ
+            ตามแบบฟอร์มของบริษัท ดู utils/pricing.ts) ⇒ ใบเดียวก็ยังมีข้อมูลใหม่ให้อ่าน
+            ⚠️ ผลบวกคลาดจากราคาตั้งได้ 1 สตางค์เพราะแต่ละช่องปัดทศนิยมของตัวเอง — ไม่ใช่บั๊ก */}
+        <div className="sticky bottom-0 z-20 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-slate-200 bg-card/95 backdrop-blur px-3.5 py-2.5 shadow-sm">
+          <div className="flex flex-wrap items-baseline gap-x-3.5 gap-y-1 min-w-0">
+            {preview && !staleNow ? (
+              <>
+                <span className="text-[11.5px] text-slate-500 whitespace-nowrap">
+                  รวมก่อนส่วนลด{' '}
+                  <span className="text-xs font-bold text-slate-800 tabular-nums">
+                    ฿{money2(sumQuotes((t) => t.subtotal) + sumQuotes((t) => t.discount_total))}
+                  </span>
+                </span>
+                <span className="text-[11.5px] text-slate-500 whitespace-nowrap">
+                  ส่วนลดรวม{' '}
+                  <span className="text-xs font-bold text-red-700 tabular-nums">
+                    −฿{money2(sumQuotes((t) => t.discount_total))}
+                  </span>
+                </span>
+                <span className="text-[11.5px] text-slate-500 whitespace-nowrap">
+                  รวมก่อน VAT{' '}
+                  <span className="text-xs font-bold text-slate-800 tabular-nums">
+                    ฿{money2(sumQuotes((t) => t.subtotal))}
+                  </span>
+                </span>
+                <span className="text-[11.5px] text-slate-500 whitespace-nowrap">
+                  VAT 7%{' '}
+                  <span className="text-xs font-bold text-slate-800 tabular-nums">
+                    ฿{money2(sumQuotes((t) => t.vat))}
+                  </span>
+                </span>
+                <span className="text-[11.5px] text-slate-500 whitespace-nowrap">
+                  {preview.quotes.length > 1 ? 'ยอดสุทธิทุกใบ' : 'ยอดสุทธิ'}{' '}
+                  <span className="text-base font-extrabold text-slate-900 tabular-nums">
+                    ฿{money2(sumQuotes((t) => t.grand_total))}
+                  </span>
+                </span>
+              </>
+            ) : (
+              <span className="text-[11.5px] text-slate-500">
+                {staleNow
+                  ? 'ยอดรวมรอผลตรวจรอบใหม่ — กด “ตรวจใหม่” ด้านบน'
+                  : 'ยอดรวมขึ้นเมื่อตรวจรายละเอียดสำเร็จ — ตัวเลขทุกตัวมาจากผลตรวจ ไม่ได้บวกเองบนจอ'}
               </span>
-            </div>
-          )}
+            )}
+          </div>
 
-          {confirmError && (
-            <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2 text-xs text-red-700 whitespace-pre-wrap">
-              <AlertTriangle className="w-4 h-4 shrink-0 mt-px" />
-              <span>{confirmError}</span>
-            </div>
-          )}
-
-          {/* สร้างไปแล้วแต่ยืนยันไม่ผ่าน = มีแถวค้างอยู่ในฐานจริง ๆ ห้ามเงียบ และห้ามให้กด
-              "ยืนยัน" ซ้ำจากศูนย์ ไม่งั้นจะได้ร่างสองชุดของลูกค้าคนเดียวกัน */}
-          {strandedIds.length > 0 && (
-            <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 text-xs text-amber-800 space-y-1.5">
-              <p className="flex items-center gap-2 font-bold">
-                <AlertTriangle className="w-4 h-4 shrink-0" />
-                ยืนยันไม่ครบ — ใบที่เหลือถูกบันทึกเป็นร่างไว้ในระบบแล้ว {strandedIds.length} ใบ
-              </p>
-              <p className="pl-6">รหัสร่าง: {strandedIds.join(', ')}</p>
-              <p className="pl-6">
-                กด “ยกเลิก” ได้ — ร่างที่ค้างจะถูกล้างเองตอนออกใบครั้งถัดไปในนามพนักงานขายคนเดิม
-              </p>
-              <div className="pl-6">
-                <Button variant="warning" tone="soft" icon={CheckCircle2} busy={confirming} onClick={retryStranded}>
-                  ยืนยันใบที่เหลืออีกครั้ง
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* ส่งคำขอแล้ว = ใบถูกบันทึกเป็นร่างจริงในระบบ แต่ยังไม่ใช่ใบเสนอราคา —
-              ต้องพูดสองเรื่องนี้พร้อมกัน ไม่งั้นคนกดจะไปตามหา PDF ที่ยังไม่มี */}
-          {approvalSent && (
-            <div className="bg-violet-50 border border-violet-200 rounded-2xl p-4 space-y-2 text-sm">
-              <p className="flex items-center gap-2 font-bold text-violet-800">
-                <BadgeCheck className="w-4 h-4 shrink-0" />
-                ส่งขออนุมัติราคาแล้ว {approvalSent.count} ใบ — รอผู้อนุมัติ
-              </p>
-              <p className="text-xs text-violet-800">
-                ใบชุดนี้ถูกบันทึกเป็นร่างที่รออนุมัติ <b>ยังไม่มีเลขที่ใบและยังไม่มี PDF</b> ·
-                ติดตามสถานะได้ที่เมนู “อนุมัติราคา”
-              </p>
-            </div>
-          )}
-
-          {issued && (
-            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 space-y-2">
-              <p className="text-sm font-bold text-emerald-800">ออกใบเสนอราคาสำเร็จ {results.length} ใบ</p>
-              {results.map((r) => (
-                <div key={r.quotation_no} className="flex flex-wrap items-center gap-3 text-sm">
-                  <span className="font-semibold text-slate-800 tabular-nums">{r.quotation_no}</span>
-                  <a
-                    href={r.pdf_link}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-emerald-300 text-emerald-800 hover:bg-emerald-100"
-                  >
-                    <FileText className="w-3.5 h-3.5" />
-                    เปิดไฟล์ PDF
-                  </a>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="flex flex-wrap items-center justify-end gap-2">
+          <div className="flex flex-wrap items-center gap-2 ml-auto">
             {issued || requested ? (
               <Button variant="primary" size="md" icon={FilePlus2} onClick={resetAll}>
                 เริ่มใบใหม่
               </Button>
             ) : (
               <>
-                <Button variant="neutral" tone="soft" icon={Pencil} disabled={confirming} onClick={() => setStage('form')}>
-                  แก้ไข
-                </Button>
+                {/* ปุ่มที่จางอยู่เฉย ๆ โดยไม่บอกเหตุผล คือปุ่มที่ผู้ใช้สรุปว่าระบบพัง */}
+                {!canIssue && (
+                  <span className="text-[11px] text-amber-700 max-w-[320px]">{issueBlockedBecause()}</span>
+                )}
                 <Button variant="danger" tone="soft" icon={Ban} disabled={confirming} onClick={resetAll}>
                   ยกเลิก
                 </Button>
@@ -2727,9 +3250,10 @@ export const QuoteRequest: React.FC = () => {
                     (docs/design.md หัวข้อสีปุ่ม: แดง = ของที่ย้อนยาก) */}
                 <Button
                   variant={needsApproval ? 'warning' : (blockers.length > 0 || manualReasons.length > 0 ? 'danger' : 'primary')}
+                  size="md"
                   icon={needsApproval ? Send : CheckCircle2}
                   busy={confirming}
-                  disabled={!canReview || strandedIds.length > 0}
+                  disabled={!canIssue || strandedIds.length > 0}
                   onClick={requestConfirm}
                 >
                   {confirming
@@ -2739,8 +3263,18 @@ export const QuoteRequest: React.FC = () => {
               </>
             )}
           </div>
+
+          {/* คำว่า "ร่าง" ชวนให้เข้าใจว่าระบบเก็บไว้ให้แล้ว — ต้องพูดตรงนี้ว่ายังไม่ได้เก็บ
+              และไม่มีปุ่ม "บันทึกร่าง" ให้กด (เจ้าของเคาะ 2026-09-17) ⇒ ทั้งหน้ามีจุดเดียวที่เขียน DB */}
+          {!issued && !requested && (
+            <p className="basis-full text-[10.5px] text-slate-400">
+              {needsApproval
+                ? 'ใบนี้ยังไม่ถูกบันทึกลงระบบ — กด “ยืนยัน” จะเป็นการส่งคำขออนุมัติราคา ยังไม่ออกเลขที่ใบ'
+                : 'ใบนี้ยังไม่ถูกบันทึกลงระบบ — กด “ยืนยัน” เมื่อไหร่จึงจะออกเลขที่และบันทึกจริง'}
+            </p>
+          )}
         </div>
-      )}
+      </div>
 
       {/* ชั้นยืนยันอีกชั้นก่อนออกใบจริง — เด้งเฉพาะตอนที่มีอะไรให้รับทราบ (ดู requestConfirm) */}
       {confirmOpen && (
@@ -2757,40 +3291,47 @@ export const QuoteRequest: React.FC = () => {
         />
       )}
 
-      {/* ── ส่วนที่ 3 — revise · พับหายตอนขึ้นขั้นใบร่าง เหมือนส่วนที่ 1 ── */}
-      {!reviewing && (
-        <div className={`bg-card border border-slate-200 rounded-2xl shadow-sm p-4 space-y-3 ${blocked ? 'opacity-50 pointer-events-none' : ''}`}>
-          <div className="flex items-center gap-2">
-            <RotateCcw className="w-[18px] h-[18px]" style={{ color: BRAND }} />
-            <h3 className="text-sm font-bold text-slate-800">แก้ไขใบที่ออกไปแล้ว (revise)</h3>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              value={reviseNo}
-              onChange={(e) => setReviseNo(e.target.value)}
-              placeholder="เลขที่ใบ เช่น QP-260705030"
-              className="h-10 px-3 rounded-xl border border-slate-200 bg-slate-50 text-sm text-slate-800 outline-none focus:border-[var(--brand-fg)] focus:bg-card w-64"
-            />
-            <Button
-              variant="neutral"
-              tone="soft"
-              size="md"
-              icon={ArrowRight}
-              busy={revising}
-              disabled={!reviseNo.trim() || !spUserId}
-              onClick={doRevise}
-            >
-              เตรียมใบแก้ไข
-            </Button>
-            <span className="text-xs text-slate-400">ใบที่ยังไม่มีเลขที่ (ร่าง) แก้แบบ revision ไม่ได้</span>
-          </div>
-          {reviseError && (
-            <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2 text-xs text-red-700">
-              <AlertTriangle className="w-4 h-4 shrink-0 mt-px" />
-              <span>{reviseError}</span>
-            </div>
-          )}
+      {/* ── ส่วนที่ 3 — revise ── */}
+      <div className={`bg-card border border-slate-200 rounded-2xl shadow-sm p-4 space-y-3 ${blocked ? 'opacity-50 pointer-events-none' : ''}`}>
+        <div className="flex items-center gap-2">
+          <RotateCcw className="w-[18px] h-[18px]" style={{ color: BRAND }} />
+          <h3 className="text-sm font-bold text-slate-800">แก้ไขใบที่ออกไปแล้ว (revise)</h3>
         </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            value={reviseNo}
+            onChange={(e) => setReviseNo(e.target.value)}
+            placeholder="เลขที่ใบ เช่น QP-260705030"
+            className="h-10 px-3 rounded-xl border border-slate-200 bg-slate-50 text-sm text-slate-800 outline-none focus:border-[var(--brand-fg)] focus:bg-card w-64"
+          />
+          <Button
+            variant="neutral"
+            tone="soft"
+            size="md"
+            icon={ArrowRight}
+            busy={revising}
+            disabled={!reviseNo.trim() || !spUserId}
+            onClick={doRevise}
+          >
+            เตรียมใบแก้ไข
+          </Button>
+          <span className="text-xs text-slate-400">ใบที่ยังไม่มีเลขที่ (ร่าง) แก้แบบ revision ไม่ได้</span>
+        </div>
+        {reviseError && (
+          <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2 text-xs text-red-700">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-px" />
+            <span>{reviseError}</span>
+          </div>
+        )}
+      </div>
+
+      {bulkOffer && (
+        <BulkDiscountPopup
+          offer={bulkOffer}
+          multiDoc={groups.length > 1}
+          onApply={applyBulk}
+          onDismiss={dismissBulk}
+        />
       )}
     </div>
   );

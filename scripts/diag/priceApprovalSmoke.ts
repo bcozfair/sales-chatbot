@@ -62,11 +62,15 @@ async function setup() {
      ON CONFLICT (user_id) DO UPDATE SET status = 'active'`,
     [TEST_SP_USER]
   );
+  // ต้องตั้ง `employee_quotation_id` ให้ด้วย ไม่งั้น resolveWebUserId() ปฏิเสธด้วย MAKER_NOT_SET
+  // ตั้งแต่บรรทัดแรกของด่าน (เหมือนที่ webQuoteSmoke ทำ) — แอดมินที่ยังไม่ตั้งชื่อผู้จัดทำออกใบไม่ได้
   const mk = async (username: string, role: string, name: string) => {
     const { rows } = await pool.query(
-      `INSERT INTO admin_users (username, password_hash, name, role)
-       VALUES ($1, 'x-diag-not-a-login', $3, $2)
-       ON CONFLICT (username) DO UPDATE SET role = EXCLUDED.role
+      `INSERT INTO admin_users (username, password_hash, name, role, employee_quotation_id)
+       VALUES ($1, 'x-diag-not-a-login', $3, $2, 'DIAG ผู้จัดทำ (ลบอัตโนมัติ)')
+       ON CONFLICT (username) DO UPDATE
+          SET role = EXCLUDED.role,
+              employee_quotation_id = EXCLUDED.employee_quotation_id
        RETURNING id`,
       [username, role, name]
     );

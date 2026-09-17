@@ -13,7 +13,8 @@ import {
   blockWarnText,
   normalizeProductScope
 } from "./services/rules/index.js";
-import { calcNetPrice, calcVat, calcGrandTotal } from "./utils/pricing.js";
+import { calcNetPrice, quotationDocumentTotals } from "./utils/pricing.js";
+import { companyProfileOf, companyNameHtml, companyAddressHtml, companyClosingHtml } from "./utils/companyProfile.js";
 import { DEFAULT_WARRANTY_DISPLAY, resolveMinWarrantyDisplay, warrantyNoteText } from "./utils/warranty.js";
 import { thaiDateDMY } from "./utils/thaiTime.js";
 import { resolveDeliveryTerms, deliveryDisplayText } from "./utils/deliveryTerms.js";
@@ -341,26 +342,14 @@ export async function generateQuotationPDF(quoteData: any, quoteNoInput?: string
     delivery_all_in_stock: allItemsInStock,
   }));
 
-  let grossSubTotal = 0;
-  let discountedSubTotal = 0;
-
-  itemsList.forEach((item: any) => {
-    const qty = Number(item.quantity) || 0;
-    const price = Number(item.price) || 0;
-    const disc1 = Number(item.discount_1) || 0;
-    const disc2 = Number(item.discount_2) || 0;
-
-    const rowGross = qty * price;
-    const discountedPrice = calcNetPrice(price, disc1, disc2);
-    const rowNet = qty * discountedPrice;
-
-    grossSubTotal += rowGross;
-    discountedSubTotal += rowNet;
-  });
-
-  const totalDiscountAmount = 0.00;
-  const vat = calcVat(discountedSubTotal);
-  const grandTotal = calcGrandTotal(discountedSubTotal);
+  // ยอดท้ายใบทั้งชุดมาจาก utils/pricing ที่เดียว — หน้าจอ "ใบร่าง" ของหน้าขอใบเสนอราคา
+  // เรียกฟังก์ชันตัวเดียวกันนี้ ตัวเลขบนจอกับในไฟล์จึงไม่มีทางเป็นคนละชุด
+  // (`discount_shown` = 0 เสมอ เป็นพฤติกรรมเดิมของใบ ไม่ใช่ของใหม่ — ดูหมายเหตุที่ฟังก์ชัน)
+  const docTotals = quotationDocumentTotals(itemsList);
+  const discountedSubTotal = docTotals.net;
+  const totalDiscountAmount = docTotals.discount_shown;
+  const vat = docTotals.vat;
+  const grandTotal = docTotals.grand;
 
   // ใบที่มีเลขที่แล้ว = เอกสารที่ออกไปแล้ว ต้องพิมพ์ซ้ำได้เหมือนเดิมทุกครั้ง
   // ใบร่างยังไม่ใช่เอกสาร จึงยังคำนวณสดเหมือนเดิมทุกอย่าง
@@ -424,50 +413,15 @@ export async function generateQuotationPDF(quoteData: any, quoteNoInput?: string
     : null;
 
 
-  const logoFile = isThemtech ? "logo2.png" : "logo.png";
-  const logoBase64 = fs.readFileSync(path.join(process.cwd(), "data", logoFile)).toString("base64");
+  const profile = companyProfileOf(isThemtech);
+  const logoBase64 = fs.readFileSync(path.join(process.cwd(), "data", profile.logo_file)).toString("base64");
   const isoBase64 = fs.readFileSync(path.join(process.cwd(), "data", "iso.png")).toString("base64");
 
-  let companyHtml = '';
-  let addressHtml = '';
-  let tNoteHtml = '';
-
-  if (isThemtech) {
-    companyHtml = `
-      <div>บริษัท เดมเทค จำกัด (สาขาที่ 00002)</div>
-      <div>Themtech Co., Ltd.</div>
-    `;
-    addressHtml = `
-      118/60 อาคาร PRIMUS ชั้น 2 หมู่ที่ 18 ตำบลคลองหนึ่ง อำเภอคลองหลวง จังหวัด ปทุมธานี 12120<br />
-      118/60 PRIMUS BUILDING, 2ND FLOOR MOO 18 , KHLONG NUENG , KHLONG LUANG , PATHUM THANI 12120<br />
-      Tel: 0-2693-7005 (Auto lines) &nbsp; Fax:Sale:0-2277-3565 , 0-2277-1146 &nbsp; FaxAccount: 0-2276-7221, 0-2275-1912<br />
-      https://www.themtech.co.th &nbsp; E-mail: sales_tht@themtech.co.th &nbsp; Tax ID: 0105542030032
-    `;
-    tNoteHtml = `
-      ทางบริษัทฯ หวังเป็นอย่างยิ่งว่าจะได้บริการท่านในเร็ววันนี้<br>
-      We look forward to give you our best service<br>
-      บริษัท เดมเทค จำกัด
-    `;
-  } else {
-    companyHtml = `
-      <div>บริษัท ไพรมัส จํากัด (สาขาที่ 00012)</div>
-      <div>Primus Co.,Ltd</div>
-    `;
-    addressHtml = `
-      118/60 &nbsp;หมู่ 18 &nbsp;ตำบลคลองหนึ่ง &nbsp;อำเภอคลองหลวง
-      &nbsp;จังหวัด ปทุมธานี &nbsp;12120<br />
-      118/60 MOO 18 , KHLONG NUENG , KHLONG LUANG , PATHUM THANI 12120<br />
-      Tel: 0-2693-7005 (Auto lines) &nbsp; Fax:Sale : 0-2277-3565 ,
-      0-2277-1146 &nbsp; FaxAccount : 0-2276-7221, 0-2275-1912<br />
-      https://www.primus.co.th &nbsp; E-mail: sales@primus.co.th &nbsp; Tax
-      ID: 0105536011803
-    `;
-    tNoteHtml = `
-      ทางบริษัทฯ หวังเป็นอย่างยิ่งว่าจะได้บริการท่านในเร็ววันนี้<br>
-      We look forward to give you our best service<br>
-      บริษัท ไพรมัส จำกัด
-    `;
-  }
+  // ข้อความหัวกระดาษอยู่ที่ utils/companyProfile.ts ที่เดียว — หน้าจอ "ใบร่าง" ของหน้าขอ
+  // ใบเสนอราคาอ่านจากก้อนเดียวกันผ่านผลตรวจ ⇒ ที่อยู่/เลขผู้เสียภาษีมีที่แก้ที่เดียว
+  const companyHtml = companyNameHtml(profile);
+  const addressHtml = companyAddressHtml(profile);
+  const tNoteHtml = companyClosingHtml(profile);
 
   // Dynamic pagination based on item content weight
   // Each item gets a weight based on how much vertical space it needs

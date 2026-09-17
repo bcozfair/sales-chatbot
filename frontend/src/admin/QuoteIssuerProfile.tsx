@@ -53,12 +53,25 @@ interface ActingSalesperson {
   last_active_at?: string | null;
 }
 
+/**
+ * ตัวตนสองคนที่จะไป**ขึ้นบนกระดาษ** (ช่องลงนามกลางและขวาของใบ)
+ *
+ * หน้าแม่ต้องใช้ตอนเรนเดอร์ขั้นใบร่างให้เหมือนใบจริง — ข้อมูลชุดนี้โหลดอยู่แล้วในคอมโพเนนต์นี้
+ * ⇒ ส่งต่อขึ้นไป **ไม่ใช่ให้หน้าแม่ยิง API ซ้ำ** ไม่งั้นจะมีสองแหล่งที่ตอบคนละค่าได้
+ */
+export interface QuoteIssuerIdentity {
+  salesperson: { name: string; phone: string | null; sig_url: string | null } | null;
+  issuer: { name: string | null; phone: string | null; sig_url: string | null };
+}
+
 interface Props {
   /** เซลส์ที่เลือก "ออกในนาม" — ว่าง = ยังไม่เลือก (หน้าแม่ใช้บล็อกปุ่มสร้างร่าง) */
   spUserId: string;
   onSpUserIdChange: (userId: string) => void;
   /** true เมื่อตั้งชื่อผู้จัดทำแล้ว — หน้าแม่ใช้บล็อกทั้งหน้าเมื่อยังไม่พร้อม */
   onReadyChange: (ready: boolean) => void;
+  /** ตัวตนที่จะขึ้นบนใบ — เปลี่ยนเมื่อเลือกเซลส์คนใหม่ หรือแอดมินแก้โปรไฟล์ของตัวเอง */
+  onIdentityChange?: (identity: QuoteIssuerIdentity) => void;
 }
 
 /**
@@ -95,7 +108,7 @@ const writeStoredSp = (adminId: number, userId: string) => {
   }
 };
 
-export const QuoteIssuerProfile: React.FC<Props> = ({ spUserId, onSpUserIdChange, onReadyChange }) => {
+export const QuoteIssuerProfile: React.FC<Props> = ({ spUserId, onSpUserIdChange, onReadyChange, onIdentityChange }) => {
   const { token } = useAuth();
   const [profile, setProfile] = useState<IssuerProfile | null>(null);
   const [makers, setMakers] = useState<Maker[]>([]);
@@ -154,6 +167,20 @@ export const QuoteIssuerProfile: React.FC<Props> = ({ spUserId, onSpUserIdChange
   }, [token, loadAll, onReadyChange, onSpUserIdChange]);
 
   const selectedSp = salespersons.find((s) => s.user_id === spUserId) ?? null;
+
+  // ส่งตัวตนขึ้นไปให้หน้าแม่ทุกครั้งที่มันเปลี่ยน — ขั้นใบร่างวาดช่องลงนามจากค่าชุดนี้
+  useEffect(() => {
+    onIdentityChange?.({
+      salesperson: selectedSp
+        ? { name: selectedSp.name, phone: selectedSp.phone ?? null, sig_url: selectedSp.sig_url ?? null }
+        : null,
+      issuer: {
+        name: profile?.employee_quotation_id ?? null,
+        phone: profile?.employee_quotation_phone ?? null,
+        sig_url: profile?.signature_url ?? null,
+      },
+    });
+  }, [selectedSp, profile, onIdentityChange]);
   /** รวมจำนวนบัญชีซ้ำที่ถูกยุบทิ้ง — อธิบายว่าทำไมรายชื่อสั้นกว่าที่เคยเห็น จึงไปอยู่ใต้รายชื่อ */
   const mergedTotal = salespersons.reduce((sum, s) => sum + (s.merged_count ?? 0), 0);
 

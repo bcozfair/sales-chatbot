@@ -128,6 +128,7 @@ import {
   proposeFromText,
   createDraft as createWebQuoteDraft,
   previewDraft as previewWebQuoteDraft,
+  previewQuotePdf as previewWebQuotePdf,
   reviseQuotation as reviseWebQuotation,
 } from './services/webQuoteService.js';
 import {
@@ -2501,6 +2502,40 @@ app.post('/api/admin/webquote/preview', adminAuthMiddleware, requireRole('admin'
     }));
   } catch (err: any) {
     sendWebQuoteError(res, 'POST /api/admin/webquote/preview', err);
+  }
+});
+
+/**
+ * ฟอร์มที่เคาะแล้ว → **ไฟล์ PDF ของใบที่จะได้** โดยยังไม่เขียน DB และไม่ออกเลขที่ใบ
+ *
+ * ต่างจาก /preview ตรงที่ตัวนี้ **รับ `sp_user_id`** เพราะกระดาษมีช่องลายเซ็นเซลส์อยู่จริง —
+ * แต่เป็นการอ่านอย่างเดียว (ดูหัวข้อ previewQuotePdf) ไม่มีการสร้างแถวพร็อกซีเหมือนตอนออกใบ
+ *
+ * ตอบเป็น `application/pdf` ไม่ใช่ JSON ⇒ หน้าเว็บรับเป็น blob แล้วเปิดแท็บใหม่เอง
+ * (ใช้ fetch เพราะ endpoint นี้ต้องแนบ header ยืนยันตัวตนเหมือนทุก route ในกลุ่มนี้)
+ */
+app.post('/api/admin/webquote/preview-pdf', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), express.json({ limit: '2mb' }), async (req: any, res: any) => {
+  try {
+    const out = await previewWebQuotePdf({
+      adminId: req.admin.id,
+      spUserId: req.body?.sp_user_id,
+      quoteCompany: req.body?.quote_company,
+      customerId: req.body?.customer_id,
+      contactId: req.body?.contact_id,
+      items: req.body?.items,
+      paymentTermsOverride: req.body?.payment_terms_override,
+      delivery: req.body?.delivery,
+    });
+    res.setHeader('Content-Type', 'application/pdf');
+    // ชื่อ ASCII ก่อน แล้วค่อยชื่อไทยแบบ RFC 5987 — เบราว์เซอร์เก่าอ่านตัวแรก ตัวใหม่อ่านตัวหลัง
+    // (ยัดอักขระไทยลง `filename=` ตรง ๆ ไม่ได้ Node จะโยน ERR_INVALID_CHAR)
+    const thaiName = encodeURIComponent(`ใบเสนอราคา-ร่าง-${out.quote_company}.pdf`);
+    res.setHeader('Content-Disposition', `inline; filename="${out.filename}.pdf"; filename*=UTF-8''${thaiName}`);
+    // ใบร่างเปลี่ยนได้ทุกครั้งที่แอดมินแก้ฟอร์ม — เบราว์เซอร์ห้ามจำไฟล์เก่าไว้เด็ดขาด
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(out.pdf);
+  } catch (err: any) {
+    sendWebQuoteError(res, 'POST /api/admin/webquote/preview-pdf', err);
   }
 });
 

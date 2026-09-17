@@ -17,6 +17,9 @@
 //  8. ทะลุด่านตรวจได้ (`rule_overrides`) + คิวแก้มือใน Odoo (`odoo_manual_review`)
 //     · ข้อสำคัญที่สุด: **ใบจาก LINE ต้องยังถูกบล็อกเหมือนเดิม** (ปลดล็อกผูกกับใบ ไม่ใช่ endpoint)
 //     · `SYSTEM_ERROR` ทะลุไม่ได้แม้กดรับทราบ · ข้อที่เพิ่งโผล่ยังปฏิเสธ 422
+//  9. ข้อมูลชุด "ใบจริง" ของขั้นใบร่าง (2026-09-17) — หมายเหตุรายบรรทัดที่แอดมินพิมพ์ ·
+//     ยอดท้ายใบ 5 ช่องที่ต้องตรงกับ `quotationDocumentTotals()` ตัวเดียวกับ PDF ·
+//     และ `previewQuotePdf()` ที่ต้องได้ไฟล์ PDF จริงโดย **ไม่เขียน DB และไม่ออกเลขที่ใบ**
 //
 //  ⚠️ เขียนข้อมูลจริงลง DB (salesperson · admin_users · quotations ของ user ทดสอบ)
 //     แล้วลบทิ้งใน finally ทุกกรณี — user/แอดมินทดสอบเป็นค่าคงที่ที่ไม่ชนของจริง
@@ -40,10 +43,14 @@ import {
   proposeFromText,
   createDraft,
   previewDraft,
+  previewQuotePdf,
   reviseQuotation,
   resolveWebUserId,
   WebQuoteError,
 } from '../../services/webQuoteService.js';
+import { quotationDocumentTotals, round2 } from '../../utils/pricing.js';
+import jwt from 'jsonwebtoken';
+import { getJwtSecret } from '../../config/jwt.js';
 
 const GREEN = '\x1b[32m', RED = '\x1b[31m', DIM = '\x1b[2m', BOLD = '\x1b[1m', RESET = '\x1b[0m';
 
@@ -843,6 +850,119 @@ async function case7() {
     after?.pt === '30 Days', String(after?.pt));
 }
 
+/**
+ * ข้อ 9 — ขั้นใบร่างต้อง "ครบเท่าใบจริง" (2026-09-17)
+ *
+ * จอใบร่างใหม่พิมพ์ยอดท้ายใบเองไม่ได้ ต้องได้มาจาก server ที่คิดด้วยฟังก์ชันเดียวกับ PDF
+ * ⇒ ข้อนี้พังเมื่อไหร่ แปลว่า "เลขบนจอกับเลขในไฟล์เริ่มเป็นคนละชุด" ซึ่งไม่มีอะไรฟ้องเอง
+ */
+async function case9() {
+  console.log(`
+${BOLD}9) ข้อมูลใบจริงบนขั้นใบร่าง + PDF พรีวิว${RESET}`);
+  const cust = await pickCustomerContact();
+  const product = await pickProduct(cust);
+  const REMARK = 'ลูกค้าขอรุ่นเดิมกับล็อตเดือนที่แล้ว';
+  const items = [
+    { product_template_id: product.product_template_id, quantity: 3, discount_1: 10, discount_2: 5, remark: REMARK },
+  ];
+
+  const countQuotes = async () =>
+    Number((await pool.query(`SELECT COUNT(*)::int AS n FROM quotations`)).rows[0].n);
+
+  const pv = await previewDraft({ customerId: cust.customerId, contactId: cust.contactId, items });
+  const q = pv.quotes[0];
+  const line = q.items.find((it) => it.model === product.model) ?? q.items[0];
+
+  ok('หมายเหตุที่แอดมินพิมพ์เดินทางมาถึงพรีวิว', line?.remark === REMARK, line?.remark);
+  ok('คำอธิบายสินค้าติดมาจาก snapshot ตัวเดียวกับที่ PDF พิมพ์',
+    typeof line?.sales_description === 'string', `"${String(line?.sales_description).slice(0, 40)}"`);
+
+  // ยอดท้ายใบต้องเท่ากับที่ pdfGenerator จะคิด — เทียบกับฟังก์ชันกลางตรง ๆ
+  const expect = quotationDocumentTotals(q.items);
+  ok('รวมเงิน = ยอดหลังหักส่วนลดรายบรรทัด (ตามที่ใบพิมพ์จริง)',
+    q.totals.subtotal === round2(expect.net), `${q.totals.subtotal} vs ${round2(expect.net)}`);
+  ok('  "ส่วนลด" บนใบเป็น 0.00 เสมอ (พฤติกรรมเดิมของเอกสาร)', q.totals.discount === 0, String(q.totals.discount));
+  ok('  มูลค่าหลังหักส่วนลด = รวมเงิน', q.totals.after_discount === q.totals.subtotal);
+  ok('  VAT 7% และยอดสุทธิตรงกับฟังก์ชันกลาง',
+    q.totals.vat === expect.vat && q.totals.grand_total === expect.grand,
+    `VAT ${q.totals.vat} · สุทธิ ${q.totals.grand_total}`);
+  // ส่วนลดรวมเป็นของ "แถบสรุปของแอดมิน" ไม่ใช่ของช่องส่วนลดบนใบ — สองตัวนี้ต้องไม่เท่ากัน
+  // เมื่อมีส่วนลดจริง ไม่งั้นแปลว่ามีใครเอา discount_line ไปลงใบ (= เปลี่ยนเอกสารของลูกค้า)
+  ok('ส่วนลดรวมที่ส่งให้แถบสรุป = discount_line ของฟังก์ชันกลาง',
+    q.totals.discount_total === round2(expect.discount_line),
+    `${q.totals.discount_total} vs ${round2(expect.discount_line)}`);
+  ok('  ส่วนลดรวม > 0 เมื่อใบมีส่วนลดจริง และไม่ปนกับช่อง "ส่วนลด" ของใบ',
+    q.totals.discount_total > 0 && q.totals.discount !== q.totals.discount_total,
+    `รวม ${q.totals.discount_total} · ช่องบนใบ ${q.totals.discount}`);
+  // ปัดทศนิยมแยกกันคนละช่อง ⇒ ผลบวกคลาดได้ไม่เกิน 1 สตางค์ (เคสจริง: 212.825 + 2.175 = 215
+  // แต่ปัดแล้วได้ 212.83 + 2.18 = 215.01) — เอกสารจริงก็ปัดรายช่องแบบนี้เหมือนกัน
+  // ห้ามแก้ด้วยการเลิกปัด เพราะเลขที่โชว์ต้องเป็นเลขเดียวกับที่พิมพ์ลงใบ
+  ok('  รวมเงิน + ส่วนลดรวม = ราคาตั้งก่อนลด (คลาดได้ไม่เกิน 1 สตางค์จากการปัดรายช่อง)',
+    Math.abs(Math.round((q.totals.subtotal + q.totals.discount_total - round2(expect.gross)) * 100)) <= 1,
+    `${round2(q.totals.subtotal + q.totals.discount_total)} vs ${round2(expect.gross)}`);
+  ok('  ยอดเป็นตัวอักษรมาจาก server ไม่ให้หน้าจอเขียนเอง',
+    q.totals.amount_text.endsWith('บาทถ้วน') || q.totals.amount_text.includes('สตางค์'), q.totals.amount_text);
+  ok('บรรทัด "หมายเหตุ:" ท้ายใบใช้คำเดียวกับ PDF',
+    q.warranty_note.startsWith('เงื่อนไขการรับประกันสินค้า'), q.warranty_note);
+
+  // เลขที่ใบต้องไม่ถูก "กิน" ไปกับการกดดูพรีวิว — วัดจากตัวนับจริง ไม่ใช่จากเวลา
+  // (เทียบก่อน/หลังรอบนี้เท่านั้น ข้ออื่นในด่านนี้ออกใบจริงไปแล้วหลายใบ)
+  const seqSum = async () =>
+    Number((await pool.query(`SELECT COALESCE(SUM(last_seq), 0)::int AS n FROM quotation_counters`)).rows[0].n);
+
+  const before = await countQuotes();
+  const seqBefore = await seqSum();
+  const out = await previewQuotePdf({
+    adminId, spUserId: TEST_SP_USER, quoteCompany: q.quote_company,
+    customerId: cust.customerId, contactId: cust.contactId, items,
+  });
+  const after = await countQuotes();
+  const seqAfter = await seqSum();
+  ok('previewQuotePdf ได้ไฟล์ PDF จริง',
+    out.pdf.subarray(0, 5).toString('latin1') === '%PDF-' && out.pdf.length > 10_000,
+    `${(out.pdf.length / 1024).toFixed(0)} KB`);
+  ok('  ไม่เขียน quotations สักแถว (ยังเป็นแค่พรีวิว)', before === after, `${before} → ${after}`);
+  ok('  ไม่กินเลขที่ใบ — ตัวนับไม่ขยับ', seqBefore === seqAfter, `${seqBefore} → ${seqAfter}`);
+
+  // ── ด่าน "ผ่าน HTTP จริง" ──
+  // service ผ่านไม่ได้แปลว่า endpoint ผ่าน — เคสจริง 2026-09-17: ชื่อไฟล์ภาษาไทยใน
+  // `Content-Disposition` ทำให้ Node โยน ERR_INVALID_CHAR ⇒ route ตอบ 500 ทั้งที่ service ปกติ
+  const token = jwt.sign(
+    { id: adminId, username: TEST_ADMIN_USERNAME, name: 'DIAG', role: 'admin' },
+    getJwtSecret(),
+    { expiresIn: '5m' }
+  );
+  const httpRes = await fetch(`${BASE}/api/admin/webquote/preview-pdf`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      sp_user_id: TEST_SP_USER,
+      quote_company: q.quote_company,
+      customer_id: cust.customerId,
+      contact_id: cust.contactId,
+      items,
+    }),
+  });
+  const httpBuf = Buffer.from(await httpRes.arrayBuffer());
+  ok('  ยิงผ่าน HTTP จริงก็ได้ไฟล์ (ไม่ใช่แค่เรียก service ตรง ๆ)',
+    httpRes.status === 200 && httpBuf.subarray(0, 5).toString('latin1') === '%PDF-',
+    `HTTP ${httpRes.status} · ${(httpBuf.length / 1024).toFixed(0)} KB`);
+  ok('  ชื่อไฟล์ใน Content-Disposition เป็น ASCII (ไทยต้องอยู่ในรูป filename*)',
+    /filename="[\x20-\x7e]+\.pdf"/.test(String(httpRes.headers.get('content-disposition') ?? '')),
+    String(httpRes.headers.get('content-disposition') ?? ''));
+
+  let rejected = '';
+  try {
+    await previewQuotePdf({
+      adminId, spUserId: TEST_SP_USER, quoteCompany: 'XX',
+      customerId: cust.customerId, contactId: cust.contactId, items,
+    });
+  } catch (e: any) {
+    rejected = e instanceof WebQuoteError ? e.code : 'OTHER';
+  }
+  ok('  ระบุใบผิด (ไม่ใช่ PM/THT) ⇒ ปฏิเสธ 400', rejected === 'BAD_REQUEST', rejected);
+}
+
 async function main() {
   console.log(`${BOLD}webQuoteSmoke — ด่านเฟส D${RESET} ${DIM}(${BASE})${RESET}`);
 
@@ -863,6 +983,7 @@ async function main() {
     await case6();
     await case7();
     await case8();
+    await case9();
   } finally {
     await teardown();
   }

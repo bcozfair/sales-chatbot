@@ -52,10 +52,13 @@ import {
 } from './priceApprovalService.js';
 import {
   resolveDeliveryTerms, deliveryDisplayText, deliveryTypeLabel,
-  parseDeliveryTypeOverride, DELIVERY_TYPES, type DeliveryTypeKey,
+  parseDeliveryTypeOverride, DELIVERY_TYPES, type DeliveryTypeKey, type DeliveryTerms,
 } from '../utils/deliveryTerms.js';
+import ThaiBahtText from 'thai-baht-text';
 import { buildThaiAddress } from '../utils/address.js';
-import { round2, calcNetPrice } from '../utils/pricing.js';
+import { COMPANY_PROFILES, type CompanyProfile } from '../utils/companyProfile.js';
+import { round2, calcNetPrice, quotationDocumentTotals } from '../utils/pricing.js';
+import { resolveMinWarrantyDisplay, warrantyNoteText } from '../utils/warranty.js';
 import { loadActiveQuotation } from './quotationAgent.js';
 import { appendReviseFrom } from '../utils/flexTemplates.js';
 import {
@@ -424,6 +427,8 @@ export interface WebQuoteDeliveryInput {
 
 /** ยาวกว่านี้คือวางข้อความผิดช่อง ไม่ใช่เครดิต — ค่ายาวสุดที่มีจริงในฐานคือ 18 ตัวอักษร */
 const PAYMENT_TERMS_MAX = 60;
+/** ความยาวสูงสุดของหมายเหตุรายบรรทัด — ยาวกว่านี้ใบ PDF จะดันแถวจนตกหน้า */
+const ITEM_REMARK_MAX = 200;
 
 /**
  * เครดิตที่ตั้งทับ — `null` = ไม่ได้ตั้ง ให้ใช้ของลูกค้าตามเดิม
@@ -504,6 +509,13 @@ export interface WebQuoteItemInput {
    * สินค้าจริงเอาชื่อจาก products เสมอ (ดูกติกาในหัวข้อ resolveItems)
    */
   name?: string | null;
+  /**
+   * หมายเหตุของบรรทัดนั้น — ขึ้นใต้ชื่อสินค้าบนใบ PDF จริง (pdfGenerator: `remarkHtml`)
+   * เป็นข้อเท็จจริงของ *ใบ* ไม่ใช่ของสินค้า ⇒ client เป็นเจ้าของค่านี้ได้เต็มที่
+   * ทางเดิมของ LINE ให้พิมพ์ผ่านหน้า LIFF (`quote-edit.html` ปุ่ม "📝 เพิ่มหมายเหตุ") อยู่แล้ว
+   * และ snapshot รองรับทั้งขาเขียน (`buildItemSnapshots`) และขาอ่าน (`legacyItems`) มาตั้งแต่ต้น
+   */
+  remark?: string | null;
 }
 
 export interface CreateDraftResult {
@@ -579,6 +591,11 @@ async function resolveItems(items: WebQuoteItemInput[]): Promise<any[]> {
 
     const price = Number(raw?.price);
     if (Number.isFinite(price) && price > 0) itemForDb.price = price;
+
+    // หมายเหตุรายบรรทัด — ตัดหัวท้ายได้ (เป็นข้อความอิสระ ไม่ใช่ชื่อที่ Odoo เอาไปจับคู่ partner)
+    // ตัดความยาวกันคนวางทั้งอีเมลลงมา เพราะช่องนี้ไปโผล่บนกระดาษ A4 ที่มีที่จำกัด
+    const remark = String(raw?.remark ?? '').trim();
+    if (remark) itemForDb.remark = remark.slice(0, ITEM_REMARK_MAX);
 
     // ── ข้อยกเว้นข้อเดียวของกฎ "ชื่อสินค้ามาจาก DB เสมอ": บรรทัดค่าบริการ ──
     // สินค้าตัวนี้เป็น is_system_item ตัวเดียวที่ทุกบรรทัดใช้ร่วมกัน (model = N/A) ชื่อใน products
@@ -887,6 +904,10 @@ export interface WebQuotePreviewItem {
   is_shipping_fee: boolean;
   is_manual_service: boolean;
   warranty_display: string;
+  /** คำอธิบายสินค้าที่ขึ้นใต้ชื่อบนใบจริง — มาจาก snapshot ตัวเดียวกับที่ PDF พิมพ์ */
+  sales_description: string;
+  /** หมายเหตุที่แอดมินพิมพ์ให้บรรทัดนี้ — ขึ้นบนใบจริงเช่นกัน */
+  remark: string;
   /** ข้อกฎที่บรรทัดนี้ติด (จับคู่ด้วยรหัสรุ่น — ถ้อยคำมาจาก buildViolationDisplay ฝั่ง server) */
   violations: Violation[];
 }
@@ -907,6 +928,34 @@ export interface WebQuotePreviewQuote {
   delivery_type_auto: DeliveryTypeKey;
   delivery_days_auto: number;
   delivery_auto_label: string;
+  /**
+   * ยอดท้ายใบทั้ง 5 ช่องที่จะพิมพ์บนใบจริง — คิดด้วย `quotationDocumentTotals()` ตัวเดียว
+   * กับที่ pdfGenerator ใช้ ⇒ จอ "ใบร่าง" กับไฟล์ PDF ไม่มีทางได้เลขคนละชุด
+   * (`discount` เป็น 0 เสมอตามที่ใบพิมพ์จริง — เหตุผลอยู่ที่ utils/pricing.ts)
+   */
+  totals: {
+    subtotal: number;
+    discount: number;
+    after_discount: number;
+    vat: number;
+    grand_total: number;
+    /** ยอดสุทธิเป็นตัวอักษรไทย — ใช้แพ็กเกจตัวเดียวกับ PDF ไม่ให้ frontend เขียนเอง */
+    amount_text: string;
+    /**
+     * ส่วนลดที่หักไปแล้วจริง (ราคาตั้ง − ราคาหลังลดสองชั้น) — **ไม่ใช่ช่อง `discount` ของใบ**
+     * ช่องบนกระดาษพิมพ์ `0.00` เสมอตามแบบฟอร์มของบริษัท ตัวนี้จึงมีไว้ให้ "แถบสรุปของแอดมิน"
+     * ท้ายจอเท่านั้น (2026-09-17 เจ้าของสั่งให้สรุปยอดส่วนลดให้เห็น) — ห้ามเอาไปพิมพ์ลงใบ
+     * ⇒ ส่งมาจาก `quotationDocumentTotals().discount_line` ไม่ให้หน้าจอบวกเอง
+     */
+    discount_total: number;
+  };
+  /** บรรทัด "หมายเหตุ:" ท้ายใบ — คำเดียวกับที่ PDF และไฟล์นำเข้า Odoo ใช้ */
+  warranty_note: string;
+  /**
+   * หัวกระดาษของบริษัทผู้ขายใบนี้ (ชื่อ · ที่อยู่ · เลขผู้เสียภาษี · โลโก้ · ข้อความปิดท้าย)
+   * ส่งมาให้แทนที่จะให้หน้าจอถือสำเนาของตัวเอง — ที่อยู่บริษัทต้องมีที่แก้ที่เดียวกับที่ PDF ใช้
+   */
+  company: CompanyProfile;
 }
 
 export interface WebQuotePreviewResult {
@@ -986,14 +1035,34 @@ export interface WebQuotePreviewResult {
   };
 }
 
-export async function previewDraft(params: {
+export interface WebQuotePreviewParams {
   customerId: number | string;
   contactId: number | string;
   items: WebQuoteItemInput[];
   /** ค่าที่แอดมินตั้งทับ — ต้องเดินทางมาถึงพรีวิวด้วย ไม่งั้นจอกับใบจริงคนละเรื่อง */
   paymentTermsOverride?: any;
   delivery?: WebQuoteDeliveryInput[] | null;
-}): Promise<WebQuotePreviewResult> {
+}
+
+/**
+ * ของที่ "อยู่ระหว่างทาง" ของพรีวิว — รายการดิบ + snapshot ต่อหนึ่งใบ
+ *
+ * ไม่ส่งออกไปหา client (หน้าจอไม่ต้องรู้ และก้อนใหญ่) แต่ **ตัวเจน PDF พรีวิวต้องใช้**
+ * ⇒ ทำเป็นผลพลอยได้ของ pipeline เดิม ไม่ใช่ pipeline ที่สอง — ถ้าเขียนทางเดินคู่ขนาน
+ * วันหนึ่ง PDF ที่กดดูจะไม่ใช่ใบเดียวกับที่จอโชว์ ซึ่งเป็นอาการที่ไม่มีอะไรฟ้องเลย
+ */
+interface PreviewArtifacts {
+  byCompany: Partial<Record<'PM' | 'THT', { items: any[]; snaps: any[]; terms: DeliveryTerms }>>;
+}
+
+/** ทางเข้าสาธารณะ — คืนเฉพาะสิ่งที่หน้าจอต้องใช้ */
+export async function previewDraft(params: WebQuotePreviewParams): Promise<WebQuotePreviewResult> {
+  return (await previewDraftInternal(params)).result;
+}
+
+async function previewDraftInternal(
+  params: WebQuotePreviewParams
+): Promise<{ result: WebQuotePreviewResult; artifacts: PreviewArtifacts }> {
   if (!Array.isArray(params.items) || params.items.length === 0) {
     throw new WebQuoteError('BAD_REQUEST', 'ต้องมีรายการสินค้าอย่างน้อย 1 รายการ (items)', 400);
   }
@@ -1095,11 +1164,15 @@ export async function previewDraft(params: {
       is_shipping_fee: isShippingFeeItem(it, cfg),
       is_manual_service: it.is_manual_service === true,
       warranty_display: String(snap?.warranty_display || ''),
+      // snapshot มาก่อนเสมอ — เป็นค่าที่จะถูกตรึงลงใบจริง ส่วน it.* เป็นของก่อนตรึง
+      sales_description: String(snap?.sales_description ?? it.sales_description ?? ''),
+      remark: String(snap?.remark ?? it.remark ?? ''),
       violations: violationsOf(model),
     };
   };
 
   const quotes: WebQuotePreviewQuote[] = [];
+  const artifacts: PreviewArtifacts = { byCompany: {} };
   for (const company of ['PM', 'THT'] as const) {
     const mine = byCompany[company];
     if (mine.length === 0) continue;
@@ -1125,6 +1198,8 @@ export async function previewDraft(params: {
       delivery_days_override: daysOverride,
     });
     const auto = resolveDeliveryTerms(autoOnly);
+    // ใช้ withStock ไม่ใช่ mine — PDF พิมพ์คำเตือน "สินค้าคงเหลือ N pcs." จากค่านี้
+    artifacts.byCompany[company] = { items: [...withStock], snaps: [...snaps], terms };
 
     quotes.push({
       quote_company: company,
@@ -1139,6 +1214,10 @@ export async function previewDraft(params: {
       delivery_type_auto: auto.type,
       delivery_days_auto: auto.days,
       delivery_auto_label: deliveryTypeLabel(auto.type),
+      // ยอดจริงคิดหลังบรรทัดค่าบริการเข้าใบแล้ว (ดูท้ายฟังก์ชัน) — ตรงนี้เป็นที่จองไว้เฉย ๆ
+      totals: { subtotal: 0, discount: 0, after_discount: 0, vat: 0, grand_total: 0, amount_text: '', discount_total: 0 },
+      warranty_note: warrantyNoteText(resolveMinWarrantyDisplay(snaps)),
+      company: COMPANY_PROFILES[company],
     });
   }
 
@@ -1157,12 +1236,30 @@ export async function previewDraft(params: {
     const feeSnap = buildShippingFeeSnapshot(cfg, incomingFee ?? undefined);
     const target = quotes.find((q) => q.quote_company === 'PM') ?? quotes[0];
     target.items.push(toPreviewItem(feeSnap, feeSnap));
+    // ใบเดียวกันบน PDF ต้องมีบรรทัดนี้ด้วย — feeSnap เป็นทั้ง item และ snapshot เหมือนตอน
+    // insert จริง (applyShippingFeeToQuoteGroup เขียนก้อนเดียวกันลงทั้ง items และ item_details)
+    const art = artifacts.byCompany[target.quote_company];
+    if (art) { art.items.push(feeSnap); art.snaps.push(feeSnap); }
   }
 
-  for (const q of quotes) q.subtotal = round2(q.items.reduce((sum, it) => sum + it.line_total, 0));
+  for (const q of quotes) {
+    q.subtotal = round2(q.items.reduce((sum, it) => sum + it.line_total, 0));
+    // ยอดท้ายใบคิดจาก "รายการของใบนั้น" ด้วยฟังก์ชันเดียวกับ PDF — ไม่ได้บวกจาก line_total
+    // ที่ปัดรายบรรทัดมาแล้ว เพราะ PDF บวกค่าดิบก่อนค่อยปัด สองวิธีนี้ต่างกันได้ระดับสตางค์
+    const t = quotationDocumentTotals(q.items);
+    q.totals = {
+      subtotal: round2(t.net),
+      discount: t.discount_shown,
+      after_discount: round2(t.net),
+      vat: t.vat,
+      grand_total: t.grand,
+      amount_text: (ThaiBahtText as any)(t.grand),
+      discount_total: round2(t.discount_line),
+    };
+  }
   const grandTotal = round2(quotes.reduce((sum, q) => sum + q.subtotal, 0));
 
-  return {
+  const result: WebQuotePreviewResult = {
     customer: {
       customer_id: resolvedCustomerId,
       contact_id: contactId,
@@ -1200,6 +1297,89 @@ export async function previewDraft(params: {
       auto_applied: keepFee && incomingFee?.is_manual_service !== true,
     },
   };
+  return { result, artifacts };
+}
+
+/**
+ * PDF พรีวิวของ "ใบที่จะได้" — **ไม่เขียน DB สักแถว และไม่ออกเลขที่ใบ**
+ *
+ * ทำไมต้องมี: จอใบร่างเลียนแบบใบจริงได้ใกล้แค่ไหนก็ยังเป็น HTML คนละตัวกับไฟล์ที่ลูกค้าเปิด
+ * ปุ่มนี้คือคำตอบสุดท้ายว่า "ของจริงหน้าตาแบบนี้" ⇒ **ต้องเจนด้วย `generateQuotationPDF()`
+ * ตัวเดียวกับใบจริงเท่านั้น** ห้ามมี template ที่สองเด็ดขาด
+ *
+ * ของที่ยังไม่มีในขั้นร่างและจะไม่เดาให้:
+ *   · เลขที่ใบ — ออกตอนยืนยันเท่านั้น (allocateQuotationNo) เอกสารจึงพิมพ์ว่า `DRAFT`
+ *   · วันที่ — ใบร่างไม่มี created_at ⇒ pdfGenerator ลงวันไทยของวันนี้ ตรงกับที่จอโชว์
+ *
+ * ตัวตนสองคนบนหัวกระดาษอ่านแบบ **read-only** ทั้งคู่:
+ *   · เซลส์ที่ออกในนาม — `getSalespersonByUserId` ไม่ใช่ `ensureWebProxy` เพราะพรีวิวต้องไม่
+ *     ไปสร้างแถวพร็อกซีใน `salesperson` (เหตุผลเดียวกับที่ POST /preview ไม่รับ sp_user_id)
+ *   · ผู้เสนอราคา — โปรไฟล์ของแอดมินที่ล็อกอินอยู่ (ชื่อ/เบอร์/คีย์ลายเซ็น)
+ */
+export async function previewQuotePdf(params: WebQuotePreviewParams & {
+  adminId: number;
+  /** เซลส์ที่ "ออกในนาม" — ไม่ส่งมาก็เจนได้ แค่ช่องลายเซ็นซ้ายจะว่าง */
+  spUserId?: string | null;
+  /** ใบไหนของคำขอนี้ — คำขอเดียวออกได้ทั้ง PM และ THT ⇒ ต้องระบุ */
+  quoteCompany: string;
+}): Promise<{ pdf: Buffer; filename: string; quote_company: 'PM' | 'THT' }> {
+  const company = String(params.quoteCompany || '').trim().toUpperCase();
+  if (company !== 'PM' && company !== 'THT') {
+    throw new WebQuoteError('BAD_REQUEST', 'ต้องระบุใบที่จะพรีวิว (quote_company = PM หรือ THT)', 400);
+  }
+
+  const { result, artifacts } = await previewDraftInternal(params);
+  const art = artifacts.byCompany[company];
+  if (!art || art.items.length === 0) {
+    throw new WebQuoteError('BAD_REQUEST', `คำขอนี้ไม่มีใบของ ${company}`, 400);
+  }
+
+  const sp = params.spUserId ? await getSalespersonByUserId(String(params.spUserId)) : null;
+  const issuer = await getAdminIssuerProfile(params.adminId);
+  const c = result.customer;
+
+  // รูปร่างเดียวกับที่ enrichQuotationData() คืนให้ route /download-pdf — pdfGenerator อ่านจาก
+  // คีย์แบน ๆ พวกนี้ล้วน ๆ ไม่ได้แตะ DB เอง ⇒ ใบร่างที่ยังไม่มีแถวในฐานจึงเจนได้ด้วยชุดเดียวกัน
+  const quoteData: any = {
+    id: null,
+    quotation_no: '',
+    created_at: null,
+    customer_code: c.reference,
+    customer_tax_id: c.tax_id,
+    company_name: c.display_name,
+    customer_name: c.display_name,
+    contact_name: c.contact_name,
+    contact_phone: c.contact_phone,
+    contact_email: c.contact_email,
+    contact_address: c.address,
+    delivery_address: c.address,
+    payment_terms: c.payment_terms,
+    salesperson_name: sp?.name || '',
+    salesperson_phone: sp?.phone || '',
+    salesperson_employee_code: sp?.salesperson_id || null,
+    // ไม่มีโปรไฟล์ = ยังไม่ได้ตั้งชื่อผู้จัดทำ ⇒ ช่องขวาเดินเส้นเดิมของใบ LINE (ไม่มีชื่อ ไม่มีลายเซ็น)
+    issuer_name: issuer?.employee_quotation_id || null,
+    issuer_phone: issuer?.employee_quotation_phone || null,
+    issuer_sig_key: issuer?.signature_key || null,
+    items: art.items,
+    item_details: art.snaps,
+    // กำหนดส่งที่ resolve แล้วจากพรีวิว — ส่งเป็นก้อน "ตรึง" เพื่อให้ PDF พิมพ์ข้อความเดียวกับจอ
+    // เป๊ะ ๆ แทนที่จะให้มันไปคิดใหม่จาก snapshot แล้วมีโอกาสได้คนละคำ
+    delivery_terms: {
+      type: art.terms.type,
+      days: art.terms.days,
+      all_in_stock: art.terms.all_in_stock,
+      type_source: art.terms.type_source,
+      days_source: art.terms.days_source,
+    },
+  };
+
+  const { generateQuotationPDF } = await import('../pdfGenerator.js');
+  const pdf = Buffer.from(await generateQuotationPDF(quoteData, 'DRAFT'));
+  // ชื่อไฟล์เป็น ASCII ล้วน — ค่านี้ไปลง header `Content-Disposition` และ Node **โยน
+  // ERR_INVALID_CHAR ทันทีถ้ามีอักขระไทย** (เจอ 2026-09-17: route ตอบ 500 ทั้งที่ service ทำงานปกติ)
+  // อยากได้ชื่อไทยให้ใส่ `filename*=UTF-8''…` ที่ฝั่ง route เพิ่ม ไม่ใช่ยัดลงตัวนี้
+  return { pdf, filename: `quotation-draft-${company}`, quote_company: company };
 }
 
 /**
