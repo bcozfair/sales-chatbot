@@ -134,7 +134,7 @@ const ENTITY_LABELS: Record<string, string> = {
   credit_policy: 'นโยบายเครดิต',
   blacklist: 'บัญชีห้ามเสนอราคา',
   admin_user: 'ผู้ใช้งานระบบ',
-  salesperson: 'ข้อมูลพนักงาน',
+  salesperson: 'พนักงานขาย',
   sync_setting: 'ตั้งค่าการ sync',
   traffic: 'รายงานการใช้งาน',
   audit_log: 'บันทึกการแก้ไข',

@@ -797,7 +797,7 @@ ALTER TABLE public.admin_users ADD COLUMN IF NOT EXISTS signature_key character 
 ### 2.11 ผลข้างเคียงที่ต้องจัดการ
 
 * `GET /api/admin/salespersons` ต้องกรอง `user_id NOT LIKE 'web:%'` ออก **(ทำแล้วในเฟส B)**
-  ไม่งั้นหน้า "จัดการข้อมูลพนักงาน" จะเต็มไปด้วยแถวพร็อกซีและขึ้นเตือนรหัสซ้ำ
+  ไม่งั้นหน้า "จัดการพนักงานขาย" จะเต็มไปด้วยแถวพร็อกซีและขึ้นเตือนรหัสซ้ำ
 * `quotation_count` ที่ใช้เตือนตอนลบพนักงาน จะไม่นับใบที่ออกผ่านเว็บของคนนั้น — ยอมรับได้ในเฟสแรก
 * **1 คู่ (admin × เซลส์) = ร่างได้ครั้งละ 1 ใบ** เหมือน LINE เป๊ะ (`deletePendingQuotations`)
 * **ลบแอดมินทิ้ง** ([`DELETE /api/admin/users/:id`](../index.ts)) → ไฟล์ลายเซ็นใน `admin_sigs/` จะค้าง

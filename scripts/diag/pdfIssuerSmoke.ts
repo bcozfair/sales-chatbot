@@ -288,7 +288,7 @@ try {
   const acting = await listActingSalespersons();
   ok('7a. listActingSalespersons() ไม่เห็นแถวพร็อกซี', !acting.some(a => a.user_id === tmpProxyUserId));
   const adminList = await listSalespersonsForAdmin();
-  ok('7b. หน้า "จัดการข้อมูลพนักงาน" ไม่เห็นแถวพร็อกซี', !adminList.some((r: any) => r.user_id === tmpProxyUserId));
+  ok('7b. หน้า "จัดการพนักงานขาย" ไม่เห็นแถวพร็อกซี', !adminList.some((r: any) => r.user_id === tmpProxyUserId));
   const dups = await findDuplicateEmployeeCodeNames('DIAGX', 'UsomeoneElse');
   ok('7c. คำเตือน "รหัสพนักงานซ้ำ" ไม่นับแถวพร็อกซี (พร็อกซีก๊อป salesperson_id มาจากเซลส์จริง)',
      !dups.includes('DIAG เซลส์ปลอม'), dups.join(', ') || '(ไม่มี)');

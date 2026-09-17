@@ -135,24 +135,28 @@ const NAV_GROUPS: { key: string; label: string; icon: typeof LayoutDashboard; it
   },
   {
     // แยกจากกลุ่ม "จัดการข้อมูลผู้ใช้งาน" เมื่อ 2026-09-17 ตามที่เจ้าของสั่ง —
-    // กลุ่มนี้คือ "ข้อมูลอ้างอิง" (สินค้า/ลูกค้า/พนักงาน) ส่วนอีกกลุ่มคือ "คนที่ล็อกอินเข้าระบบ"
-    // สองหน้าแรกอ่านอย่างเดียว ต้นทางคือ Odoo
+    // เส้นแบ่งคือ **ข้อมูลที่ระบบใช้ตัดสินใจ** (สินค้า/ลูกค้า/ใครห้ามเสนอราคา) อยู่กลุ่มนี้
+    // ส่วน **คนที่ล็อกอินเข้าระบบ** อยู่อีกกลุ่ม — "บัญชีห้ามเสนอราคา" จึงอยู่ที่นี่ทั้งที่ชื่อ
+    // ขึ้นต้นว่า "บัญชี": มันคือรายชื่อลูกค้าที่ห้ามออกใบให้ ไม่ใช่บัญชีผู้ใช้ (เจ้าของสั่งย้าย
+    // 2026-09-17 หลังเห็นของจริง) · สองหน้าแรกอ่านอย่างเดียว ต้นทางคือ Odoo
     key: 'data',
     label: 'จัดการข้อมูลทั่วไป',
     icon: Database,
     items: [
       { tab: 'productsdata', label: 'ข้อมูลสินค้า', icon: Package, roles: ['admin', 'approver', 'subadmin'] },
       { tab: 'customersdata', label: 'ข้อมูลลูกค้า', icon: Contact, roles: ['admin', 'approver', 'subadmin'] },
-      { tab: 'salespersons', label: 'จัดการข้อมูลพนักงาน', icon: UserCheck, roles: ['admin'] },
+      { tab: 'blacklist', label: 'บัญชีห้ามเสนอราคา', icon: Ban, roles: ['admin', 'user'] },
     ],
   },
   {
+    // role `user` เห็นได้เมนูเดียวคือ "บัญชีห้ามเสนอราคา" ซึ่งย้ายออกไปกลุ่มบนแล้ว ⇒
+    // กลุ่มนี้กลายเป็นของ admin ล้วน และถูกซ่อนทั้งกลุ่มให้เอง (`visibleGroups` ตัดกลุ่มที่ว่าง)
     key: 'people',
     label: 'จัดการข้อมูลผู้ใช้งาน',
     icon: UsersIcon,
     items: [
+      { tab: 'salespersons', label: 'จัดการพนักงานขาย', icon: UserCheck, roles: ['admin'] },
       { tab: 'users', label: 'จัดการผู้ใช้งานระบบ', icon: UsersIcon, roles: ['admin'] },
-      { tab: 'blacklist', label: 'บัญชีห้ามเสนอราคา', icon: Ban, roles: ['admin', 'user'] },
     ],
   },
   {
@@ -183,7 +187,7 @@ const PAGE_TITLES: Record<MainTab, string> = {
   approvals: 'อนุมัติราคา',
   quotations: 'ประวัติใบเสนอราคา',
   promotions: 'จัดการโปรโมชันส่วนลด',
-  salespersons: 'จัดการข้อมูลพนักงาน',
+  salespersons: 'จัดการพนักงานขาย',
   users: 'จัดการผู้ใช้งานระบบ',
   blacklist: 'บัญชีห้ามเสนอราคา',
   productsdata: 'ข้อมูลสินค้า',
@@ -349,7 +353,7 @@ function AdminContent() {
   }[] = [
     { key: 'quotations', label: 'ใบเสนอราคา', unit: 'รายการ', icon: FileText, onClick: () => goTo('quotations') },
     { key: 'promotions', label: 'โปรโมชันส่วนลด', unit: 'รายการ', icon: Tag, onClick: () => goTo('promotions') },
-    { key: 'salespersons', label: 'ข้อมูลพนักงาน', unit: 'คน', icon: UserCheck, onClick: () => goTo('salespersons') },
+    { key: 'salespersons', label: 'พนักงานขาย', unit: 'คน', icon: UserCheck, onClick: () => goTo('salespersons') },
     { key: 'quotation_rules', label: 'เงื่อนไขหลัก', unit: 'รายการ', icon: Sliders, onClick: () => goToSubTab('quotation') },
     { key: 'optional_links', label: 'สินค้าพ่วงเสริม', unit: 'รายการ', icon: Sliders, onClick: () => goToSubTab('optional') },
     { key: 'stock_rules', label: 'ระงับเมื่อหมดสต็อก', unit: 'รายการ', icon: Sliders, onClick: () => goToSubTab('stock') },
