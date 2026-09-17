@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ลองคิดราคา · เครื่องคิดราคาสินค้าสั่งทำ</title>
+<link rel="stylesheet" href="_theme.css">
+<script src="_pr-labels.js"></script>
+<script src="_pr-ui.js"></script>
+<script src="_pr-engine.js"></script>
+<style>
+  /* โทเคนสีมาจาก _theme.css (คัดจาก frontend/src/index.css) — ที่นี่มีแต่โครงเฉพาะหน้านี้ */
+  .doc { max-width: 1120px; margin: 0 auto; }
+  .doc h1 { font-size: 20px; font-weight: 800; color: var(--c-text-max); margin: 20px 0 4px; }
+  .doc .sub { color: var(--c-text-muted); font-size: 12.5px; margin: 0 0 16px; }
+
+  .pick { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+  .pick .btn.on { border-color: var(--brand-border); color: var(--brand-fg); background: var(--brand-soft); }
+
+  .cols { display: grid; grid-template-columns: minmax(0,1fr) 380px; gap: 16px; align-items: start; }
+  @media (max-width: 1023px) { .cols { grid-template-columns: minmax(0,1fr); } }
+
+  .stepno {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 20px; height: 20px; border-radius: 50%; margin-right: 7px;
+    background: var(--c-surface-3); border: 1px solid var(--c-line-strong);
+    color: var(--c-text-strong); font-size: 11px; font-weight: 800; flex: none;
+  }
+
+  .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+  .f { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .f > label { font-size: 11.5px; font-weight: 700; color: var(--c-text-soft); }
+  .f .std { font-size: 11px; color: var(--c-text-faint); }
+  .f .what { font-size: 11px; color: var(--c-text-faint); line-height: 1.45; }
+  .f .row { display: flex; align-items: center; gap: 6px; }
+  .f .row input.cell { flex: 1; min-width: 0; }
+  .f .row .u { font-size: 11.5px; color: var(--c-text-muted); flex: none; }
+
+  .checks { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 4px 14px; }
+  .checks label { display: flex; align-items: flex-start; gap: 7px; font-size: 12.5px;
+                  color: var(--c-text-soft); cursor: pointer; padding: 3px 0; }
+  .checks input { margin-top: 3px; accent-color: var(--brand); flex: none; }
+
+  .result { position: sticky; top: 16px; }
+  @media (max-width: 1023px) { .result { position: static; } }
+  .rhead { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+           padding-bottom: 10px; border-bottom: 1px solid var(--c-line); }
+  .rhead .m { font-size: 14px; font-weight: 800; color: var(--c-text-max); }
+  .rhead .mn { display: block; font-size: 11.5px; font-weight: 400; color: var(--c-text-muted); }
+
+  .rline { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px;
+           padding: 8px 0; border-bottom: 1px dashed var(--c-surface-3); }
+  .rline .l { font-size: 12.5px; color: var(--c-text-strong); }
+  .rline .a { font-size: 12.5px; font-weight: 700; text-align: right; color: var(--c-text-max);
+              font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .rline .d { grid-column: 1/-1; font-size: 11px; color: var(--c-text-faint); overflow-wrap: anywhere; }
+
+  .rtot { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 10px;
+          border-top: 1px solid var(--c-line); margin-top: 10px; padding-top: 10px; }
+  .rtot .l { font-size: 12px; font-weight: 700; color: var(--c-text-strong); }
+  .rtot .a { font-size: 24px; font-weight: 800; color: var(--brand-fg);
+             font-variant-numeric: tabular-nums; text-align: right; }
+  .rtot.warn .a { color: var(--amber-800); }
+  .rtot.bad  .a { color: var(--red-700); }
+  .rtot .vat { display: block; font-size: 11px; font-weight: 400; color: var(--c-text-faint); }
+
+  .empty { padding: 20px 0; text-align: center; color: var(--c-text-faint); font-size: 12.5px; }
+</style>
+</head>
+<body>
+<div class="mock-stage">
+<div class="doc">
+
+  <h1>ลองคิดราคา</h1>
+  <p class="sub">เลือกสเปกทางซ้าย ราคาและที่มาจะขึ้นทางขวาทันที · ยังไม่รู้จักคำไหน ดูได้ที่ <a href="pr-manual.html" style="color:var(--brand-fg)">คู่มือการใช้งาน</a></p>
+
+  <div class="pick" id="pick"></div>
+
+  <div class="cols">
+    <div>
+      <div class="card" id="card-model">
+        <h2 class="sec"><span class="stepno">·</span>รุ่นสินค้า</h2>
+        <div class="f">
+          <select class="cell" id="model" style="height:38px;font-size:13px"></select>
+          <span class="std" id="model-note"></span>
+        </div>
+      </div>
+
+      <div class="card" id="card-axes">
+        <h2 class="sec"><span class="stepno">·</span>เลือกจากรายการ</h2>
+        <div class="fields" id="axes"></div>
+      </div>
+
+      <div class="card" id="card-dims">
+        <h2 class="sec"><span class="stepno">·</span>กรอกขนาดที่ลูกค้าบอกมา</h2>
+        <div class="fields" id="dims"></div>
+      </div>
+
+      <div class="card" id="card-opts">
+        <h2 class="sec"><span class="stepno">·</span>ตัวเลือกที่สั่งเพิ่ม</h2>
+        <div class="checks" id="options"></div>
+      </div>
+    </div>
+
+    <div class="card result" id="result"></div>
+  </div>
+
+  <p class="tiny faint" style="margin:18px 0 40px">
+    ราคาที่ได้คือ “ราคาตั้ง” ต่อชิ้น ยังไม่หักส่วนลดและยังไม่รวม VAT ·
+    ตัวอย่างนี้รันในเครื่องเท่านั้น ข้อมูลราคาเป็นของจริงของบริษัท
+  </p>
+
+</div>
+</div>
+
+<script>
+(function () {
+  const U = window.PR_UI, L = window.PR_LABELS, B = window.PR_BOOK, el = U.el;
+  U.bar('calc');
+
+  // ── ชุดสเปกสำเร็จรูป ไว้กดโชว์ตอนพรีเซนต์ ────────────────────────────────
+  const PRESETS = [
+    { t: 'ตัวอย่างจากไฟล์ราคา BH', cfg: { model: 'BH-01C', axes: {}, dims: { dia_mm: 600, width_mm: 150, hold_od_mm: 0, cable_cm: 30, cable_extra_m: 0 }, options: ['conn:pl2'] } },
+    { t: 'ตัวอย่างจากไฟล์ราคา TS-14', cfg: { model: 'TS-14', axes: { sensor: 'K', dia_group: 'Ø6mm./12.7mm.' }, dims: { L1: 200, L2: 150 }, options: [] } },
+    { t: 'งานทั่วไป เทอร์โมคัปเปิลเกลียว', cfg: { model: 'TSK-04', axes: { D: '6', thread: '1/2”' }, dims: { L1: 300, teflon_mm: 0 }, options: [] } },
+    { t: 'เคสที่โรงงานไม่รับผลิต', cfg: { model: 'TSK-04', axes: { D: '19', thread: '1/8”' }, dims: { L1: 100, teflon_mm: 0 }, options: [] } },
+    { t: 'เคสที่ต้องขอราคาจากผลิต 2', cfg: { model: 'TS-18', axes: { D: '6', sensor: 'Type K/J', flange: 'ANSI 150# 3"' }, dims: { L1: 100, L2: 50 }, options: [] } }
+  ];
+
+  let cfg = JSON.parse(JSON.stringify(PRESETS[0].cfg));
+  let activePreset = 0;
+
+  const pick = document.getElementById('pick');
+  PRESETS.forEach((p, i) => {
+    const b = el('button', 'btn', p.t);
+    b.type = 'button';
+    b.addEventListener('click', () => {
+      cfg = JSON.parse(JSON.stringify(p.cfg));
+      activePreset = i;
+      document.getElementById('model').value = cfg.model;
+      draw();
+    });
+    pick.append(b);
+  });
+  function markPreset() {
+    [...pick.children].forEach((b, i) => b.classList.toggle('on', i === activePreset));
+  }
+
+  // ── รูปทรงของรุ่น: แกนไหน ขนาดไหน ตัวเลือกไหน ────────────────────────────
+  function collectOptions(pred, into) {
+    if (!pred || typeof pred !== 'object') return;
+    if ('option' in pred) into.add(pred.option);
+    for (const k of ['all', 'any']) if (Array.isArray(pred[k])) pred[k].forEach((p) => collectOptions(p, into));
+    if (pred.not) collectOptions(pred.not, into);
+  }
+  function shape(code) {
+    const m = PR_ENGINE.resolveModel(B, code);
+    const baseAxes = m.base.kind === 'matrix' ? m.base.axes : [];
+    const adderAxes = [...new Set(m.adders.filter((a) => a.byAxis).map((a) => a.byAxis))]
+      .filter((a) => !baseAxes.includes(a));
+    const derived = new Set((m.derivedDims || []).map((d) => d.name));
+    const dims = [...new Set([
+      ...Object.keys(m.standard),
+      ...m.adders.filter((a) => a.kind === 'perUnit' && a.dim).map((a) => a.dim),
+      ...(m.derivedDims || []).flatMap((d) => d.args)
+    ])].filter((d) => !derived.has(d));
+    const opts = new Set();
+    m.adders.forEach((a) => collectOptions(a.when, opts));
+    m.constraints.forEach((c) => collectOptions(c.when, opts));
+    return { m, baseAxes, adderAxes, dims, opts: [...opts] };
+  }
+  const axisValues = (m, i) => [...new Set(Object.keys(m.base.cells).map((k) => k.split(' | ')[i]))];
+  function availableFor(m, i, chosen) {
+    const ok = new Set();
+    for (const k of Object.keys(m.base.cells)) {
+      const parts = k.split(' | ');
+      if (chosen.every((c, j) => c == null || parts[j] === c)) ok.add(parts[i]);
+    }
+    return ok;
+  }
+
+  // ── วาดช่องกรอก ──────────────────────────────────────────────────────────
+  function draw() {
+    const { m, baseAxes, adderAxes, dims, opts } = shape(cfg.model);
+    markPreset();
+
+    const info = L.models[m.code] || {};
+    document.getElementById('model-note').textContent =
+      (info.short ? info.short + ' · ' : '') + (info.note || '');
+
+    // ── แกน ──
+    const axBox = document.getElementById('axes');
+    axBox.replaceChildren();
+    baseAxes.forEach((ax, i) => {
+      const chosen = baseAxes.map((a, j) => (j < i ? cfg.axes[a] : null));
+      const avail = availableFor(m, i, chosen);
+      const meta = L.axes[ax] || {};
+      const f = el('div', 'f');
+      f.append(el('label', null, U.axis(ax) + (meta.unit ? ` (${meta.unit})` : '')));
+      const s = el('select', 'cell');
+      s.id = 'ax-' + ax;
+      for (const v of axisValues(m, i)) {
+        const o = el('option', null, avail.has(v) ? v : `${v}  ·  ไม่รับผลิต`);
+        o.value = v;
+        s.append(o);
+      }
+      if (!cfg.axes[ax] || !axisValues(m, i).includes(cfg.axes[ax])) cfg.axes[ax] = axisValues(m, i)[0];
+      s.value = cfg.axes[ax];
+      s.addEventListener('change', () => { cfg.axes[ax] = s.value; activePreset = -1; draw(); });
+      f.append(s);
+      if (i > 0) f.append(el('span', 'std', `ขนาดนี้ผลิตได้ ${avail.size} จาก ${axisValues(m, i).length} แบบ`));
+      axBox.append(f);
+    });
+    adderAxes.forEach((ax) => {
+      const vals = [...new Set(m.adders.filter((a) => a.byAxis === ax).flatMap((a) => Object.keys(a.rates || {})))];
+      const f = el('div', 'f');
+      f.append(el('label', null, U.axis(ax)));
+      const s = el('select', 'cell');
+      s.id = 'ax-' + ax;
+      const none = el('option', null, '— ไม่มี —'); none.value = ''; s.append(none);
+      for (const v of vals) { const o = el('option', null, v); o.value = v; s.append(o); }
+      const other = el('option', null, 'อื่น ๆ นอกรายการ'); other.value = 'ANSI 150# 3"'; s.append(other);
+      s.value = cfg.axes[ax] || '';
+      s.addEventListener('change', () => { cfg.axes[ax] = s.value; activePreset = -1; render(); });
+      f.append(s);
+      if ((L.axes[ax] || {}).what) f.append(el('span', 'what', L.axes[ax].what));
+      axBox.append(f);
+    });
+    document.getElementById('card-axes').hidden = axBox.children.length === 0;
+
+    // ── ขนาด ──
+    const dBox = document.getElementById('dims');
+    dBox.replaceChildren();
+    for (const d of dims) {
+      const meta = L.dims[d] || {};
+      const f = el('div', 'f');
+      f.append(el('label', null, U.dim(d)));
+      const row = el('div', 'row');
+      const inp = el('input', 'cell r');
+      inp.type = 'number'; inp.id = 'dim-' + d; inp.min = '0'; inp.step = 'any';
+      inp.value = cfg.dims[d] ?? m.standard[d] ?? 0;
+      inp.addEventListener('input', () => { cfg.dims[d] = Number(inp.value) || 0; activePreset = -1; render(); });
+      row.append(inp);
+      if (meta.unit) row.append(el('span', 'u', meta.unit));
+      f.append(row);
+      if (m.standard[d] != null) f.append(el('span', 'std', `มาตรฐาน = ${m.standard[d]} ${meta.unit || ''} (รวมในราคาตั้งแล้ว)`));
+      else if (meta.what) f.append(el('span', 'what', meta.what));
+      dBox.append(f);
+    }
+    document.getElementById('card-dims').hidden = dims.length === 0;
+
+    // ── ตัวเลือก ──
+    const oBox = document.getElementById('options');
+    oBox.replaceChildren();
+    for (const o of opts) {
+      const lab = el('label');
+      const c = el('input');
+      c.type = 'checkbox'; c.id = 'opt-' + o; c.checked = cfg.options.includes(o);
+      c.addEventListener('change', () => {
+        cfg.options = c.checked ? [...new Set([...cfg.options, o])] : cfg.options.filter((x) => x !== o);
+        activePreset = -1;
+        render();
+      });
+      lab.append(c, el('span', null, U.opt(o)));
+      oBox.append(lab);
+    }
+    document.getElementById('card-opts').hidden = opts.length === 0;
+
+    // เลขขั้นตอนนับเฉพาะการ์ดที่ไม่ถูกซ่อน — รุ่น BH ไม่มีแกนให้เลือก การ์ดที่ 2 จึงหายไป
+    // ถ้าเลขตายตัว จะเห็นเป็น 1 → 3 → 4 แล้วคนอ่านจะคิดว่าตัวเองทำข้ามขั้น
+    let n = 0;
+    for (const id of ['card-model', 'card-axes', 'card-dims', 'card-opts']) {
+      const card = document.getElementById(id);
+      if (!card || card.hidden) continue;
+      card.querySelector('.stepno').textContent = String(++n);
+    }
+
+    render();
+  }
+
+  // ── วาดผล ────────────────────────────────────────────────────────────────
+  function render() {
+    const out = PR_ENGINE.computePrice(cfg, B);
+    const st = L.status[out.status];
+    const box = document.getElementById('result');
+    box.replaceChildren();
+
+    const head = el('div', 'rhead');
+    const left = el('div');
+    const m = el('span', 'm', out.model);
+    left.append(m);
+    const info = L.models[out.model] || {};
+    if (info.short) left.append(el('span', 'mn', info.short));
+    head.append(left);
+    head.append(el('span', 'tag ' + (st.tone === 'ok' ? 'ok' : st.tone === 'warn' ? 'warn' : 'low'), st.label));
+    box.append(head);
+
+    if (out.breakdown.length) {
+      for (const b of out.breakdown) {
+        const r = el('div', 'rline');
+        r.append(el('span', 'l', b.label));
+        r.append(el('span', 'a', U.baht(b.amount)));
+        if (b.detail) r.append(el('span', 'd', U.humanDetail(b.detail)));
+        box.append(r);
+      }
+    } else {
+      box.append(el('div', 'empty', 'สเปกนี้ยังไม่มีราคาให้คิด'));
+    }
+
+    const tot = el('div', 'rtot ' + (st.tone === 'ok' ? '' : st.tone));
+    const l = el('span', 'l');
+    l.append(document.createTextNode('ราคาตั้งต่อชิ้น (บาท)'));
+    l.append(el('span', 'vat', 'ยังไม่หักส่วนลด · ยังไม่รวม VAT'));
+    tot.append(l);
+    tot.append(el('span', 'a', out.status === 'notManufacturable' ? '—' : U.baht(out.unitPrice)));
+    box.append(tot);
+
+    if (out.violations.length) {
+      for (const v of out.violations) {
+        const cls = v.level === 'block' ? 'amber' : v.level === 'quoteOnRequest' ? 'amber' : 'ok';
+        const d = el('div', 'banner ' + (v.level === 'warn' ? 'ok' : 'amber'));
+        d.append(el('div', null, v.message));
+        box.append(d);
+      }
+    }
+    // "คิดราคาได้" ไม่ต้องอธิบายซ้ำ — บรรทัดใต้ตัวเลขบอกเรื่องส่วนลด/VAT ไปแล้ว
+    // ส่วนอีกสองสถานะต้องอธิบาย เพราะมันคือคำสั่งว่าให้ทำอะไรต่อ
+    if (out.status !== 'priced') box.append(el('div', 'tiny faint', st.what));
+    box.append(el('div', 'tiny faint', `ตารางราคานำเข้าเมื่อ ${out.bookVersion}`));
+  }
+
+  // ── รายการรุ่น ──────────────────────────────────────────────────────────
+  const msel = document.getElementById('model');
+  for (const code of Object.keys(B.models)) {
+    const info = L.models[code] || {};
+    const o = el('option', null, `${code}${info.short ? ' — ' + info.short : ''}`);
+    o.value = code;
+    msel.append(o);
+  }
+  msel.value = cfg.model;
+  msel.addEventListener('change', () => {
+    cfg = { model: msel.value, axes: {}, dims: {}, options: [] };
+    activePreset = -1;
+    draw();
+  });
+
+  draw();
+})();
+</script>
+</body>
+</html>

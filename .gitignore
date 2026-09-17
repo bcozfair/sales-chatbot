@@ -54,3 +54,7 @@ data/eval/extraction_corpus.json
 data/eval/extraction_baseline.json
 data/eval/extraction_llm_cache.json
 data/eval/extraction_result_*.json
+
+# สมุดราคาที่แปลงจากไฟล์ Excel — เป็นราคาจริงของบริษัท ไม่ควรออกนอกเครื่อง
+# (เหตุผลเดียวกับที่ mockup/ ถูก ignore) · สร้างใหม่ได้ด้วย importer.ts
+prototypes/pricing/book.json

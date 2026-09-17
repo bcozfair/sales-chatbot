@@ -1,42 +1,76 @@
 // ─────────────────────────────────────────────────────────────────────────────
-//  PROTOTYPE — ประกอบหน้าเดโมเป็นไฟล์ HTML ไฟล์เดียว
+//  PROTOTYPE — ประกอบหน้าตัวอย่างลงโฟลเดอร์ `mockup/` ที่รากรีโป
 //
-//  หน้าเดโมรัน engine.ts **ตัวเดียวกับที่รันในเครื่อง** โดยผ่าน esbuild ไม่ใช่เขียนใหม่ด้วย JS
-//  เหตุผล: ถ้าเขียนใหม่ วันหนึ่งสองตัวจะคิดเลขไม่ตรงกัน แล้วหน้าที่เอาไปให้หัวหน้าดู
-//  จะโชว์ราคาที่ระบบจริงไม่ได้คิด — ซึ่งแย่กว่าไม่มีหน้าเดโมเลย
+//  **ทำไมออกไปที่ `mockup/` ไม่ใช่เก็บไว้ใน prototypes/**
+//  กติกาของเจ้าของ (2026-09-17): ตัวอย่าง/mockup ส่งเป็น **ลิงก์ local เท่านั้น**
+//  เพราะข้อมูลข้างในเป็นราคาจริงของบริษัท จึงไม่ควรออกนอกเครื่อง · `mockup/` ถูก
+//  gitignore ไว้ด้วยเหตุผลเดียวกัน ⇒ ไฟล์ที่มีราคาฝังอยู่ไม่ถูก commit และไม่ถูก push
+//  ส่วน "ต้นฉบับ" (เทมเพลต + คู่มือ) อยู่ใน prototypes/ ซึ่ง commit ไว้ จึงไม่หาย
+//
+//  หน้าตัวอย่างรัน engine.ts **ตัวเดียวกับที่รันในเครื่อง** (ผ่าน esbuild) ไม่ได้เขียน JS ใหม่
+//  ถ้าเขียนใหม่ วันหนึ่งสองตัวจะคิดเลขไม่ตรงกัน แล้วหน้าที่เอาไปให้คนดูจะโชว์ราคาที่ระบบจริงไม่ได้คิด
 //
 //  รัน:  node prototypes/pricing/demo/build.mjs
+//  ดู:   npx http-server . -p 4173 -c-1   แล้วเปิด http://localhost:4173/mockup/pr-index.html
 // ─────────────────────────────────────────────────────────────────────────────
 
-// เรียก esbuild ผ่าน JS API ไม่ใช่ spawn `npx` — node บน Windows ปฏิเสธ .cmd
-// ถ้าไม่ผ่าน shell (EINVAL) และการเปิด shell เพื่อเรื่องเท่านี้ไม่คุ้ม
 import { build } from 'esbuild';
-import { readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+const PRICING = resolve(HERE, '..');
 
-const result = await build({
-  entryPoints: [join(HERE, '../engine.ts')],
+// รากรีโปของ "ทรีที่ให้บริการ" — ค่าเริ่มต้นคือทรีที่ไฟล์นี้อยู่
+// ส่ง --out <path> ได้ ถ้าจะให้ไปลงทรีหลักที่เปิด http-server ค้างไว้
+const outArg = process.argv.indexOf('--out');
+const REPO = outArg > -1 ? resolve(process.argv[outArg + 1]) : resolve(HERE, '../../..');
+const MOCKUP = join(REPO, 'mockup');
+
+if (!existsSync(MOCKUP)) mkdirSync(MOCKUP, { recursive: true });
+if (!existsSync(join(MOCKUP, '_theme.css'))) {
+  console.error(`ไม่พบ ${join(MOCKUP, '_theme.css')} — หน้าตัวอย่างต้องใช้โทเคนสีชุดเดียวกับแอปจริง`);
+  console.error('ชี้ไปที่ทรีที่มี mockup/_theme.css ด้วย --out <path ของรากรีโป>');
+  process.exit(1);
+}
+
+// ── 1. engine (ตัวจริง) + สมุดราคา + เคสทดสอบ → _pr-engine.js ───────────────
+const bundled = await build({
+  entryPoints: [join(PRICING, 'engine.ts')],
   bundle: true,
-  format: 'esm',
+  format: 'iife',
+  globalName: 'PR_ENGINE',
   write: false,
   logLevel: 'warning'
 });
 
-// esbuild ปิดท้ายด้วย `export { ... };` ซึ่งใน inline module ไม่มีใครรับ — ตัดทิ้ง
-// เพื่อให้ฟังก์ชันอยู่ใน scope เดียวกับโค้ดของหน้าเว็บตรง ๆ
-const engine = result.outputFiles[0].text.replace(/export\s*\{[\s\S]*?\};\s*$/, '');
+const engineJs =
+  '/* สร้างจาก prototypes/pricing/engine.ts ด้วย esbuild — ห้ามแก้ไฟล์นี้ตรง ๆ */\n' +
+  bundled.outputFiles[0].text +
+  '\nwindow.PR_BOOK = ' +
+  readFileSync(join(PRICING, 'book.json'), 'utf8').trim() +
+  ';\nwindow.PR_CASES = ' +
+  readFileSync(join(PRICING, 'cases.json'), 'utf8').trim() +
+  ';\n';
 
-const book = readFileSync(join(HERE, '../book.json'), 'utf8');
-const cases = readFileSync(join(HERE, '../cases.json'), 'utf8');
+writeFileSync(join(MOCKUP, '_pr-engine.js'), engineJs, 'utf8');
 
-const html = readFileSync(join(HERE, 'template.html'), 'utf8')
-  .replace('/*__ENGINE__*/', () => engine)
-  .replace('/*__BOOK__*/', () => book)
-  .replace('/*__CASES__*/', () => cases);
+// ── 2. ไฟล์ร่วมที่เขียนมือ ─────────────────────────────────────────────────
+copyFileSync(join(HERE, 'labels.js'), join(MOCKUP, '_pr-labels.js'));
+copyFileSync(join(HERE, 'ui.js'), join(MOCKUP, '_pr-ui.js'));
 
-const out = join(HERE, 'index.html');
-writeFileSync(out, html, 'utf8');
-console.log(`หน้าเดโม → ${out}  (${(Buffer.byteLength(html) / 1024).toFixed(0)} KB)`);
+// ── 3. หน้า ────────────────────────────────────────────────────────────────
+const PAGES = ['index', 'manual', 'calc'];
+for (const p of PAGES) {
+  copyFileSync(join(HERE, `${p}.html`), join(MOCKUP, `pr-${p}.html`));
+}
+
+const size = (f) => (Buffer.byteLength(readFileSync(join(MOCKUP, f))) / 1024).toFixed(0) + ' KB';
+console.log(`หน้าตัวอย่าง → ${MOCKUP}`);
+for (const f of ['_pr-engine.js', '_pr-labels.js', '_pr-ui.js', ...PAGES.map((p) => `pr-${p}.html`)]) {
+  console.log(`  ${f.padEnd(20)} ${size(f)}`);
+}
+console.log('');
+console.log('เปิดดู:  npx http-server . -p 4173 -c-1');
+console.log('        http://localhost:4173/mockup/pr-index.html');
