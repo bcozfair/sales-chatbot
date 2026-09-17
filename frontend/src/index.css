@@ -139,6 +139,8 @@
   --color-blue-400: #60a5fa;
   --color-blue-600: #3b82f6;
   --color-blue-700: #6aa8ff;
+  /* 800 = ตัวอักษรในกล่องน้ำเงินของหน้า "ข้อมูลสินค้า"/"ข้อมูลลูกค้า" — ขาดไปแล้ววัดได้ 2.1:1 */
+  --color-blue-800: #9cc7ff;
 
   --color-orange-50: #2c1a0a;
   --color-orange-200: #4f3316;
@@ -149,9 +151,14 @@
   --color-purple-100: #271a3b;
   --color-purple-600: #a855f7;
 
+  /* ม่วง = คิวอนุมัติราคา · 800 กับ 100 ต้องมีด้วย ไม่งั้นหล่นไปใช้ค่าเริ่มต้นของ Tailwind
+     ซึ่งเป็นม่วงเข้มสำหรับพื้นสว่าง (วัด 2026-09-17: ตัวอักษรในกล่อง "ต้องขออนุมัติราคา"
+     ได้คอนทราสต์ 2.46:1 และป้ายตัวเลขข้างเมนูได้ 2.56:1 — อ่านไม่ออกทั้งคู่) */
   --color-violet-50: #1c1633;
+  --color-violet-100: #251c42;
   --color-violet-200: #3a2e63;
   --color-violet-700: #a78bfa;
+  --color-violet-800: #cdbcff;
 
   --color-yellow-50: #2a250a;
   --color-yellow-200: #4d4412;
@@ -258,6 +265,7 @@
   --color-blue-400: #60a5fa;
   --color-blue-600: #2563eb;
   --color-blue-700: #1d4ed8;
+  --color-blue-800: #1e40af;
 
   --color-orange-50: #fff7ed;
   --color-orange-200: #fed7aa;
@@ -269,8 +277,10 @@
   --color-purple-600: #9333ea;
 
   --color-violet-50: #f5f3ff;
+  --color-violet-100: #ede9fe;
   --color-violet-200: #ddd6fe;
   --color-violet-700: #6d28d9;
+  --color-violet-800: #5b21b6;
 
   --color-yellow-50: #fefce8;
   --color-yellow-200: #fef08a;
