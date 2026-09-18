@@ -64,15 +64,19 @@ async function setup() {
   );
   // ต้องตั้ง `employee_quotation_id` ให้ด้วย ไม่งั้น resolveWebUserId() ปฏิเสธด้วย MAKER_NOT_SET
   // ตั้งแต่บรรทัดแรกของด่าน (เหมือนที่ webQuoteSmoke ทำ) — แอดมินที่ยังไม่ตั้งชื่อผู้จัดทำออกใบไม่ได้
+  // ⚠️ `employee_quotation_id` ต้องไม่ซ้ำกันระหว่างแอดมินทดสอบสองคน — migration
+  //    2026-09-18_01_role_permissions.sql เพิ่ม unique index `admin_users_employee_quotation_id_key`
+  //    ไว้ (ชื่อผู้จัดทำบนใบต้องชี้กลับไปหาคนเดียวได้) ⇒ ค่าคงที่ค่าเดียวทำให้ด่านนี้ล้มตั้งแต่ setup
+  //    ด้วย 23505 ทันทีที่ฐานไหนรัน migration นั้นแล้ว (เจอจริง 2026-09-18 บนเครื่อง dev)
   const mk = async (username: string, role: string, name: string) => {
     const { rows } = await pool.query(
       `INSERT INTO admin_users (username, password_hash, name, role, employee_quotation_id)
-       VALUES ($1, 'x-diag-not-a-login', $3, $2, 'DIAG ผู้จัดทำ (ลบอัตโนมัติ)')
+       VALUES ($1, 'x-diag-not-a-login', $3, $2, $4)
        ON CONFLICT (username) DO UPDATE
           SET role = EXCLUDED.role,
               employee_quotation_id = EXCLUDED.employee_quotation_id
        RETURNING id`,
-      [username, role, name]
+      [username, role, name, `DIAG ผู้จัดทำ ${username} (ลบอัตโนมัติ)`]
     );
     return Number(rows[0].id);
   };
