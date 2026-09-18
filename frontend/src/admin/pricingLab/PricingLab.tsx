@@ -143,7 +143,7 @@ export const PricingLab: React.FC = () => {
             <label className="sr-only" htmlFor="pl-code">รหัสสินค้า</label>
             <input
               id="pl-code"
-              className="w-full h-11 px-3.5 rounded-xl bg-surface border border-slate-200 text-slate-900 font-mono text-[15px]"
+              className="w-full h-11 px-3.5 rounded-xl bg-card border border-slate-200 text-slate-900 font-mono text-[15px]"
               value={code}
               spellCheck={false}
               onChange={(e) => setCode(e.target.value)}
@@ -160,7 +160,7 @@ export const PricingLab: React.FC = () => {
           <span className="text-[11px] text-slate-400">{HELP}</span>
           {EXAMPLES.map((eg) => (
             <button key={eg} onClick={() => { setCode(eg); void quote(eg); }}
-                    className="font-mono text-[11px] px-2 py-1 rounded-md bg-surface border border-slate-200 text-slate-600 hover:border-[var(--brand-border)] hover:text-[var(--brand-fg)]">
+                    className="font-mono text-[11px] px-2 py-1 rounded-md bg-card border border-slate-200 text-slate-600 hover:border-[var(--brand-border)] hover:text-[var(--brand-fg)]">
               {eg}
             </button>
           ))}
@@ -181,7 +181,7 @@ export const PricingLab: React.FC = () => {
                     <span className={`font-mono font-bold text-xs px-2 py-1 rounded-md border shrink-0 ${
                       isUnknown(p.kind)
                         ? 'bg-red-50 border-red-200 text-red-700'
-                        : 'bg-surface border-slate-200 text-slate-900'
+                        : 'bg-card border-slate-200 text-slate-900'
                     }`}>
                       {p.text}
                     </span>
@@ -315,7 +315,7 @@ export const PricingLab: React.FC = () => {
             <div className="sm:hidden p-3 space-y-2.5">
               {allSet.map((s) => (
                 <div key={`${s.subCode}-${s.scope}`}
-                     className={`rounded-xl border border-slate-200 bg-surface px-3.5 py-3 ${s.disabled ? 'opacity-50' : ''}`}>
+                     className={`rounded-xl border border-slate-200 bg-card px-3.5 py-3 ${s.disabled ? 'opacity-50' : ''}`}>
                   <div className="flex gap-2 items-center flex-wrap">
                     <span className="font-mono font-bold text-[13px] text-slate-900">{s.subCode}</span>
                     <span className="text-[11px] text-slate-600">{EFFECT_TH[s.effect]}</span>
@@ -347,7 +347,7 @@ export const PricingLab: React.FC = () => {
               {todo.map((it) => (
                 <button key={`${it.token}-${it.where}`}
                         onClick={() => setAdding({ subCode: it.token })}
-                        className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-full bg-surface border border-slate-200 text-slate-700 hover:border-[var(--brand-border)] hover:text-[var(--brand-fg)]">
+                        className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-full bg-card border border-slate-200 text-slate-700 hover:border-[var(--brand-border)] hover:text-[var(--brand-fg)]">
                   <Plus className="w-3 h-3" />
                   <b className="font-mono">{it.token}</b>
                   <span className="text-[10.5px] text-slate-400 tabular-nums">{it.count.toLocaleString()} รหัส</span>
