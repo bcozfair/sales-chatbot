@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { AuthProvider, useAuth, type Role } from '../context/AuthContext';
 import { Login } from './Login';
 import { Users } from './Users';
+import { RolePermissions } from './RolePermissions';
 import { Blacklist } from './Blacklist';
 import { CreditPolicy } from './CreditPolicy';
 import { ChangePasswordModal } from './ChangePasswordModal';
@@ -58,6 +59,7 @@ import {
   BadgeCheck,
   Database,
   Package,
+  ShieldCheck,
 } from 'lucide-react';
 
 // MainTab / SubTab ย้ายไป navHash.ts แล้ว เพราะชื่อแท็บกลายเป็นส่วนหนึ่งของ URL (ดูเหตุผลในไฟล์นั้น)
@@ -91,16 +93,25 @@ const BRAND_BORDER = 'var(--brand-border)';
  * ยังเป็นค่าเดิมใน navHash.ts ทุกตัว ลิงก์ที่แชร์กันไว้ (`#promotions`, `#settings/stock`)
  * จึงเปิดได้เหมือนเดิม
  *
- * roles = สิทธิ์ที่เห็นเมนูนี้ — เป็นแค่การซ่อน UI เท่านั้น ตัวบังคับจริงคือ requireRole ฝั่ง backend
+ * **cap = ช่องในเมทริกซ์สิทธิ์ที่ตัดสินว่าเมนูนี้โผล่ไหม** (ตั้งแต่ 2026-09-18) — ค่ามาจาก
+ * `GET /api/admin/me/capabilities` ซึ่งเป็นช่องเดียวกับที่ `requireCapability()` ใช้เป็นด่านที่
+ * route ของหน้านั้น ⇒ เจ้าของเปิดสิทธิ์จากหน้า "สิทธิ์ตามบทบาท" แล้วเมนูขึ้นทันที ไม่ต้อง deploy
+ *
+ * roles = **ค่าสำรองตอนที่ยังตอบไม่ได้ว่าใครมีสิทธิ์อะไร** (กำลังโหลด หรือเรียก API ไม่สำเร็จ) —
+ * ไม่ใช่กติกาคู่ขนาน: รายชื่อในนี้ตรงกับ `defaults` ของ cap ตัวนั้นใน `config/capabilities.ts` เป๊ะ
+ * และ `diag:role-permissions` ข้อ 12 อ่านไฟล์นี้มาเทียบให้ ⇒ แก้ข้างเดียวเมื่อไหร่ด่านล้มทันที
+ * เมนูที่ไม่มี cap (เช่น "สิทธิ์ตามบทบาท" เอง) ใช้ roles เป็นคำตอบจริง ไม่ใช่ค่าสำรอง
+ *
+ * ทั้งสองอย่างเป็นแค่การซ่อน UI — ตัวบังคับจริงอยู่ที่ฝั่ง backend เสมอ
  */
-type NavItem = { label: string; icon: typeof LayoutDashboard; roles: Role[] } & (
+type NavItem = { label: string; icon: typeof LayoutDashboard; roles: Role[]; cap?: string } & (
   | { tab: MainTab; sub?: never }
   | { sub: SubTab; tab?: never }
 );
 
 /** หน้าแรกที่ทุกคนกลับมา จึงอยู่เดี่ยวบนสุด ไม่ใช่ของที่ต้องกางกลุ่มก่อนถึงจะเห็น */
 const NAV_HOME: NavItem & { tab: MainTab } = {
-  tab: 'dashboard', label: 'แผงควบคุม', icon: LayoutDashboard, roles: ['admin'],
+  tab: 'dashboard', label: 'แผงควบคุม', icon: LayoutDashboard, roles: ['admin'], cap: 'page.dashboard',
 };
 
 const NAV_GROUPS: { key: string; label: string; icon: typeof LayoutDashboard; items: NavItem[] }[] = [
@@ -109,10 +120,10 @@ const NAV_GROUPS: { key: string; label: string; icon: typeof LayoutDashboard; it
     label: 'งานใบเสนอราคา',
     icon: BriefcaseBusiness,
     items: [
-      { tab: 'quoterequest', label: 'ขอใบเสนอราคา', icon: FilePlus2, roles: ['admin', 'approver', 'subadmin'] },
+      { tab: 'quoterequest', label: 'ขอใบเสนอราคา', icon: FilePlus2, roles: ['admin', 'approver', 'subadmin'], cap: 'quote.create' },
       // subadmin เห็นเมนูนี้ด้วย แต่เห็น "คำขอของตัวเอง" เท่านั้น — server เป็นคนกรอง ไม่ใช่หน้าจอ
-      { tab: 'approvals', label: 'อนุมัติราคา', icon: BadgeCheck, roles: ['admin', 'approver', 'subadmin'] },
-      { tab: 'quotations', label: 'ประวัติใบเสนอราคา', icon: FileText, roles: ['admin', 'approver', 'subadmin'] },
+      { tab: 'approvals', label: 'อนุมัติราคา', icon: BadgeCheck, roles: ['admin', 'approver', 'subadmin'], cap: 'page.approvals' },
+      { tab: 'quotations', label: 'ประวัติใบเสนอราคา', icon: FileText, roles: ['admin', 'approver', 'subadmin'], cap: 'page.quotations' },
     ],
   },
   {
@@ -122,15 +133,15 @@ const NAV_GROUPS: { key: string; label: string; icon: typeof LayoutDashboard; it
     label: 'เงื่อนไข & กฎ',
     icon: SlidersHorizontal,
     items: [
-      { sub: 'quotation', label: 'เงื่อนไขหลัก', icon: Settings2, roles: ['admin'] },
-      { tab: 'promotions', label: 'จัดการโปรโมชันส่วนลด', icon: Tag, roles: ['admin'] },
+      { sub: 'quotation', label: 'เงื่อนไขหลัก', icon: Settings2, roles: ['admin'], cap: 'page.settings_quotation' },
+      { tab: 'promotions', label: 'จัดการโปรโมชันส่วนลด', icon: Tag, roles: ['admin'], cap: 'page.promotions' },
       // สามหัวข้อที่เป็นกฎของ "ตัวสินค้า" ใช้ไอคอนตระกูล Package เดียวกัน (+ พ่วง · ✕ หมด · − ขั้นต่ำ)
-      { sub: 'optional', label: 'สินค้าพ่วงเสริม', icon: PackagePlus, roles: ['admin'] },
-      { sub: 'stock', label: 'ระงับเมื่อหมดสต็อก', icon: PackageX, roles: ['admin'] },
-      { sub: 'moq', label: 'ขั้นต่ำสั่งซื้อ', icon: PackageMinus, roles: ['admin'] },
+      { sub: 'optional', label: 'สินค้าพ่วงเสริม', icon: PackagePlus, roles: ['admin'], cap: 'page.settings_optional' },
+      { sub: 'stock', label: 'ระงับเมื่อหมดสต็อก', icon: PackageX, roles: ['admin'], cap: 'page.settings_stock' },
+      { sub: 'moq', label: 'ขั้นต่ำสั่งซื้อ', icon: PackageMinus, roles: ['admin'], cap: 'page.settings_moq' },
       // ShieldBan ไม่ใช่ Ban เพราะ Ban ถูกใช้กับ "บัญชีห้ามเสนอราคา" ไปแล้ว — คนละเรื่องกัน
-      { sub: 'block', label: 'บล็อกสินค้า', icon: ShieldBan, roles: ['admin'] },
-      { sub: 'shipping', label: 'ค่าขนส่ง & เครดิต', icon: Truck, roles: ['admin'] },
+      { sub: 'block', label: 'บล็อกสินค้า', icon: ShieldBan, roles: ['admin'], cap: 'page.settings_block' },
+      { sub: 'shipping', label: 'ค่าขนส่ง & เครดิต', icon: Truck, roles: ['admin'], cap: 'page.settings_shipping' },
     ],
   },
   {
@@ -143,9 +154,9 @@ const NAV_GROUPS: { key: string; label: string; icon: typeof LayoutDashboard; it
     label: 'จัดการข้อมูลทั่วไป',
     icon: Database,
     items: [
-      { tab: 'productsdata', label: 'ข้อมูลสินค้า', icon: Package, roles: ['admin', 'approver', 'subadmin'] },
-      { tab: 'customersdata', label: 'ข้อมูลลูกค้า', icon: Contact, roles: ['admin', 'approver', 'subadmin'] },
-      { tab: 'blacklist', label: 'บัญชีห้ามเสนอราคา', icon: Ban, roles: ['admin', 'user'] },
+      { tab: 'productsdata', label: 'ข้อมูลสินค้า', icon: Package, roles: ['admin', 'approver', 'subadmin'], cap: 'page.productsdata' },
+      { tab: 'customersdata', label: 'ข้อมูลลูกค้า', icon: Contact, roles: ['admin', 'approver', 'subadmin'], cap: 'page.customersdata' },
+      { tab: 'blacklist', label: 'บัญชีห้ามเสนอราคา', icon: Ban, roles: ['admin', 'user'], cap: 'page.blacklist' },
     ],
   },
   {
@@ -155,8 +166,10 @@ const NAV_GROUPS: { key: string; label: string; icon: typeof LayoutDashboard; it
     label: 'จัดการข้อมูลผู้ใช้งาน',
     icon: UsersIcon,
     items: [
-      { tab: 'salespersons', label: 'จัดการพนักงานขาย', icon: UserCheck, roles: ['admin'] },
-      { tab: 'users', label: 'จัดการผู้ใช้งานระบบ', icon: UsersIcon, roles: ['admin'] },
+      { tab: 'salespersons', label: 'จัดการพนักงานขาย', icon: UserCheck, roles: ['admin'], cap: 'page.salespersons' },
+      { tab: 'users', label: 'จัดการผู้ใช้งานระบบ', icon: UsersIcon, roles: ['admin'], cap: 'page.users' },
+      // ไม่มี cap โดยตั้งใจ — ความสามารถที่ปิดตัวเองได้ คือความสามารถที่ล็อกคนสุดท้ายออกจากระบบได้
+      { tab: 'rolepermissions', label: 'สิทธิ์ตามบทบาท', icon: ShieldCheck, roles: ['admin'] },
     ],
   },
   {
@@ -164,7 +177,7 @@ const NAV_GROUPS: { key: string; label: string; icon: typeof LayoutDashboard; it
     label: 'ตรวจสอบระบบ',
     icon: Activity,
     // เมนูเดียวในกลุ่ม — การสลับ 4 หน้าย่อยอยู่ที่แถบแท็บใน LogsShell ตามเหตุผลข้างล่าง
-    items: [{ tab: 'traffic', label: 'รายงานการใช้งาน', icon: ClipboardList, roles: ['admin'] }],
+    items: [{ tab: 'traffic', label: 'รายงานการใช้งาน', icon: ClipboardList, roles: ['admin'], cap: 'page.traffic' }],
   },
 ];
 
@@ -189,6 +202,7 @@ const PAGE_TITLES: Record<MainTab, string> = {
   promotions: 'จัดการโปรโมชันส่วนลด',
   salespersons: 'จัดการพนักงานขาย',
   users: 'จัดการผู้ใช้งานระบบ',
+  rolepermissions: 'สิทธิ์ตามบทบาท',
   blacklist: 'บัญชีห้ามเสนอราคา',
   productsdata: 'ข้อมูลสินค้า',
   customersdata: 'ข้อมูลลูกค้า & ผู้ติดต่อ',
@@ -226,7 +240,38 @@ function AdminContent() {
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
 
   const isAdmin = user?.role === 'admin';
-  const canSee = (item: NavItem) => !!user && item.roles.includes(user.role);
+
+  /**
+   * ความสามารถของคนที่ล็อกอินอยู่ — `null` = ยังตอบไม่ได้ (กำลังโหลด หรือเรียกไม่สำเร็จ)
+   *
+   * ยิงครั้งเดียวตอนได้ token ไม่ใช่ทุกครั้งที่เปลี่ยนหน้า — ค่าจะเปลี่ยนก็ต่อเมื่อเจ้าของแก้
+   * เมทริกซ์ ซึ่งคนที่เพิ่งถูกแก้สิทธิ์จะเห็นผลรอบ login ถัดไป · **ถ้าเรียกไม่สำเร็จห้ามซ่อนทุกเมนู**
+   * เพราะอ่านว่า "ระบบพัง" ⇒ ถอยไปใช้ `roles` ซึ่งคือพฤติกรรมก่อนมีเมทริกซ์ (ด่านจริงอยู่ที่ server
+   * อยู่แล้ว เมนูที่โผล่เกินมาจึงเปิดเข้าไปแล้วได้ 403 ไม่ใช่หลุดสิทธิ์)
+   */
+  const [caps, setCaps] = useState<Record<string, string> | null>(null);
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/admin/me/capabilities', { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled && data?.capabilities) setCaps(data.capabilities as Record<string, string>);
+      } catch {
+        // ปล่อยเป็น null แล้วถอยไปใช้ roles — ดูเหตุผลข้างบน
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token]);
+
+  const canSee = (item: NavItem) => {
+    if (!user) return false;
+    // เมนูที่ไม่มีช่องในเมทริกซ์ (หน้า "สิทธิ์ตามบทบาท" เอง) ตัดสินด้วย role ตรง ๆ
+    if (!item.cap || caps === null) return item.roles.includes(user.role);
+    return caps[item.cap] !== 'deny';
+  };
   const homeVisible = canSee(NAV_HOME);
   /** กลุ่มที่ไม่เหลือเมนูให้ผู้ใช้คนนี้เลย ต้องหายไปทั้งกลุ่ม — หัวข้อกลุ่มเปล่า ๆ อ่านว่า "พัง" */
   const visibleGroups = NAV_GROUPS
@@ -273,9 +318,14 @@ function AdminContent() {
   // แท็บที่แสดงจริง — activeTab ตั้งต้นเป็น 'dashboard' ซึ่ง role 'user' ไม่มีสิทธิ์เห็น
   // คำนวณตอน render แทนการ setState ใน effect: ไม่มี re-render รอบพิเศษ และครอบเคสถูกลดสิทธิ์
   // ระหว่างเปิดหน้าค้างไว้ด้วย (adminAuthMiddleware อ่าน role สดจาก DB ทุก request)
+  //  'settings' กับหน้าลูกของกลุ่มบันทึกไม่มีอยู่ใน visibleTabs (ตัวแรกเป็นเมนูย่อย ตัวหลังสลับ
+  //  ในตัวหน้าเอง) จึงต้องถามแยก — และถามจาก **เมนูที่คนนี้เห็นจริง** ไม่ใช่ `isAdmin` ตายตัว
+  //  ไม่งั้นเจ้าของเปิดหน้าตั้งค่าให้ role อื่นแล้วเขากดเข้าไม่ได้ ทั้งที่เมนูโผล่ให้เห็น
+  const canOpenSettings = visibleGroups.some((g) => g.items.some((i) => !!i.sub));
   const effectiveTab: MainTab =
     visibleTabs.includes(activeTab) ||
-    ((activeTab === 'settings' || LOG_TABS.has(activeTab)) && isAdmin)
+    (activeTab === 'settings' && canOpenSettings) ||
+    (LOG_TABS.has(activeTab) && visibleTabs.includes('traffic'))
       ? activeTab
       : (visibleTabs[0] ?? 'blacklist');
 
@@ -726,6 +776,10 @@ function AdminContent() {
           ) : effectiveTab === 'users' ? (
             <div className="animate-fade-in">
               <Users />
+            </div>
+          ) : effectiveTab === 'rolepermissions' ? (
+            <div className="animate-fade-in">
+              <RolePermissions />
             </div>
           ) : (
             <div className="animate-fade-in">

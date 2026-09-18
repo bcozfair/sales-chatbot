@@ -19,6 +19,7 @@
 // 10. **ตัวกรอง "ใบของตัวเอง"** — ผูกรหัส = กรองด้วยรหัส · ไม่ผูก = ถอยไปใบของบัญชีตัวเอง (§13.7)
 // 11. **คำอนุมัติผูกกับตัวเลขของกฎข้อนั้น** — ราคา/จำนวน แล้วแต่ชนิด (§3.6 · §9 ข้อ 5)
 // 12. **ทุกช่องกลุ่ม "หน้าจอ" มีด่านที่ route จริง** และไม่มี route ไหนหลุดรายการ (P3c)
+//     รวมถึงเมนูฝั่งหน้าจอที่ต้องอ่านจากช่องเดียวกัน และค่าสำรองที่ต้องไม่ใจกว้างเกินค่าเริ่มต้น
 // ─────────────────────────────────────────────────────────────────────────────
 import { readFileSync } from 'node:fs';
 import { pool } from '../../config/db.js';
@@ -365,6 +366,29 @@ async function main() {
     /app\.use\('\/api\/admin\/data\/customers',[^)]*requireCapability\('page\.customersdata'\)/.test(indexSrc));
   ok('  และจุด mount ของ dataDirectoryRouter ไม่เหลือ requireRole ค้างไว้ให้ตีความสองทาง',
     /app\.use\('\/api\/admin\/data', adminAuthMiddleware, dataDirectoryRouter\)/.test(indexSrc));
+
+  // ── เมนูฝั่งหน้าจออ่านจากช่องเดียวกับด่าน ─────────────────────────────────
+  //  AdminApp.tsx ถือ `roles: [...]` ไว้เป็น **ค่าสำรอง** ตอนเรียก /me/capabilities ไม่สำเร็จ
+  //  ค่าสำรองที่ใจกว้างกว่าค่าเริ่มต้นคือช่องโหว่ที่โผล่เฉพาะตอนเน็ตสะดุด ซึ่งไม่มีใครเจอตอนทดสอบ
+  //  ⇒ บังคับว่า roles ต้องเป็น **สับเซ็ต** ของ role ที่ค่าเริ่มต้นเปิดให้ (เท่ากันไม่ได้ เพราะ
+  //  salesperson เป็นคอลัมน์ใหม่ที่ยังไม่มีบัญชี จึงยังไม่ถูกใส่ในรายชื่อสำรองของเมนู)
+  const navSrc = readFileSync(new URL('../../frontend/src/admin/AdminApp.tsx', import.meta.url), 'utf-8');
+  const navItems: { roles: string[]; cap: string }[] = [];
+  for (const line of navSrc.split('\n')) {
+    const m = /roles: \[([^\]]*)\][^\n]*?cap: '([^']+)'/.exec(line);
+    if (m) navItems.push({ roles: [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]), cap: m[2] });
+  }
+  ok(`เมนูใน AdminApp.tsx ผูกกับช่องในเมทริกซ์ครบ (${navItems.length} เมนู)`, navItems.length >= 17);
+  const unknownCaps = navItems.filter((n) => !CAPABILITIES.some((c) => c.key === n.cap)).map((n) => n.cap);
+  ok('  ทุก cap ที่เมนูอ้างถึงมีอยู่จริงในแคตตาล็อก', unknownCaps.length === 0, unknownCaps.join(' · '));
+  const tooWide = navItems.filter((n) => {
+    const def = CAPABILITIES.find((c) => c.key === n.cap);
+    return def ? n.roles.some((r) => def.defaults[r as Role] === 'deny') : false;
+  });
+  ok('  ค่าสำรองของเมนูไม่ใจกว้างกว่าค่าเริ่มต้นของช่องนั้นสักเมนู',
+    tooWide.length === 0, tooWide.map((n) => n.cap).join(' · '));
+  const missingInNav = pageCaps.filter((c) => !navItems.some((n) => n.cap === c.key)).map((c) => c.key);
+  ok('  ทุกช่องกลุ่มหน้าจอมีเมนูของตัวเองใน AdminApp.tsx', missingInNav.length === 0, missingInNav.join(' · '));
 
   // การตัดสินคำขอต้องซ้อนสองชั้น: ประตู (approval.decide) + ตัว service (canDecideApproval)
   //  ถ้าเหลือชั้นเดียว เปิดสิทธิ์ให้ role ใหม่แล้วจะได้ครึ่งเดียว ซึ่งดูเหมือนบั๊กสุ่ม
