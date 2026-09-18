@@ -133,6 +133,19 @@
       </div>
 
       <div class="card">
+        <h2 class="sec" id="sub-head">ตั้งค่ารหัสย่อย</h2>
+        <p class="tiny faint" style="margin:-6px 0 12px">
+          รหัสสินค้าหนึ่งตัวประกอบด้วยหลายท่อน เช่น <code>BH-01 230x32-240-650W-N-S000</code> ·
+          ตัวเลขระบบอ่านจากตารางราคาได้เองอยู่แล้ว แต่ <b>ตัวอักษร</b> อย่าง <code>N</code> หรือ <code>S000</code>
+          ไม่มีที่ไหนในไฟล์ราคาบอกว่าแปลว่าอะไร — ตั้งค่าที่นี่ครั้งเดียว ใช้กับทุกรหัสที่มีท่อนนั้น
+        </p>
+        <div id="subs"></div>
+        <h2 class="sec" style="margin:18px 0 6px" id="subwait-head">ยังไม่ได้ตั้งค่า</h2>
+        <p class="tiny faint" style="margin:0 0 10px" id="subwait-note"></p>
+        <div class="subadd" id="subwait"></div>
+      </div>
+
+      <div class="card">
         <h2 class="sec" id="cons-head">ข้อห้ามและข้อควรระวัง</h2>
         <div id="cons"></div>
       </div>
@@ -469,6 +482,172 @@
     touched('เพิ่มกฎ “' + base.label + '” ให้รุ่น ' + m.code, true);
   }
 
+  // ── รหัสย่อย ──────────────────────────────────────────────────────────────
+  //
+  // ตารางนี้อยู่ระดับสมุด ไม่ใช่ระดับรุ่น (แถวเดียวใช้ข้ามรุ่นได้) แต่หน้านี้ทำงานทีละรุ่น
+  // ⇒ โชว์เฉพาะแถวที่ "มีผลกับรุ่นที่กำลังดู" เป็นค่าเริ่มต้น ไม่งั้นแอดมินจะเห็นของรุ่นอื่น
+  // ปนมาแล้วเผลอแก้ผิดตัว
+  let showAllSubs = false;
+
+  /** ชื่อตระกูลแบบเดียวกับที่ไฟล์นับความถี่ใช้ (TSK-04 → TS-04 · BH-01C → BH-01C) */
+  function fam(code) {
+    const m = String(code || '').match(/^(BH|TS)[A-Z]*-?(\d{2})([A-Z]*)/i);
+    if (!m) return String(code || '');
+    const head = m[1].toUpperCase();
+    return head + '-' + m[2] + (head === 'BH' ? (m[3] || '').toUpperCase() : '');
+  }
+
+  function subsOf(m) {
+    const all = book.subCodes || [];
+    if (showAllSubs) return all.slice();
+    return all.filter((sc) => E.scopeRank ? E.scopeRank(sc, m) !== undefined : true);
+  }
+
+  function subRow(sc, m) {
+    const row = el('div', 'subrow' + (sc.disabled ? ' off' : ''));
+    row.appendChild(el('div', 'tk', sc.subCode));
+
+    const mid = el('div', 'mid');
+    mid.appendChild(el('span', null, sc.reads || '(ยังไม่ได้เขียนว่าอ่านว่าอะไร)'));
+    mid.appendChild(el('span', 'sub2',
+      U.subEffectText(sc) + ' · ' + U.subScopeText(sc.scope) +
+      (sc.match === 'pattern' ? ' · แม่แบบ (# = ตัวเลข)' : '') +
+      ' · ' + (sc.source ? 'มาจากไฟล์ราคา ' + sc.source : 'ตั้งค่าเอง' + (sc.by ? ' โดย ' + sc.by : '') + (sc.at ? ' · ' + sc.at : ''))));
+    row.appendChild(mid);
+
+    const acts = el('div', 'acts');
+    const edit = el('button', 'btn', 'แก้');
+    edit.type = 'button';
+    edit.addEventListener('click', () => {
+      U.subcodeBox({
+        token: sc.subCode,
+        modelCode: m.code,
+        book,
+        existing: sc,
+        preview: (draft) => previewSub(draft, sc),
+        onSave: (next) => {
+          const keep = { source: sc.source, by: sc.by, at: sc.at, custom: sc.custom, disabled: sc.disabled };
+          Object.keys(sc).forEach((k) => delete sc[k]);
+          Object.assign(sc, next, keep, { at: U.today() });
+          touched('แก้รหัสย่อย ' + sc.subCode, true);
+        }
+      });
+    });
+    acts.appendChild(edit);
+
+    const tog = el('button', 'btn', sc.disabled ? 'เปิดใช้' : 'ปิดไว้');
+    tog.type = 'button';
+    tog.addEventListener('click', () => {
+      if (sc.disabled) delete sc.disabled;
+      else sc.disabled = true;
+      touched((sc.disabled ? 'ปิด' : 'เปิด') + 'รหัสย่อย ' + sc.subCode, true);
+    });
+    acts.appendChild(tog);
+
+    if (sc.custom) {
+      const del = el('button', 'btn', 'ลบ');
+      del.type = 'button';
+      del.addEventListener('click', () => {
+        book.subCodes = (book.subCodes || []).filter((x) => x !== sc);
+        touched('ลบรหัสย่อย ' + sc.subCode, true);
+      });
+      acts.appendChild(del);
+    }
+    row.appendChild(acts);
+    return row;
+  }
+
+  /**
+   * "ตั้งค่าแล้วเคสไหนขยับ" — ใช้เคสทดสอบชุดเดียวกับแผงขวา
+   * รหัสย่อยจะมีผลก็ต่อเมื่อรหัสสินค้ามีท่อนนั้นจริง ⇒ เคสส่วนใหญ่จะไม่ขยับ ซึ่งถูกแล้ว
+   * และต้องบอกตรง ๆ ไม่ใช่ปล่อยให้คนเดาว่ากดแล้วไม่มีอะไรเกิดขึ้น
+   */
+  function previewSub(draft, replacing) {
+    const rows = (book.subCodes || []).filter((x) => x !== replacing).concat([draft]);
+    const trial = Object.assign({}, book, { subCodes: rows });
+    const opt = 'sub:' + String(draft.subCode).toUpperCase();
+    let moved = 0;
+    let sample = '';
+    CASES.forEach((c) => {
+      const cfg2 = Object.assign({}, c.cfg, { options: (c.cfg.options || []).concat([opt]) });
+      const a = E.computePrice(c.cfg, book).unitPrice;
+      const b = E.computePrice(cfg2, trial).unitPrice;
+      if (a !== b) {
+        moved++;
+        if (!sample) sample = c.name + ': ' + U.baht(a) + ' → <b>' + U.baht(b) + '</b>';
+      }
+    });
+    if (draft.effect === 'none') return 'ตั้งเป็น “ไม่มีผลกับราคา” — ราคาจะไม่ขยับ แต่ระบบจะเลิกขึ้นเตือนว่าอ่านไม่ออก';
+    if (!moved) return 'เคสทดสอบชุดนี้ไม่มีรหัสไหนใช้ท่อนนี้ — ราคาจะขยับเฉพาะรหัสที่มี “' + draft.subCode + '” อยู่จริง';
+    return 'ถ้ารหัสมีท่อนนี้ ราคาจะขยับ เช่น ' + sample;
+  }
+
+  function renderSubCodes(m) {
+    U.subStyle();   // สไตล์ของแถวรหัสย่อยอยู่ในไฟล์ร่วม — ต้องฉีดก่อนวาด ไม่ใช่ตอนเปิดกล่อง
+    const host = document.getElementById('subs');
+    host.innerHTML = '';
+    const rows = subsOf(m).sort((a, b) => String(a.subCode).localeCompare(String(b.subCode)));
+
+    document.getElementById('sub-head').textContent =
+      'ตั้งค่ารหัสย่อย ' + rows.length + ' ตัว' + (showAllSubs ? ' (ทั้งเล่ม)' : ' ที่ใช้กับรุ่น ' + m.code);
+
+    const toggle = el('label', 'chk');
+    toggle.style.cssText = 'display:flex;gap:7px;align-items:center;font-size:12px;color:var(--c-text-soft);margin-bottom:8px;cursor:pointer';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = showAllSubs;
+    cb.style.accentColor = 'var(--brand)';
+    cb.addEventListener('change', () => { showAllSubs = cb.checked; render(); });
+    toggle.appendChild(cb);
+    toggle.appendChild(el('span', null, 'แสดงของทุกรุ่นในเล่ม'));
+    host.appendChild(toggle);
+
+    if (rows.length === 0) {
+      host.appendChild(el('p', 'small faint',
+        'ยังไม่มีรหัสย่อยที่ตั้งค่าไว้สำหรับรุ่นนี้ — ตัวอักษรท้ายรหัสทุกตัวจะขึ้นว่า “ยังไม่ได้ตั้งค่า” และไม่ถูกคิดเงิน'));
+    } else {
+      rows.forEach((sc) => host.appendChild(subRow(sc, m)));
+    }
+
+    // ── ยังไม่ได้ตั้งค่า เรียงตามที่เจอจริงในรหัสสินค้า ───────────────────────
+    const wait = document.getElementById('subwait');
+    wait.innerHTML = '';
+    const census = window.PR_CENSUS || { items: [], totalCodes: 0, measuredAt: '' };
+    const mine = census.items.filter((it) => it.models.indexOf(fam(m.code)) >= 0);
+    const list = (mine.length ? mine : census.items)
+      .filter((it) => !E.findSubCode(book, m, it.token))
+      .slice(0, 14);
+
+    document.getElementById('subwait-note').textContent =
+      list.length === 0
+        ? 'ตั้งค่าครบทุกตัวที่เจอบ่อยในรุ่นนี้แล้ว'
+        : 'เรียงตามจำนวนรหัสสินค้าจริงที่มีท่อนนั้น (นับจาก ' + census.totalCodes.toLocaleString() +
+          ' รหัสในฐานสินค้า วัด ' + census.measuredAt + ')' +
+          (mine.length ? '' : ' · ไม่มีตัวไหนที่ผูกกับรุ่นนี้โดยเฉพาะ จึงแสดงตัวที่เจอบ่อยที่สุดทั้งฐาน');
+
+    list.forEach((it) => {
+      const b = el('button', 'btn', '＋ ' + it.token);
+      b.type = 'button';
+      b.appendChild(el('span', 'n', it.count.toLocaleString() + ' รหัส'));
+      b.addEventListener('click', () => {
+        U.subcodeBox({
+          token: it.token,
+          modelCode: m.code,
+          book,
+          preview: (draft) => previewSub(draft, null),
+          onSave: (sc) => {
+            book.subCodes = (book.subCodes || []).filter(
+              (x) => !(String(x.subCode).toUpperCase() === String(sc.subCode).toUpperCase() && x.scope === sc.scope)
+            );
+            book.subCodes.push(sc);
+            touched('ตั้งค่ารหัสย่อย ' + sc.subCode, true);
+          }
+        });
+      });
+      wait.appendChild(b);
+    });
+  }
+
   // ── ข้อห้าม ───────────────────────────────────────────────────────────────
   function consCard(c) {
     const box = el('div', 'rule' + (c.disabled ? ' off' : ''));
@@ -591,6 +770,8 @@
       b.addEventListener('click', () => addFromTemplate(t));
       th.appendChild(b);
     });
+
+    renderSubCodes(m);
 
     const ch = document.getElementById('cons');
     ch.innerHTML = '';

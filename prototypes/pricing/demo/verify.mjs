@@ -121,5 +121,102 @@ for (const p of PAGES) {
   await page.close();
 }
 
-console.log(bad ? `\nมีปัญหา ${bad} จุด` : '\nผ่านทุกความกว้าง ไม่มี error · ไฟล์ .xlsx เดินทางไปกลับแล้วราคาไม่ขยับ');
+// ─────────────────────────────────────────────────────────────────────────────
+//  ด่านที่สาม: กดปุ่ม "＋ เพิ่ม <รหัสย่อย>" บนหน้าจริง แล้วราคาต้องขยับจริง
+//
+//  ด่านใน Node พิสูจน์ว่า "ถ้าสมุดราคามีแถวนี้ engine คิดถูก" ไปแล้ว — ที่มันพิสูจน์ไม่ได้คือ
+//  **คนกดปุ่มแล้วได้แถวนั้นจริงไหม** ซึ่งคือทั้งเรื่องของเฟสนี้ · ตัวเลข 5,030 → 5,730 มาจาก
+//  เคสที่ฝ่ายขายเขียนเฉลยไว้ในชีตเอง (TS-14!A21:A23) บวกค่าสมมติ 700 ของด่านตรวจ
+// ─────────────────────────────────────────────────────────────────────────────
+
+{
+  const page = await browser.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
+  await page.setViewport({ width: 1280, height: 1000, deviceScaleFactor: 1 });
+  await page.evaluateOnNewDocument(() => {
+    try { localStorage.removeItem('pr-book-edits'); } catch (_) { /* file:// บางเครื่องไม่ให้ใช้ */ }
+  });
+  await page.goto(pathToFileURL(join(DIR, 'pr-calc.html')).href, { waitUntil: 'networkidle0' });
+
+  const price = () => page.evaluate(() => (document.querySelector('.rtot .a') || {}).textContent?.trim() || '');
+  const tagOf = (token) =>
+    page.evaluate((tk) => {
+      const g = document.querySelector('#code-out .reads');
+      if (!g) return '(ไม่มีตาราง)';
+      const kids = [...g.children];
+      for (let i = 0; i < kids.length; i += 4) {
+        if (kids[i].textContent.trim() === tk) return kids[i + 1].textContent.trim();
+      }
+      return '(ไม่เจอ)';
+    }, token);
+
+  await page.$eval('#code-in', (el) => { el.value = ''; });
+  await page.type('#code-in', 'TSK-14 6x200+150-BU');
+  await page.click('#code-go');
+  await new Promise((r) => setTimeout(r, 200));
+
+  const before = await price();
+  const tagBefore = await tagOf('BU');
+
+  const opened = await page.evaluate(() => {
+    const b = [...document.querySelectorAll('#code-out .go .btn')].find((x) => x.textContent.includes('BU'));
+    if (!b) return false;
+    b.click();
+    return true;
+  });
+  await new Promise((r) => setTimeout(r, 200));
+  const hasBox = await page.$('#pr-sub-mask');
+
+  if (opened && hasBox) {
+    await page.type('#sub-reads', 'หัวกระโหลกใหญ่ (ค่าทดสอบ)');
+    await page.select('#sub-effect', 'flat');
+    await new Promise((r) => setTimeout(r, 120));
+    await page.$eval('#sub-amount', (el) => {
+      el.value = '700';
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await new Promise((r) => setTimeout(r, 120));
+    const preview = await page.evaluate(() => (document.querySelector('.pr-modal .prev') || {}).textContent || '');
+    await page.click('#sub-save');
+    await new Promise((r) => setTimeout(r, 250));
+
+    const after = await price();
+    const tagAfter = await tagOf('BU');
+    const kept = await page.evaluate(() => {
+      try {
+        const raw = localStorage.getItem('pr-book-edits');
+        if (!raw) return 'เก็บไม่ได้ (file:// บางเครื่องปิด localStorage)';
+        const rows = (JSON.parse(raw).subCodes || []).filter((s) => s.subCode === 'BU');
+        return rows.length === 1 && rows[0].custom === true ? 'เก็บแล้วและติดธง "ตั้งค่าเอง"' : 'เก็บแล้วแต่ข้อมูลไม่ครบ';
+      } catch (_) {
+        return 'อ่าน localStorage ไม่ได้';
+      }
+    });
+
+    const ok = before === '5,030' && after === '5,730' && tagBefore === 'อ่านไม่ออก' && tagAfter !== 'อ่านไม่ออก';
+    if (!ok) bad++;
+    console.log('');
+    console.log(`${ok ? '✓' : '✗ FAIL'}  กดเพิ่มรหัสย่อย BU (+700) แล้วราคาบนจอเปลี่ยนจริง`);
+    console.log(`  ราคา ${before} → ${after} (คาด 5,030 → 5,730)`);
+    console.log(`  ป้ายของ BU: ${tagBefore} → ${tagAfter}`);
+    console.log(`  ตัวอย่างราคาในกล่องก่อนกดบันทึก: ${preview.trim() || '(ไม่มี)'}`);
+    console.log(`  ${kept}`);
+  } else {
+    bad++;
+    console.log(`\n✗ FAIL  ไม่พบปุ่ม "＋ เพิ่ม BU" หรือกล่องไม่เปิด (ปุ่ม ${opened ? 'มี' : 'ไม่มี'})`);
+  }
+
+  // ล้างของที่ด่านตรวจตั้งไว้ ไม่งั้นรอบหน้าจะเริ่มจากสมุดที่ถูกแก้แล้ว
+  await page.evaluate(() => {
+    try { localStorage.removeItem('pr-book-edits'); } catch (_) { /* ไม่เป็นไร */ }
+  });
+  if (errors.length) {
+    bad++;
+    console.log(`  ERRORS: ${errors.join(' | ')}`);
+  }
+  await page.close();
+}
+
+console.log(bad ? `\nมีปัญหา ${bad} จุด` : '\nผ่านทุกความกว้าง ไม่มี error · ไฟล์ .xlsx ไปกลับแล้วราคาไม่ขยับ · กดเพิ่มรหัสย่อยแล้วราคาเปลี่ยนจริง');
 await browser.close();

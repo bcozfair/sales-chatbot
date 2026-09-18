@@ -83,6 +83,10 @@ const engineJs =
   readFileSync(join(PRICING, 'book.json'), 'utf8').trim() +
   ';\nwindow.PR_CASES = ' +
   readFileSync(join(PRICING, 'cases.json'), 'utf8').trim() +
+  // ความถี่ของรหัสย่อยในรหัสสินค้าจริง — หน้าจอใช้เรียงว่า "ควรตั้งค่าตัวไหนก่อน"
+  // นับไว้ล่วงหน้าเป็นไฟล์ เพราะหน้าตัวอย่างต่อฐานข้อมูลไม่ได้ (และไม่ควรต่อ)
+  ';\nwindow.PR_CENSUS = ' +
+  readFileSync(join(PRICING, 'subcode-census.json'), 'utf8').trim() +
   ';\n';
 
 // ธีมเป็นก้อนเดียวที่ลง <style> ดิบ ๆ — ถ้ามีของที่ปิดแท็กได้ปนมา ให้ตายดังกว่าออกไฟล์เสีย
