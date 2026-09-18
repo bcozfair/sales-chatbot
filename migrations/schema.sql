@@ -1690,6 +1690,43 @@ CREATE UNIQUE INDEX admin_users_employee_quotation_id_key ON public.admin_users 
 
 
 --
+-- Name: pricing_subcodes; Type: TABLE; Schema: public; Owner: -
+--
+-- รหัสย่อยของโมดูล "คิดราคาสินค้าสั่งทำ" (services/pricingLab/ · migration 2026-09-18_02)
+-- เก็บทั้งแถวเป็น jsonb เพราะรูปของ SubCode ยังขยับได้ระหว่างที่ดีไซน์ยังไม่นิ่ง —
+-- เจ้าของสั่งไว้ว่าโมดูลนี้ต้องแก้เพิ่มยังไงก็ได้และถอดออกได้ทุกเมื่อ ⇒ ถอดโมดูล = DROP ตารางนี้
+-- ไม่มี FK ชี้เข้าหรือชี้ออก และไม่มีตารางเดิมของระบบอ้างถึงมัน โดยตั้งใจ
+--
+
+CREATE TABLE public.pricing_subcodes (
+    id bigint NOT NULL,
+    data jsonb NOT NULL,
+    sub_code text GENERATED ALWAYS AS ((data ->> 'subCode'::text)) STORED,
+    scope text GENERATED ALWAYS AS ((data ->> 'scope'::text)) STORED,
+    created_by text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pricing_subcodes_pkey PRIMARY KEY (id)
+);
+
+CREATE SEQUENCE public.pricing_subcodes_id_seq
+    START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1;
+
+ALTER SEQUENCE public.pricing_subcodes_id_seq OWNED BY public.pricing_subcodes.id;
+
+ALTER TABLE ONLY public.pricing_subcodes ALTER COLUMN id SET DEFAULT nextval('public.pricing_subcodes_id_seq'::regclass);
+
+--
+-- Name: pricing_subcodes_code_scope_idx; Type: INDEX; Schema: public; Owner: -
+--
+-- หนึ่งรหัสย่อยต่อหนึ่งขอบเขต มีได้แถวเดียว — ตั้งซ้ำคือการแก้ของเดิม ไม่ใช่เพิ่มแถวที่สอง
+-- (สองแถวที่เท่ากันทุกอย่าง ลำดับการค้นใน subcodes.ts จะเลือกตัวไหนก็ได้ = ราคาสุ่ม)
+--
+
+CREATE UNIQUE INDEX pricing_subcodes_code_scope_idx ON public.pricing_subcodes USING btree (sub_code, scope);
+
+
+--
 -- PostgreSQL database dump complete
 --
 

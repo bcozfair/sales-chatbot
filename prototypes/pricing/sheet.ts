@@ -20,7 +20,7 @@
 //  ชีตที่ไม่รู้จักจะถูก **ข้ามเงียบ ๆ** โดยตั้งใจ — แอดมินเพิ่มชีตคิดเลขของตัวเองได้ ไม่พัง
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { matrixKey } from './engine.js';
+import { matrixKey } from '../../services/pricingLab/engine.js';
 import type {
   Adder,
   Band,
@@ -33,7 +33,7 @@ import type {
   RoundMode,
   SubCode,
   SubCodeEffect
-} from './types.js';
+} from '../../services/pricingLab/types.js';
 
 export type CellValue = string | number | null;
 

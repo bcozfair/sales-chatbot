@@ -81,6 +81,7 @@ export type PageCapability =
   | 'page.settings_moq'
   | 'page.settings_block'
   | 'page.settings_shipping'
+  | 'page.pricing'
   | 'page.productsdata'
   | 'page.customersdata'
   | 'page.blacklist'
@@ -370,6 +371,17 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     modes: SWITCH,
     defaults: switchFor('allow', 'deny', 'deny', 'deny'),
     enforcedAt: '/api/admin/shipping-fee-config · /api/admin/credit-policy (อย่างละ GET+PUT)',
+  },
+  {
+    // โมดูลทดลอง (services/pricingLab/) — ยังไม่ต่อกับใบเสนอราคา คิดราคาให้ดูอย่างเดียว
+    // ค่าเริ่มต้น admin คนเดียว เพราะเป็นหน้าที่ยังไม่เคยมี ⇒ ไม่มีใครเสียสิทธิ์ที่เคยมี
+    // และเจ้าของเปิดให้ role อื่นเองได้จากหน้าเมทริกซ์สิทธิ์เมื่อพร้อมให้คนทดลอง
+    key: 'page.pricing',
+    group: 'page',
+    label: 'คิดราคาสินค้าสั่งทำ',
+    modes: SWITCH,
+    defaults: switchFor('allow', 'deny', 'deny', 'deny'),
+    enforcedAt: 'app.use(/api/admin/pricing) — ด่านวางก่อนจุด mount ของ pricingLabRouter',
   },
   {
     key: 'page.productsdata',

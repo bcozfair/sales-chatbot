@@ -57,6 +57,7 @@
     "diag:web-quote": "tsx scripts/diag/webQuoteSmoke.ts",
     "diag:price-approval": "tsx scripts/diag/priceApprovalSmoke.ts",
     "diag:role-permissions": "tsx scripts/diag/rolePermissions.ts",
+    "diag:pricing": "tsx scripts/diag/pricingLab.ts && tsx prototypes/pricing/golden.ts && tsx prototypes/pricing/roundtrip.ts",
     "diag:web-decision": "tsx scripts/diag/webDecisionParity.ts",
     "diag:sp-dedupe": "tsx scripts/diag/salespersonDedupeSmoke.ts",
     "diag:product-candidates": "tsx scripts/diag/productCandidateEval.ts",

@@ -22,6 +22,8 @@ import { ShippingFee } from './ShippingFee';
 import { SyncPanel } from './SyncPanel';
 import { ProductsDirectory } from './ProductsDirectory';
 import { CustomersDirectory } from './CustomersDirectory';
+// โมดูลทดลอง "คิดราคาสินค้าสั่งทำ" — ถอดออก = ลบ import นี้ + 1 เมนู + 1 แถวใน PAGE_TITLES + 1 สาขา render
+import { PricingLab } from './pricingLab/PricingLab';
 import { LogsShell } from './logs/LogsShell';
 import type { LogTab } from './logs/LogsShell';
 import { useAdminRoute, type MainTab, type SubTab } from './navHash';
@@ -60,6 +62,7 @@ import {
   Database,
   Package,
   ShieldCheck,
+  Calculator,
 } from 'lucide-react';
 
 // MainTab / SubTab ย้ายไป navHash.ts แล้ว เพราะชื่อแท็บกลายเป็นส่วนหนึ่งของ URL (ดูเหตุผลในไฟล์นั้น)
@@ -124,6 +127,9 @@ const NAV_GROUPS: { key: string; label: string; icon: typeof LayoutDashboard; it
       // subadmin เห็นเมนูนี้ด้วย แต่เห็น "คำขอของตัวเอง" เท่านั้น — server เป็นคนกรอง ไม่ใช่หน้าจอ
       { tab: 'approvals', label: 'อนุมัติราคา', icon: BadgeCheck, roles: ['admin', 'approver', 'subadmin'], cap: 'page.approvals' },
       { tab: 'quotations', label: 'ประวัติใบเสนอราคา', icon: FileText, roles: ['admin', 'approver', 'subadmin'], cap: 'page.quotations' },
+      // เครื่องมือที่ใช้ตอนกำลังทำใบ ไม่ใช่ค่าที่ตั้งทิ้งไว้ให้ระบบใช้เอง จึงอยู่กลุ่มนี้ไม่ใช่ "เงื่อนไข & กฎ"
+      // (เจ้าของเคาะ 2026-09-18) · ค่าเริ่มต้นคือ admin คนเดียว เพราะเป็นหน้าที่ยังไม่เคยมี
+      { tab: 'pricing', label: 'คิดราคาสินค้าสั่งทำ', icon: Calculator, roles: ['admin'], cap: 'page.pricing' },
     ],
   },
   {
@@ -204,6 +210,7 @@ const PAGE_TITLES: Record<MainTab, string> = {
   users: 'จัดการผู้ใช้งานระบบ',
   rolepermissions: 'สิทธิ์ตามบทบาท',
   blacklist: 'บัญชีห้ามเสนอราคา',
+  pricing: 'คิดราคาสินค้าสั่งทำ',
   productsdata: 'ข้อมูลสินค้า',
   customersdata: 'ข้อมูลลูกค้า & ผู้ติดต่อ',
   traffic: 'รายงานการใช้งาน',
@@ -760,6 +767,10 @@ function AdminContent() {
           ) : effectiveTab === 'promotions' ? (
             <div className="animate-fade-in">
               <Promotions />
+            </div>
+          ) : effectiveTab === 'pricing' ? (
+            <div className="animate-fade-in">
+              <PricingLab />
             </div>
           ) : effectiveTab === 'productsdata' ? (
             <div className="animate-fade-in">

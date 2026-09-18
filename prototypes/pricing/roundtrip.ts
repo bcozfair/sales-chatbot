@@ -18,11 +18,11 @@ import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { computePrice } from './engine.js';
+import { computePrice } from '../../services/pricingLab/engine.js';
 import { bookToOdooSheets } from './odoo.js';
 import { bookToSheets, sheetsToBook, SHEET_NAMES, VOCAB } from './sheet.js';
 import type { CellValue, RawSheet } from './sheet.js';
-import type { PriceBook, ProductConfig } from './types.js';
+import type { PriceBook, ProductConfig } from '../../services/pricingLab/types.js';
 import { readWorkbook } from './xlsx.js';
 import { writeXlsx } from './xlsxlite.js';
 

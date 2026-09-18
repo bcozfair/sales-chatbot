@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { bookToOdooSheets } from './odoo.js';
 import { bookToSheets, sheetsToBook } from './sheet.js';
 import type { CellValue, ImportIssue, RawSheet } from './sheet.js';
-import type { PriceBook } from './types.js';
+import type { PriceBook } from '../../services/pricingLab/types.js';
 import { writeXlsx } from './xlsxlite.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));

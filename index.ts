@@ -152,6 +152,7 @@ import { apiLogMiddleware, getRequestId } from './config/apiLogger.js';
 import { insertQuotationDeleteAudit } from './db/logRepositories.js';
 import { logsRouter } from './routes/logs.js';
 import { dataDirectoryRouter } from './routes/dataDirectory.js';
+import { pricingLabRouter } from './routes/pricingLab.js';
 import {
   initApiLogWriter,
   stopApiLogWriter,
@@ -225,6 +226,13 @@ app.use('/api/admin/logs', adminAuthMiddleware, requireCapability('page.traffic'
 app.use('/api/admin/data/products', adminAuthMiddleware, requireCapability('page.productsdata'));
 app.use('/api/admin/data/customers', adminAuthMiddleware, requireCapability('page.customersdata'));
 app.use('/api/admin/data', adminAuthMiddleware, dataDirectoryRouter);
+
+// ── โมดูลทดลอง "คิดราคาสินค้าสั่งทำ" — ดู routes/pricingLab.ts ──────────────────────────
+// เจ้าของสั่ง 2026-09-18 ให้เอาเข้าหน้าแอดมินจริงเพื่อทดลองใช้หลังล็อกอิน **ยังไม่ต่อกับใบเสนอราคา**
+// ถอนโมดูลออก = ลบ 2 บรรทัดนี้ (import ด้านบน + บรรทัดล่าง) + 1 ช่องใน capabilities.ts
+// + 1 เมนูใน AdminApp.tsx + 4 โฟลเดอร์/ไฟล์ของโมดูล + DROP TABLE pricing_subcodes
+// ไม่มีโค้ดเดิมที่ไหน import โฟลเดอร์ services/pricingLab/ — การพึ่งพาเป็นทางเดียวโดยตั้งใจ
+app.use('/api/admin/pricing', adminAuthMiddleware, requireCapability('page.pricing'), pricingLabRouter);
 
 // Serve admin portal dashboard
 app.get('/admin', (req: any, res: any) => {

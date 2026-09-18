@@ -21,6 +21,8 @@ import { readHash } from './logs/useHashState';
 export type MainTab =
   | 'dashboard' | 'quoterequest' | 'approvals' | 'quotations' | 'salespersons' | 'promotions' | 'users' | 'blacklist'
   | 'rolepermissions'
+  // โมดูลทดลอง "คิดราคาสินค้าสั่งทำ" (services/pricingLab/) — ถอดออก = ลบคำนี้กับแถวใน TAB_SLUG
+  | 'pricing'
   // สองหน้าข้อมูลอ้างอิงจาก Odoo (อ่านอย่างเดียว)
   | 'productsdata' | 'customersdata'
   // กลุ่ม "บันทึกและรายงาน" — 5 หน้าที่อยู่ใต้หัวข้อพับได้อันเดียวกัน
@@ -54,6 +56,7 @@ export const TAB_SLUG: Record<MainTab, string> = {
   users: 'users',
   rolepermissions: 'rolepermissions',
   blacklist: 'blacklist',
+  pricing: 'pricing',
   productsdata: 'productsdata',
   customersdata: 'customersdata',
   traffic: 'traffic',

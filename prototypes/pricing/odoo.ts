@@ -19,9 +19,9 @@
 //  คลี่เป็นรายการสินค้าไม่ได้เลย — ไม่ใช่เพราะยังไม่ได้ทำ แต่เพราะมันมีค่าได้ไม่จำกัด
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { computePrice } from './engine.js';
+import { computePrice } from '../../services/pricingLab/engine.js';
 import type { CellValue, SheetTable } from './sheet.js';
-import type { PriceBook, PriceModel } from './types.js';
+import type { PriceBook, PriceModel } from '../../services/pricingLab/types.js';
 
 export interface OdooOptions {
   /** ชื่อไทยของแกน เอาไว้ประกอบชื่อสินค้า — ไม่ส่งมาก็ใช้ชื่อดิบจากชีต */
