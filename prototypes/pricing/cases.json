@@ -136,5 +136,18 @@
     },
     "expectStatus": "quoteOnRequest",
     "show": true
+  },
+  {
+    "name": "TSK-14 6x200+150-U — รหัสย่อย -U อ่านจากตารางรหัสย่อย (ไม่มีผลกับราคา)",
+    "source": "TS-14!A10 \"ราคาตั้ง Standard TS_- 14 D x100-U\" + แถว U/TS-14 ในตารางรหัสย่อย",
+    "kind": "เฉลยจากชีต",
+    "code": "TSK-14 6x200+150-U",
+    "cfg": {
+      "model": "TS-14",
+      "axes": { "sensor": "K", "dia_group": "Ø6mm./12.7mm." },
+      "dims": { "L1": 200, "L2": 150 },
+      "options": ["sub:U"]
+    },
+    "expectPrice": 5030
   }
 ]

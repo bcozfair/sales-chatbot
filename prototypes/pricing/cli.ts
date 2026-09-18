@@ -55,6 +55,33 @@ if (codeArg) {
   process.exit(parsed.cfg ? 0 : 1);
 }
 
+// ── --subcodes: ตารางรหัสย่อยที่ตั้งค่าไว้แล้ว ────────────────────────────────
+//
+// เฟสนี้ยังไม่มีหน้าจอ — ตารางนี้จึงเป็นทางเดียวที่จะเห็นว่า "วันนี้ระบบรู้จักกี่ตัว"
+// โดยไม่ต้องเปิดไฟล์ JSON
+if (argv.includes('--subcodes')) {
+  const rows = book.subCodes ?? [];
+  console.log(`\nตารางรหัสย่อย — ${rows.length} แถว\n`);
+  if (rows.length === 0) {
+    console.log('  ยังไม่มีใครตั้งค่าสักตัว — ตัวอักษรท้ายรหัสทุกตัวจะขึ้นว่า "ยังไม่ได้ตั้งค่า"');
+  }
+  for (const sc of rows) {
+    const money =
+      sc.effect === 'flat' || sc.effect === 'basePrice'
+        ? ` ${(sc.amount ?? 0).toLocaleString()} บาท`
+        : sc.effect === 'percent'
+          ? ` ${sc.percent}%`
+          : sc.effect === 'setAxis'
+            ? ` ${sc.axis} = ${sc.value}`
+            : '';
+    console.log(`  ${sc.subCode.padEnd(10)} ${sc.scope.padEnd(10)} ${sc.effect.padEnd(10)}${money}`);
+    console.log(`  ${''.padEnd(10)} ${sc.reads}`);
+    console.log(`  ${''.padEnd(10)} ที่มา: ${sc.source ?? 'คนตั้งค่าเอง'}${sc.by ? ` · ${sc.by}` : ''}${sc.at ? ` · ${sc.at}` : ''}`);
+    console.log('');
+  }
+  process.exit(0);
+}
+
 // ── --list: รุ่นทั้งหมดในสมุดราคา ─────────────────────────────────────────────
 if (argv.includes('--list') || argv.length === 0) {
   console.log(`\nสมุดราคา ${book.version} — ${book.source}\n`);
