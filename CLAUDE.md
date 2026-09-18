@@ -101,8 +101,8 @@ npm --prefix frontend run build    # typecheck + build admin (ผลลง publi
 npm run sync:products · sync:customers · sync:saleorders   # ดึงจาก Odoo
 npm run db:dump · db:restore                               # ถ่ายฐานข้อมูลด้วยมือ (ต้องมี pg_dump บน host)
 npm run backup:auto · backup:cron · diag:backup            # สำรองอัตโนมัติ (cron ตี 3 เก็บ 7 ชุด · รายงานอยู่ในแอดมิน) — runbook ใน DEPLOY.md
-tsx scripts/runMigration.ts                                # รัน migration ที่ยังไม่ได้รัน
-npm run diag:migrations                                    # ไล่เทียบ migrations/changes/ กับฐานจริง (รันบน host)
+tsx scripts/runMigration.ts <path/to/file.sql>             # รัน migration "ทีละไฟล์" — ไม่มีโหมดไล่รันของที่ค้าง
+npm run diag:migrations                                    # ไล่เทียบ migrations/changes/ กับฐานจริง (ต้องมีกล่อง docker)
 npm run diag:data-directory                                # หน้าข้อมูลสินค้า/ลูกค้า (กฎ · ส่วนลด · ตัวกรอง)
 npm run backfill:contacts · backfill:delivery-terms · backfill:print-snapshot
 npm run logworker                                          # worker เขียน log แยกโปรเซส
@@ -349,11 +349,21 @@ npm run logworker                                          # worker เขีย
 - **ห้าม `COMMENT ON` (COLUMN/TABLE/VIEW/INDEX)** ใน migration หรือยิงเข้า DB เว้นแต่ผู้ใช้สั่งเอง —
   อธิบายด้วย `--` ในไฟล์ migration แทน
 
-- **migration ใหม่ต้องยุบเข้า `migrations/schema.sql` ด้วย** (51 ไฟล์ใน `migrations/changes/`
-  ณ 2026-09-16) ไม่งั้น schema เต็มจะค่อย ๆ ล้าสมัยจนตั้ง DB ใหม่จากศูนย์ไม่ได้ — วิธีตรวจอยู่หัวไฟล์
+- **migration ใหม่ต้องยุบเข้า `migrations/schema.sql` ด้วย** (52 ไฟล์ใน `migrations/changes/`
+  ณ 2026-09-18) ไม่งั้น schema เต็มจะค่อย ๆ ล้าสมัยจนตั้ง DB ใหม่จากศูนย์ไม่ได้ — วิธีตรวจอยู่หัวไฟล์
   **และ "อยู่ใน repo" ไม่ได้แปลว่า "ลงฐาน prod แล้ว"** — `npm run diag:migrations` คือตัวที่ตอบ
   คำถามหลัง (เกิดจริง 2026-09-15: คอลัมน์ของ `admin_users` ค้างไม่ได้รันมา 6 วัน หน้าเว็บขอ
   ใบเสนอราคาจึงขึ้น "โหลดข้อมูลผู้เสนอราคาไม่สำเร็จ" ทั้งที่โค้ดกับไฟล์ migration ขึ้น server ครบแล้ว)
+
+- **รัน migration คนละวิธีกันระหว่าง dev กับ server — และไม่มีโหมด "ไล่รันของที่ค้าง" สักที่**
+  (วัด 2026-09-18) `scripts/runMigration.ts` รับ **ไฟล์เดียวต่อครั้ง** ไม่มีตารางจำว่าไฟล์ไหนรันไปแล้ว
+  | ที่ไหน | ฐานอยู่ไหน | รันยังไง | ตรวจว่าค้างไหม |
+  | --- | --- | --- | --- |
+  | dev (เครื่องนี้) | Postgres 18 ลงบน Windows ตรง ๆ **ไม่มี docker** | `npx tsx scripts/runMigration.ts migrations/changes/<ไฟล์>.sql` | `diag:migrations` **ใช้ไม่ได้** (มันเรียก `docker compose exec db`) → ถามฐานตรง ๆ ว่า object มีหรือยัง |
+  | server | กล่อง docker `db` | `docker compose exec -T db psql … -f - < <ไฟล์>` (ขั้น 4 ของ `DEPLOY.md`) | `npm run diag:migrations` บน host |
+  บน dev ไฟล์ที่นานกว่า 15 วิ (สร้าง `customers_data_view` ใหม่) ต้องใช้ psql ตรง ๆ แทน
+  เพราะ pool ใน `config/db.ts` ตั้ง `statement_timeout` = 15s — psql อยู่ที่
+  `C:\Program Files\PostgreSQL\18\bin\` ซึ่ง **ไม่ได้อยู่ใน PATH** (วัด 2026-09-18: psql 18.4 · server 18.4)
 
 ---
 
