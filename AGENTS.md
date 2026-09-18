@@ -578,6 +578,7 @@ TS ไต่ `node_modules` ขึ้นไปตามลำดับ ⇒ `<ท
 | รายการ "รุ่นใกล้เคียง" ที่ให้เซลส์กดเลือก | `npm run diag:product-candidates` — เฉลยมาจากประวัติแชทจริง ไม่มี fixture ในกิต ⇒ **จำนวนเคสขยับได้ ตัวที่เป็น gate คือ "หลุดจากรายการ 0 เคส"** ไม่ใช่เปอร์เซ็นต์ |
 | ชื่อลูกค้า / ส่งออก Odoo | `npm run diag:odoo-export` — ถ้าขึ้น `(ตรวจ 0 ชื่อ)` แปลว่าด่านผ่านแบบว่างเปล่า อย่าเชื่อ |
 | กฎเครดิต | `npm run diag:credit-hold` (read-only รันกับ prod ได้) |
+| นิยาม `customers_data_build` / ผู้ติดต่อที่แอดมินเพิ่มเอง | `npm run diag:local-contacts` — **บวก `diag:credit-hold` · `diag:data-directory` · `diag:customer-search` ทุกครั้งที่แตะนิยาม view** เพราะทั้งสามอ่านตารางที่ view สร้าง · ด่านนี้เขียน `local_contacts` และ `customers_data_view` ของจริงใน transaction ที่ **ROLLBACK เสมอ** ห้ามเปลี่ยนเป็น COMMIT |
 | `prompt` ของการสกัด / Flex | `npm run diag:line-parity` |
 | หน้าเว็บขอใบเสนอราคา | `npm run diag:web-quote` · `diag:pdf-issuer` · `diag:sp-dedupe` |
 | คิวอนุมัติราคา / role `approver` | `npm run diag:price-approval` — **ข้อ 1 ห้ามล้มเด็ดขาด** (ใบจาก LINE ที่ติดราคาขั้นต่ำต้องยังออกไม่ได้) · ต้องรัน migration `2026-09-15_02_*` ก่อน ไม่งั้น `admin_users_role_check` ปฏิเสธตั้งแต่ setup |

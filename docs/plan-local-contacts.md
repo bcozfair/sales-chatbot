@@ -5,9 +5,19 @@
 > อยู่ที่ §5 ทั้งหมด ไฟล์นี้เพิ่มสิ่งที่ §5 ยังไม่มี: SQL ที่รันผ่านจริง · แผนที่ไฟล์ · และ**ข้อตัดสินของ
 > เจ้าของเมื่อ 2026-09-17** ซึ่งเปลี่ยนรูปของงานไป 5 ข้อ (§2.5)
 >
-> สถานะ: ⬜ ยังไม่เริ่ม (เฟส I) · **เฟส H (ตรึงทีมขาย) ที่ต้องมาก่อน — โค้ด+migration เสร็จแล้วบน
-> เครื่อง dev เมื่อ 2026-09-18 ด่านผ่านครบ เหลือรัน migration และด่านซ้ำบน server ตอน deploy**
+> สถานะ (2026-09-18): **เฟส H เสร็จบนเครื่อง dev** (เหลือรัน migration + ด่านซ้ำบน server ตอน deploy)
+> · **ก้อน I1 เสร็จบนเครื่อง dev** — migration `2026-09-18_04_local_contacts.sql` รันแล้ว · Arm 3
+> เข้า `customers_data_build` แล้ว · watermark เติมแล้ว · audit trigger ติดแล้ว · ด่านใหม่
+> `npm run diag:local-contacts` ผ่าน 6/6 · **I2–I5 ยังไม่เริ่ม**
 > (รายละเอียดในตารางเฟสของ [แผนใหญ่](plan-web-quote-request.md) · เจ้าของเคาะลำดับไว้ที่ §7.6)
+>
+> **หลักฐานของ I1 ที่วัดได้ (ฐาน dev 2026-09-18)**
+> — ตารางว่าง ⇒ `customers_data_build` ให้ผล **เท่าเดิมทุกไบต์**: 82,721 แถว ·
+> md5 `aee27a082e24539af7a2950f9608bf59` เท่ากันก่อน–หลังรัน migration
+> — เวลา build **ไม่ถอย**: วัดสลับฝั่ง 3 รอบในทรานแซกชันที่ rollback ทิ้ง ได้มัธยฐาน
+> **5,748 ms (นิยามเดิม) เทียบ 5,866 ms (มี Arm 3)** = ต่างกัน 2% อยู่ในช่วง noise
+> — และมีผู้ติดต่อ local 202 คนแล้วยังไม่วิ่งตามจำนวนคน (7,716 ms เทียบว่าง 7,229 ms)
+> — `migrations/schema.sql` ยังตั้ง DB ใหม่จากศูนย์ได้ (ทดสอบบนฐานเปล่า `schema_check` · 30 ตาราง)
 
 ---
 
@@ -629,7 +639,7 @@ picker** และ Odoo จับคู่ผู้ติดต่อของ�
 | ก้อน | เนื้องาน | ขึ้น prod เดี่ยวได้เพราะ | ด่านของก้อนนี้ |
 | --- | --- | --- | --- |
 | **H** | ตรึงทีมขายตอนยืนยันใบ (เฟสอิสระ · ทำที่ server เพราะกระทบใบ LINE) | ใบเก่าไม่มีค่าที่ตรึง → `COALESCE` ตกกลับไปใช้ join สดทุกบิต | `diag:confirm-race` · `diag:odoo-export` **ก่อนและหลัง** |
-| **I1** | migration + Arm 3 + watermark + audit | ตารางว่าง ⇒ view ให้ผลเดิมทุกแถวทุกคอลัมน์ | `diag:local-contacts` ข้อ 1–3 · `diag:migrations` · `diag:customer-search` (ก่อน–หลัง) · `diag:credit-hold` · `diag:data-directory` |
+| **I1** ✅ dev | migration + Arm 3 + watermark + audit | ตารางว่าง ⇒ view ให้ผลเดิมทุกแถวทุกคอลัมน์ | `diag:local-contacts` ข้อ 1–3 · `diag:migrations` · `diag:customer-search` (ก่อน–หลัง) · `diag:credit-hold` · `diag:data-directory` |
 | **I2** | repo + service + 5 endpoint + reconcile ท้าย sync | ยังไม่มี UI เรียก · reconcile กับตารางว่าง = no-op | `npx tsc --noEmit` · `diag:local-contacts` ข้อ 4–8 |
 | **I3** | ปุ่ม + กล่องในหน้าขอใบเสนอราคา | **← ฟีเจอร์ใช้ได้จริงครั้งแรก** | `lint` · `build` · `diag:web-quote` |
 | **I4** | หน้ารายการงานค้าง + badge + ไฟล์ export + ป้าย 🔴 | หน้าใหม่ ไม่แตะของเดิม | `lint` · `build` · วัดที่ 390px |

@@ -146,6 +146,12 @@ npm run logworker                                          # worker เขีย
   ท้าย sync · มัน **ข้ามรอบเองถ้าข้อมูลต้นทางไม่ขยับ** ⇒ migration ที่แก้แค่นิยาม view ต้องส่ง
   `{ force: true }` ไม่งั้นจะดูเหมือนรันแล้วแต่ไม่มีอะไรเปลี่ยน
   **ห้ามให้แอป query `customers_data_build` ตรง ๆ** (~2 วิ/ครั้ง) — แอปอ่าน `customers_data_view` เสมอ
+  **ตั้งแต่ 2026-09-18 view มี Arm 3**: ผู้ติดต่อที่แอดมินเพิ่มเอง (`local_contacts`) ⇒ `source='local'`
+  · `comp`/`own_last`/`own_credit`/`ent_keys` **ยังอ่าน `base` เหมือนเดิม ห้ามเปลี่ยนเป็น `all_rows`**
+  ไม่งั้นผู้ติดต่อที่เพิ่งเพิ่มจะขยับค่าระดับบริษัทและคำตอบของด่านเครดิตได้ · แถวใหม่ต้องเขียนสองที่
+  (`local_contacts` + `ensureDirectoryRow()` ลง `customers_data_view`) เพราะ rebuild กินเวลาถึง 10 นาที
+  · ทีมขายของแถว local **สืบทอดจากบริษัทตอนอ่าน ไม่เก็บซ้ำ** และกติกาต้องตรงกันทั้งสองฝั่งเป๊ะ
+  · gate: `npm run diag:local-contacts`
 
 - **`date AT TIME ZONE` ที่ไม่มี `::timestamp` เพี้ยนตาม TZ ของโปรเซส — และห้ามเดาว่าฝั่งไหนเป็น
   โซนอะไร** เพราะเคยสลับด้านกันมาแล้ว วัด 2026-09-15: **host (เครื่อง dev) = `Etc/UTC`** ส่วน
@@ -360,7 +366,7 @@ npm run logworker                                          # worker เขีย
 - **ห้าม `COMMENT ON` (COLUMN/TABLE/VIEW/INDEX)** ใน migration หรือยิงเข้า DB เว้นแต่ผู้ใช้สั่งเอง —
   อธิบายด้วย `--` ในไฟล์ migration แทน
 
-- **migration ใหม่ต้องยุบเข้า `migrations/schema.sql` ด้วย** (54 ไฟล์ใน `migrations/changes/`
+- **migration ใหม่ต้องยุบเข้า `migrations/schema.sql` ด้วย** (55 ไฟล์ใน `migrations/changes/`
   ณ 2026-09-18) ไม่งั้น schema เต็มจะค่อย ๆ ล้าสมัยจนตั้ง DB ใหม่จากศูนย์ไม่ได้ — วิธีตรวจอยู่หัวไฟล์
   **และ "อยู่ใน repo" ไม่ได้แปลว่า "ลงฐาน prod แล้ว"** — `npm run diag:migrations` คือตัวที่ตอบ
   คำถามหลัง (เกิดจริง 2026-09-15: คอลัมน์ของ `admin_users` ค้างไม่ได้รันมา 6 วัน หน้าเว็บขอ

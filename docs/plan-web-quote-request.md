@@ -1486,6 +1486,17 @@ COALESCE(q.customer_sales_team, st.sales_team)   -- ← ที่จุดปร
 > รัน `diag:odoo-export` ทั้ง qp/qt + `diag:confirm-race` บน server อีกรอบ **ก่อนและหลัง deploy**
 > · จำลองอาการ "ผู้ติดต่อหายจาก view" ได้ด้วย `scripts/dev/seedPhaseH.ts` (เครื่อง dev เท่านั้น)
 >
+> **เฟส I = ⬜ แต่ก้อน I1 เสร็จแล้วบนเครื่อง dev** (2026-09-18) — เฟสนี้ถูกซอยเป็น 5 ก้อนที่ขึ้น prod
+> เดี่ยวได้ (ตาราง §8 ของ [แผนของโมดูล](plan-local-contacts.md)) · **I1 = ชั้นฐานข้อมูลล้วน ยังไม่มี
+> ใครเรียก**: migration `2026-09-18_04_local_contacts.sql` (ตาราง + Arm 3 + audit) · watermark ใน
+> `refreshCustomerDirectory.ts` · `db/localContactsRepo.ts` · ด่านใหม่ `npm run diag:local-contacts`
+> ผ่าน 6/6 · ตารางว่าง ⇒ view เท่าเดิมทุกไบต์ (82,721 แถว · md5 `aee27a082e24539af7a2950f9608bf59`)
+> และเวลา build ไม่ถอย (5,748 ms เดิม เทียบ 5,866 ms มี Arm 3 = ต่างกัน 2%)
+> · ด่านข้างเคียงผ่านครบ: `diag:credit-hold` · `diag:data-directory` · `diag:customer-search`
+> · **`diag:migrations` รันบนเครื่องนี้ไม่ได้** (เรียก `docker compose exec db`) ⇒ ต้องรันบน server
+> · **ที่ยังไม่เริ่ม: I2–I5** (repo/service/endpoint · ปุ่มในหน้าขอใบเสนอราคา · หน้ารายการงานค้าง +
+> ไฟล์ export · ธง `new_contact` เข้าคิวแก้มือ)
+>
 > **เฟส D = 🟨** — โค้ดครบและ push ขึ้น `dev` แล้ว (`services/webQuoteService.ts` · 4 route ·
 > `scripts/diag/webQuoteSmoke.ts`) แต่ **เขียนบน server ซึ่ง DB ยังไม่มีคอลัมน์ของเฟส B/B2**
 > (`admin_users.employee_quotation_id` · `employee_quotation_phone` · `signature_key`)

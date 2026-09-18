@@ -64,7 +64,12 @@ export async function refreshCustomerDataView(opts?: { force?: boolean }): Promi
     const { rows: wmRows } = await client.query(`
       SELECT GREATEST(
                (SELECT max(sync_updated_at) FROM public.customers),
-               (SELECT max(updated_at)      FROM public.sale_orders)
+               (SELECT max(updated_at)      FROM public.sale_orders),
+               -- ผู้ติดต่อที่แอดมินเพิ่มเอง (Arm 3) — ไม่มีบรรทัดนี้แล้วคนที่เพิ่งเพิ่มจะโผล่ใน
+               -- ตารางจริงก็ต่อเมื่อบังเอิญมีข้อมูล Odoo ขยับด้วย ⇒ ดูเหมือนระบบ "ลืม" เขาไปเฉย ๆ
+               -- ⚠️ ตัว reconcile (§6.1 ของ docs/plan-local-contacts.md) ห้ามแตะ updated_at
+               --    มันไม่ได้แก้ข้อมูลธุรกิจ ถ้าไปบวก watermark ทุกรอบจะสั่ง rebuild เพิ่มฟรี ๆ รอบละครั้ง
+               (SELECT max(updated_at)      FROM public.local_contacts)
              ) AS wm,
              (SELECT source_watermark FROM public.customers_data_view_state WHERE id = 1) AS prev`);
     const wm: Date | null = wmRows[0]?.wm ?? null;
