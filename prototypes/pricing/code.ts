@@ -18,12 +18,17 @@
 //  คือใบเสนอราคาที่ต่ำกว่าความจริงโดยไม่มีใครรู้ — ผิดแบบที่ไม่มีอะไรฟ้อง
 //  (เคสจริงที่ยังอ่านไม่ออกวันนี้: `-BU` · `-U` ของ TS-18 · `(F4)` · `+5MP` · `-S000`)
 //
+//  **ตารางรหัสย่อยมาก่อนคำว่า "อ่านไม่ออก"** — ทุกจุดที่เคยตอบว่าอ่านไม่ออก จะถามตาราง
+//  ที่แอดมินตั้งค่าไว้ก่อนเสมอ (`subcodes.ts`) ⇒ ของที่ไฟล์ราคาไม่ได้เขียนไว้ แอดมินเติมเองได้
+//  โดยไม่ต้องแก้ไฟล์นี้ · ที่ยังไม่มีใครตั้งค่า ยังคงออกมาเป็น `unknown` เหมือนเดิม
+//
 //  ไฟล์นี้ **ไม่รู้จักราคา** เลยสักบาท — หน้าที่มันคือแปลงรหัสเป็นสเปก แล้วส่งต่อให้
 //  `engine.ts` คิดราคา ⇒ แก้ตัวอ่านรหัสไม่กระทบตัวเลข และแก้ราคาไม่กระทบตัวอ่าน
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { PriceBook, PriceModel, ProductConfig } from './types.js';
 import { resolveModel } from './engine.js';
+import { findSubCode, subCodeOption } from './subcodes.js';
 
 /** หนึ่งรหัสย่อยในรหัสสินค้า พร้อมคำอธิบายว่าระบบอ่านมันว่าอะไร — ใช้โชว์ให้คนตรวจก่อนเชื่อราคา */
 export interface CodePart {
@@ -115,6 +120,7 @@ function matchSensor(values: string[], prefix: string, letter: string): string |
 // ── ตัวอ่านของแต่ละตระกูล ────────────────────────────────────────────────────
 
 interface Ctx {
+  book: PriceBook;
   model: PriceModel;
   cfg: ProductConfig;
   parts: CodePart[];
@@ -122,6 +128,26 @@ interface Ctx {
 }
 
 const add = (c: Ctx, part: CodePart) => c.parts.push(part);
+
+/**
+ * ลองอ่านจาก "ตารางรหัสย่อย" ที่แอดมินตั้งค่าไว้ — คืน true เมื่อมีแถวรองรับ
+ *
+ * ตัวอ่านนี้ **ไม่ดูเลยว่าแถวนั้นคิดเงินเท่าไหร่** มันแค่แปะป้ายว่าอ่านออกแล้ว และหย่อน
+ * ชื่อรหัสย่อยลง options ให้ engine ไปคิดต่อ — คนละหน้าที่กัน และทำให้แก้ราคาในตาราง
+ * แล้วตัวอ่านไม่ต้องรู้เรื่องด้วยเลย
+ *
+ * `text` แยกจาก `token` เพราะสิ่งที่โชว์บนจอต้องเป็นสิ่งที่คนพิมพ์มาจริง ๆ (มีวงเล็บ)
+ * ส่วนสิ่งที่เอาไปค้นตารางคือเนื้อในวงเล็บ
+ */
+function readFromTable(c: Ctx, token: string, text: string = token): boolean {
+  const sc = findSubCode(c.book, c.model, token);
+  if (!sc) return false;
+  c.cfg.options = [...(c.cfg.options ?? []), subCodeOption(token)];
+  const kind: CodePart['kind'] =
+    sc.effect === 'none' ? 'noPrice' : sc.effect === 'setAxis' ? 'axis' : 'option';
+  add(c, { text, reads: sc.reads, kind });
+  return true;
+}
 
 /** รหัสย่อยที่เหลือจากรหัส ตัดด้วย `-` แล้วยังไม่มีใครอ่าน */
 function leftovers(c: Ctx, rest: string): string[] {
@@ -175,10 +201,12 @@ function readTs04(c: Ctx, rest: string, prefix: string): void {
     if (hit) {
       c.cfg.axes = { ...c.cfg.axes, thread: hit };
       add(c, { text: `(${raw})`, reads: `เกลียว ${hit}${hun ? ` (${hun[1]} หุน)` : ''}`, kind: 'axis' });
+    } else if (readFromTable(c, raw, `(${raw})`)) {
+      // มีแถวในตารางรหัสย่อยแล้ว — จบตรงนี้
     } else if (/^M\d+$/i.test(raw)) {
       add(c, {
         text: `(${raw})`,
-        reads: `เกลียวมิล ${raw.toUpperCase()} — ตารางราคา TS-04 มีแต่เกลียวนิ้ว ต้องขอราคาจากผลิต 2`,
+        reads: `เกลียวมิล ${raw.toUpperCase()} — ตารางราคา TS-04 มีแต่เกลียวนิ้ว ยังไม่ได้ตั้งค่าว่าคิดเท่าไหร่`,
         kind: 'unknown'
       });
     } else {
@@ -229,8 +257,8 @@ function readTs14(c: Ctx, rest: string, prefix: string, letter: string): void {
     if (/^S\d+$/i.test(raw)) {
       c.cfg.options = [...(c.cfg.options ?? []), 'thread'];
       add(c, { text: `(${raw})`, reads: 'รุ่นมีเกลียว (ชีตคิดเพิ่มราคาเดียวทุกขนาดเกลียว)', kind: 'option' });
-    } else {
-      add(c, { text: `(${raw})`, reads: 'อ่านไม่ออก', kind: 'unknown' });
+    } else if (!readFromTable(c, raw, `(${raw})`)) {
+      add(c, { text: `(${raw})`, reads: 'ยังไม่ได้ตั้งค่าว่าแปลว่าอะไร', kind: 'unknown' });
     }
     rest = rest.slice(paren[0].length);
   }
@@ -365,8 +393,9 @@ function readBh(c: Ctx, rest: string): void {
       add(c, { text: token, reads: `แรงดันไฟ ${token} V — ชีตไม่ได้คิดราคาตามแรงดัน`, kind: 'noPrice' });
       continue;
     }
+    if (readFromTable(c, token)) continue;
 
-    add(c, { text: token, reads: 'ยังไม่มีในชีตราคาว่าแปลว่าอะไร', kind: 'unknown' });
+    add(c, { text: token, reads: 'ยังไม่ได้ตั้งค่าว่าแปลว่าอะไร', kind: 'unknown' });
   }
 }
 
@@ -395,15 +424,11 @@ function readTail(c: Ctx, rest: string, prefix: string): void {
   for (const token of leftovers(c, rest)) {
     if (readCable(c, token)) continue;
     if (readCommonToken(c, token)) continue;
+    // `-U` ของ TS-14 เคยเป็นเงื่อนไขฝังในโค้ดตรงนี้ ตอนนี้ย้ายไปเป็นแถวในตารางรหัสย่อยแล้ว
+    // (มาจากรหัสมาตรฐานที่ชีตเขียนเอง `TS_- 14 D x100-U`) ⇒ แอดมินเห็นและแก้ได้
+    if (readFromTable(c, token)) continue;
 
-    // `-U` เป็นส่วนหนึ่งของรหัสมาตรฐานที่ชีต TS-14 เขียนไว้เอง (`TS_- 14 D x100-U`)
-    // ⇒ เฉพาะรุ่นนั้นเท่านั้นที่ตีว่า "ไม่มีผลกับราคา" ได้โดยมีหลักฐาน
-    if (/^U$/i.test(token) && c.model.code === 'TS-14') {
-      add(c, { text: token, reads: 'ตรงกับรหัสมาตรฐานที่ชีตเขียนไว้ (ไม่มีผลกับราคา)', kind: 'noPrice' });
-      continue;
-    }
-
-    add(c, { text: token, reads: 'ยังไม่มีในชีตราคาว่าแปลว่าอะไร', kind: 'unknown' });
+    add(c, { text: token, reads: 'ยังไม่ได้ตั้งค่าว่าแปลว่าอะไร', kind: 'unknown' });
   }
   void prefix;
 }
@@ -459,7 +484,7 @@ export function parseProductCode(input: string, book: PriceBook): ParsedCode {
   }
 
   out.model = model.code;
-  const c: Ctx = { model, cfg: { model: model.code }, parts: [], warnings: out.warnings };
+  const c: Ctx = { book, model, cfg: { model: model.code }, parts: [], warnings: out.warnings };
   add(c, { text: normalized.slice(0, head[0].length), reads: `รุ่น ${model.code} — ${model.label}`, kind: 'model' });
 
   const rest = normalized.slice(head[0].length);

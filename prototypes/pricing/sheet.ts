@@ -30,7 +30,9 @@ import type {
   Predicate,
   PriceBook,
   PriceModel,
-  RoundMode
+  RoundMode,
+  SubCode,
+  SubCodeEffect
 } from './types.js';
 
 export type CellValue = string | number | null;
@@ -95,6 +97,24 @@ const FORMULA_TH: Record<DerivedDim['formula'], string> = {
   cylinderAreaIn2: 'พื้นที่ผิวทรงกระบอก'
 };
 
+/**
+ * ผลของรหัสย่อยต่อราคา — คำที่แอดมินจะเห็นและพิมพ์เอง
+ * ต้องอ่านแล้วรู้ว่า "เงินขยับยังไง" โดยไม่ต้องเปิดคู่มือ
+ */
+const EFFECT_TH: Record<SubCodeEffect, string> = {
+  none: 'ไม่มีผลกับราคา',
+  basePrice: 'ราคาตั้งต้นของตัวเอง',
+  flat: 'บวกเงินคงที่',
+  percent: 'บวกเปอร์เซ็นต์',
+  perUnit: 'บวกตามส่วนที่เกิน',
+  setAxis: 'ตั้งค่าให้ช่อง'
+};
+
+const MATCH_TH: Record<SubCode['match'], string> = {
+  exact: 'ตรงตัว',
+  pattern: 'แม่แบบ'
+};
+
 const ON = 'ใช้';
 const OFF = 'ปิดไว้';
 const SKIP_YES = 'ข้าม';
@@ -110,6 +130,7 @@ const SHEET = {
   rates: 'อัตราตามแกน',
   constraints: 'เงื่อนไขและข้อห้าม',
   derived: 'ค่าที่คำนวณเอง',
+  subCodes: 'รหัสย่อย',
   basePrefix: 'ฐาน-'
 } as const;
 
@@ -122,6 +143,8 @@ const KIND_FROM = flip(KIND_TH);
 const LEVEL_FROM = flip(LEVEL_TH);
 const ROUND_FROM = flip(ROUND_TH);
 const FORMULA_FROM = flip(FORMULA_TH);
+const EFFECT_FROM = flip(EFFECT_TH);
+const MATCH_FROM = flip(MATCH_TH);
 
 // ── เงื่อนไข: โครงสร้าง ⇄ ข้อความที่คนพิมพ์เองได้ ────────────────────────────
 //
@@ -325,6 +348,7 @@ const README_LINES = [
   `${SHEET.rates}           อัตราที่ต่างกันตามขนาดแกน (กฎเดียวแต่คนละราคาตามแกน)`,
   `${SHEET.constraints}    ข้อห้าม/ข้อควรระวัง — ไม่รับผลิต · ต้องขอราคา · เตือน`,
   `${SHEET.derived}       ค่าที่ระบบคิดให้เอง เช่น พื้นที่ผิว`,
+  `${SHEET.subCodes}                ความหมายของตัวอักษรในรหัสสินค้า และผลกับราคา`,
   '',
   '── กติกา 5 ข้อ ตอนแก้ ────────────────────────────────────────',
   '1. ห้ามเปลี่ยนข้อความในแถวหัวตาราง — ระบบหาคอลัมน์จากข้อความนั้น',
@@ -357,7 +381,23 @@ const README_LINES = [
   '   10,975 → +20% = 13,170 → +320 = 13,490   (ลำดับที่ชีตราคาใช้จริง)',
   '   10,975 → +320 → +20%  = 13,554           (สลับลำดับ ผิดไป 64 บาท)',
   '',
-  'เว้นเลขลำดับห่าง ๆ (10, 20, 30) จะได้แทรกกฎใหม่ตรงกลางได้โดยไม่ต้องแก้ทั้งชีต'
+  'เว้นเลขลำดับห่าง ๆ (10, 20, 30) จะได้แทรกกฎใหม่ตรงกลางได้โดยไม่ต้องแก้ทั้งชีต',
+  '',
+  `── ชีต ${SHEET.subCodes} ─────────────────────────────────────────────`,
+  'รหัสสินค้าหนึ่งตัวประกอบด้วยหลายท่อน เช่น BH-01 230x32-240-650W-N-S000',
+  'ตัวเลข (ขนาด · กำลังไฟ · ความยาว) ระบบอ่านจากตารางราคาได้เองอยู่แล้ว',
+  'แต่ "ตัวอักษร" อย่าง N หรือ S000 ไม่มีที่ไหนในไฟล์ราคาบอกว่าแปลว่าอะไร',
+  'ชีตนี้คือที่ที่คุณบอกระบบเอง — หนึ่งแถวต่อหนึ่งรหัสย่อย',
+  '',
+  '   ใช้กับรุ่น      TS-14        เฉพาะรุ่นนี้',
+  '                  TS-18*       ทั้งตระกูล (ขึ้นต้นด้วย TS-18)',
+  '                  *            ทุกรุ่น   ← รุ่นที่เขียนเจาะจงไว้ ชนะเสมอ',
+  '   แบบจับคู่       ตรงตัว       ต้องพิมพ์มาเหมือนกันเป๊ะ',
+  '                  แม่แบบ       # แทนตัวเลขหนึ่งหลัก (S### จับได้ทั้ง S000 S001 S002)',
+  `   ผลกับราคา      ${Object.values(EFFECT_TH).join(' · ')}`,
+  '',
+  'รหัสย่อยที่ยังไม่มีแถวในชีตนี้ ระบบจะขึ้นเตือนว่า "ยังไม่ได้ตั้งค่า" และไม่เดาให้',
+  'เพราะราคาที่ตกของไปหนึ่งท่อน หน้าตาเหมือนราคาที่ถูกต้องทุกประการ'
 ];
 
 function metaSheet(book: PriceBook, exportedAt: string): SheetTable {
@@ -545,6 +585,76 @@ function addersSheet(book: PriceBook): SheetTable {
   };
 }
 
+const SUBCODE_COLS: SheetColumn[] = [
+  { label: 'รหัสย่อย', width: 12 },
+  { label: 'แบบจับคู่', width: 10 },
+  { label: 'ใช้กับรุ่น', width: 12 },
+  { label: 'อ่านว่า', width: 34 },
+  { label: 'ผลกับราคา', width: 20 },
+  { label: 'ลำดับ', width: 8 },
+  { label: 'จำนวนเงิน', width: 11 },
+  { label: 'เปอร์เซ็นต์', width: 11 },
+  { label: 'คิดจากขนาด', width: 13 },
+  { label: 'เกินกว่า', width: 10 },
+  { label: 'ทีละ', width: 8 },
+  { label: 'ปัดเศษ', width: 10 },
+  { label: 'อัตราต่อหน่วย', width: 13 },
+  { label: 'คูณ', width: 7 },
+  { label: 'หน่วย', width: 8 },
+  { label: 'ตั้งค่าช่อง', width: 12 },
+  { label: 'เป็นค่า', width: 16 },
+  { label: 'เปิดใช้', width: 9 },
+  { label: 'ที่มาในไฟล์ราคา', width: 34 },
+  { label: 'ใครตั้งค่า', width: 14 },
+  { label: 'เมื่อไหร่', width: 12 },
+  { label: 'หมายเหตุ', width: 30 }
+];
+
+/**
+ * ชีตนี้คือของใหม่ทั้งหมดของรอบ "พิมพ์รหัสแล้วได้ราคา" — ที่เหลือในไฟล์เหมือนเดิมทุกชีต
+ * วางไว้ให้แอดมินเติมเองได้ทีละแถว และ **ส่งออก/นำเข้าได้เหมือนกฎอื่น** เพราะการตั้งค่า
+ * 30 ตัวรวดใน Excel เร็วกว่าจิ้มทีละตัวบนหน้าจอมาก
+ */
+function subCodesSheet(book: PriceBook): SheetTable {
+  const rows: CellValue[][] = [];
+  for (const sc of [...(book.subCodes ?? [])].sort(
+    (x, y) => x.scope.localeCompare(y.scope) || x.subCode.localeCompare(y.subCode)
+  )) {
+    rows.push([
+      sc.subCode,
+      MATCH_TH[sc.match] ?? MATCH_TH.exact,
+      sc.scope,
+      sc.reads,
+      EFFECT_TH[sc.effect],
+      sc.order ?? '',
+      sc.amount ?? '',
+      sc.percent ?? '',
+      sc.dim ?? '',
+      sc.over ?? '',
+      sc.step ?? '',
+      sc.round ? ROUND_TH[sc.round] : '',
+      sc.rate ?? '',
+      sc.times ?? '',
+      sc.unit ?? '',
+      sc.axis ?? '',
+      sc.value ?? '',
+      sc.disabled ? OFF : ON,
+      sc.source ?? '',
+      sc.by ?? '',
+      sc.at ?? '',
+      sc.note ?? ''
+    ]);
+  }
+  return {
+    name: SHEET.subCodes,
+    title:
+      'ความหมายของตัวอักษรในรหัสสินค้า · หนึ่งแถว = หนึ่งรหัสย่อย · รหัสย่อยที่ไม่มีในชีตนี้ ระบบจะเตือนว่า "ยังไม่ได้ตั้งค่า" ไม่เดาให้',
+    columns: SUBCODE_COLS,
+    rows,
+    freeze: true
+  };
+}
+
 function ratesSheet(book: PriceBook): SheetTable {
   const rows: CellValue[][] = [];
   for (const m of Object.values(book.models)) {
@@ -647,6 +757,7 @@ export function bookToSheets(book: PriceBook, opts?: { exportedAt?: string }): S
     ratesSheet(book),
     constraintsSheet(book),
     derivedSheet(book),
+    subCodesSheet(book),
     ...Object.values(book.models).map(baseSheet)
   ];
 }
@@ -776,6 +887,7 @@ export function sheetsToBook(grids: RawSheet[]): { book: PriceBook | null; issue
   readRates(by.get(SHEET.rates), models, R);
   readConstraints(by.get(SHEET.constraints), models, R);
   readDerived(by.get(SHEET.derived), models, R);
+  const subCodes = readSubCodes(by.get(SHEET.subCodes), R);
 
   // ── หัวสมุด ────────────────────────────────────────────────────────────────
   let version = 'นำเข้าจากไฟล์ Excel';
@@ -802,6 +914,7 @@ export function sheetsToBook(grids: RawSheet[]): { book: PriceBook | null; issue
     version,
     source,
     models,
+    subCodes,
     edited: {
       at: new Date().toISOString().slice(0, 16).replace('T', ' '),
       by: bywhom || undefined,
@@ -810,6 +923,94 @@ export function sheetsToBook(grids: RawSheet[]): { book: PriceBook | null; issue
   };
 
   return { book, issues: R.issues };
+}
+
+/**
+ * อ่านชีตรหัสย่อยกลับเป็นข้อมูล
+ *
+ * **ไม่มีชีตนี้ ไม่ใช่ความผิดพลาด** — ไฟล์ที่ส่งออกก่อนรอบนี้ยังไม่มีชีตนี้ และสมุดที่
+ * ยังไม่มีใครตั้งค่ารหัสย่อยสักตัวก็ถูกต้องอยู่แล้ว ⇒ คืนรายการว่าง ไม่ต้องเตือน
+ */
+function readSubCodes(grid: CellValue[][] | undefined, R: Reader): SubCode[] {
+  const name = SHEET.subCodes;
+  if (!grid) return [];
+  const h = findHeader(grid, ['รหัสย่อย', 'ผลกับราคา']);
+  if (!h) {
+    R.err(name, 'ไม่พบแถวหัวตาราง (ต้องมี "รหัสย่อย" และ "ผลกับราคา")');
+    return [];
+  }
+
+  const out: SubCode[] = [];
+  for (let r = h.at + 1; r < grid.length; r++) {
+    const row = grid[r] ?? [];
+    if (isEmptyRow(row)) continue;
+    const line = r + 1;
+
+    const token = toText(cell(row, h.index, 'รหัสย่อย'));
+    if (token === '') {
+      R.warn(name, 'แถวนี้ไม่มีรหัสย่อย — ข้ามไป', line);
+      continue;
+    }
+
+    const effectTh = toText(cell(row, h.index, 'ผลกับราคา'));
+    const effect = EFFECT_FROM[effectTh];
+    if (!effect) {
+      R.err(name, `ผลกับราคา "${effectTh}" ไม่รู้จัก — ใช้ได้แค่ ${Object.values(EFFECT_TH).join(' · ')}`, line);
+      continue;
+    }
+
+    const matchTh = toText(cell(row, h.index, 'แบบจับคู่'));
+    const match = matchTh === '' ? 'exact' : MATCH_FROM[matchTh];
+    if (!match) {
+      R.err(name, `แบบจับคู่ "${matchTh}" ไม่รู้จัก — ใช้ได้แค่ ${Object.values(MATCH_TH).join(' · ')}`, line);
+      continue;
+    }
+
+    const scope = toText(cell(row, h.index, 'ใช้กับรุ่น')) || '*';
+    if (out.some((s) => s.subCode.toUpperCase() === token.toUpperCase() && s.scope === scope)) {
+      R.err(name, `รหัสย่อย "${token}" ของรุ่น ${scope} ซ้ำกับแถวก่อนหน้า — ใช้แถวแรก`, line);
+      continue;
+    }
+
+    const roundTh = toText(cell(row, h.index, 'ปัดเศษ'));
+    const round = roundTh === '' ? undefined : ROUND_FROM[roundTh];
+    if (roundTh !== '' && !round) R.warn(name, `ปัดเศษ "${roundTh}" ไม่รู้จัก — ใช้ปัดขึ้น`, line);
+
+    const sc: SubCode = {
+      subCode: token,
+      match,
+      scope,
+      reads: toText(cell(row, h.index, 'อ่านว่า')),
+      effect,
+      order: toNumber(cell(row, h.index, 'ลำดับ')),
+      amount: toNumber(cell(row, h.index, 'จำนวนเงิน')),
+      percent: toNumber(cell(row, h.index, 'เปอร์เซ็นต์')),
+      dim: toText(cell(row, h.index, 'คิดจากขนาด')) || undefined,
+      over: toNumber(cell(row, h.index, 'เกินกว่า')),
+      step: toNumber(cell(row, h.index, 'ทีละ')),
+      round,
+      rate: toNumber(cell(row, h.index, 'อัตราต่อหน่วย')),
+      times: toNumber(cell(row, h.index, 'คูณ')),
+      unit: toText(cell(row, h.index, 'หน่วย')) || undefined,
+      axis: toText(cell(row, h.index, 'ตั้งค่าช่อง')) || undefined,
+      value: toText(cell(row, h.index, 'เป็นค่า')) || undefined,
+      disabled: toText(cell(row, h.index, 'เปิดใช้')) === OFF ? true : undefined,
+      source: toText(cell(row, h.index, 'ที่มาในไฟล์ราคา')) || undefined,
+      by: toText(cell(row, h.index, 'ใครตั้งค่า')) || undefined,
+      at: toText(cell(row, h.index, 'เมื่อไหร่')) || undefined,
+      note: toText(cell(row, h.index, 'หมายเหตุ')) || undefined
+    };
+
+    // แถวที่ "ไม่มีที่มาในไฟล์ราคา" = คนเพิ่มเอง — ต้องแยกให้ออก เพราะไฟล์ราคารอบใหม่
+    // ห้ามทับของที่แอดมินตั้งค่าไว้เอง (กติกาเดียวกับกฎบวกเพิ่มที่เพิ่มเอง)
+    if (!sc.source) sc.custom = true;
+
+    for (const k of Object.keys(sc) as (keyof SubCode)[]) {
+      if (sc[k] === undefined) delete sc[k];
+    }
+    out.push(sc);
+  }
+  return out;
 }
 
 function readBase(model: PriceModel, name: string, grid: CellValue[][], R: Reader): void {
@@ -1237,4 +1438,4 @@ function readDerived(grid: CellValue[][] | undefined, models: Record<string, Pri
 
 // ── ชื่อชีตที่ใช้ภายนอก (หน้าเว็บอ้างถึงตอนอธิบายให้คนอ่าน) ────────────────────
 export const SHEET_NAMES = SHEET;
-export const VOCAB = { KIND_TH, LEVEL_TH, ROUND_TH, FORMULA_TH, ON, OFF, SKIP_YES, SKIP_NO, BLANK_TOKEN };
+export const VOCAB = { KIND_TH, LEVEL_TH, ROUND_TH, FORMULA_TH, EFFECT_TH, MATCH_TH, ON, OFF, SKIP_YES, SKIP_NO, BLANK_TOKEN };

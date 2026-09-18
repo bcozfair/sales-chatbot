@@ -14,7 +14,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseProductCode } from './code.js';
 import { computePrice, formatOutcome } from './engine.js';
-import type { PriceBook, ProductConfig } from './types.js';
+import type { PriceBook, ProductConfig, SubCode } from './types.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const book = JSON.parse(readFileSync(join(HERE, 'book.json'), 'utf8')) as PriceBook;
@@ -115,6 +115,141 @@ for (const c of CASES.filter((x) => x.code)) {
     console.log(`   (มีรหัสย่อยที่อ่านไม่ออกและถูกรายงานไว้: ${unknown.join(' · ')})`);
   }
 }
+console.log('');
+
+// ── ด่านตรวจตารางรหัสย่อย ────────────────────────────────────────────────────
+//
+// คำถามที่ด่านนี้ตอบ: **"แอดมินตั้งค่ารหัสย่อยแล้ว ราคาขยับตามที่ตั้งไว้จริงไหม"**
+// ตัวเลขที่คาดหวังคิดจากเคส TSK-14 ที่ชีตเฉลยไว้เอง (5,030) แล้วบวกตามกฎที่ตั้ง
+// ⇒ ผิดเมื่อไหร่รู้ทันทีว่าเพี้ยนที่ "ตารางรหัสย่อย" ไม่ใช่ที่ราคาตั้ง
+//
+// **แถวที่ใช้ในด่านนี้เป็นของสมมติ ไม่ใช่ราคาจริงของร้าน** — ราคาจริงของ `-BU` ยังไม่มี
+// ใครยืนยัน (ชีตมีคอลัมน์ "หัวกระโหลก Blacklite ใหญ่ +700" แต่ตัวอย่างของชีตเองไม่คิดค่านี้)
+// จึงห้ามเอาไปใส่ในสมุดราคาจริงจนกว่าฝ่ายขายจะตอบ
+
+const ts14: ProductConfig = {
+  model: 'TS-14',
+  axes: { sensor: 'K', dia_group: 'Ø6mm./12.7mm.' },
+  dims: { L1: 200, L2: 150 }
+};
+
+/** สมุดราคาเล่มเดิม + ตารางรหัสย่อยชุดทดสอบ — ไม่แตะ book.json จริง */
+function withSubCodes(rows: SubCode[]): PriceBook {
+  return { ...book, subCodes: [...(book.subCodes ?? []), ...rows] };
+}
+
+function subCase(name: string, rows: SubCode[], cfg: ProductConfig, expect: number): void {
+  const out = computePrice(cfg, withSubCodes(rows));
+  const ok = out.unitPrice === expect;
+  ok ? pass++ : fail++;
+  console.log(`${ok ? '✓' : '✗ FAIL'}  ${name}`);
+  console.log(`   คาดหวัง ${expect.toLocaleString()} · ได้ ${out.unitPrice.toLocaleString()}`);
+  if (!ok) {
+    console.log(
+      formatOutcome(out)
+        .split('\n')
+        .map((l) => '   ' + l)
+        .join('\n')
+    );
+  }
+}
+
+console.log('─'.repeat(70));
+console.log('ด่านตรวจตารางรหัสย่อย — ตั้งค่าแล้วราคาต้องขยับตามที่ตั้งไว้');
+console.log('─'.repeat(70));
+
+subCase(
+  'บวกเงินคงที่ 700 (5,030 + 700)',
+  [{ subCode: 'BU', match: 'exact', scope: 'TS-14', reads: 'หัวกระโหลกใหญ่ (ค่าสมมติสำหรับด่านตรวจ)', effect: 'flat', amount: 700, order: 60 }],
+  { ...ts14, options: ['sub:BU'] },
+  5730
+);
+
+subCase(
+  'บวกเปอร์เซ็นต์ 10% ของยอดสะสม (5,030 → 5,533)',
+  [{ subCode: 'PX', match: 'exact', scope: 'TS-14', reads: 'ค่าสมมติสำหรับด่านตรวจ', effect: 'percent', percent: 10, order: 60 }],
+  { ...ts14, options: ['sub:PX'] },
+  5533
+);
+
+subCase(
+  'บวกตามส่วนที่เกิน — L1 เกิน 100 ไป 100 mm ทีละ 100 @10 (5,030 + 10)',
+  [{ subCode: 'PU', match: 'exact', scope: 'TS-14', reads: 'ค่าสมมติสำหรับด่านตรวจ', effect: 'perUnit', dim: 'L1', over: 100, step: 100, rate: 10, unit: ' mm', order: 60 }],
+  { ...ts14, options: ['sub:PU'] },
+  5040
+);
+
+subCase(
+  'ราคาตั้งต้นของตัวเอง — ทิ้งตารางราคาตั้งไปเลย (1,234 + ส่วนที่เกินของกฎเดิม 1,030)',
+  [{ subCode: 'ZZ', match: 'exact', scope: 'TS-14', reads: 'ราคาเหมาสมมติสำหรับด่านตรวจ', effect: 'basePrice', amount: 1234, order: 1 }],
+  { ...ts14, options: ['sub:ZZ'] },
+  2264
+);
+
+{
+  // แม่แบบ: S### ต้องจับ S000 S001 S002 ได้ทั้งชุดด้วยแถวเดียว
+  const rows: SubCode[] = [
+    { subCode: 'S###', match: 'pattern', scope: '*', reads: 'หมายเลขแบบ (ค่าสมมติ)', effect: 'flat', amount: 100, order: 60 }
+  ];
+  const a = computePrice({ ...ts14, options: ['sub:S000'] }, withSubCodes(rows)).unitPrice;
+  const b = computePrice({ ...ts14, options: ['sub:S742'] }, withSubCodes(rows)).unitPrice;
+  const ok = a === 5130 && b === 5130;
+  ok ? pass++ : fail++;
+  console.log(`${ok ? '✓' : '✗ FAIL'}  แม่แบบ S### แถวเดียวจับได้ทั้ง S000 และ S742`);
+  console.log(`   คาดหวัง 5,130 ทั้งคู่ · ได้ ${a.toLocaleString()} · ${b.toLocaleString()}`);
+}
+
+{
+  // ชั้นของขอบเขต: แถวที่เจาะจงรุ่น ต้องชนะแถวที่ตั้งไว้กลาง ๆ เสมอ
+  const rows: SubCode[] = [
+    { subCode: 'KK', match: 'exact', scope: '*', reads: 'ค่ากลาง', effect: 'flat', amount: 100, order: 60 },
+    { subCode: 'KK', match: 'exact', scope: 'TS-14', reads: 'ค่าของรุ่นนี้', effect: 'flat', amount: 900, order: 60 }
+  ];
+  const price = computePrice({ ...ts14, options: ['sub:KK'] }, withSubCodes(rows)).unitPrice;
+  const ok = price === 5930;
+  ok ? pass++ : fail++;
+  console.log(`${ok ? '✓' : '✗ FAIL'}  แถวที่เจาะจงรุ่นชนะแถวที่ใช้ทุกรุ่น`);
+  console.log(`   คาดหวัง 5,930 (ของรุ่นนี้ 900) · ได้ ${price.toLocaleString()}`);
+}
+
+{
+  // ปิดไว้ = ไม่มีผลกับราคา แต่แถวยังอยู่ (เหมือนกฎบวกเพิ่มที่ปิดไว้)
+  const rows: SubCode[] = [
+    { subCode: 'OFFX', match: 'exact', scope: 'TS-14', reads: 'ปิดไว้', effect: 'flat', amount: 700, order: 60, disabled: true }
+  ];
+  const price = computePrice({ ...ts14, options: ['sub:OFFX'] }, withSubCodes(rows)).unitPrice;
+  const ok = price === 5030;
+  ok ? pass++ : fail++;
+  console.log(`${ok ? '✓' : '✗ FAIL'}  แถวที่ปิดไว้ไม่มีผลกับราคา`);
+  console.log(`   คาดหวัง 5,030 · ได้ ${price.toLocaleString()}`);
+}
+
+{
+  // รหัสย่อยที่ยังไม่มีใครตั้งค่า ต้องไม่ทำให้ราคาขยับ และต้องยังถูกรายงานว่าอ่านไม่ออก
+  const price = computePrice({ ...ts14, options: ['sub:ไม่มีจริง'] }, book).unitPrice;
+  const parsed = parseProductCode('TSK-14 6x200+150-QQ', book);
+  const flagged = parsed.parts.some((p) => p.kind === 'unknown' && p.text.toUpperCase() === 'QQ');
+  const ok = price === 5030 && flagged;
+  ok ? pass++ : fail++;
+  console.log(`${ok ? '✓' : '✗ FAIL'}  รหัสย่อยที่ยังไม่ได้ตั้งค่า: ราคาไม่ขยับ และขึ้นธงว่าอ่านไม่ออก`);
+  console.log(`   ราคา ${price.toLocaleString()} (คาด 5,030) · ขึ้นธง ${flagged ? 'ครบ' : 'ไม่ขึ้น'}`);
+}
+
+{
+  // setAxis: รหัสย่อยเซ็ตค่าให้ช่อง แล้วปล่อยให้ตารางราคาเดิมคิดต่อ
+  // ค่าเกลียวหยิบมาจากเคสที่ชีตเฉลยไว้เอง เพื่อไม่ต้องพิมพ์เครื่องหมายนิ้วซ้ำในไฟล์นี้
+  const threadCase = CASES.find((x) => x.cfg.axes?.thread);
+  const thread = threadCase?.cfg.axes?.thread ?? '';
+  const rows: SubCode[] = [
+    { subCode: 'TT', match: 'exact', scope: 'TSK-04', reads: 'เกลียวตามค่าที่ตั้งไว้', effect: 'setAxis', axis: 'thread', value: thread }
+  ];
+  const price = computePrice({ model: 'TSK-04', axes: { D: '6' }, dims: { L1: 300 }, options: ['sub:TT'] }, withSubCodes(rows)).unitPrice;
+  const ok = price === 1010;
+  ok ? pass++ : fail++;
+  console.log(`${ok ? '✓' : '✗ FAIL'}  ตั้งค่าให้ช่อง (เกลียว ${thread}) แล้วตารางราคาเดิมคิดต่อได้`);
+  console.log(`   คาดหวัง 1,010 · ได้ ${price.toLocaleString()}`);
+}
+
 console.log('');
 
 console.log('─'.repeat(70));

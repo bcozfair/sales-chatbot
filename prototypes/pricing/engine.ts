@@ -24,8 +24,10 @@ import type {
   PriceOutcome,
   ProductConfig,
   RoundMode,
+  SubCode,
   Violation
 } from './types.js';
+import { matchedSubCodes } from './subcodes.js';
 
 /** ปัดเป็นสตางค์ — ตัวเลขในไฟล์ Excel มี float noise จริง 182 เซลล์ (วัด 2026-09-17) */
 function money(n: number): Money {
@@ -250,6 +252,32 @@ function computeAdder(
   };
 }
 
+/**
+ * แถวในตารางรหัสย่อยที่คิดเงิน ถูกแปลงเป็น "กฎบวกเพิ่ม" ชั่วคราวแล้วเข้าคิวเดียวกับกฎอื่น
+ * **ตั้งใจให้เป็นทางเดียวกัน** — ถ้าเขียนสูตรแยก วันหนึ่งการปัดเศษหรือลำดับของสองทางจะต่างกัน
+ * แล้วไม่มีใครรู้ว่าทางไหนถูก (ราคาห้ามคิดสองที่)
+ */
+function subCodeAsAdder(sc: SubCode): Adder {
+  return {
+    id: 'sub:' + sc.subCode,
+    // เขียนตัวรหัสย่อยไว้ในชื่อด้วย เพราะ breakdown ต้องตอบได้ว่า "เงินก้อนนี้มาจากตัวไหนในรหัส"
+    label: `${sc.reads || sc.subCode} (${sc.subCode})`,
+    order: sc.order ?? 50,
+    kind: sc.effect as Adder['kind'],
+    amount: sc.amount,
+    percent: sc.percent,
+    dim: sc.dim,
+    over: sc.over,
+    step: sc.step,
+    round: sc.round,
+    rate: sc.rate,
+    times: sc.times,
+    unit: sc.unit,
+    source: sc.source,
+    note: sc.note
+  };
+}
+
 // ── ตัวหลัก ──────────────────────────────────────────────────────────────────
 
 export function resolveModel(book: PriceBook, code: string): PriceModel | undefined {
@@ -278,6 +306,11 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
   // ไม่งั้นช่อง "— ไม่มี —" บนหน้าจอจะลบค่ามาตรฐานของแกนนั้นไปเงียบ ๆ
   const given = Object.fromEntries(Object.entries(cfg.axes ?? {}).filter(([, v]) => v !== ''));
   const axes = { ...(model.axisDefaults ?? {}), ...given };
+  // รหัสย่อยที่ "เซ็ตค่าให้ช่อง" ต้องมีผลก่อนหาราคาตั้ง ไม่งั้นตารางจะถูกค้นด้วยค่าเก่า
+  const subCodes = matchedSubCodes(book, model, cfg.options ?? []);
+  for (const sc of subCodes) {
+    if (sc.effect === 'setAxis' && sc.axis) axes[sc.axis] = sc.value ?? '';
+  }
   // standard คือสเปกที่รวมอยู่ในราคาตั้งแล้ว ⇒ เป็นค่าตั้งต้นของทุก dim ที่ผู้ใช้ไม่ได้ระบุ
   const dims: Record<string, number> = { ...model.standard, ...(cfg.dims ?? {}) };
   const options = new Set(cfg.options ?? []);
@@ -299,7 +332,25 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
   const breakdown: BreakdownLine[] = [];
   let running = 0;
 
-  const base = computeBase(model, book, axes, dims, new Set([model.code]));
+  // "ราคาตั้งต้นของตัวเอง" — รุ่นพิเศษที่ราคาไม่ได้อิงตาราง ⇒ ทิ้งตารางไปเลย ไม่ใช่บวกทับ
+  const ownBase = subCodes
+    .filter((s) => s.effect === 'basePrice')
+    .sort((x, y) => (x.order ?? 50) - (y.order ?? 50));
+  if (ownBase.length > 1) {
+    violations.push({
+      id: 'SUBCODE_BASE_CONFLICT',
+      level: 'warn',
+      message: `รหัสย่อยที่ตั้งราคาตั้งต้นมีมากกว่าหนึ่งตัว (${ownBase.map((s) => s.subCode).join(' · ')}) — ใช้ตัวที่ลำดับน้อยที่สุด`
+    });
+  }
+  const base = ownBase[0]
+    ? {
+        ok: true,
+        amount: money(ownBase[0].amount ?? 0),
+        label: `ราคาตั้งต้นจากรหัสย่อย ${ownBase[0].subCode}`,
+        detail: ownBase[0].reads
+      }
+    : computeBase(model, book, axes, dims, new Set([model.code]));
   if (!base.ok) {
     violations.push({ id: 'NO_BASE_PRICE', level: 'block', message: base.reason ?? 'ไม่มีราคาฐาน' });
   } else {
@@ -310,7 +361,12 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
   if (base.ok) {
     // `disabled` ถูกกรองทิ้งตรงนี้ ไม่ใช่ตอนโหลดสมุดราคา — เพื่อให้กฎที่ปิดไว้ยังอยู่ในสมุด
     // (ส่งออกไป Excel แล้วยังเห็น เปิดกลับมาใช้ได้) แค่ไม่มีผลกับราคา
-    const ordered = [...model.adders].filter((a) => !a.disabled).sort((x, y) => x.order - y.order);
+    const fromSubCodes = subCodes
+      .filter((s) => s.effect === 'flat' || s.effect === 'percent' || s.effect === 'perUnit')
+      .map(subCodeAsAdder);
+    const ordered = [...model.adders, ...fromSubCodes]
+      .filter((a) => !a.disabled)
+      .sort((x, y) => x.order - y.order);
     for (const a of ordered) {
       if (a.when && !evalPredicate(a.when, axes, dims, options)) continue;
       const r = computeAdder(a, model, running, axes, dims);

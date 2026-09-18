@@ -56,7 +56,16 @@ function countBook(b: PriceBook) {
     derived += (m.derivedDims ?? []).length;
     for (const a of m.adders) rates += Object.keys(a.rates ?? {}).length;
   }
-  return { models: Object.keys(b.models).length, cells, bands, rates, adders, constraints, derived };
+  return {
+    models: Object.keys(b.models).length,
+    cells,
+    bands,
+    rates,
+    adders,
+    constraints,
+    derived,
+    subCodes: (b.subCodes ?? []).length
+  };
 }
 
 /** หาแถวในตารางที่อ่านกลับมา แล้วแก้ช่องหนึ่ง — จำลองการที่แอดมินเปิด Excel แล้วพิมพ์ทับ */
@@ -199,6 +208,62 @@ try {
     check(
       'พิมพ์เงื่อนไขผิด → ฟ้องพร้อมเลขแถว และแถวอื่นยังใช้ได้',
       err.length === 1 && err[0]!.row !== undefined && edited !== null,
+      err[0] ? `[${err[0].sheet} แถว ${err[0].row}]` : 'ไม่ฟ้องเลย'
+    );
+  }
+
+  {
+    // จ) เพิ่มรหัสย่อยใหม่ในชีต "รหัสย่อย" — ท่าที่แอดมินจะใช้จริงเวลาเจอตัวอักษรที่ระบบไม่รู้จัก
+    //
+    // ตัวเลข 700 ที่ใช้ที่นี่เป็นค่าสมมติของด่านตรวจ **ไม่ใช่ราคาจริงของ -BU**
+    // (ชีตมีคอลัมน์ "หัวกระโหลก Blacklite ใหญ่ +700" อยู่จริง แต่ตัวอย่างการคิดราคาของ
+    //  ชีตเองกลับไม่คิดค่านี้ ⇒ ยังเป็นคำถามถึงฝ่ายขาย ห้ามใส่ลงสมุดราคาจริง)
+    const g = await readWorkbook(tmp);
+    const sheet = g.find((x) => x.name === SHEET_NAMES.subCodes)!;
+    const header = sheet.rows.findIndex((r) => r.map((c) => String(c ?? '')).includes('รหัสย่อย'));
+    const cols = sheet.rows[header]!.map((c) => String(c ?? '').trim());
+    const newRow: CellValue[] = [];
+    const put = (label: string, v: CellValue) => {
+      const i = cols.indexOf(label);
+      if (i >= 0) newRow[i] = v;
+    };
+    put('รหัสย่อย', 'BU');
+    put('แบบจับคู่', VOCAB.MATCH_TH.exact);
+    put('ใช้กับรุ่น', 'TS-14');
+    put('อ่านว่า', 'หัวกระโหลกใหญ่ (ค่าสมมติของด่านตรวจ)');
+    put('ผลกับราคา', VOCAB.EFFECT_TH.flat);
+    put('ลำดับ', 60);
+    put('จำนวนเงิน', 700);
+    put('เปิดใช้', VOCAB.ON);
+    sheet.rows.push(newRow);
+
+    const { book: edited, issues: is4 } = sheetsToBook(g);
+    const err = is4.filter((i) => i.level === 'error');
+    const ts14: ProductConfig = {
+      model: 'TS-14',
+      axes: { sensor: 'K', dia_group: 'Ø6mm./12.7mm.' },
+      dims: { L1: 200, L2: 150 },
+      options: ['sub:BU']
+    };
+    const price = edited ? computePrice(ts14, edited).unitPrice : -1;
+    check(
+      'เพิ่มรหัสย่อยใหม่ในไฟล์ (-BU +700) แล้วราคาขยับตามทันที',
+      price === 5730 && err.length === 0,
+      `ได้ ${price.toLocaleString()} · คาด 5,730`
+    );
+    const added = (edited?.subCodes ?? []).find((s) => s.subCode === 'BU');
+    check('รหัสย่อยที่เพิ่มเองถูกทำเครื่องหมายว่า "ไม่ได้มาจากไฟล์ราคา"', added?.custom === true);
+  }
+
+  {
+    // ฉ) พิมพ์ "ผลกับราคา" ผิด — ต้องฟ้องพร้อมเลขแถว ไม่ใช่เงียบแล้วราคาหาย
+    const g = await readWorkbook(tmp);
+    const ok = editCell(g, SHEET_NAMES.subCodes, (r) => String(r[0] ?? '') === 'U', 'ผลกับราคา', 'บวกมั่ว ๆ');
+    const { book: edited, issues: is5 } = sheetsToBook(g);
+    const err = is5.filter((i) => i.level === 'error' && i.sheet === SHEET_NAMES.subCodes);
+    check(
+      'พิมพ์ "ผลกับราคา" ผิด → ฟ้องพร้อมเลขแถว และสมุดที่เหลือยังใช้ได้',
+      ok && err.length === 1 && err[0]!.row !== undefined && edited !== null,
       err[0] ? `[${err[0].sheet} แถว ${err[0].row}]` : 'ไม่ฟ้องเลย'
     );
   }

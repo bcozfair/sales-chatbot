@@ -19,7 +19,7 @@ import ExcelJS from 'exceljs';
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Adder, Band, Constraint, DerivedDim, PriceBook, PriceModel } from './types.js';
+import type { Adder, Band, Constraint, DerivedDim, PriceBook, PriceModel, SubCode } from './types.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -265,6 +265,21 @@ function importSheet(
 
 // ── ตัวหลัก ──────────────────────────────────────────────────────────────────
 
+/**
+ * ตารางรหัสย่อยไม่ได้อยู่ในไฟล์ Excel ของฝ่ายขาย — ไฟล์ราคาไม่เคยเขียนไว้ว่าตัวอักษร
+ * ท้ายรหัสแปลว่าอะไร (ดูหัวไฟล์ `subcodes.ts`) ⇒ มันเป็นของที่ "คนกรอก" และเดินทาง
+ * มากับสมุดราคาในไฟล์แยก · ไม่มีไฟล์ = สมุดที่ยังไม่มีใครตั้งค่ารหัสย่อยสักตัว ซึ่งถูกต้อง
+ * และไม่ควรพัง
+ */
+function readSubCodes(file: string): SubCode[] {
+  try {
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as SubCode[];
+    return Array.isArray(raw) ? raw : [];
+  } catch {
+    return [];
+  }
+}
+
 export async function buildBook(dataDir: string, mapDir: string): Promise<{ book: PriceBook; reports: ImportReport[] }> {
   const mapFiles = readdirSync(mapDir).filter((f) => f.endsWith('.map.json')).sort();
   const workbooks = new Map<string, ExcelJS.Workbook>();
@@ -296,7 +311,8 @@ export async function buildBook(dataDir: string, mapDir: string): Promise<{ book
     book: {
       version: new Date().toISOString().slice(0, 10),
       source: [...sources].join(' · '),
-      models
+      models,
+      subCodes: readSubCodes(join(HERE, 'subcodes.json'))
     },
     reports
   };
@@ -316,6 +332,7 @@ if (isMain) {
 
   console.log(`สมุดราคา → ${outFile}`);
   console.log(`ต้นทาง: ${book.source}`);
+  console.log(`ตารางรหัสย่อยที่ตั้งค่าไว้: ${(book.subCodes ?? []).length} ตัว`);
   console.log('');
   console.log('รุ่น              ชีต            ช่องมีราคา  ช่องว่าง(ไม่รับผลิต)  ราคา adder  float noise ที่ปัดทิ้ง');
   for (const r of reports) {

@@ -10,6 +10,7 @@
 
 export { computePrice, formatOutcome, resolveModel, matrixKey, evalPredicate } from '../engine.js';
 export { parseProductCode, unknownParts, axisValues } from '../code.js';
+export { findSubCode, matchedSubCodes, unsetSubCodes, subCodeOption, SUBCODE_PREFIX } from '../subcodes.js';
 export { bookToSheets, sheetsToBook, predicateToText, parsePredicate, SHEET_NAMES, VOCAB } from '../sheet.js';
 export { bookToOdooSheets } from '../odoo.js';
 export { writeXlsx, readXlsxInBrowser } from '../xlsxlite.js';
