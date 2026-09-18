@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { getJwtSecret } from './jwt.js';
 import { pool } from './db.js';
+import { can, type Capability } from './capabilities.js';
 
 /**
  * สิทธิ์ของผู้ใช้ Admin Portal — ตรงกับ CHECK constraint admin_users_role_check
@@ -10,10 +11,12 @@ import { pool } from './db.js';
  *              เป็นคนขอได้ และแก้จำนวน/ราคา/ส่วนลดในร่างที่รออนุมัติได้เอง
  *              (docs/plan-quote-price-approval.md §3.4 · §3.6)
  *   subadmin = ขอใบเสนอราคา + ประวัติใบเสนอราคา (ดู/กรอง/ส่งออก/ถอยเครื่องหมายส่งออก)
+ *   salesperson = พนักงานขายที่ออกใบ/แก้ใบเองได้ แต่ทะลุกฎเองไม่ได้ · เห็นเฉพาะใบของรหัสตัวเอง
+ *              · ส่งออกไฟล์ไม่ได้ · ตั้งเครดิตทับไม่ได้ (docs/plan-role-permissions.md)
  *   user     = สิทธิ์จำกัด เข้าได้เฉพาะเมนูที่เปิดให้ชัดเจน (ตอนนี้คือบัญชีห้ามเสนอราคา)
  * เพิ่ม role ใหม่ต้องแก้ทั้งที่นี่และ CHECK constraint ใน DB ให้ตรงกัน
  */
-export type Role = 'admin' | 'approver' | 'subadmin' | 'user';
+export type Role = 'admin' | 'approver' | 'subadmin' | 'salesperson' | 'user';
 
 export interface AdminIdentity {
   id: number;
@@ -92,5 +95,37 @@ export function requireRole(...roles: Role[]) {
     }
 
     next();
+  };
+}
+
+/**
+ * จำกัดด้วย "ความสามารถ" แทนรายชื่อ role — ต้องวางต่อจาก adminAuthMiddleware เหมือน requireRole
+ *
+ * ต่างจาก `requireRole(...)` ตรงที่คำตอบมาจากตาราง `role_permissions` ซึ่งเจ้าของแก้ได้จากหน้าจอ
+ * ⇒ route ที่เปลี่ยนมาใช้ตัวนี้จะเปลี่ยนพฤติกรรมตามค่าที่ตั้งไว้ทันที โดยไม่ต้อง deploy ใหม่
+ * ตารางว่าง = ค่าเริ่มต้นในแคตตาล็อก ซึ่งถูกเขียนให้ตรงกับรายชื่อ role เดิมของ route นั้นเป๊ะ
+ *
+ * ⚠️ ใช้ได้เฉพาะความสามารถที่เป็น **สวิตช์** (quote.* / approval.* / users.*) เท่านั้น
+ *    ความสามารถกลุ่ม `rule.*` มีโหมด `approval` ซึ่งแปลว่า "ทำได้ถ้ามีคนอนุมัติ" — ความหมายนั้น
+ *    ไม่มีทางแสดงออกมาเป็น "ผ่าน/ไม่ผ่าน" ที่ประตู และการปลดกฎต้องผูกกับ *ใบ* ไม่ใช่ *endpoint*
+ *    (ถ้าย้ายไปไว้ที่ประตู ใบที่ออกจาก LINE จะเปลี่ยนพฤติกรรมตามไปเงียบ ๆ — CLAUDE.md)
+ */
+export function requireCapability(capability: Capability) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    const admin = (req as AdminRequest).admin;
+    if (!admin) {
+      return res.status(401).json({ error: 'Unauthorized: No token provided' });
+    }
+
+    try {
+      if (!(await can(admin.role, capability))) {
+        return res.status(403).json({ error: 'คุณไม่มีสิทธิ์เข้าถึงส่วนนี้' });
+      }
+      next();
+    } catch (err) {
+      // อ่านตารางสิทธิ์ไม่ได้ = ตอบไม่ได้ว่าคนนี้ทำได้ไหม ⇒ ปฏิเสธ ไม่ใช่ปล่อยผ่าน
+      console.error('requireCapability error:', err);
+      res.status(500).json({ error: 'Internal Server Error' });
+    }
   };
 }

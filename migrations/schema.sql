@@ -72,7 +72,8 @@ CREATE TABLE public.admin_users (
     employee_quotation_id character varying(255),
     employee_quotation_phone character varying(64),
     signature_key character varying(32),
-    CONSTRAINT admin_users_role_check CHECK (role IN ('admin', 'approver', 'subadmin', 'user'))
+    acting_salesperson_id character varying(50),
+    CONSTRAINT admin_users_role_check CHECK (role IN ('admin', 'approver', 'subadmin', 'salesperson', 'user'))
 );
 
 
@@ -1624,6 +1625,68 @@ CREATE INDEX idx_sale_orders_sync_cursor ON public.sale_orders (updated_at, orde
 CREATE INDEX idx_customers_sync_cursor   ON public.customers (updated_at, company_id, contact_id);
 CREATE INDEX idx_products_sync_cursor    ON public.products (updated_at, product_template_id);
 CREATE INDEX idx_quotations_sync_cursor  ON public.quotations (updated_at, id);
+
+
+--
+-- Name: role_permissions; Type: TABLE; Schema: public; Owner: -
+--
+-- เมทริกซ์สิทธิ์ต่อ role ที่ตั้งจากหน้าจอได้ (docs/plan-role-permissions.md)
+-- แคตตาล็อกความสามารถอยู่ใน config/capabilities.ts · ตารางนี้เก็บเฉพาะช่องที่ถูกแก้จากค่าเริ่มต้น
+-- ⇒ ตารางว่าง = พฤติกรรมเริ่มต้นในโค้ด · ไม่มีแถวของ SYSTEM_ERROR และต้องไม่มีตลอดไป
+--
+
+CREATE TABLE public.role_permissions (
+    role character varying(20) NOT NULL,
+    capability character varying(64) NOT NULL,
+    mode character varying(16) NOT NULL,
+    updated_by integer,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT role_permissions_pkey PRIMARY KEY (role, capability),
+    CONSTRAINT role_permissions_mode_check CHECK (mode IN ('deny', 'approval', 'allow'))
+);
+
+
+--
+-- Name: admin_user_salespersons; Type: TABLE; Schema: public; Owner: -
+--
+-- บัญชีนี้คือเซลส์รหัสไหน — ตัวนิยามของคำว่า "ใบของตัวเอง" · หลายรหัสต่อบัญชีได้
+-- ไม่มี FK ไป salesperson เพราะ salesperson_id ไม่ unique ที่นั่น · ไม่มีสิทธิ์ใดผูกกับตารางนี้
+--
+
+CREATE TABLE public.admin_user_salespersons (
+    admin_user_id integer NOT NULL,
+    salesperson_id character varying(50) NOT NULL,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT admin_user_salespersons_pkey PRIMARY KEY (admin_user_id, salesperson_id)
+);
+
+
+--
+-- Name: role_permissions role_permissions_updated_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+-- FK 2 ตัวนี้อยู่ตรงนี้ด้วยเหตุผลเดียวกับ FK ของ quotation_blacklist ด้านบน —
+-- admin_users_pkey ถูกสร้างในหมวด CONSTRAINT ซึ่งอยู่หลัง CREATE TABLE ทุกตัว
+--
+
+ALTER TABLE ONLY public.role_permissions
+    ADD CONSTRAINT role_permissions_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES public.admin_users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: admin_user_salespersons admin_user_salespersons_admin_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.admin_user_salespersons
+    ADD CONSTRAINT admin_user_salespersons_admin_user_id_fkey FOREIGN KEY (admin_user_id) REFERENCES public.admin_users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: admin_users_employee_quotation_id_key; Type: INDEX; Schema: public; Owner: -
+--
+-- 1 ชื่อผู้เสนอราคา = 1 บัญชี — ชื่อบนกระดาษมาจากบัญชีที่ล็อกอิน ถ้าซ้ำได้ก็ไม่รู้ว่าใครออกใบจริง
+--
+
+CREATE UNIQUE INDEX admin_users_employee_quotation_id_key ON public.admin_users (employee_quotation_id) WHERE employee_quotation_id IS NOT NULL;
 
 
 --

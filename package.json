@@ -56,6 +56,7 @@
     "diag:line-parity": "tsx scripts/diag/lineFlexParity.ts",
     "diag:web-quote": "tsx scripts/diag/webQuoteSmoke.ts",
     "diag:price-approval": "tsx scripts/diag/priceApprovalSmoke.ts",
+    "diag:role-permissions": "tsx scripts/diag/rolePermissions.ts",
     "diag:web-decision": "tsx scripts/diag/webDecisionParity.ts",
     "diag:sp-dedupe": "tsx scripts/diag/salespersonDedupeSmoke.ts",
     "diag:product-candidates": "tsx scripts/diag/productCandidateEval.ts",

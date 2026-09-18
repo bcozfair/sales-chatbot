@@ -1483,3 +1483,30 @@ export async function getApiLogStats(dateFrom: string, dateTo: string): Promise<
     return { byRoute: [], byHour: [], slowest: [], saturation: null };
   }
 }
+
+// ═══════════════════════════ role_permissions ═══════════════════════════
+//
+// เมทริกซ์สิทธิ์ต่อ role (docs/plan-role-permissions.md) — แคตตาล็อกและค่าเริ่มต้นอยู่ใน
+// config/capabilities.ts ตารางนี้เก็บเฉพาะช่องที่ถูกแก้จากค่าเริ่มต้น ⇒ **ตารางว่างคือสถานะปกติ**
+
+export interface RolePermissionRow {
+  role: string;
+  capability: string;
+  mode: string;
+}
+
+/**
+ * อ่านทั้งตาราง (ไม่กี่สิบแถวเป็นอย่างมาก — ฝั่งเรียกมี cache ของตัวเอง)
+ *
+ * ⚠️ คืน **null เมื่ออ่านไม่สำเร็จ** ไม่ใช่ [] ซึ่งต่างจากฟังก์ชันอื่นในไฟล์นี้โดยตั้งใจ:
+ *    ที่นี่ [] แปลว่า "ไม่มีใครแก้ค่าเริ่มต้นเลย" ซึ่งเป็นคำตอบที่ถูกต้องและพบบ่อยที่สุด
+ *    ถ้าคืน [] ตอน error ด้วย ผู้เรียกจะแยกไม่ออกระหว่าง "ไม่มีการตั้งค่า" กับ "อ่านฐานไม่ได้"
+ *    แล้วสิทธิ์ที่เจ้าของตั้งไว้จะหายไปเงียบ ๆ ทุกครั้งที่ฐานสะดุด
+ */
+export async function getRolePermissionRows(): Promise<RolePermissionRow[] | null> {
+  try {
+    const { rows } = await pool.query(
+      'SELECT role, capability, mode FROM role_permissions');
+    return rows as RolePermissionRow[];
+  } catch (err) { logErr('getRolePermissionRows', err); return null; }
+}
