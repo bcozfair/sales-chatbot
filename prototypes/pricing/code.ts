@@ -13,8 +13,8 @@
 //    BH!E19     `ตัวอย่างการคิดราคา BH-01C (BH-01C-600x150-380-4950W-PL-PL2)`
 //  ⇒ ตัวอ่านนี้อ่าน "ภาษาเดียวกับที่ฝ่ายขายเขียนอยู่แล้ว" ไม่ใช่ภาษาใหม่ที่ต้องสอนใคร
 //
-//  **กฎเหล็กของไฟล์นี้: ท่อนที่ไม่มีหลักฐานว่าแปลว่าอะไร ต้องออกมาเป็น `unknown`**
-//  ห้ามเดาแล้วปล่อยผ่านเงียบ ๆ เพราะราคาที่ "ดูเหมือนคิดครบ" แต่ตกของไป 1 ท่อน
+//  **กฎเหล็กของไฟล์นี้: รหัสย่อยที่ไม่มีหลักฐานว่าแปลว่าอะไร ต้องออกมาเป็น `unknown`**
+//  ห้ามเดาแล้วปล่อยผ่านเงียบ ๆ เพราะราคาที่ "ดูเหมือนคิดครบ" แต่ตกของไป 1 รหัสย่อย
 //  คือใบเสนอราคาที่ต่ำกว่าความจริงโดยไม่มีใครรู้ — ผิดแบบที่ไม่มีอะไรฟ้อง
 //  (เคสจริงที่ยังอ่านไม่ออกวันนี้: `-BU` · `-U` ของ TS-18 · `(F4)` · `+5MP` · `-S000`)
 //
@@ -25,7 +25,7 @@
 import type { PriceBook, PriceModel, ProductConfig } from './types.js';
 import { resolveModel } from './engine.js';
 
-/** หนึ่งท่อนของรหัส พร้อมคำอธิบายว่าระบบอ่านมันว่าอะไร — ใช้โชว์ให้คนตรวจก่อนเชื่อราคา */
+/** หนึ่งรหัสย่อยในรหัสสินค้า พร้อมคำอธิบายว่าระบบอ่านมันว่าอะไร — ใช้โชว์ให้คนตรวจก่อนเชื่อราคา */
 export interface CodePart {
   /** ข้อความตามที่อยู่ในรหัส */
   text: string;
@@ -123,7 +123,7 @@ interface Ctx {
 
 const add = (c: Ctx, part: CodePart) => c.parts.push(part);
 
-/** ท่อนที่เหลือจากรหัส ตัดด้วย `-` แล้วยังไม่มีใครอ่าน */
+/** รหัสย่อยที่เหลือจากรหัส ตัดด้วย `-` แล้วยังไม่มีใครอ่าน */
 function leftovers(c: Ctx, rest: string): string[] {
   return rest
     .split('-')
@@ -132,8 +132,8 @@ function leftovers(c: Ctx, rest: string): string[] {
 }
 
 /**
- * ท่อนสายของ TC: `+1M` `+3M` `+1.5M` `+30cm` — ตัวอักษรที่ตามหลัง M (P/T/C/U/F ฯลฯ)
- * ยังไม่มีหลักฐานว่าคืออะไร จึงถูกแยกออกมาเป็นท่อนที่อ่านไม่ออกต่างหาก ไม่กลืนทิ้ง
+ * ส่วนสายของ TC: `+1M` `+3M` `+1.5M` `+30cm` — ตัวอักษรที่ตามหลัง M (P/T/C/U/F ฯลฯ)
+ * ยังไม่มีหลักฐานว่าคืออะไร จึงถูกแยกออกมาเป็นรหัสย่อยที่อ่านไม่ออกต่างหาก ไม่กลืนทิ้ง
  */
 function readCable(c: Ctx, token: string): boolean {
   const m = token.match(/^\+?(\d+(?:\.\d+)?)(M|CM)([A-Z]*)$/i);
@@ -149,7 +149,7 @@ function readCable(c: Ctx, token: string): boolean {
     kind: 'dim'
   });
   if (tail) {
-    add(c, { text: tail, reads: 'ตัวอักษรท้ายท่อนสาย — ยังไม่มีในชีตราคาว่าแปลว่าอะไร', kind: 'unknown' });
+    add(c, { text: tail, reads: 'ตัวอักษรท้ายส่วนสาย — ยังไม่มีในชีตราคาว่าแปลว่าอะไร', kind: 'unknown' });
   }
   return true;
 }
@@ -380,7 +380,7 @@ function readCableBh(c: Ctx, token: string): boolean {
   return true;
 }
 
-/** ท่อนที่ทุกตระกูลใช้เหมือนกัน — วันนี้มีตัวเดียวที่ชีตเขียนราคาไว้ตรง ๆ คือ PL-2 */
+/** รหัสย่อยที่ทุกตระกูลใช้เหมือนกัน — วันนี้มีตัวเดียวที่ชีตเขียนราคาไว้ตรง ๆ คือ PL-2 */
 function readCommonToken(c: Ctx, token: string): boolean {
   if (/^PL2$/i.test(token) && c.model.adders.some((a) => a.id === 'conn_pl2')) {
     c.cfg.options = [...(c.cfg.options ?? []), 'conn:pl2'];
@@ -390,7 +390,7 @@ function readCommonToken(c: Ctx, token: string): boolean {
   return false;
 }
 
-/** ท่อนท้ายของรหัส TC หลังส่วนขนาด */
+/** รหัสย่อยต่อท้ายของรหัส TC หลังส่วนขนาด */
 function readTail(c: Ctx, rest: string, prefix: string): void {
   for (const token of leftovers(c, rest)) {
     if (readCable(c, token)) continue;
@@ -487,7 +487,7 @@ export function parseProductCode(input: string, book: PriceBook): ParsedCode {
   return out;
 }
 
-/** จำนวนท่อนที่อ่านไม่ออก — หน้าจอใช้ตัดสินว่าจะขึ้นธงเตือนไหม */
+/** จำนวนรหัสย่อยที่อ่านไม่ออก — หน้าจอใช้ตัดสินว่าจะขึ้นธงเตือนไหม */
 export function unknownParts(p: ParsedCode): CodePart[] {
   return p.parts.filter((x) => x.kind === 'unknown');
 }
