@@ -77,7 +77,8 @@
   }
   .coderow .btn { height: 42px; padding: 0 18px; font-weight: 700; flex: none; }
 
-  .reads { display: grid; grid-template-columns: auto auto 1fr; gap: 2px 10px; margin-top: 12px; }
+  .reads { display: grid; grid-template-columns: auto auto 1fr auto; gap: 2px 10px; margin-top: 12px;
+            align-items: center; }
   .reads .t {
     font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
     font-size: 12.5px; font-weight: 700; color: var(--c-text-max); white-space: nowrap;
@@ -87,9 +88,15 @@
   .reads .k.ok   { color: var(--c-text-faint); }
   .reads .k.warn { color: var(--amber-800); font-weight: 700; }
   .reads .k.bad  { color: var(--red-700); font-weight: 700; }
+  .reads .go { justify-self: end; }
+  .reads .go .btn {
+    padding: 3px 9px; font-size: 11.5px; font-weight: 700; white-space: nowrap;
+    border-color: var(--brand-border); color: var(--brand-fg); background: var(--brand-soft);
+  }
   @media (max-width: 520px) {
     .reads { grid-template-columns: 1fr; gap: 0; }
-    .reads .w { margin-bottom: 8px; }
+    .reads .w { margin-bottom: 6px; }
+    .reads .go { justify-self: start; margin-bottom: 10px; }
   }
   #code-out.stale .reads, #code-out.stale .banner { opacity: .5; }
 </style>
@@ -155,7 +162,9 @@
 (function () {
   // สมุดราคาที่หน้านี้ใช้ = ของที่แก้ไว้ในหน้า "แก้กฎราคา" ถ้ามี ไม่งั้นคือของจากไฟล์ราคา
   // ต้องเป็นเล่มเดียวกันจริง ๆ ไม่งั้นแอดมินแก้กฎแล้วมาลองคิดราคาจะเห็นเลขเดิม แล้วสรุปว่าแก้ไม่ติด
-  const U = window.PR_UI, L = window.PR_LABELS, B = window.PR_UI.book(), el = U.el;
+  const U = window.PR_UI, L = window.PR_LABELS, el = U.el;
+  // ไม่ใช่ const เพราะหน้านี้ "เพิ่มรหัสย่อย" ได้เอง — พอเพิ่มแล้วต้องคิดราคาใหม่จากเล่มที่แก้แล้ว
+  let B = window.PR_UI.book();
   U.bar('calc');
 
   const editedNote = U.editedBanner(B);
@@ -252,6 +261,18 @@
       g.append(el('span', 't', part.text));
       g.append(el('span', 'k ' + (bad ? 'bad' : part.guess ? 'warn' : 'ok'), tag));
       g.append(el('span', 'w', part.reads));
+
+      // ปุ่มเขียนตัวรหัสย่อยจริงลงไป ไม่ใช่คำว่า "อันนี้" — บรรทัดเดียวมีตัวที่อ่านไม่ออกได้หลายตัว
+      // และปุ่มต้องอยู่ตรงนี้ ไม่ใช่ในเมนูตั้งค่า เพราะคนที่รู้ว่ามันแปลว่าอะไรคือคนที่กำลังออกใบอยู่
+      const cell = el('span', 'go');
+      if (bad && parsed.model) {
+        const token = part.text.replace(/[()]/g, '');
+        const b = el('button', 'btn', '+ เพิ่ม ' + token);
+        b.type = 'button';
+        b.addEventListener('click', () => askSubcode(token, parsed));
+        cell.append(b);
+      }
+      g.append(cell);
     }
     codeOut.append(g);
 
@@ -260,7 +281,7 @@
       const d = el('div', 'banner amber');
       d.append(el('div', null,
         `ราคาข้างล่างยังไม่รวมของที่อ่านไม่ออก ${unknown.length} ตัว (${unknown.map((u) => u.text).join(' · ')}) — ` +
-        'ตรวจกับฝ่ายขายก่อนส่งให้ลูกค้า'));
+        'ถ้ารู้ว่ามันคืออะไร กดปุ่ม “＋ เพิ่ม” ข้างตัวนั้นได้เลย · ถ้าไม่รู้ ต้องตรวจกับฝ่ายขายก่อนส่งให้ลูกค้า'));
       codeOut.append(d);
     }
     for (const w of parsed.warnings) {
@@ -268,6 +289,63 @@
       d.append(el('div', null, w));
       codeOut.append(d);
     }
+  }
+
+  /**
+   * เพิ่มรหัสย่อยจากหน้านี้เลย แล้วคิดราคาใหม่ทันที
+   *
+   * เก็บลงสมุดเล่มเดียวกับหน้า "แก้กฎราคา" (localStorage ก้อนเดียวกัน) ⇒ ตั้งค่าจากหน้าไหน
+   * อีกหน้าก็เห็น · ของจริงจะเป็นฐานข้อมูล แต่กติกา "ต้องเป็นเล่มเดียวกัน" ต้องเหมือนกัน
+   */
+  function askSubcode(token, parsed) {
+    U.subcodeBox({
+      token,
+      modelCode: parsed.model,
+      book: B,
+      preview(sc) {
+        const trial = Object.assign({}, B, { subCodes: (B.subCodes || []).concat([sc]) });
+        const cfg2 = {
+          model: parsed.cfg.model,
+          axes: Object.assign({}, parsed.cfg.axes),
+          dims: Object.assign({}, parsed.cfg.dims),
+          options: (parsed.cfg.options || []).concat(['sub:' + token.toUpperCase()])
+        };
+        const before = PR_ENGINE.computePrice(parsed.cfg, B);
+        const after = PR_ENGINE.computePrice(cfg2, trial);
+        if (after.status === 'notManufacturable') {
+          return 'บันทึกแล้วรหัสนี้จะกลายเป็น <b>ไม่รับผลิต</b> — ตรวจค่าที่กรอกอีกที';
+        }
+        const same = after.unitPrice === before.unitPrice;
+        return 'ราคาของรหัสนี้จะเป็น <b>' + U.baht(after.unitPrice) + ' บาท</b>' +
+          (same ? ' (เท่าเดิม)' : ' (เดิม ' + U.baht(before.unitPrice) + ')');
+      },
+      onSave(sc) {
+        // ก๊อปเล่มก่อนแก้ ไม่งั้นไปแก้สมุดต้นฉบับในหน่วยความจำ แล้วช่องเทียบ "เดิม → ใหม่"
+        // ของหน้าแก้กฎจะเท่ากันตลอดโดยไม่มีใครรู้ว่าทำไม
+        B = JSON.parse(JSON.stringify(B));
+        B.subCodes = (B.subCodes || []).filter(
+          (x) => !(x.subCode.toUpperCase() === sc.subCode.toUpperCase() && x.scope === sc.scope)
+        );
+        B.subCodes.push(sc);
+        B.edited = {
+          at: new Date().toISOString().slice(0, 16).replace('T', ' '),
+          note: 'เพิ่มรหัสย่อย ' + sc.subCode + ' (' + U.subScopeText(sc.scope) + ')'
+        };
+        const stored = U.saveBook(B);
+        const note = document.getElementById('edited-banner');
+        note.replaceChildren();
+        const nb = U.editedBanner(B);
+        if (nb) note.appendChild(nb);
+
+        // คิดราคาใหม่ก่อน แล้วค่อยต่อท้ายคำเตือน — สลับลำดับเมื่อไหร่คำเตือนจะถูกวาดทับทันที
+        applyCode(codeIn.value);
+        if (!stored) {
+          const w = el('div', 'banner amber');
+          w.append(el('div', null, 'เบราว์เซอร์นี้เก็บของที่ตั้งค่าไว้ไม่ได้ (โหมดส่วนตัว?) — ใช้ต่อได้ แต่รีเฟรชแล้วจะหาย'));
+          codeOut.append(w);
+        }
+      }
+    });
   }
 
   document.getElementById('code-go').addEventListener('click', () => {

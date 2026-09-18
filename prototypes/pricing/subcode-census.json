@@ -1,0 +1,590 @@
+{
+  "measuredAt": "2026-09-18",
+  "source": "ตาราง products ในฐานข้อมูล dev",
+  "totalCodes": 22061,
+  "note": "นับเฉพาะรหัสที่ไม่ซ้ำกัน · ตัดตัวเลขล้วน กำลังไฟ และความยาวสายออก เพราะตัวอ่านรหัสอ่านเองได้แล้ว",
+  "items": [
+    {
+      "token": "S4",
+      "where": "paren",
+      "count": 4037,
+      "models": [
+        "TS-08",
+        "TS-06",
+        "TS-10"
+      ]
+    },
+    {
+      "token": "S2",
+      "where": "paren",
+      "count": 2831,
+      "models": [
+        "TS-04",
+        "TS-10",
+        "TS-08"
+      ]
+    },
+    {
+      "token": "U",
+      "where": "tail",
+      "count": 2569,
+      "models": [
+        "TS-08",
+        "TS-18",
+        "TS-09"
+      ]
+    },
+    {
+      "token": "BU",
+      "where": "tail",
+      "count": 1856,
+      "models": [
+        "TS-08",
+        "TS-14",
+        "TS-15"
+      ]
+    },
+    {
+      "token": "S000",
+      "where": "tail",
+      "count": 1678,
+      "models": [
+        "TS-11",
+        "TS-01",
+        "TS-10"
+      ]
+    },
+    {
+      "token": "S6",
+      "where": "paren",
+      "count": 1129,
+      "models": [
+        "TS-08",
+        "TS-06",
+        "TS-04"
+      ]
+    },
+    {
+      "token": "S3",
+      "where": "paren",
+      "count": 902,
+      "models": [
+        "TS-04",
+        "TS-08",
+        "TS-06"
+      ]
+    },
+    {
+      "token": "PU",
+      "where": "tail",
+      "count": 781,
+      "models": [
+        "TS-11",
+        "TS-10"
+      ]
+    },
+    {
+      "token": "B",
+      "where": "tail",
+      "count": 748,
+      "models": [
+        "TS-06",
+        "TS-15",
+        "TS-07"
+      ]
+    },
+    {
+      "token": "TU",
+      "where": "tail",
+      "count": 702,
+      "models": [
+        "TS-11",
+        "TS-10",
+        "TS-25"
+      ]
+    },
+    {
+      "token": "M6",
+      "where": "paren",
+      "count": 519,
+      "models": [
+        "TS-01",
+        "TS-04",
+        "TS-10"
+      ]
+    },
+    {
+      "token": "TSU",
+      "where": "tail",
+      "count": 517,
+      "models": [
+        "TS-11",
+        "TS-02",
+        "TS-10"
+      ]
+    },
+    {
+      "token": "M8",
+      "where": "paren",
+      "count": 503,
+      "models": [
+        "TS-04",
+        "TS-01",
+        "TS-10"
+      ]
+    },
+    {
+      "token": "S8",
+      "where": "paren",
+      "count": 432,
+      "models": [
+        "TS-06",
+        "TS-08",
+        "TS-15"
+      ]
+    },
+    {
+      "token": "12",
+      "where": "paren",
+      "count": 414,
+      "models": [
+        "TS-02",
+        "TS-05",
+        "TS-12"
+      ]
+    },
+    {
+      "token": "S1",
+      "where": "paren",
+      "count": 396,
+      "models": [
+        "TS-04",
+        "TS-10",
+        "TS-06"
+      ]
+    },
+    {
+      "token": "N",
+      "where": "tail",
+      "count": 391,
+      "models": [
+        "BH-01",
+        "BH-02",
+        "BH-01C"
+      ]
+    },
+    {
+      "token": "1.5",
+      "where": "paren",
+      "count": 360,
+      "models": [
+        "TS-18"
+      ]
+    },
+    {
+      "token": "HPT",
+      "where": "paren",
+      "count": 330,
+      "models": [
+        "BH-01",
+        "BH-03",
+        "BH-02"
+      ]
+    },
+    {
+      "token": "12.7",
+      "where": "paren",
+      "count": 256,
+      "models": [
+        "TS-02",
+        "TS-05"
+      ]
+    },
+    {
+      "token": "MP",
+      "where": "tail",
+      "count": 243,
+      "models": [
+        "TS-23",
+        "TS-25",
+        "TS-12"
+      ]
+    },
+    {
+      "token": "M10",
+      "where": "paren",
+      "count": 238,
+      "models": [
+        "TS-10",
+        "TS-04",
+        "TS-01"
+      ]
+    },
+    {
+      "token": "M12",
+      "where": "paren",
+      "count": 227,
+      "models": [
+        "TS-10",
+        "TS-04",
+        "TS-01"
+      ]
+    },
+    {
+      "token": "PL2",
+      "where": "tail",
+      "count": 219,
+      "models": [
+        "BH-01",
+        "BH-03",
+        "BH-02"
+      ]
+    },
+    {
+      "token": "KU",
+      "where": "tail",
+      "count": 217,
+      "models": [
+        "TS-08",
+        "TS-18",
+        "TS-17"
+      ]
+    },
+    {
+      "token": "T",
+      "where": "tail",
+      "count": 173,
+      "models": [
+        "TS-11",
+        "TS-25",
+        "BH-03"
+      ]
+    },
+    {
+      "token": "11.5",
+      "where": "paren",
+      "count": 156,
+      "models": [
+        "TS-02",
+        "TS-05"
+      ]
+    },
+    {
+      "token": "KBU",
+      "where": "tail",
+      "count": 147,
+      "models": [
+        "TS-08",
+        "TS-18",
+        "TS-09"
+      ]
+    },
+    {
+      "token": "2BU",
+      "where": "tail",
+      "count": 126,
+      "models": [
+        "TS-17",
+        "TS-15",
+        "TS-08"
+      ]
+    },
+    {
+      "token": "Z",
+      "where": "tail",
+      "count": 106,
+      "models": [
+        "BH-01",
+        "BH-02",
+        "BH-02S"
+      ]
+    },
+    {
+      "token": "S001",
+      "where": "tail",
+      "count": 102,
+      "models": [
+        "TS-01",
+        "TS-08",
+        "TS-11"
+      ]
+    },
+    {
+      "token": "P",
+      "where": "tail",
+      "count": 93,
+      "models": [
+        "TS-11",
+        "TS-25"
+      ]
+    },
+    {
+      "token": "SP",
+      "where": "tail",
+      "count": 80,
+      "models": [
+        "TS-21",
+        "TS-03",
+        "TS-05"
+      ]
+    },
+    {
+      "token": "N(HPT)",
+      "where": "tail",
+      "count": 74,
+      "models": [
+        "BH-01",
+        "BH-02",
+        "BH-01C"
+      ]
+    },
+    {
+      "token": "2",
+      "where": "paren",
+      "count": 69,
+      "models": [
+        "TS-18",
+        "TS-06"
+      ]
+    },
+    {
+      "token": "EU",
+      "where": "tail",
+      "count": 68,
+      "models": [
+        "TS-08",
+        "TS-17",
+        "TS-15"
+      ]
+    },
+    {
+      "token": "14.5",
+      "where": "paren",
+      "count": 66,
+      "models": [
+        "TS-02",
+        "TS-12",
+        "TS-05"
+      ]
+    },
+    {
+      "token": "S",
+      "where": "tail",
+      "count": 66,
+      "models": [
+        "TS-25",
+        "TS-06",
+        "TS-17"
+      ]
+    },
+    {
+      "token": "M27",
+      "where": "paren",
+      "count": 56,
+      "models": [
+        "TS-15",
+        "TS-08",
+        "TS-14"
+      ]
+    },
+    {
+      "token": "PL2(HPT)",
+      "where": "tail",
+      "count": 54,
+      "models": [
+        "BH-01",
+        "BH-03",
+        "BH-02"
+      ]
+    },
+    {
+      "token": "SU",
+      "where": "tail",
+      "count": 51,
+      "models": [
+        "TS-08",
+        "TS-15",
+        "TS-14"
+      ]
+    },
+    {
+      "token": "15.5",
+      "where": "paren",
+      "count": 45,
+      "models": [
+        "TS-02",
+        "TS-05"
+      ]
+    },
+    {
+      "token": "Z(HPT)",
+      "where": "tail",
+      "count": 43,
+      "models": [
+        "BH-02S",
+        "BH-01",
+        "BH-02"
+      ]
+    },
+    {
+      "token": "S002",
+      "where": "tail",
+      "count": 42,
+      "models": [
+        "TS-01",
+        "TS-11",
+        "TS-08"
+      ]
+    },
+    {
+      "token": "PL5",
+      "where": "tail",
+      "count": 42,
+      "models": [
+        "BH-01",
+        "BH-03",
+        "BH-02"
+      ]
+    },
+    {
+      "token": "CU",
+      "where": "tail",
+      "count": 42,
+      "models": [
+        "TS-11"
+      ]
+    },
+    {
+      "token": "1(HPT)",
+      "where": "tail",
+      "count": 41,
+      "models": [
+        "BH-01",
+        "BH-02",
+        "BH-03"
+      ]
+    },
+    {
+      "token": "5/16",
+      "where": "paren",
+      "count": 40,
+      "models": [
+        "TS-01",
+        "TS-04",
+        "TS-08"
+      ]
+    },
+    {
+      "token": "12.5",
+      "where": "paren",
+      "count": 40,
+      "models": [
+        "TS-02"
+      ]
+    },
+    {
+      "token": "SSU",
+      "where": "tail",
+      "count": 38,
+      "models": [
+        "TS-08",
+        "TS-09",
+        "TS-15"
+      ]
+    },
+    {
+      "token": "F1",
+      "where": "paren",
+      "count": 37,
+      "models": [
+        "TS-18"
+      ]
+    },
+    {
+      "token": "2B",
+      "where": "tail",
+      "count": 35,
+      "models": [
+        "TS-17",
+        "TS-15",
+        "TS-07"
+      ]
+    },
+    {
+      "token": "S003",
+      "where": "tail",
+      "count": 35,
+      "models": [
+        "TS-01",
+        "TS-12",
+        "TS-11"
+      ]
+    },
+    {
+      "token": "M5",
+      "where": "paren",
+      "count": 32,
+      "models": [
+        "TS-01",
+        "TS-10"
+      ]
+    },
+    {
+      "token": "F",
+      "where": "tail",
+      "count": 30,
+      "models": [
+        "TS-25",
+        "TS-11",
+        "TS-04"
+      ]
+    },
+    {
+      "token": "M16",
+      "where": "paren",
+      "count": 29,
+      "models": [
+        "TS-08",
+        "TS-17",
+        "TS-10"
+      ]
+    },
+    {
+      "token": "S004",
+      "where": "tail",
+      "count": 29,
+      "models": [
+        "TS-01",
+        "TS-11",
+        "TS-17"
+      ]
+    },
+    {
+      "token": "F3",
+      "where": "paren",
+      "count": 29,
+      "models": [
+        "TS-18"
+      ]
+    },
+    {
+      "token": "SBU",
+      "where": "tail",
+      "count": 28,
+      "models": [
+        "TS-08",
+        "TS-15",
+        "TS-09"
+      ]
+    },
+    {
+      "token": "M4",
+      "where": "paren",
+      "count": 28,
+      "models": [
+        "TS-01",
+        "TS-04"
+      ]
+    }
+  ]
+}
