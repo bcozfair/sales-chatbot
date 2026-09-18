@@ -422,3 +422,4 @@ chatbot/
 - **`docs/plan-product-block-rules.md`** — กฎบล็อกสินค้า
 - **`docs/plan-logging-audit-compliance.md`** — ระบบ log / audit / ข้อกำหนดตามกฎหมาย
 - **`docs/plan-user-roles-auth.md`** — สิทธิ์ผู้ใช้และการยืนยันตัวตน
+- **`docs/plan-role-permissions.md`** — เมทริกซ์สิทธิ์ต่อ role ที่ตั้งจากหน้าจอได้ + role `salesperson` + ตัวตนบนใบที่ออกจากเว็บ
