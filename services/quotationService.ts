@@ -1,4 +1,6 @@
 import { pool, withTransaction, type DbExecutor } from '../config/db.js';
+// type-only โดยตั้งใจ — เหตุผลอยู่ที่หัวข้อ "ชั้นเดียวกันนี้ตั้งค่าต่อ role ได้แล้ว" ข้างล่าง
+import type { PermissionMode } from '../config/capabilities.js';
 import { getCustomerByDisplayName, getCustomerById, getFirstContact, getCompanyAddressRows, getContactById } from '../db/repositories.js';
 import {
   findCustomerCandidates,
@@ -169,6 +171,39 @@ export const APPROVAL_REQUIRED_TYPES: Violation['type'][] = ['MIN_PRICE_VIOLATIO
 
 export const requiresPriceApproval = (v: Violation): boolean => APPROVAL_REQUIRED_TYPES.includes(v.type);
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  ชั้นเดียวกันนี้ตั้งค่าต่อ role ได้แล้ว (2026-09-18 · docs/plan-role-permissions.md)
+//
+//  ของที่เปลี่ยนคือ **"ข้อไหนอยู่ชั้นไหน" กลายเป็นค่าที่ขึ้นกับ role ของคนออกใบ** ไม่ใช่ค่าคงที่
+//  ของทั้งระบบอีกต่อไป — แต่ *ตรรกะ* ยังอยู่ที่ฟังก์ชันเดียวเหมือนเดิม โหมดถูกส่งเข้ามาเป็น
+//  **ข้อมูล** จากผู้เรียก (`ruleModesOf()` ใน config/capabilities.ts)
+//
+//  ⚠️ ไฟล์นี้ **ห้าม import config/capabilities.ts แบบ runtime** — ต้องเป็น type-only เท่านั้น
+//     ไม่ใช่เรื่องวงจร import อย่างเดียว แต่เพราะ "ด่านตรวจกฎที่ไปถามตารางสิทธิ์เอง" คือด่านที่
+//     ให้คำตอบต่างกันตามผู้เรียก ⇒ ใบจาก LINE กับใบจากเว็บจะเริ่มคิดคนละแบบโดยไม่มีใครตั้งใจ
+//
+//  `ruleModes` เป็น `null` = ไม่มีใครส่งโหมดมา ⇒ ใช้กติกาเดิมของทั้งระบบเป๊ะ
+//  (ราคาขั้นต่ำ = ต้องอนุมัติ · ที่เหลือ = ติ๊กรับทราบเองได้) ซึ่งเป็นค่าของใบจาก LINE ทุกใบ
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** แมป "ชนิดกฎ → โหมด" ที่ผู้เรียกส่งเข้ามา — รูปเดียวกับ `RuleModeMap` ของ config/capabilities.ts */
+export type ViolationModeMap = Partial<Record<Violation['type'], PermissionMode>>;
+
+/**
+ * ข้อนี้อยู่ชั้นไหนสำหรับคนที่กำลังออกใบอยู่
+ *
+ *   deny     = ออกใบไม่ได้ ต้องแก้ใบ (ไม่มีคำรับทราบหรือคำอนุมัติใดปลดได้)
+ *   approval = ต้องมีคนอนุมัติก่อน
+ *   allow    = ติ๊กรับทราบเองได้
+ */
+export function violationMode(v: Violation, ruleModes?: ViolationModeMap | null): PermissionMode {
+  // ตรวจกฎไม่สำเร็จ = ยังไม่รู้ว่าผิดหรือไม่ ⇒ ไม่มีโหมดไหนปลดได้ และต้องตอบก่อนดูแมปเสมอ
+  if (!isBypassableViolation(v)) return 'deny';
+  const mode = ruleModes?.[v.type];
+  if (mode) return mode;
+  return requiresPriceApproval(v) ? 'approval' : 'allow';
+}
+
 /**
  * คีย์ของข้อที่ "อนุมัติไว้แล้วและยังใช้ได้อยู่" — อ่านจาก `quotations.price_approval` ของใบนั้น
  *
@@ -179,22 +214,74 @@ export const requiresPriceApproval = (v: Violation): boolean => APPROVAL_REQUIRE
  */
 export function approvedViolationKeys(priceApproval: any, current: Violation[]): string[] {
   if (!priceApproval || priceApproval.status !== 'approved') return [];
+
+  // ชนิดกฎที่ **คำขอนี้** ขออนุมัติไว้ — อ่านจากตัวคำขอเอง ไม่ใช่จากค่าคงที่ของระบบ
+  // เพราะตั้งแต่ 2026-09-18 กฎข้อไหนเข้าคิวอนุมัติขึ้นกับ role ของคนขอ (ดู violationMode)
+  // คำขอเก่าที่ไม่ได้เก็บ violations ไว้ = คำขอราคาขั้นต่ำ ซึ่งเป็นชนิดเดียวที่มีก่อนหน้านั้น
+  const askedTypes = new Set<string>();
+  // คีย์ (`type|model`) ของข้อที่ถูกส่งไปขอจริง ๆ — กฎที่ไม่มีตัวเลขผูกใช้ชุดนี้เป็นขอบเขต
+  // ไม่งั้นการอนุมัติ "ระงับรุ่น A" จะกลายเป็นอนุมัติ "ระงับรุ่น B" ให้ด้วยเพราะเป็นกฎชนิดเดียวกัน
+  const askedKeys = new Set<string>();
+  for (const v of (Array.isArray(priceApproval.violations) ? priceApproval.violations : [])) {
+    const t = String(v?.type ?? '');
+    if (!t) continue;
+    askedTypes.add(t);
+    askedKeys.add(`${t}|${String(v?.model ?? '') || '-'}`);
+  }
+  if (askedTypes.size === 0) askedTypes.add('MIN_PRICE_VIOLATION');
+
   const approvedPriceOf = new Map<string, number>();
+  const approvedQtyOf = new Map<string, number>();
   for (const it of (Array.isArray(priceApproval.items) ? priceApproval.items : [])) {
     const model = String(it?.model ?? '');
+    if (!model) continue;
     const price = Number(it?.price);
-    if (!model || !Number.isFinite(price)) continue;
-    // รุ่นเดียวกันหลายบรรทัด ⇒ ยึดราคาที่ต่ำที่สุดที่ถูกอนุมัติ (เป็นเพดานที่อนุมัติไว้จริง)
-    const prev = approvedPriceOf.get(model);
-    approvedPriceOf.set(model, prev === undefined ? price : Math.min(prev, price));
+    if (Number.isFinite(price)) {
+      // รุ่นเดียวกันหลายบรรทัด ⇒ ยึดราคาที่ต่ำที่สุดที่ถูกอนุมัติ (เป็นเพดานที่อนุมัติไว้จริง)
+      const prev = approvedPriceOf.get(model);
+      approvedPriceOf.set(model, prev === undefined ? price : Math.min(prev, price));
+    }
+    const qty = Number(it?.quantity);
+    if (Number.isFinite(qty)) {
+      const prev = approvedQtyOf.get(model);
+      approvedQtyOf.set(model, prev === undefined ? qty : Math.max(prev, qty));
+    }
   }
+
   const keys: string[] = [];
   for (const v of current || []) {
-    if (!requiresPriceApproval(v)) continue;
-    const approved = approvedPriceOf.get(v.model);
-    if (approved === undefined) continue;
-    // 0.005 = ครึ่งสตางค์ กันเลขทศนิยมลอยตัวปัดไม่ตรงกันระหว่าง JSON กับ numeric ของ Postgres
-    if (Number(v.price ?? 0) >= approved - 0.005) keys.push(violationKey(v));
+    if (!askedTypes.has(v.type)) continue;
+    switch (v.type) {
+      case 'MIN_PRICE_VIOLATION': {
+        const approved = approvedPriceOf.get(v.model);
+        if (approved === undefined) break;
+        // 0.005 = ครึ่งสตางค์ กันเลขทศนิยมลอยตัวปัดไม่ตรงกันระหว่าง JSON กับ numeric ของ Postgres
+        if (Number(v.price ?? 0) >= approved - 0.005) keys.push(violationKey(v));
+        break;
+      }
+      // ─ กฎที่ผูกกับ "จำนวน" ─────────────────────────────────────────────────
+      //  ทิศทางของสองข้อนี้ **กลับกัน** และนั่นคือประเด็นทั้งหมด — เกณฑ์คือ
+      //  "แก้ไปทางที่ทำให้ผิดหนักขึ้นกว่าที่คนอนุมัติเห็น = ต้องขอใหม่"
+      case 'OUT_OF_STOCK': {
+        // ผิดเพราะ "สั่งมากกว่าของที่มี" ⇒ สั่งเพิ่มขึ้น = หนักขึ้น
+        const approved = approvedQtyOf.get(v.model);
+        if (approved === undefined) break;
+        if (Number(v.qty ?? 0) <= approved) keys.push(violationKey(v));
+        break;
+      }
+      case 'MOQ_VIOLATION': {
+        // ผิดเพราะ "สั่งน้อยกว่าขั้นต่ำ" ⇒ สั่งลดลง = หนักขึ้น (ตรงข้ามกับของหมด)
+        const approved = approvedQtyOf.get(v.model);
+        if (approved === undefined) break;
+        if (Number(v.qty ?? 0) >= approved) keys.push(violationKey(v));
+        break;
+      }
+      // ─ กฎที่ไม่มีตัวเลขผูก — เทียบคีย์ล้วน แต่ **ต้องเป็นคีย์ที่อยู่ในคำขอจริง** ─
+      //  (คนละรุ่น/คนละลูกค้า = คนละคีย์ ⇒ อนุมัติรุ่นหนึ่งไม่ปลดอีกรุ่นให้)
+      default:
+        if (askedKeys.has(violationKey(v))) keys.push(violationKey(v));
+        break;
+    }
   }
   return keys;
 }
@@ -213,17 +300,25 @@ export function approvedViolationKeys(priceApproval: any, current: Violation[]):
 export function blockingViolations(
   violations: Violation[],
   acknowledgedKeys: string[] | null,
-  approvedKeys: string[] | null = null
+  approvedKeys: string[] | null = null,
+  ruleModes: ViolationModeMap | null = null
 ): Violation[] {
   const list = violations || [];
   const ack = new Set(acknowledgedKeys || []);
   const approved = new Set(approvedKeys || []);
   return list.filter((v) => {
-    if (!isBypassableViolation(v)) return true;
-    // ราคาขั้นต่ำ: คำรับทราบของคนออกใบไม่มีผล ต้องมาจากผู้อนุมัติเท่านั้น
-    if (requiresPriceApproval(v)) return !approved.has(violationKey(v));
-    if (!acknowledgedKeys) return true;
-    return !ack.has(violationKey(v));
+    switch (violationMode(v, ruleModes)) {
+      // `deny` ครอบทั้ง SYSTEM_ERROR และกฎที่ role นี้ถูกปิดไว้ — ไม่มีคีย์ไหนปลดได้
+      case 'deny':
+        return true;
+      // ราคาขั้นต่ำ (และกฎอื่นที่ถูกตั้งเป็น approval): คำรับทราบของคนออกใบไม่มีผล
+      // ต้องมาจากผู้อนุมัติเท่านั้น
+      case 'approval':
+        return !approved.has(violationKey(v));
+      case 'allow':
+        if (!acknowledgedKeys) return true;
+        return !ack.has(violationKey(v));
+    }
   });
 }
 
@@ -1426,7 +1521,8 @@ export async function validateQuotationItems(
       const v: Omit<Violation, 'display_message'> = {
         type: 'OUT_OF_STOCK', model: e.model, warn_msg: e.warn_msg,
         is_optional: e.is_optional, linked_to_model: e.linked_to_model,
-        quantity_on_hand_unreserved: e.quantity_on_hand_unreserved
+        quantity_on_hand_unreserved: e.quantity_on_hand_unreserved,
+        qty: e.qty
       };
       violations.push({ ...v, display_message: buildViolationDisplay(v) });
     }

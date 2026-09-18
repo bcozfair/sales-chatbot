@@ -49,7 +49,9 @@ import {
   getApiLogById,
   getApiLogStats,
   insertMessage,
+  ownQuotesCondition,
 } from './db/repositories.js';
+import { quoteScopeOf } from './config/capabilities.js';
 import {
   confirmQuotationAtomic, enrichQuotationData, buildItemSnapshots, buildViolationDisplay,
   blockingViolations, approvedViolationKeys, ODOO_MANUAL_REASON_KINDS,
@@ -110,7 +112,7 @@ import jwt from 'jsonwebtoken';
 import { pool, withTransaction, type DbExecutor } from './config/db.js';
 import { getJwtSecret } from './config/jwt.js';
 import { getAppUrl } from './config/appUrl.js';
-import { adminAuthMiddleware, requireRole, type Role, type AdminIdentity } from './config/auth.js';
+import { adminAuthMiddleware, requireRole, requireCapability, type Role, type AdminIdentity } from './config/auth.js';
 import {
   listOdooQuotationMakers,
   isValidQuotationMaker,
@@ -211,6 +213,8 @@ app.use('/api/admin/logs', adminAuthMiddleware, requireRole('admin'), logsRouter
 // หน้า "ข้อมูลสินค้า" / "ข้อมูลลูกค้า" — อ่านอย่างเดียว ต้นทางคือ Odoo
 // สิทธิ์: admin · approver · subadmin (เจ้าของกำหนด 2026-09-17) — ไม่รวม role 'user'
 // ซึ่งเห็นได้แค่ "บัญชีห้ามเสนอราคา" เมนูเดียว · บังคับที่จุด mount ที่เดียวเหมือน logsRouter
+// ยังเป็น requireRole โดยตั้งใจ — เมนู "ข้อมูลสินค้า/ลูกค้า" เป็นคำถามของ *เมนู* ไม่ใช่ของ *ใบ*
+// และแคตตาล็อกสิทธิ์รอบแรกจงใจไม่รับเมนูเข้ามา (docs/plan-role-permissions.md §4ข ย่อหน้าท้าย)
 app.use('/api/admin/data', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), dataDirectoryRouter);
 
 // Serve admin portal dashboard
@@ -2312,7 +2316,7 @@ app.delete('/api/admin/salespersons/:userId', adminAuthMiddleware, requireRole('
  * รายชื่อผู้จัดทำที่ Odoo รู้จักจริง — ให้ dropdown ฝั่งหน้าเว็บใช้เลือก (ห้ามพิมพ์เอง)
  * แต่ละรายการมี `phone` ที่ระบบเลือกให้แล้ว (เบอร์ในใบล่าสุดของชื่อนั้น · null ได้) — §2.5b
  */
-app.get('/api/admin/webquote/makers', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), async (req: any, res: any) => {
+app.get('/api/admin/webquote/makers', adminAuthMiddleware, requireCapability('quote.create'), async (req: any, res: any) => {
   try {
     res.json({ makers: await listOdooQuotationMakers() });
   } catch (err: any) {
@@ -2328,7 +2332,7 @@ app.get('/api/admin/webquote/makers', adminAuthMiddleware, requireRole('admin', 
  * ใบจะไม่มีลายเซ็นในช่องผู้เสนอราคา เท่ากับพฤติกรรมของเซลส์ที่ยังไม่มีลายเซ็นวันนี้เป๊ะ
  * ⇒ หน้าเว็บใช้ `has_signature === false` ขึ้นป้ายเตือนค้างไว้ แต่ห้ามใช้บล็อก
  */
-app.get('/api/admin/webquote/me', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), async (req: any, res: any) => {
+app.get('/api/admin/webquote/me', adminAuthMiddleware, requireCapability('quote.create'), async (req: any, res: any) => {
   try {
     const admin = req.admin;
     const profile = await getAdminIssuerProfile(admin.id);
@@ -2360,6 +2364,8 @@ app.get('/api/admin/webquote/me', adminAuthMiddleware, requireRole('admin', 'app
  *    `employee_quotation_phone` มาด้วยจะถูก **เพิกเฉย** ไม่ใช่ตอบ error
  *    (ไม่มี field ให้กรอกเบอร์อยู่แล้ว การส่งมาจึงเป็นความเข้าใจผิดของ client ไม่ใช่การโจมตี)
  */
+// ⚠️ ยังเป็น requireRole โดยตั้งใจ และ **ห้ามใส่ salesperson** — §13.3 ย้ายการตั้งชื่อผู้เสนอราคา
+// ไปเป็นของผู้ดูแลทั้งหมด (P3.5) การเปิดให้ตั้งชื่อเองคือช่องที่ทำให้แอบอ้างชื่อคนอื่นได้
 app.put('/api/admin/webquote/me', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), express.json(), async (req: any, res: any) => {
   try {
     const raw = req.body?.employee_quotation_id;
@@ -2391,6 +2397,8 @@ app.put('/api/admin/webquote/me', adminAuthMiddleware, requireRole('admin', 'app
  * ⇒ ชื่อไฟล์ที่เดาได้ = ลายเซ็นถูกดูดออกไปได้ด้วยการไล่เลข (§2.5)
  * อัปโหลดทับใช้ token เดิม ⇒ ใบเก่าที่พิมพ์ซ้ำได้ลายเซ็นอันใหม่ (ตรงกับพฤติกรรม sale_sigs วันนี้)
  */
+// เซลส์ไม่ได้ใช้เส้นนี้ — ลายเซ็นของเขาอยู่ที่ data/sale_sigs/<salesperson_id>.png อยู่แล้ว
+// และใบของเขาเดินช่อง "ผู้เสนอราคา" เส้นเดียวกับใบ LINE (§13.2) ⇒ ไม่ต้องอัปซ้ำเข้า admin_sigs
 app.post('/api/admin/webquote/me/signature', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), express.json({ limit: '10mb' }), async (req: any, res: any) => {
   try {
     const image = req.body?.image;
@@ -2412,6 +2420,7 @@ app.post('/api/admin/webquote/me/signature', adminAuthMiddleware, requireRole('a
 });
 
 /** ลบลายเซ็นของตัวเอง — ลบแล้วยังออกใบได้ปกติ ใบจะไม่มีลายเซ็นช่องผู้เสนอราคา */
+// คู่กับเส้นอัปโหลดข้างบน — เหตุผลเดียวกัน
 app.delete('/api/admin/webquote/me/signature', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), async (req: any, res: any) => {
   try {
     const deleted = await deleteAdminSignature(req.admin.id);
@@ -2443,7 +2452,7 @@ function sendWebQuoteError(res: any, where: string, err: any) {
  * รายชื่อเซลส์ที่เลือกเป็น "ออกในนาม" ได้ + สถานะ/URL ลายเซ็นของแต่ละคน
  * แถวพร็อกซี `web:%` ถูกกรองออกตั้งแต่ใน listActingSalespersons() (§2.3b · ด่าน pdf-issuer เคส 7)
  */
-app.get('/api/admin/webquote/salespersons', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), async (req: any, res: any) => {
+app.get('/api/admin/webquote/salespersons', adminAuthMiddleware, requireCapability('quote.create'), async (req: any, res: any) => {
   try {
     res.json({ salespersons: await listSalespersonsForWeb() });
   } catch (err: any) {
@@ -2457,7 +2466,7 @@ app.get('/api/admin/webquote/salespersons', adminAuthMiddleware, requireRole('ad
  * เป็น endpoint แยกแทนที่จะแปะไปกับพรีวิว เพราะมันเป็นรายการระดับระบบที่โหลดครั้งเดียวตอน
  * เปิดหน้า ไม่ได้ขึ้นกับใบที่กำลังกรอก · แคช 5 นาทีอยู่ในเซอร์วิส
  */
-app.get('/api/admin/webquote/payment-terms', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), async (req: any, res: any) => {
+app.get('/api/admin/webquote/payment-terms', adminAuthMiddleware, requireCapability('quote.create'), async (req: any, res: any) => {
   try {
     res.json({ terms: await listPaymentTermOptions() });
   } catch (err: any) {
@@ -2471,7 +2480,7 @@ app.get('/api/admin/webquote/payment-terms', adminAuthMiddleware, requireRole('a
  * ยังไม่ลบร่างที่ค้างอยู่ด้วย (`purgePending: false` ใน service) เพราะแค่วางข้อความผิด
  * ก็ไม่ควรทำลายงานที่แอดมินทำค้างไว้ — ต่างจากแชทที่ไม่มีจังหวะ "ดูก่อนแล้วค่อยกด"
  */
-app.post('/api/admin/webquote/propose', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), express.json({ limit: '1mb' }), async (req: any, res: any) => {
+app.post('/api/admin/webquote/propose', adminAuthMiddleware, requireCapability('quote.create'), express.json({ limit: '1mb' }), async (req: any, res: any) => {
   try {
     res.json(await proposeFromText({
       adminId: req.admin.id,
@@ -2490,9 +2499,11 @@ app.post('/api/admin/webquote/propose', adminAuthMiddleware, requireRole('admin'
  * กดสร้างไปแล้ว · ไม่รับ `sp_user_id` โดยตั้งใจ เพราะพรีวิวไม่ต้องมีตัวตนผู้ออกใบ
  * และการ resolve ตัวตนจะไปเขียนแถวพร็อกซีลง salesperson (ดูหัวข้อ previewDraft)
  */
-app.post('/api/admin/webquote/preview', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), express.json({ limit: '2mb' }), async (req: any, res: any) => {
+app.post('/api/admin/webquote/preview', adminAuthMiddleware, requireCapability('quote.create'), express.json({ limit: '2mb' }), async (req: any, res: any) => {
   try {
     res.json(await previewWebQuoteDraft({
+      // โมดัลต้องบอกผลของ *คนนี้* ไม่ใช่ของระบบโดยรวม ไม่งั้นติ๊กแล้วไปเจอ 422 ตอนกด
+      role: req.admin.role,
       customerId: req.body?.customer_id,
       contactId: req.body?.contact_id,
       items: req.body?.items,
@@ -2514,10 +2525,11 @@ app.post('/api/admin/webquote/preview', adminAuthMiddleware, requireRole('admin'
  * ตอบเป็น `application/pdf` ไม่ใช่ JSON ⇒ หน้าเว็บรับเป็น blob แล้วเปิดแท็บใหม่เอง
  * (ใช้ fetch เพราะ endpoint นี้ต้องแนบ header ยืนยันตัวตนเหมือนทุก route ในกลุ่มนี้)
  */
-app.post('/api/admin/webquote/preview-pdf', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), express.json({ limit: '2mb' }), async (req: any, res: any) => {
+app.post('/api/admin/webquote/preview-pdf', adminAuthMiddleware, requireCapability('quote.create'), express.json({ limit: '2mb' }), async (req: any, res: any) => {
   try {
     const out = await previewWebQuotePdf({
       adminId: req.admin.id,
+      role: req.admin.role,
       spUserId: req.body?.sp_user_id,
       quoteCompany: req.body?.quote_company,
       customerId: req.body?.customer_id,
@@ -2545,10 +2557,12 @@ app.post('/api/admin/webquote/preview-pdf', adminAuthMiddleware, requireRole('ad
  * `web_user_id` ต้องส่งกลับไปด้วยเสมอ เพราะขั้นถัดไป (PUT /api/quotation/:id · confirm · cancel)
  * เป็น endpoint เดิมที่ตรวจสิทธิ์ด้วย `isQuotationOwner()` จาก `userId` ใน body (ขั้น 8′)
  */
-app.post('/api/admin/webquote/drafts', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), express.json({ limit: '2mb' }), async (req: any, res: any) => {
+app.post('/api/admin/webquote/drafts', adminAuthMiddleware, requireCapability('quote.create'), express.json({ limit: '2mb' }), async (req: any, res: any) => {
   try {
     res.json(await createWebQuoteDraft({
       adminId: req.admin.id,
+      // role ตัดสินว่ากฎข้อไหนทะลุได้ · ตั้งเครดิตทับได้ไหม · ออกใบในนามใครได้บ้าง
+      role: req.admin.role,
       spUserId: req.body?.sp_user_id,
       customerId: req.body?.customer_id,
       contactId: req.body?.contact_id,
@@ -2597,7 +2611,7 @@ function sendApprovalError(res: any, where: string, err: any) {
 }
 
 /** คิวคำขอ — `?status=pending|rejected|approved` (ไม่ส่ง = ทุกสถานะที่ยังเป็นร่าง) */
-app.get('/api/admin/approvals', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), async (req: any, res: any) => {
+app.get('/api/admin/approvals', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin', 'salesperson'), async (req: any, res: any) => {
   try {
     res.json({ requests: await listApprovalRequests({ actor: actorOf(req), status: req.query?.status }) });
   } catch (err: any) {
@@ -2606,7 +2620,7 @@ app.get('/api/admin/approvals', adminAuthMiddleware, requireRole('admin', 'appro
 });
 
 /** ตัวเลขข้างเมนู — ผู้อนุมัติได้ "รออนุมัติกี่ชุด" · คนขอได้ "ของฉันถูกตีกลับกี่ชุด" */
-app.get('/api/admin/approvals/count', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), async (req: any, res: any) => {
+app.get('/api/admin/approvals/count', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin', 'salesperson'), async (req: any, res: any) => {
   try {
     res.json(await countOpenRequests(actorOf(req)));
   } catch (err: any) {
@@ -2615,7 +2629,7 @@ app.get('/api/admin/approvals/count', adminAuthMiddleware, requireRole('admin', 
 });
 
 /** รายละเอียดคำขอ 1 ชุด — รวมทุกบรรทัดของทุกใบ + ผลตรวจกฎ "สด" ณ ตอนเปิดดู */
-app.get('/api/admin/approvals/:requestId', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), async (req: any, res: any) => {
+app.get('/api/admin/approvals/:requestId', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin', 'salesperson'), async (req: any, res: any) => {
   try {
     res.json(await getApprovalRequest({ requestId: req.params.requestId, actor: actorOf(req) }));
   } catch (err: any) {
@@ -2624,7 +2638,7 @@ app.get('/api/admin/approvals/:requestId', adminAuthMiddleware, requireRole('adm
 });
 
 /** รายการของคำขอที่ถูกตีกลับ เพื่อเปิดกลับเข้าฟอร์มขอใบเสนอราคาแล้วแก้ต่อ */
-app.get('/api/admin/approvals/:requestId/form', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), async (req: any, res: any) => {
+app.get('/api/admin/approvals/:requestId/form', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin', 'salesperson'), async (req: any, res: any) => {
   try {
     res.json(await loadRequestIntoForm({ requestId: req.params.requestId, actor: actorOf(req) }));
   } catch (err: any) {
@@ -2667,7 +2681,7 @@ app.post('/api/admin/approvals/:requestId/reject', adminAuthMiddleware, requireR
 });
 
 /** คนขอยกเลิกคำขอของตัวเอง (หรือ admin ยกเลิกให้) — ใบกลายเป็น cancelled ด้วยกลไกเดิม */
-app.post('/api/admin/approvals/:requestId/cancel', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), express.json(), async (req: any, res: any) => {
+app.post('/api/admin/approvals/:requestId/cancel', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin', 'salesperson'), express.json(), async (req: any, res: any) => {
   try {
     res.json(await cancelRequest({ requestId: req.params.requestId, actor: actorOf(req) }));
   } catch (err: any) {
@@ -2676,10 +2690,11 @@ app.post('/api/admin/approvals/:requestId/cancel', adminAuthMiddleware, requireR
 });
 
 /** เลขที่ใบที่ยืนยันแล้ว → ร่าง revision · คืน `draft_quote_id` ให้ฟอร์มเปิดต่อในหน้าเดิม */
-app.post('/api/admin/webquote/revise', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), express.json(), async (req: any, res: any) => {
+app.post('/api/admin/webquote/revise', adminAuthMiddleware, requireCapability('quote.revise'), express.json(), async (req: any, res: any) => {
   try {
     res.json(await reviseWebQuotation({
       adminId: req.admin.id,
+      role: req.admin.role,
       spUserId: req.body?.sp_user_id,
       quotationNo: req.body?.quotation_no,
     }));
@@ -3539,7 +3554,7 @@ const SP_CODE_SQL = `COALESCE(s.salesperson_id, q.employee_details->>'salesperso
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // --- API Endpoint: Admin Quotations List (with search, filter, pagination) ---
-app.get('/api/admin/quotations', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), async (req: any, res: any) => {
+app.get('/api/admin/quotations', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin', 'salesperson'), async (req: any, res: any) => {
   try {
     const search = req.query.search || '';
     const status = req.query.status || '';
@@ -3602,6 +3617,18 @@ app.get('/api/admin/quotations', adminAuthMiddleware, requireRole('admin', 'appr
     const flagCondition = quoteFlagFilterCondition(flag);
     if (flagCondition) conditions.push(flagCondition);
 
+    // ── เห็นเฉพาะใบของตัวเองไหม ────────────────────────────────────────────────
+    //  `null` = เห็นทุกใบ ซึ่งเป็นคำตอบของทุก role ที่ออกใบได้ในวันนี้ ⇒ ไม่มีอะไรเปลี่ยน
+    //  เงื่อนไขตัวจริงอยู่ที่ ownQuotesCondition() ใน db/repositories.ts ที่เดียว และ
+    //  **ตัวนับข้างล่างใช้ whereClause ก้อนเดียวกัน** — ตัวเลขกับรายการจึงตรงกันเสมอ
+    const ownScope = await quoteScopeOf(req.admin);
+    if (ownScope) {
+      const own = ownQuotesCondition(ownScope, paramIndex);
+      conditions.push(own.sql);
+      params.push(...own.params);
+      paramIndex += own.params.length;
+    }
+
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     // Count total
@@ -3643,7 +3670,7 @@ app.get('/api/admin/quotations', adminAuthMiddleware, requireRole('admin', 'appr
 // และตัวกรอง exported ตั้งต้นเป็น 'no' ครั้งถัดไปจึงได้เฉพาะใบใหม่ (แอดมินถอยเครื่องหมายได้ถ้านำเข้าไม่ผ่าน)
 //
 // 1 ครั้ง = 1 บริษัท (company=qp|qt) เพราะ Odoo ของ PM กับ THT เป็นคนละระบบและใช้ชื่อภาษีคนละค่า
-app.get('/api/admin/quotations/export', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), async (req: any, res: any) => {
+app.get('/api/admin/quotations/export', adminAuthMiddleware, requireCapability('quote.export_odoo'), async (req: any, res: any) => {
   try {
     // บริษัทต้องส่งมาเสมอ ไม่มีค่าตั้งต้น — เดาผิดแปลว่าไฟล์ได้ชื่อภาษีของอีกบริษัท
     // แล้วใบชุดนั้นถูกมาร์ก "ส่งออกแล้ว" ไปเรียบร้อย กว่าจะรู้ตัวก็ตอนนำเข้า Odoo ไม่ผ่าน
@@ -3728,6 +3755,17 @@ app.get('/api/admin/quotations/export', adminAuthMiddleware, requireRole('admin'
     // ใบหนึ่งอยู่ได้กลุ่มเดียวเสมอ (ดู ODOO_MANUAL_BUCKET_SQL) ⇒ ไม่มีใบไหนโผล่สองไฟล์
     conditions.push(odooManualBucketCondition(manualBucket, paramIndex));
     if (manualBucket) { params.push(manualBucket); paramIndex++; }
+
+    // ไฟล์ export ต้องกรองด้วยขอบเขตเดียวกับหน้าประวัติ — ไม่งั้น "เห็นเฉพาะใบของตัวเอง"
+    // กลายเป็นของประดับ: กดส่งออกครั้งเดียวก็ได้ใบของทุกคนติดมาทั้งไฟล์ (§9 ข้อ 7)
+    // วันนี้ไม่มี role ไหนที่ส่งออกได้แต่เห็นไม่ครบ ⇒ ownScope เป็น null ทุกครั้ง
+    const ownScope = await quoteScopeOf(req.admin);
+    if (ownScope) {
+      const own = ownQuotesCondition(ownScope, paramIndex);
+      conditions.push(own.sql);
+      params.push(...own.params);
+      paramIndex += own.params.length;
+    }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
@@ -3831,7 +3869,7 @@ app.get('/api/admin/quotations/export', adminAuthMiddleware, requireRole('admin'
 // --- API Endpoint: ยกเลิกเครื่องหมาย "ส่งออกแล้ว" ของใบเดียว ---
 //
 // ใช้ตอนนำเข้า Odoo ไม่ผ่าน หรือไฟล์หายระหว่างดาวน์โหลด — ใบจะกลับเข้าคิว export รอบถัดไป
-app.post('/api/admin/quotations/:id/unmark-export', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), async (req: any, res: any) => {
+app.post('/api/admin/quotations/:id/unmark-export', adminAuthMiddleware, requireCapability('quote.unmark_export'), async (req: any, res: any) => {
   try {
     const id = String(req.params.id || '').trim();
     if (!UUID_RE.test(id)) {
@@ -3912,9 +3950,9 @@ app.delete('/api/admin/quotations/:id', adminAuthMiddleware, requireRole('admin'
  * ตัวเลขนี้คือของสำคัญที่สุดของทั้งฟีเจอร์ — ใบกลุ่มนี้ **ไม่อยู่ในไฟล์ส่งออกปกติแล้ว**
  * ถ้าไม่มีใครเห็นยอดค้าง มันจะไม่ไปถึง Odoo เลยโดยไม่มีอะไรฟ้อง
  */
-app.get('/api/admin/quotations/manual-review-counts', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), async (_req: any, res: any) => {
+app.get('/api/admin/quotations/manual-review-counts', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin', 'salesperson'), async (req: any, res: any) => {
   try {
-    const groups = await getOdooManualReviewCounts(pool);
+    const groups = await getOdooManualReviewCounts(pool, await quoteScopeOf(req.admin));
     res.json({ total: groups.reduce((s, g) => s + g.count, 0), groups });
   } catch (err) {
     console.error('GET /api/admin/quotations/manual-review-counts error:', err);
@@ -3923,6 +3961,7 @@ app.get('/api/admin/quotations/manual-review-counts', adminAuthMiddleware, requi
 });
 
 // --- API Endpoint: ประวัติชุดการส่งออก Odoo ---
+// ประวัติ "ชุดการส่งออก" ไม่ใช่รายการใบ — คนที่ส่งออกไม่ได้ก็ไม่มีชุดของตัวเองให้ดู
 app.get('/api/admin/quotations/export-batches', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), async (req: any, res: any) => {
   try {
     const limit = Math.min(parseInt(req.query.limit) || 20, 100);
@@ -3936,7 +3975,7 @@ app.get('/api/admin/quotations/export-batches', adminAuthMiddleware, requireRole
 });
 
 // --- API Endpoint: ยกเลิกเครื่องหมายทั้งชุด (ไฟล์ทั้งไฟล์นำเข้า Odoo ไม่ผ่าน) ---
-app.post('/api/admin/quotations/export-batches/:batchId/unmark', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), async (req: any, res: any) => {
+app.post('/api/admin/quotations/export-batches/:batchId/unmark', adminAuthMiddleware, requireCapability('quote.unmark_export'), async (req: any, res: any) => {
   try {
     const batchId = String(req.params.batchId || '').trim();
     if (!UUID_RE.test(batchId)) {

@@ -19,7 +19,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { pool } from '../config/db.js';
 import {
-  getCustomerById, getContactById, getSalespersonByUserId,
+  getCustomerById, getContactById, getSalespersonByUserId, getAdminSalespersonIds,
   insertMessage, getMessageMetaById, listCustomerPaymentTerms,
   saveQuotationRuleOverrides,
   savePriceApproval,
@@ -40,10 +40,13 @@ import {
   violationKey,
   isBypassableViolation,
   blockingViolations,
-  requiresPriceApproval,
+  violationMode,
   type Violation,
+  type ViolationModeMap,
   type DraftQuoteOverrides,
 } from './quotationService.js';
+import { ruleModesOf, can } from '../config/capabilities.js';
+import type { Role } from '../config/auth.js';
 import {
   buildApprovalItems,
   buildApprovalPayload,
@@ -104,6 +107,7 @@ export type WebQuoteErrorCode =
   | 'PRODUCT_NOT_FOUND'
   | 'RULE_VIOLATION'
   | 'NEEDS_APPROVAL'            // ติดราคาขั้นต่ำ ⇒ ต้องส่งให้ผู้อนุมัติ ไม่ใช่ติ๊กรับทราบเอง
+  | 'FORBIDDEN'                 // role นี้ทำสิ่งนี้ไม่ได้ (เมทริกซ์สิทธิ์ · docs/plan-role-permissions.md)
   | 'INSERT_FAILED'
   | 'TIMEOUT';
 
@@ -447,6 +451,52 @@ export function parsePaymentTermsOverride(raw: any): string | null {
   return s;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  ด่านสิทธิ์ของ "ของที่ไม่ใช่กฎ" — เครดิตที่ตั้งทับ และการออกใบในนามคนอื่น
+//
+//  ทั้งคู่บังคับใช้ **ที่ service ไม่ใช่ที่ route** เพราะมันตัดสินจาก *เนื้อของคำขอ* ไม่ใช่จาก
+//  ปลายทางที่ยิงมา: แอดมินที่ไม่ได้ตั้งเครดิตทับก็ยิง endpoint เดียวกัน และเซลส์ที่ออกใบในนาม
+//  ตัวเองก็ส่ง sp_user_id มาเหมือนกันทุกประการ ⇒ `requireCapability()` ที่ route แยกไม่ออก
+//
+//  แผน: docs/plan-role-permissions.md §4ข · §13.2
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function assertMayOverridePaymentTerms(role: Role, override: string | null | undefined): Promise<void> {
+  if (override === null || override === undefined) return;
+  if (await can(role, 'quote.payment_terms_override')) return;
+  throw new WebQuoteError('FORBIDDEN', 'บัญชีนี้ไม่มีสิทธิ์ตั้งเครดิตทับเฉพาะใบ — ใบจะใช้เครดิตของลูกค้าตามฐานข้อมูล', 403);
+}
+
+/**
+ * ออกใบในนามรหัสนี้ได้ไหม
+ *
+ * บัญชีที่ไม่มี `quote.act_as_any_salesperson` ทำได้เฉพาะ **รหัสของตัวเอง** ที่ผูกไว้ใน
+ * `admin_user_salespersons` · คนที่มีสองรหัส (มีจริง — วัด 2026-09-18) เลือกได้ว่าจะออก
+ * ในนามสาขาไหน ซึ่งยังเป็นตัวเขาเองทั้งสองทาง
+ *
+ * ⚠️ ตอบ **403 พร้อมเหตุผล** ไม่ใช่ "เงียบ ๆ แก้ให้เป็นรหัสตัวเอง" — คนยิงต้องรู้ว่าทำไม่ได้
+ *    ไม่ใช่เข้าใจว่าทำได้แล้ว (§13.2) · บัญชีที่ไม่ได้ผูกรหัสไว้เลยออกใบไม่ได้ทั้งหมด ซึ่งตรงกับ
+ *    ด่าน "ความพร้อมของบัญชี" ใน §13.5
+ */
+async function assertMayActAs(adminId: number, role: Role, spUserId: any): Promise<void> {
+  if (await can(role, 'quote.act_as_any_salesperson')) return;
+
+  const mine = await getAdminSalespersonIds(adminId);
+  if (mine.length === 0) {
+    throw new WebQuoteError(
+      'FORBIDDEN',
+      'บัญชีนี้ยังไม่ได้ผูกกับรหัสพนักงานขาย จึงยังออกใบเสนอราคาไม่ได้ — ติดต่อผู้ดูแลระบบ',
+      403
+    );
+  }
+
+  const sp = await getSalespersonByUserId(String(spUserId ?? '').trim());
+  const code = sp ? String(sp.salesperson_id ?? '') : '';
+  if (code === '' || !mine.includes(code)) {
+    throw new WebQuoteError('FORBIDDEN', 'บัญชีนี้ออกใบเสนอราคาได้เฉพาะในนามตัวเองเท่านั้น', 403);
+  }
+}
+
 /** คีย์ที่ยาวกว่านี้ไม่มีทางมาจาก `violationKey()` — กันคนยิง payload บวมเข้ามาตรง ๆ */
 const VIOLATION_KEY_MAX = 120;
 
@@ -627,6 +677,12 @@ async function resolveItems(items: WebQuoteItemInput[]): Promise<any[]> {
  */
 export async function createDraft(params: {
   adminId: number;
+  /**
+   * role ของคนที่กดออกใบ — **บังคับ** เพราะทุกอย่างที่ฟังก์ชันนี้ตัดสินใจ (กฎข้อไหนทะลุได้ ·
+   * ตั้งเครดิตทับได้ไหม · ออกใบในนามใครได้บ้าง) ขึ้นกับมัน · ทำเป็น optional ไม่ได้ เพราะ
+   * "ไม่ส่งมา = ใช้กติกาเดิม" จะกลายเป็นช่องที่เรียกแล้วข้ามสิทธิ์ได้ทั้งชุดโดยไม่มีอะไรฟ้อง
+   */
+  role: Role;
   spUserId: string;
   customerId: number | string;
   contactId: number | string;
@@ -694,7 +750,13 @@ export async function createDraft(params: {
     paymentTerms: parsePaymentTermsOverride(params.paymentTermsOverride),
     delivery: parseDeliveryOverrides(params.delivery),
   };
+  // เครดิตที่ตั้งทับเป็นสิทธิ์ต่างหาก — ปฏิเสธเสียงดังแทนการ "เงียบ ๆ ไม่เอาค่าที่ส่งมา"
+  // เพราะคนยิงต้องรู้ว่าใบที่ได้ไม่ใช่ใบที่เขาสั่ง (และมันมีผลกับกฎค่าบริการ + คิวแก้มือ Odoo ด้วย)
+  await assertMayOverridePaymentTerms(params.role, overrides.paymentTerms);
+  // ออกใบในนามคนอื่นไม่ได้ ถ้าไม่มีสิทธิ์ — ด่านอยู่ที่ server ไม่ใช่การซ่อน dropdown (§13.2)
+  await assertMayActAs(params.adminId, params.role, params.spUserId);
 
+  const ruleModes = await ruleModesOf(params.role);
   const webUserId = await resolveWebUserId(params.adminId, params.spUserId);
 
   return runQueued(webUserId, async () => {
@@ -722,14 +784,16 @@ export async function createDraft(params: {
     //  (2) ข้อที่เพิ่งโผล่หลังจากคนกดรับทราบ (ของหมดระหว่างที่โมดัลเปิดค้าง) — เจ้าของเลือกไว้ว่า
     //  ให้ **ปฏิเสธและให้ดูใหม่** ไม่ใช่ปล่อยผ่านเพราะ "ก็กดยืนยันมาแล้ว"
     const acknowledgedKeys = parseAcknowledgedKeys(params.acknowledgedViolations);
-    const blockers = blockingViolations(violations, acknowledgedKeys);
+    const blockers = blockingViolations(violations, acknowledgedKeys, null, ruleModes);
 
     // ── ราคาต่ำกว่าขั้นต่ำ: ติ๊กเองไม่ได้ ต้องเข้าคิวอนุมัติ (2026-09-15) ────────
     //  แยกกองก่อนตัดสิน เพราะสองกองนี้จบคนละแบบ:
     //    needApproval → ยังสร้างร่างได้ แต่ร่างนั้น "รออนุมัติ" และยังไม่ใช่ใบเสนอราคา
     //    hardBlockers → ปฏิเสธเหมือนเดิมทุกประการ (SYSTEM_ERROR หรือข้อที่เพิ่งโผล่)
-    const needApproval = blockers.filter(requiresPriceApproval);
-    const hardBlockers = blockers.filter((v) => !requiresPriceApproval(v));
+    //  ตั้งแต่ 2026-09-18 "ข้อไหนอยู่กองไหน" ขึ้นกับ role ของคนออกใบ (ruleModes) ไม่ใช่ค่าคงที่
+    //  ของทั้งระบบ — ค่าเริ่มต้นของ admin/approver/subadmin ให้ผลเท่ากับบรรทัดเดิมทุกประการ
+    const needApproval = blockers.filter((v) => violationMode(v, ruleModes) === 'approval');
+    const hardBlockers = blockers.filter((v) => violationMode(v, ruleModes) !== 'approval');
     if (hardBlockers.length > 0) {
       throw new WebQuoteError('RULE_VIOLATION', buildViolationText(hardBlockers), 422, { violations: hardBlockers });
     }
@@ -774,7 +838,7 @@ export async function createDraft(params: {
             // ข้อที่ต้องอนุมัติไม่ใช่ "ข้อที่คนออกใบรับทราบ" — มันปลดด้วยคีย์นี้ไม่ได้อยู่แล้ว
             // (blockingViolations มองข้าม ack ของมัน) แต่ถ้าเขียนลงไปด้วย ประวัติจะอ่านได้ว่า
             // "คนออกใบปล่อยผ่านราคาต่ำกว่าขั้นต่ำเอง" ซึ่งไม่จริงและเป็นคนละคนกับที่อนุมัติ
-            acknowledged_keys: mine.filter((v) => isBypassableViolation(v) && !requiresPriceApproval(v)).map(violationKey),
+            acknowledged_keys: mine.filter((v) => violationMode(v, ruleModes) === 'allow').map(violationKey),
             violations: mine,
           });
         } catch (err) {
@@ -1005,6 +1069,13 @@ export interface WebQuotePreviewResult {
    */
   override_keys: string[];
   /**
+   * ข้อที่ role นี้ **ทะลุไม่ได้เลย** — โมดัลต้องบอกให้แก้ใบ ไม่ใช่ให้ติ๊กหรือส่งขออนุมัติ
+   *
+   * วันนี้ว่างเสมอสำหรับ admin/approver/subadmin (ค่าเริ่มต้นของทุกกฎคือ allow หรือ approval)
+   * และ `SYSTEM_ERROR` **ไม่อยู่ในนี้** เพราะมันมี `can_create_draft` เป็นตัวบอกอยู่แล้ว
+   */
+  blocked_keys: string[];
+  /**
    * ข้อที่ **ติ๊กรับทราบเองไม่ได้ ต้องให้ผู้อนุมัติราคาตัดสิน** (วันนี้มีแต่ราคาต่ำกว่าขั้นต่ำ)
    *
    * แยกออกมาจาก `override_keys` เพราะปุ่มบนหน้าจอเปลี่ยนความหมายไปเลยเมื่อมีข้อพวกนี้:
@@ -1039,6 +1110,14 @@ export interface WebQuotePreviewParams {
   customerId: number | string;
   contactId: number | string;
   items: WebQuoteItemInput[];
+  /**
+   * role ของคนที่กำลังดูพรีวิว — ไม่ส่งมา = กติกาเดิมของทั้งระบบ (ราคาขั้นต่ำต้องอนุมัติ ·
+   * ที่เหลือติ๊กเองได้) ซึ่งเป็นค่าที่ผู้เรียกเก่าทุกตัวเคยได้อยู่แล้ว
+   *
+   * พรีวิวไม่เขียนอะไรลงฐาน จึงเป็นที่เดียวในเส้นนี้ที่ optional ได้โดยไม่เปิดช่องข้ามสิทธิ์ —
+   * ด่านจริงอยู่ที่ createDraft ซึ่งบังคับให้ส่ง role เสมอ
+   */
+  role?: Role;
   /** ค่าที่แอดมินตั้งทับ — ต้องเดินทางมาถึงพรีวิวด้วย ไม่งั้นจอกับใบจริงคนละเรื่อง */
   paymentTermsOverride?: any;
   delivery?: WebQuoteDeliveryInput[] | null;
@@ -1075,6 +1154,9 @@ async function previewDraftInternal(
     throw new WebQuoteError('BAD_REQUEST', 'ต้องระบุผู้ติดต่อ (contact_id) เป็นตัวเลข', 400);
   }
 
+  // โหมดกฎของคนที่กำลังดู — ไม่ส่ง role มา = null ⇒ กติกาเดิมของทั้งระบบ (ดู violationMode)
+  const ruleModes: ViolationModeMap | null = params.role ? await ruleModesOf(params.role) : null;
+
   const contact = await getContactById(contactId);
   if (!contact) throw new WebQuoteError('BAD_REQUEST', `ไม่พบผู้ติดต่อ id=${contactId}`, 400);
   // กติกาเดียวกับ createDraft — ผูกตามบริษัทของผู้ติดต่อที่เลือกจริง ไม่ใช่ที่กดใน dropdown
@@ -1085,6 +1167,9 @@ async function previewDraftInternal(
   // ตรวจค่าที่ตั้งทับด้วยตัวตรวจชุดเดียวกับ createDraft — พรีวิวที่รับค่าที่ /drafts จะปฏิเสธ
   // คือพรีวิวที่โกหก · เครดิตที่ใช้จริงในรอบนี้ = ค่าที่ตั้งทับ ถ้าไม่มีจึงตกมาที่ของลูกค้า
   const paymentTermsOverride = parsePaymentTermsOverride(params.paymentTermsOverride);
+  // ...รวมถึงด่านสิทธิ์ด้วย ด้วยเหตุผลเดียวกัน — พรีวิวที่ยอมให้ตั้งทับแล้วปุ่มยืนยันตอบ 403
+  // คือพรีวิวที่โกหก (ผู้เรียกที่ไม่ส่ง role มายังได้พฤติกรรมเดิมทุกประการ)
+  if (params.role) await assertMayOverridePaymentTerms(params.role, paymentTermsOverride);
   const deliveryOverrides = parseDeliveryOverrides(params.delivery);
   const customerPaymentTerms = String(customer.customer_payment_terms || '');
   const effectivePaymentTerms = paymentTermsOverride ?? customerPaymentTerms;
@@ -1283,9 +1368,14 @@ async function previewDraftInternal(
     can_create_draft: violations.every(isBypassableViolation),
     // คำรับทราบใช้กับกฎที่ "ติ๊กเองได้" เท่านั้น — ราคาขั้นต่ำถูกตัดออกตั้งแต่ตรงนี้ เพราะมันต้อง
     // ผ่านผู้อนุมัติ ถ้ายังส่งคีย์ของมันไปให้หน้าจอ คนจะเข้าใจว่าติ๊กแล้วจบ แล้วไปเจอ 422 ตอนกด
-    override_keys: violations.filter((v) => isBypassableViolation(v) && !requiresPriceApproval(v)).map(violationKey),
-    approval_required: violations.filter(requiresPriceApproval),
-    needs_approval: violations.some(requiresPriceApproval),
+    // ⚠️ สามกองนี้ต้องคัดด้วย `ruleModes` ชุดเดียวกับที่ createDraft จะใช้ตอนกดจริง ไม่งั้น
+    //    โมดัลจะบอกว่าติ๊กได้ แล้วปุ่มยืนยันตอบ 422 — อาการที่ไม่มีใครเดาถูกว่ามาจากสิทธิ์
+    override_keys: violations.filter((v) => violationMode(v, ruleModes) === 'allow').map(violationKey),
+    blocked_keys: violations
+      .filter((v) => isBypassableViolation(v) && violationMode(v, ruleModes) === 'deny')
+      .map(violationKey),
+    approval_required: violations.filter((v) => violationMode(v, ruleModes) === 'approval'),
+    needs_approval: violations.some((v) => violationMode(v, ruleModes) === 'approval'),
     odoo_manual_reasons:
       buildOdooManualReview({ customer_details: { payment_terms_override: paymentTermsOverride } })?.reasons ?? [],
     service_line: {
@@ -1427,6 +1517,8 @@ export interface ReviseResult {
  */
 export async function reviseQuotation(params: {
   adminId: number;
+  /** ไม่ส่งมา = กติกาเดิม (กัน SYSTEM_ERROR อย่างเดียว) — ผู้เรียกเก่าทุกตัวได้ผลเท่าเดิม */
+  role?: Role;
   spUserId: string;
   quotationNo: string;
 }): Promise<ReviseResult> {
@@ -1456,7 +1548,11 @@ export async function reviseQuotation(params: {
     // แล้วไปออกใบจริงที่ createDraft ซึ่งมีโมดัลรับทราบอยู่แล้ว ⇒ ที่นี่ไม่ต้องขอคำรับทราบซ้ำ
     // ปล่อยผ่านได้ แต่ **ยังกัน `SYSTEM_ERROR` ไว้** เพราะ "ตรวจกฎไม่สำเร็จ" แปลว่ายังไม่รู้ว่าผิดไหม
     // ⇒ ยกใบที่ยังไม่ได้ตรวจจริงเข้าฟอร์ม คือการพาคนไปกดยืนยันบนข้อมูลที่ไม่มีใครตรวจ
-    const revBlockers = violations.filter((v) => !isBypassableViolation(v));
+    // ตั้งแต่ 2026-09-18 กฎที่ role นี้ถูกปิดไว้ (`deny`) ก็ถูกกันตรงนี้ด้วย — ไม่ใช่เพื่อความ
+    // ปลอดภัย (createDraft กันอยู่แล้ว) แต่เพื่อไม่ให้คนแก้ใบทั้งใบเสร็จแล้วค่อยเจอว่ากดออกไม่ได้
+    // `violationMode` ที่ไม่มี ruleModes ตอบ 'deny' เฉพาะ SYSTEM_ERROR ⇒ ค่าเดิมเป๊ะ
+    const revRuleModes = params.role ? await ruleModesOf(params.role) : null;
+    const revBlockers = violations.filter((v) => violationMode(v, revRuleModes) === 'deny');
     if (revBlockers.length > 0) {
       throw new WebQuoteError('RULE_VIOLATION', buildViolationText(revBlockers), 422, { violations: revBlockers });
     }

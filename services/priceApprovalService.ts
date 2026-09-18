@@ -42,10 +42,11 @@ import {
   validateQuotationItems,
   buildItemSnapshots,
   blockingViolations,
-  requiresPriceApproval,
   buildViolationText,
   type Violation,
 } from './quotationService.js';
+import { can } from '../config/capabilities.js';
+import type { Role } from '../config/auth.js';
 import { sumLineTotals } from '../utils/pricing.js';
 import { confirmQuotationById } from './quotationConfirm.js';
 import { parseWebUserId } from './webIdentity.js';
@@ -67,13 +68,26 @@ export class PriceApprovalError extends Error {
   }
 }
 
-/** ใครกดอนุมัติ/ไม่อนุมัติได้บ้าง — รวมไว้ที่เดียวเพื่อให้ route กับ service ตอบเหมือนกัน */
-export const canDecideApproval = (actor: ApprovalActor): boolean =>
-  actor.role === 'admin' || actor.role === 'approver';
+/**
+ * ใครกดอนุมัติ/ไม่อนุมัติได้บ้าง — รวมไว้ที่เดียวเพื่อให้ route กับ service ตอบเหมือนกัน
+ *
+ * ตั้งแต่ 2026-09-18 อ่านจากเมทริกซ์สิทธิ์ (`approval.decide`) แทน role ที่เขียนตายตัว ⇒
+ * เจ้าของเพิ่ม/ถอนผู้อนุมัติได้จากหน้าจอโดยไม่ต้อง deploy · ค่าเริ่มต้นคือ admin + approver
+ * ซึ่งเท่ากับบรรทัดเดิมทุกประการ (docs/plan-role-permissions.md §4ข)
+ *
+ * ⚠️ เป็น async แล้ว — ทุกจุดที่เรียกต้อง `await` ไม่งั้นได้ Promise ซึ่ง truthy เสมอ
+ *    แล้วกลายเป็น "ใครก็อนุมัติได้" เงียบ ๆ · ชนิดที่คืนเป็น Promise<boolean> ทำให้
+ *    typecheck จับให้ตั้งแต่ตอน compile แทนที่จะไปเจอบนระบบจริง
+ */
+export const canDecideApproval = (actor: ApprovalActor): Promise<boolean> =>
+  can(actor.role as Role, 'approval.decide');
 
 /**
- * รายการที่ถูกส่งไปขออนุมัติ — เก็บ **ราคาที่ขอ** ไว้ด้วย ไม่ใช่แค่ชื่อรุ่น
+ * รายการที่ถูกส่งไปขออนุมัติ — เก็บ **ตัวเลขที่ขอ** ไว้ด้วย ไม่ใช่แค่ชื่อรุ่น
  * (เหตุผลอยู่ที่ `approvedViolationKeys()` ใน quotationService.ts)
+ *
+ * `price` ผูกกับกฎราคาขั้นต่ำ · `quantity` ผูกกับกฎของหมด/MOQ — กฎที่ไม่มีตัวเลขของตัวเอง
+ * (สินค้าระงับ · blacklist · เครดิตค้าง) ก็ยังมีแถวอยู่ในนี้ เพื่อให้ผู้อนุมัติเห็นว่ากำลังปล่อยอะไร
  */
 export interface ApprovalItem {
   model: string;
@@ -83,10 +97,16 @@ export interface ApprovalItem {
   min_price: number;
 }
 
+/**
+ * ⚠️ **ไม่กรองชนิดกฎเองแล้ว** (2026-09-18) — ผู้เรียกส่ง "ข้อที่กำลังจะขออนุมัติ" มาให้ตรง ๆ
+ *
+ * เพราะกฎข้อไหนเข้าคิวอนุมัติขึ้นกับ role ของคนขอ ไม่ใช่ค่าคงที่ของทั้งระบบอีกต่อไป ถ้าฟังก์ชันนี้
+ * ยังกรองด้วย `requiresPriceApproval` เหมือนเดิม คำขอของเซลส์ที่ติด MOQ จะได้รายการ **ว่างเปล่า**
+ * ⇒ ผู้อนุมัติเห็นคำขอที่ไม่มีอะไรให้ดู และคำอนุมัติจะปลดใบนั้นไม่ได้ตลอดกาล
+ */
 export function buildApprovalItems(violations: Violation[], items: any[]): ApprovalItem[] {
   const out: ApprovalItem[] = [];
   for (const v of violations || []) {
-    if (!requiresPriceApproval(v)) continue;
     const line = (items || []).find((it: any) => String(it?.model ?? it?.internal_reference ?? '') === v.model);
     out.push({
       model: v.model,
@@ -204,13 +224,13 @@ export async function listApprovalRequests(params: {
     : undefined;
   const rows = await listPriceApprovalQuotations(pool, {
     status,
-    requestedById: canDecideApproval(params.actor) ? null : params.actor.id,
+    requestedById: (await canDecideApproval(params.actor)) ? null : params.actor.id,
   });
   return groupRows(rows);
 }
 
 export async function countOpenRequests(actor: ApprovalActor): Promise<{ pending: number; rejected: number }> {
-  const mine = canDecideApproval(actor) ? null : actor.id;
+  const mine = (await canDecideApproval(actor)) ? null : actor.id;
   return {
     // ผู้อนุมัติสนใจ "รออยู่กี่ชุด" · คนขอสนใจ "ของฉันถูกตีกลับกี่ชุด" — ส่งไปทั้งคู่ ให้หน้าจอเลือกใช้
     pending: await countPriceApprovalRequests(pool, { status: 'pending', requestedById: mine }),
@@ -235,7 +255,7 @@ async function loadRequestRows(requestId: string, actor: ApprovalActor): Promise
   const rows = await getQuotationsByApprovalRequest(pool, String(requestId));
   if (rows.length === 0) throw new PriceApprovalError('NOT_FOUND', 'ไม่พบคำขออนุมัติราคานี้', 404);
   const requestedById = Number(rows[0]?.price_approval?.requested_by_id ?? 0);
-  if (!canDecideApproval(actor) && requestedById !== actor.id) {
+  if (!(await canDecideApproval(actor)) && requestedById !== actor.id) {
     throw new PriceApprovalError('FORBIDDEN', 'ไม่มีสิทธิ์เข้าถึงคำขอนี้', 403);
   }
   return rows;
@@ -321,7 +341,7 @@ export async function updateRequestItems(params: {
   actor: ApprovalActor;
   quotes: ApprovalQuoteEdit[];
 }): Promise<{ request_id: string; violations: Violation[]; items: ApprovalItem[]; total_sum: number }> {
-  if (!canDecideApproval(params.actor)) {
+  if (!(await canDecideApproval(params.actor))) {
     throw new PriceApprovalError('FORBIDDEN', 'ไม่มีสิทธิ์แก้ไขร่างที่รออนุมัติ', 403);
   }
   const rows = await loadRequestRows(params.requestId, params.actor);
@@ -329,6 +349,15 @@ export async function updateRequestItems(params: {
   if (pa.status !== 'pending') {
     throw new PriceApprovalError('ALREADY_DECIDED', `คำขอนี้ถูกตัดสินไปแล้ว (${pa.status}) แก้ไขไม่ได้`, 409);
   }
+
+  // ชนิดกฎที่คำขอนี้ขออนุมัติไว้ — อ่านจากตัวคำขอเอง ตัวเดียวกับที่ approvedViolationKeys() ใช้
+  // คำขอเก่าที่ไม่ได้เก็บ violations ไว้ = คำขอราคาขั้นต่ำ (ชนิดเดียวที่มีก่อน 2026-09-18)
+  const askedTypes = new Set<string>(
+    (Array.isArray(pa.violations) ? pa.violations : [])
+      .map((v: any) => String(v?.type ?? ''))
+      .filter((t: string) => t !== '')
+  );
+  if (askedTypes.size === 0) askedTypes.add('MIN_PRICE_VIOLATION');
 
   const editByQuote = new Map<string, ApprovalLineEdit[]>();
   for (const q of (params.quotes || [])) {
@@ -376,9 +405,10 @@ export async function updateRequestItems(params: {
       contactId: row.contact_id,
     });
     // ข้อที่ยังบล็อกอยู่จริง = หักคำรับทราบที่ผูกกับใบไว้แล้ว (เช่นของหมดที่ผู้ขอกดรับทราบตอนส่ง)
-    // แล้วเอา "ข้อที่กำลังจะอนุมัติ" (ราคาขั้นต่ำ) ออก — ที่เหลือคือของที่ต้องหยุดมือจริง ๆ
+    // แล้วเอา "ข้อที่กำลังจะอนุมัติ" ออก — ที่เหลือคือของที่ต้องหยุดมือจริง ๆ
+    // ชุด "ข้อที่กำลังจะอนุมัติ" อ่านจากตัวคำขอ ไม่ใช่จากค่าคงที่ (ดู askedTypes ข้างบน)
     const ackKeys = await getAcknowledgedViolationKeys(pool, String(row.id));
-    const hard = blockingViolations(violations, ackKeys).filter((v) => !requiresPriceApproval(v));
+    const hard = blockingViolations(violations, ackKeys).filter((v) => !askedTypes.has(v.type));
     if (hard.length > 0) {
       throw new PriceApprovalError('RULE_VIOLATION', buildViolationText(hard), 422);
     }
@@ -392,8 +422,9 @@ export async function updateRequestItems(params: {
       [row.id, JSON.stringify(snapshot), total]
     );
 
-    allViolations.push(...violations.filter(requiresPriceApproval));
-    approvalItems.push(...buildApprovalItems(violations, items));
+    const asked = violations.filter((v) => askedTypes.has(v.type));
+    allViolations.push(...asked);
+    approvalItems.push(...buildApprovalItems(asked, items));
     grandTotal += total;
   }
 
@@ -446,7 +477,7 @@ export async function approveRequest(params: {
   actor: ApprovalActor;
   note?: string | null;
 }): Promise<ApproveResult> {
-  if (!canDecideApproval(params.actor)) {
+  if (!(await canDecideApproval(params.actor))) {
     throw new PriceApprovalError('FORBIDDEN', 'ไม่มีสิทธิ์อนุมัติราคา', 403);
   }
   const rows = await loadRequestRows(params.requestId, params.actor);
@@ -503,7 +534,7 @@ export async function rejectRequest(params: {
   actor: ApprovalActor;
   reason: string;
 }): Promise<{ request_id: string; quote_ids: string[] }> {
-  if (!canDecideApproval(params.actor)) {
+  if (!(await canDecideApproval(params.actor))) {
     throw new PriceApprovalError('FORBIDDEN', 'ไม่มีสิทธิ์อนุมัติราคา', 403);
   }
   const reason = String(params.reason ?? '').trim();

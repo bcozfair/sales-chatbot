@@ -854,6 +854,7 @@ export interface StockViolation {
   model: string;
   name: string;
   quantity_on_hand_unreserved: number;  // ของว่างขายได้จริง (หักที่ถูกจองแล้ว) ณ ตอนตรวจ
+  qty: number;                          // จำนวนที่สั่งมาในบรรทัดนั้น — คำอนุมัติผูกกับตัวเลขนี้
   warn_msg: string;
   is_optional?: boolean;          // true = หมดเพราะ optional แนบมา
   linked_to_model?: string;       // ชื่อ trigger product
@@ -886,6 +887,9 @@ export function evaluateStockViolation(
     model: stock.model,
     name: stock.name,
     quantity_on_hand_unreserved: available,
+    // เก็บ "จำนวนที่สั่ง" ไว้ด้วย เพราะคำอนุมัติของกฎข้อนี้ผูกกับตัวเลขนี้ (ขอมากกว่าที่อนุมัติ
+    // = คำขอใหม่) — หลักเดียวกับที่ราคาขั้นต่ำผูกกับราคา (docs/plan-role-permissions.md §3.6)
+    qty: requested,
     warn_msg: available <= 0
       ? 'สินค้าหมดสต็อก'
       : `ของว่างขายได้ ${available} ชิ้น ไม่พอกับจำนวนที่สั่ง ${requested} ชิ้น`,

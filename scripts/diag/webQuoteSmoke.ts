@@ -247,6 +247,7 @@ async function case3(): Promise<string | null> {
 
   const draft = await createDraft({
     adminId,
+    role: 'admin',
     spUserId: TEST_SP_USER,
     customerId: cust.customerId,
     contactId: cust.contactId,
@@ -342,6 +343,7 @@ async function case4(quotationNo: string | null) {
 
   const redraft = await createDraft({
     adminId,
+    role: 'admin',
     spUserId: TEST_SP_USER,
     customerId: rq?.customer_id,
     contactId: rq?.contact_id,
@@ -446,7 +448,7 @@ async function case8() {
 
   let refusedWithoutAck = false;
   try {
-    await createDraft({ adminId, spUserId: TEST_SP_USER, customerId: cust.customerId, contactId: cust.contactId, items });
+    await createDraft({ adminId, role: 'admin', spUserId: TEST_SP_USER, customerId: cust.customerId, contactId: cust.contactId, items });
   } catch (e) {
     refusedWithoutAck = e instanceof WebQuoteError && e.code === 'RULE_VIOLATION' && e.status === 422;
   }
@@ -455,7 +457,8 @@ async function case8() {
   let refusedPartialAck = false;
   try {
     await createDraft({
-      adminId, spUserId: TEST_SP_USER, customerId: cust.customerId, contactId: cust.contactId, items,
+      adminId,
+      role: 'admin', spUserId: TEST_SP_USER, customerId: cust.customerId, contactId: cust.contactId, items,
       acknowledgedViolations: ['MOQ_VIOLATION|ไม่มีอยู่จริง'],
     });
   } catch (e) {
@@ -464,7 +467,8 @@ async function case8() {
   ok('รับทราบข้อที่ไม่ตรงกับที่เจอ ⇒ ยังปฏิเสธ (กันคนยิง payload มั่ว ๆ)', refusedPartialAck);
 
   const okDraft = await createDraft({
-    adminId, spUserId: TEST_SP_USER, customerId: cust.customerId, contactId: cust.contactId, items,
+    adminId,
+    role: 'admin', spUserId: TEST_SP_USER, customerId: cust.customerId, contactId: cust.contactId, items,
     acknowledgedViolations: pv.override_keys,
     adminUsername: TEST_ADMIN_USERNAME,
     // ตั้งเครดิตทับด้วย เพื่อให้ใบนี้ติดทั้งสองแกนพร้อมกัน — ตรงกับเคสจริงที่เจ้าของอธิบายไว้
@@ -604,7 +608,8 @@ async function case5() {
 
   const product = await pickProduct(cust);
   const d2 = await createDraft({
-    adminId, spUserId: TEST_SP_USER,
+    adminId,
+    role: 'admin', spUserId: TEST_SP_USER,
     customerId: cust.customerId, contactId: cust.contactId,
     items: [{ product_template_id: product.product_template_id, quantity: 1 }],
     proposeMsgId: plantedId,
@@ -675,7 +680,8 @@ async function case6() {
 
   // ของจริง: กดสร้างแล้วบรรทัดต้องยังอยู่ — จุดที่เคยหายคือ insertDraftQuotations ตัดทิ้งก่อนแบ่งใบ
   const draft = await createDraft({
-    adminId, spUserId: TEST_SP_USER,
+    adminId,
+    role: 'admin', spUserId: TEST_SP_USER,
     customerId: cust.customerId, contactId: cust.contactId, items,
   });
   ok('createDraft คืนใบร่าง', (draft.quotes?.length ?? 0) > 0, `${draft.quotes?.length ?? 0} ใบ`);
@@ -783,7 +789,8 @@ async function case7() {
 
   // ── ค) ของจริง: createDraft แล้วค่าต้องลงถูกที่ ──
   const draft = await createDraft({
-    adminId, spUserId: TEST_SP_USER,
+    adminId,
+    role: 'admin', spUserId: TEST_SP_USER,
     customerId: cust.customerId, contactId: cust.contactId, items,
     paymentTermsOverride: '30 Days', delivery: ovDelivery,
   });

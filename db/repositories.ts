@@ -846,17 +846,29 @@ export const ODOO_MANUAL_BUCKET_SQL = `
  * · บริษัทดูจากอักษรนำของเลขที่ใบ ซึ่งเป็นตัวเดียวกับที่ไฟล์ export ใช้แบ่ง (QP=PM · QT=THT)
  */
 export async function getOdooManualReviewCounts(
-  db: DbExecutor
+  db: DbExecutor,
+  /**
+   * `null` = นับทั้งระบบ (พฤติกรรมเดิมและของทุก role ที่มี `quote.view_all` วันนี้)
+   *
+   * ตัวนับที่ไม่ได้กรอง คือตัวเลขที่บอกคนดูว่ามีใบค้างอยู่กี่ใบทั้งที่เขาเปิดดูไม่ได้สักใบ
+   * ⇒ ต้องรับขอบเขตชุดเดียวกับหน้าประวัติ (docs/plan-role-permissions.md §9 ข้อ 7)
+   */
+  scope: OwnQuotesScope | null = null
 ): Promise<{ bucket: string; company: 'PM' | 'THT'; count: number }[]> {
+  // join salesperson เพื่อให้ ownQuotesCondition อ่านรหัสของใบได้ — ไม่มี scope ก็ไม่มีค่าใช้จ่าย
+  // เพิ่ม เพราะ planner ตัด join ที่ไม่ถูกใช้ทิ้งเองไม่ได้ก็จริง แต่ตารางนี้มีไม่กี่สิบแถว
+  const own = scope ? ownQuotesCondition(scope, 1) : null;
   const { rows } = await db.query(
     `SELECT ${ODOO_MANUAL_BUCKET_SQL} AS bucket,
             CASE WHEN q.quotation_no LIKE 'QT%' THEN 'THT' ELSE 'PM' END AS company,
             COUNT(*)::int AS count
        FROM quotations q
+       LEFT JOIN salesperson s ON q.user_id = s.user_id
       WHERE q.odoo_manual_review IS NOT NULL
         AND q.odoo_exported_at IS NULL
         AND q.quotation_no IS NOT NULL AND TRIM(q.quotation_no) <> ''
-      GROUP BY 1, 2`);
+        ${own ? `AND ${own.sql}` : ''}
+      GROUP BY 1, 2`, own ? own.params : []);
   return rows.map((r: any) => ({ bucket: String(r.bucket), company: r.company === 'THT' ? 'THT' : 'PM', count: Number(r.count) }));
 }
 
@@ -1509,4 +1521,64 @@ export async function getRolePermissionRows(): Promise<RolePermissionRow[] | nul
       'SELECT role, capability, mode FROM role_permissions');
     return rows as RolePermissionRow[];
   } catch (err) { logErr('getRolePermissionRows', err); return null; }
+}
+
+// ═══════════════════════════ admin_user_salespersons ═══════════════════════════
+//
+// "บัญชีนี้คือเซลส์รหัสไหนบ้าง" — ตอบคำถามเดียวคือ **ใบไหนเป็นของใคร** ไม่มีสิทธิ์ใดผูกกับ
+// ตารางนี้ (สิทธิ์อยู่ในเมทริกซ์ที่ config/capabilities.ts ที่เดียว ไม่งั้นจะมีสองแหล่งที่ขัดกันได้)
+// แผน: docs/plan-role-permissions.md §3.5 · §13.7 ข้อ 7
+
+/**
+ * รหัสพนักงานขายที่ผูกกับบัญชีนี้ — **ผูกได้หลายรหัสต่อบัญชี** และมันเกิดขึ้นแล้วจริง
+ * (วัด 2026-09-18: คุณวิรุณ ถือรหัส 441 กับ 688 และยังใช้งานอยู่ทั้งคู่)
+ *
+ * คืน [] เมื่ออ่านไม่ได้ ซึ่งที่นี่เป็นด้านที่ปลอดภัย: ไม่ผูกกับรหัสไหน = เห็นเฉพาะใบที่ออกจาก
+ * บัญชีตัวเอง ⇒ ฐานสะดุดแล้วคนเห็นใบ *น้อยลง* ไม่ใช่เห็นใบของคนอื่นเพิ่มขึ้น
+ */
+export async function getAdminSalespersonIds(adminUserId: number): Promise<string[]> {
+  try {
+    const { rows } = await pool.query(
+      `SELECT salesperson_id FROM admin_user_salespersons WHERE admin_user_id = $1 ORDER BY salesperson_id`,
+      [adminUserId]
+    );
+    return rows.map((r: any) => String(r.salesperson_id));
+  } catch (err) { logErr('getAdminSalespersonIds', err); return []; }
+}
+
+/**
+ * รหัสพนักงานขายของใบหนึ่งใบในภาษา SQL — **ต้องใช้กับ query ที่มี**
+ * `FROM quotations q LEFT JOIN salesperson s ON q.user_id = s.user_id`
+ *
+ * สามชั้นเพราะใบเก่ากับใบใหม่เก็บคนละที่ และพนักงานที่ถูกลบทำให้ join ไม่เจอ (FK ON DELETE
+ * SET NULL) แต่ snapshot ณ ตอนออกใบยังอยู่ · แถวพร็อกซีของหน้าเว็บก๊อป salesperson_id ของ
+ * เซลส์ตัวจริงมาแล้ว ⇒ ใบที่แอดมินออกให้ในนามเขา ตกอยู่ใต้รหัสของเขาเองโดยอัตโนมัติ
+ */
+export const QUOTE_SALESPERSON_CODE_SQL =
+  `COALESCE(s.salesperson_id, q.employee_details->>'salesperson_id', q.salesperson_id)`;
+
+export interface OwnQuotesScope {
+  /** admin_users.id ของคนที่กำลังดู — ใช้เป็นทางถอยเมื่อบัญชีไม่ได้ผูกกับเซลส์คนไหน */
+  adminId: number;
+  /** รหัสที่ผูกไว้ (getAdminSalespersonIds) — ว่าง = บัญชีนี้ไม่ใช่เซลส์ */
+  salespersonIds: string[];
+}
+
+/**
+ * เงื่อนไข "เฉพาะใบของฉัน" — **ที่เดียวของทั้งระบบ** ต้องถูกใช้โดยหน้าประวัติ · ไฟล์ export ·
+ * ตัวนับ พร้อมกัน (docs/plan-role-permissions.md §13.7 ข้อ 7)
+ *
+ * นิยามยึด **รหัสพนักงานขาย ไม่ใช่ `user_id`** เพราะคนหนึ่งคนมีได้หลาย `user_id` และมันเกิดแล้ว
+ * จริง (วัด 2026-09-18: รหัส 435 มีใบ 129 ใบกระจายอยู่ใน 3 `user_id`) ⇒ กรองด้วย `user_id`
+ * ที่ผูกไว้แถวเดียว เจ้าตัวจะมองไม่เห็นใบของตัวเองเกือบทั้งหมด
+ *
+ * บัญชีที่ไม่ได้ผูกกับเซลส์คนไหน (แอดมิน/ผู้เสนอราคาที่ถูกปิด `quote.view_all`) ถอยไปใช้
+ * "ใบที่ออกจากบัญชีนี้" ซึ่งคือแถวพร็อกซี `web:<adminId>:%` — ไม่ใช่ "ไม่เห็นอะไรเลย"
+ * และไม่ใช่ "เห็นทุกใบ"
+ */
+export function ownQuotesCondition(scope: OwnQuotesScope, paramIndex: number): { sql: string; params: any[] } {
+  if (scope.salespersonIds.length > 0) {
+    return { sql: `${QUOTE_SALESPERSON_CODE_SQL} = ANY($${paramIndex})`, params: [scope.salespersonIds] };
+  }
+  return { sql: `q.user_id LIKE $${paramIndex}`, params: [`web:${scope.adminId}:%`] };
 }

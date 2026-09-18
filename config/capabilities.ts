@@ -21,7 +21,7 @@
  */
 import type { Violation } from '../services/quotationService.js';
 import type { Role } from './auth.js';
-import { getRolePermissionRows } from '../db/repositories.js';
+import { getRolePermissionRows, getAdminSalespersonIds, type OwnQuotesScope } from '../db/repositories.js';
 
 /**
  * โหมดของหนึ่งช่องในเมทริกซ์
@@ -381,4 +381,38 @@ export async function modeOf(role: Role, capability: Capability): Promise<Permis
  */
 export async function can(role: Role, capability: Capability): Promise<boolean> {
   return (await modeOf(role, capability)) === 'allow';
+}
+
+/**
+ * โหมดของกฎทุกข้อในครั้งเดียว — รูปที่ `blockingViolations()` รับเข้าไป
+ *
+ * มีฟังก์ชันนี้เพราะด่านตรวจกฎต้องเป็น **ฟังก์ชันซิงโครนัสที่ไม่รู้จักเรื่องสิทธิ์เลย** ผู้เรียก
+ * ถามโหมดครั้งเดียวตอนต้นทาง แล้วส่ง "ข้อมูล" ก้อนนี้เข้าไป ⇒ ไม่มีตรรกะสิทธิ์ชุดที่สองไป
+ * งอกอยู่ใน quotationService และใบจาก LINE (ที่ไม่มีใครส่งโหมดเข้าไป) เดินเส้นเดิมทุกประการ
+ *
+ * `SYSTEM_ERROR` ไม่อยู่ในผลลัพธ์โดยตั้งใจ — มันไม่มีสวิตช์ และ `blockingViolations()` บล็อกมัน
+ * ก่อนจะมองแมปนี้ด้วยซ้ำ
+ */
+export type RuleModeMap = Record<SwitchableViolationType, PermissionMode>;
+
+export async function ruleModesOf(role: Role): Promise<RuleModeMap> {
+  const caps = await capsOf(role);
+  const out = {} as RuleModeMap;
+  for (const type of SWITCHABLE_VIOLATION_TYPES) out[type] = caps[ruleCapability(type)];
+  return out;
+}
+
+/**
+ * ขอบเขต "ใบที่บัญชีนี้เห็น" — `null` = เห็นทุกใบ (พฤติกรรมของทุก role ที่ออกใบได้ในวันนี้)
+ *
+ * อยู่ที่นี่เพราะมันเป็น **คำถามเรื่องสิทธิ์** ไม่ใช่เรื่องของ SQL — ส่วนตัวเงื่อนไข SQL อยู่ที่
+ * `ownQuotesCondition()` ใน db/repositories.ts ที่เดียว ผู้เรียกเอาผลของสองตัวนี้มาต่อกัน
+ *
+ * ⚠️ ทุก endpoint ที่แสดง/นับ/ส่งออกใบ ต้องถามตัวนี้ **พร้อมกัน** ไม่ใช่เฉพาะหน้าประวัติ —
+ *    ตัวนับที่ไม่ได้กรองจะบอกจำนวนใบที่คนดูเปิดดูไม่ได้ และไฟล์ export ที่ไม่ได้กรองคือ
+ *    ช่องที่ทำให้ "เห็นเฉพาะใบของตัวเอง" กลายเป็นของประดับ
+ */
+export async function quoteScopeOf(admin: { id: number; role: Role }): Promise<OwnQuotesScope | null> {
+  if (await can(admin.role, 'quote.view_all')) return null;
+  return { adminId: admin.id, salespersonIds: await getAdminSalespersonIds(admin.id) };
 }

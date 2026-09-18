@@ -225,6 +225,14 @@ npm run logworker                                          # worker เขีย
   มาเป็นขอบเขต ไม่งั้นยอดของชุดที่รออนุมัติกับชุดที่กำลังทำจะถูกบวกกัน
   · ออกใบหลังอนุมัติใช้ `services/quotationConfirm.ts` ตัวเดียวกับปุ่มยืนยันปกติ
   · gate: `npm run diag:price-approval`
+  **ตั้งแต่ 2026-09-18 "ข้อไหนอยู่ชั้นไหน" ขึ้นกับ role ของคนออกใบ ไม่ใช่ค่าคงที่ของทั้งระบบ** —
+  `blockingViolations()` รับพารามิเตอร์ที่ 4 เป็นแมป `ชนิดกฎ → deny|approval|allow` ที่ผู้เรียก
+  ถามมาจาก `ruleModesOf(role)` (`config/capabilities.ts`) · **ไม่ส่งมา = กติกาเดิมเป๊ะ** ซึ่งคือ
+  ทุกเส้นของ LINE/LIFF ⇒ ใบจาก LINE ไม่ขยับ · `quotationService.ts` **ห้าม import
+  `config/capabilities.ts` แบบ runtime** (type-only เท่านั้น) ไม่งั้นด่านตรวจกฎจะเริ่มตอบต่างกัน
+  ตามผู้เรียก · คำอนุมัติผูกกับ **ตัวเลขของกฎข้อนั้น** และทิศทางไม่เหมือนกัน: ราคา = ต่ำลง ·
+  ของหมด = จำนวนมากขึ้น · MOQ = จำนวน**น้อยลง** (`approvedViolationKeys`)
+  · gate เพิ่ม: `npm run diag:role-permissions` · แผน: `docs/plan-role-permissions.md` §12.1
 
 - **กฎระงับสต็อกเทียบ `unreserved` กับ "จำนวนที่สั่ง" ไม่ใช่ `actual_quantity <= 0`** และ
   **สินค้าที่ไม่มีแถวใน `product_stock_rules` ต้องเพิ่ม/ปรับจำนวนได้เสมอแม้ของว่าง** —

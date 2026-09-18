@@ -3,9 +3,9 @@
 //  รัน:  npm run diag:role-permissions        (ไม่ต้องเปิดเซิร์ฟเวอร์ · อ่านอย่างเดียว ไม่เขียน DB)
 //  แผน: docs/plan-role-permissions.md §9
 //
-//  รอบนี้ (P1) ตรวจเฉพาะสิ่งที่ P1 ส่งมอบจริง — แคตตาล็อก ค่าเริ่มต้น และการอ่านค่าจากตาราง
-//  ข้อที่เหลือของ §9 (deny/approval/allow สามเส้นทาง · ตัวกรอง "ใบของตัวเอง" · admin แก้ไม่ได้
-//  ผ่าน API) ต้องรอจุดบังคับใช้ใน P2 ถึงจะมีของให้ตรวจ
+//  รอบนี้ครอบถึง P2 (จุดบังคับใช้ฝั่ง server) — ข้อที่ยังต้องรอคือข้อที่ต้อง **เขียน DB จริง**
+//  เพื่อพิสูจน์ (สร้างใบ · เปิดคำขออนุมัติ · ยิง API ด้วยบัญชีจริง) ซึ่งฐานในกล่องคือฐานลูกค้าจริง
+//  ⇒ ด่านนี้พิสูจน์ที่ระดับฟังก์ชันแทน: ฟังก์ชันเดียวกับที่ endpoint เรียกจริง ไม่ใช่สำเนา
 //
 //  1. แคตตาล็อกไม่บิด — ทุกช่องมีค่าเริ่มต้นครบทั้ง 5 role และเป็นโหมดที่ช่องนั้นรับได้
 //  2. `SYSTEM_ERROR` ไม่มีสวิตช์ และต้องไม่มีตลอดไป (§3.3)
@@ -14,6 +14,10 @@
 //  5. แถวของ `admin` ถูกล็อก — ค่าใน DB ทับไม่ได้ (§3.4)
 //  6. ค่าใน DB ทับค่าเริ่มต้นของ role อื่นได้จริง และ cache ล้างแล้วเห็นผลทันที
 //  7. role ทั้ง 5 ผ่าน CHECK constraint ของ DB จริง (ข้ามถ้ายังไม่ได้รัน migration)
+//  8. **ใบจาก LINE ไม่ขยับ** — ไม่ส่งโหมดเข้าไป = คำตอบเดิมของทั้งระบบทุกชนิดกฎ (§9 ข้อ 3)
+//  9. **สามเส้นทาง deny / approval / allow** ที่ `blockingViolations()` (§9 ข้อ 4 · §6)
+// 10. **ตัวกรอง "ใบของตัวเอง"** — ผูกรหัส = กรองด้วยรหัส · ไม่ผูก = ถอยไปใบของบัญชีตัวเอง (§13.7)
+// 11. **คำอนุมัติผูกกับตัวเลขของกฎข้อนั้น** — ราคา/จำนวน แล้วแต่ชนิด (§3.6 · §9 ข้อ 5)
 // ─────────────────────────────────────────────────────────────────────────────
 import { pool } from '../../config/db.js';
 import {
@@ -26,7 +30,15 @@ import {
   type Capability,
   type PermissionMode,
 } from '../../config/capabilities.js';
-import { getRolePermissionRows } from '../../db/repositories.js';
+import { getRolePermissionRows, ownQuotesCondition } from '../../db/repositories.js';
+import {
+  blockingViolations,
+  violationMode,
+  violationKey,
+  approvedViolationKeys,
+  type Violation,
+  type ViolationModeMap,
+} from '../../services/quotationService.js';
 import type { Role } from '../../config/auth.js';
 
 const GREEN = '\x1b[32m', RED = '\x1b[31m', DIM = '\x1b[2m', BOLD = '\x1b[1m', YELLOW = '\x1b[33m', RESET = '\x1b[0m';
@@ -170,6 +182,105 @@ async function main() {
       conDef !== '' && missing.length === 0,
       missing.length ? `ยังไม่มีใน constraint: ${missing.join(', ')}` : conDef.slice(0, 80));
   }
+
+  // ── 8. ใบจาก LINE ไม่ขยับ ──────────────────────────────────────────────────
+  //  เส้น LINE ไม่มีใครส่ง ruleModes เข้าไป ⇒ ทุกคำตอบต้องเท่ากับกติกาเดิมของทั้งระบบ
+  //  เขียนคำตอบที่ถูกไว้เป็นตัวหนังสือ ไม่ได้คำนวณจากโค้ดตัวเดียวกับที่กำลังตรวจ
+  console.log(`\n${BOLD}8. ไม่ส่งโหมดเข้าไป = กติกาเดิมของทั้งระบบ (เส้น LINE)${RESET}`);
+  const LEGACY: Record<string, PermissionMode> = {
+    BLOCKED: 'allow', OUT_OF_STOCK: 'allow', MOQ_VIOLATION: 'allow',
+    CUSTOMER_BLACKLISTED: 'allow', CUSTOMER_CREDIT_HOLD: 'allow',
+    MIN_PRICE_VIOLATION: 'approval', SYSTEM_ERROR: 'deny',
+  };
+  const mk = (type: string): Violation =>
+    ({ type, model: 'DIAG-X', display_message: 'ทดสอบ' } as unknown as Violation);
+  let legacyDrift = 0;
+  for (const [type, expect] of Object.entries(LEGACY)) {
+    const got = violationMode(mk(type));
+    if (got !== expect) { legacyDrift++; console.log(`      ${DIM}${type}: ได้ ${got} · ควรเป็น ${expect}${RESET}`); }
+  }
+  ok('violationMode() ที่ไม่มีโหมด ตอบเหมือนกติกาเดิมทุกชนิดกฎ', legacyDrift === 0,
+    `${Object.keys(LEGACY).length} ชนิด`);
+
+  const vStock = mk('OUT_OF_STOCK');
+  ok('ติ๊กรับทราบแล้วผ่าน (ของหมด) — เหมือนเดิม',
+    blockingViolations([vStock], [violationKey(vStock)]).length === 0);
+  const vSys = mk('SYSTEM_ERROR');
+  ok('SYSTEM_ERROR ติ๊กรับทราบแล้วก็ยังบล็อก — เหมือนเดิม',
+    blockingViolations([vSys], [violationKey(vSys)]).length === 1);
+  ok('SYSTEM_ERROR บล็อกแม้จะมีคนพยายามตั้งโหมดให้มัน',
+    blockingViolations([vSys], [violationKey(vSys)], [violationKey(vSys)],
+      { SYSTEM_ERROR: 'allow' } as ViolationModeMap).length === 1);
+
+  // ── 9. สามเส้นทางของ §6 ────────────────────────────────────────────────────
+  console.log(`\n${BOLD}9. deny / approval / allow${RESET}`);
+  const v = mk('MOQ_VIOLATION');
+  const key = violationKey(v);
+  ok('deny — ติ๊กรับทราบก็ไม่ผ่าน และคำอนุมัติก็ปลดไม่ได้',
+    blockingViolations([v], [key], [key], { MOQ_VIOLATION: 'deny' }).length === 1);
+  ok('approval — คำรับทราบของคนออกใบไม่มีผล',
+    blockingViolations([v], [key], null, { MOQ_VIOLATION: 'approval' }).length === 1);
+  ok('approval — คำอนุมัติปลดได้',
+    blockingViolations([v], null, [key], { MOQ_VIOLATION: 'approval' }).length === 0);
+  ok('allow — ติ๊กรับทราบแล้วผ่าน',
+    blockingViolations([v], [key], null, { MOQ_VIOLATION: 'allow' }).length === 0);
+  ok('allow — ไม่ติ๊กก็ยังบล็อก (คำรับทราบต้องมาจากคนจริง)',
+    blockingViolations([v], null, null, { MOQ_VIOLATION: 'allow' }).length === 1);
+
+  // ── 10. ตัวกรอง "ใบของตัวเอง" ──────────────────────────────────────────────
+  //  ตรวจ *รูปของเงื่อนไข* ไม่ใช่ผลของ query เพราะยังไม่มีบัญชีที่ผูกรหัสจริงสักบัญชี
+  //  (ตาราง admin_user_salespersons เพิ่งเกิดใน P1 และ P4 คือรอบที่เปิดบัญชี)
+  console.log(`\n${BOLD}10. ตัวกรอง "ใบของตัวเอง"${RESET}`);
+  const bound = ownQuotesCondition({ adminId: 7, salespersonIds: ['441', '688'] }, 3);
+  ok('ผูกรหัสไว้ ⇒ กรองด้วย *รหัสพนักงานขาย* ไม่ใช่ user_id',
+    bound.sql.includes('= ANY($3)') && !bound.sql.includes('user_id LIKE'), bound.sql);
+  ok('  และส่งรหัสไปเป็นพารามิเตอร์เดียว (คนเดียวมีหลายรหัสได้)',
+    bound.params.length === 1 && Array.isArray(bound.params[0]) && bound.params[0].length === 2);
+  const unbound = ownQuotesCondition({ adminId: 7, salespersonIds: [] }, 1);
+  ok('ไม่ผูกรหัส ⇒ ถอยไปใบที่ออกจากบัญชีนี้ ไม่ใช่ "เห็นทุกใบ"',
+    unbound.sql.includes('q.user_id LIKE $1') && unbound.params[0] === 'web:7:%', String(unbound.params[0]));
+
+  // ── 11. คำอนุมัติผูกกับตัวเลขของกฎข้อนั้น ─────────────────────────────────
+  //  คำอนุมัติหนึ่งครั้งต้องไม่กลายเป็นใบเบิกทางถาวร — เกณฑ์คือ "แก้ไปทางที่ผิดหนักขึ้น
+  //  กว่าที่คนอนุมัติเห็น = ต้องขอใหม่" ซึ่งทิศทางของของหมดกับ MOQ **กลับกัน**
+  console.log(`\n${BOLD}11. คำอนุมัติผูกกับตัวเลขของกฎข้อนั้น${RESET}`);
+  const approvalOf = (type: string, item: Record<string, unknown>) => ({
+    status: 'approved',
+    violations: [{ type, model: 'DIAG-X' }],
+    items: [{ model: 'DIAG-X', ...item }],
+  });
+  const vAt = (type: string, extra: Record<string, unknown>): Violation =>
+    ({ type, model: 'DIAG-X', display_message: 'ทดสอบ', ...extra } as unknown as Violation);
+
+  const priceApp = approvalOf('MIN_PRICE_VIOLATION', { price: 100, quantity: 10 });
+  ok('ราคา — เท่าที่อนุมัติ ⇒ ปลด',
+    approvedViolationKeys(priceApp, [vAt('MIN_PRICE_VIOLATION', { price: 100 })]).length === 1);
+  ok('ราคา — ต่ำลงกว่าที่อนุมัติ ⇒ ต้องขอใหม่',
+    approvedViolationKeys(priceApp, [vAt('MIN_PRICE_VIOLATION', { price: 50 })]).length === 0);
+
+  const stockApp = approvalOf('OUT_OF_STOCK', { quantity: 10, price: 5 });
+  ok('ของหมด — สั่งเท่าที่อนุมัติ ⇒ ปลด',
+    approvedViolationKeys(stockApp, [vAt('OUT_OF_STOCK', { qty: 10 })]).length === 1);
+  ok('ของหมด — สั่งมากขึ้นกว่าที่อนุมัติ ⇒ ต้องขอใหม่',
+    approvedViolationKeys(stockApp, [vAt('OUT_OF_STOCK', { qty: 11 })]).length === 0);
+
+  const moqApp = approvalOf('MOQ_VIOLATION', { quantity: 10, price: 5 });
+  ok('MOQ — สั่งเท่าที่อนุมัติ ⇒ ปลด',
+    approvedViolationKeys(moqApp, [vAt('MOQ_VIOLATION', { qty: 10 })]).length === 1);
+  ok('MOQ — สั่งน้อยลงกว่าที่อนุมัติ ⇒ ต้องขอใหม่ (ทิศตรงข้ามกับของหมด)',
+    approvedViolationKeys(moqApp, [vAt('MOQ_VIOLATION', { qty: 9 })]).length === 0);
+
+  const blockApp = approvalOf('BLOCKED', { quantity: 10, price: 5 });
+  ok('สินค้าระงับ — ไม่มีตัวเลขผูก ใช้คีย์ล้วน',
+    approvedViolationKeys(blockApp, [vAt('BLOCKED', {})]).length === 1);
+  ok('  คนละรุ่น = คนละคีย์ ⇒ ปลดข้ามรุ่นไม่ได้',
+    approvedViolationKeys(blockApp,
+      [{ type: 'BLOCKED', model: 'DIAG-Y', display_message: 'x' } as unknown as Violation]).length === 0);
+  ok('คำขอที่ยังไม่อนุมัติ ⇒ ไม่ปลดอะไรเลย',
+    approvedViolationKeys({ ...stockApp, status: 'pending' }, [vAt('OUT_OF_STOCK', { qty: 10 })]).length === 0);
+  ok('คำขอเก่าที่ไม่ได้เก็บ violations ⇒ ยังตีความเป็นคำขอราคาขั้นต่ำ',
+    approvedViolationKeys({ status: 'approved', items: [{ model: 'DIAG-X', price: 100 }] },
+      [vAt('MIN_PRICE_VIOLATION', { price: 100 })]).length === 1);
 
   console.log(`\n${BOLD}สรุป:${RESET} ${GREEN}ผ่าน ${pass}${RESET} · ${fail > 0 ? RED : DIM}ล้ม ${fail}${RESET}${skip ? ` · ${YELLOW}ข้าม ${skip}${RESET}` : ''}`);
   await pool.end();

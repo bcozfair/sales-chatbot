@@ -180,7 +180,8 @@ async function case2to4(cust: any, pick: any): Promise<string> {
   let refused = false;
   try {
     await createDraft({
-      adminId, spUserId: TEST_SP_USER, customerId: cust.customerId, contactId: cust.contactId,
+      adminId,
+      role: 'admin', spUserId: TEST_SP_USER, customerId: cust.customerId, contactId: cust.contactId,
       items: pick.items, acknowledgedViolations: [`MIN_PRICE_VIOLATION|${pick.product.model}`],
     });
   } catch (e) {
@@ -194,7 +195,8 @@ async function case2to4(cust: any, pick: any): Promise<string> {
 
   console.log(`\n${BOLD}3) ส่งขออนุมัติ → ร่าง pending ที่ยังไม่มีเลขที่ใบ${RESET}`);
   const draft = await createDraft({
-    adminId, spUserId: TEST_SP_USER, customerId: cust.customerId, contactId: cust.contactId,
+    adminId,
+    role: 'admin', spUserId: TEST_SP_USER, customerId: cust.customerId, contactId: cust.contactId,
     items: pick.items, requestApproval: true, approvalNote: 'ลูกค้าเทียบราคาเจ้าอื่น (diag)',
     adminUsername: TEST_ADMIN_USERNAME, adminName: 'DIAG แอดมิน',
   });
@@ -262,7 +264,8 @@ async function case5to6(requestId: string) {
 async function case7to8(cust: any, pick: any, oldRequestId: string): Promise<string> {
   console.log(`\n${BOLD}7) แก้แล้วส่งใหม่ → คำขอเดิมถูกยกเลิก คำขอใหม่ pending${RESET}`);
   const again = await createDraft({
-    adminId, spUserId: TEST_SP_USER, customerId: cust.customerId, contactId: cust.contactId,
+    adminId,
+    role: 'admin', spUserId: TEST_SP_USER, customerId: cust.customerId, contactId: cust.contactId,
     items: pick.items, requestApproval: true, approvalNote: 'แก้แล้วส่งใหม่ (diag)',
     adminUsername: TEST_ADMIN_USERNAME, replacesRequestId: oldRequestId,
   });
