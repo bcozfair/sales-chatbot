@@ -101,6 +101,13 @@ async function main() {
   ok('ไม่มีคีย์ดิบหลุดไปอยู่ในคำอธิบาย',
     !bd.some((l) => [...axisKeys].some((k) => k.length > 2 && (l.detail ?? '').includes(k))));
 
+  // ขนาดที่ตารางเว้นว่าง = ไม่รับผลิต · ข้อความนี้แอดมินเอาไปตอบลูกค้าตรง ๆ จึงต้องเป็นคำคน
+  const noSize = parseProductCode('TSJ-04(S1) 19x100+1M', base);
+  const noSizeOut = noSize.cfg ? computePrice(noSize.cfg, base) : null;
+  const reason = noSizeOut?.violations.map((v) => v.message).join(' ') ?? '';
+  ok('ข้อความ "ไม่รับผลิต" ไม่มีคีย์ดิบ',
+    reason.length > 0 && ![...axisKeys].some((k) => k.length > 2 && reason.includes(k)), reason);
+
   console.log(`\n${BOLD}4. ตัวตรวจรูปแถว (clean)${RESET}`);
   ok('flat ที่ไม่มีจำนวนเงิน ⇒ ปฏิเสธ', clean({ subCode: 'X', effect: 'flat' }) === null);
   ok('ผลกับราคาที่ไม่รู้จัก ⇒ ปฏิเสธ', clean({ subCode: 'X', effect: 'wat', amount: 1 }) === null);
