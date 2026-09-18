@@ -23,6 +23,7 @@ import {
   getBranchesByCodes,
   getBranches,
   ODOO_EXPORT_SALES_TEAM_JOIN,
+  ODOO_EXPORT_SALES_TEAM_COL,
   ODOO_EXPORT_RAW_NAME_JOINS,
   getOdooSalespersonNameVocabulary,
   ODOO_EXPORT_RAW_NAME_COLS,
@@ -3904,7 +3905,7 @@ app.get('/api/admin/quotations/export', adminAuthMiddleware, requireCapability('
       const result = await client.query(
         `SELECT q.id, q.quotation_no, q.created_at, q.updated_at, q.customer_details, q.item_details, q.employee_details,
                 q.delivery_terms,
-                ${SP_NAME_SQL} AS salesperson_name, cust.sales_team AS customer_sales_team,
+                ${SP_NAME_SQL} AS salesperson_name, ${ODOO_EXPORT_SALES_TEAM_COL} AS customer_sales_team,
                 s.employee_quotation_id AS salesperson_employee_quotation_id,
                 ${ODOO_EXPORT_RAW_NAME_COLS}
            FROM quotations q

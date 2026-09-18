@@ -908,6 +908,10 @@ CREATE TABLE public.quotations (
     -- เพราะคีย์ของกฎเป็น `type|model` ไม่มีตัวเลข ถ้าใช้คีย์เป็นตัวปลด อนุมัติ ฿100 = อนุมัติ ฿10 ด้วย
     -- NULL = ไม่มีคำขอ (ใบจาก LINE ทุกใบ ⇒ ราคาขั้นต่ำบล็อกเหมือนเดิม)
     price_approval jsonb,
+    -- ทีมขายของผู้ติดต่อ "ณ เวลาที่ยืนยันใบ" — ช่อง Sales Team (คอลัมน์ I) ของไฟล์นำเข้า Odoo
+    -- NULL = ใบที่ยืนยันก่อนเฟส H ⇒ export ตกกลับไป join customers_data_view สดแบบเดิม
+    -- ตรึงที่นี่เพราะผู้ติดต่อหายจาก view ได้ทีหลัง แล้วช่อง I จะว่างเงียบ ๆ (plan §5.7)
+    customer_sales_team text,
     CONSTRAINT quotations_delivery_days_override_check CHECK (
         (delivery_days_override IS NULL)
         OR ((delivery_days_override >= 0) AND (delivery_days_override <= 3650))

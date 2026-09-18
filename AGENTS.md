@@ -448,6 +448,11 @@ docker compose exec -T db psql -U "$PG_USER" -d "$PG_DATABASE" -c "SELECT …"  
 วัดรายตัวด้วย grep ข้างบนเมื่อ 2026-09-15 ได้ 0 ทั้งสี่ตัว ⇒ รันบน PMSV ได้ (`backupHealth.mjs` ไม่แตะ DB เลย):
 `webDecisionParity.ts` · `salespersonDedupeSmoke.ts` · `migrationsAudit.mjs` · `backupHealth.mjs`
 
+**`scripts/dev/` คือของที่ห้ามรันบน PMSV ทั้งโฟลเดอร์** — ต่างจาก `scripts/diag/` ตรงที่มันตั้งใจ
+เขียนข้อมูลปลอมลงฐานและ commit เพื่อ **จำลองสถานการณ์** (`seedPhaseH.ts` เพิ่ม/ลบแถวใน
+`customers_data_view` ด้วย) ไฟล์ในนี้ต้องมีด่านกันเครื่องในตัวเอง (PG_HOST ต้องเป็น localhost ·
+ชื่อฐานห้ามมีคำว่า prod · `NODE_ENV` ห้ามเป็น production) และต้องมีโหมด `--clean` ที่ลบของตัวเองครบ
+
 **ก่อนทำอะไรที่เขียน DB บน PMSV: `npm run db:dump` ก่อนเสมอ** และบอกเจ้าของว่า dump อยู่ไหน
 
 ---
@@ -568,7 +573,7 @@ TS ไต่ `node_modules` ขึ้นไปตามลำดับ ⇒ `<ท
 | --- | --- |
 | การจับคู่ลูกค้า | `npm run diag:customer-search` (เทียบ baseline — **ห้าม `--refresh-corpus` ตอนเทียบ**) และ `tsx scripts/evalCustomerSearch.ts` (54 เคส · `wrong-auto-select` ต้องเป็น 0 · **ห้าม `--mine` ตอนเทียบ**) |
 | อะไรที่เกี่ยวกับวันที่ | `npm run diag:date-filter` |
-| flow ยืนยัน / การออกเลขใบ | `npm run diag:confirm-race` (ต้องเปิด server ก่อน) |
+| flow ยืนยัน / การออกเลขใบ | `npm run diag:confirm-race` (ต้องเปิด server ก่อน) · **บวก `diag:odoo-export` ทั้ง qp/qt** ตั้งแต่เฟส H เพราะการยืนยันเขียนช่อง Sales Team ของไฟล์ export ลงใบด้วย |
 | กฎสต็อก / validation ของใบ | `npm run diag:stock-rule` · `diag:stock-rule-put` · `diag:quote-validation` |
 | รายการ "รุ่นใกล้เคียง" ที่ให้เซลส์กดเลือก | `npm run diag:product-candidates` — เฉลยมาจากประวัติแชทจริง ไม่มี fixture ในกิต ⇒ **จำนวนเคสขยับได้ ตัวที่เป็น gate คือ "หลุดจากรายการ 0 เคส"** ไม่ใช่เปอร์เซ็นต์ |
 | ชื่อลูกค้า / ส่งออก Odoo | `npm run diag:odoo-export` — ถ้าขึ้น `(ตรวจ 0 ชื่อ)` แปลว่าด่านผ่านแบบว่างเปล่า อย่าเชื่อ |

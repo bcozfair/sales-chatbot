@@ -210,6 +210,17 @@ npm run logworker                                          # worker เขีย
   **ทะลุไม่ได้ทุกกรณี** เพราะมันแปลว่า *ยังไม่รู้ว่าผิดหรือไม่* ไม่ใช่ *ผิดข้อนี้*
   · gate: `npm run diag:web-quote` ข้อ 8
 
+- **ช่อง Sales Team (คอลัมน์ I) ของไฟล์ Odoo อ่านจาก "ค่าที่ตรึงไว้ในใบ" ก่อน แล้วค่อยถอยไป join สด**
+  (เฟส H · 2026-09-18) — `confirmQuotationAtomic` เขียน `quotations.customer_sales_team` ใน
+  ทรานแซกชันเดียวกับการออกเลข และ export ใช้ `ODOO_EXPORT_SALES_TEAM_COL`
+  (`COALESCE(q.customer_sales_team, cust.sales_team)`) ที่เดียวทั้ง endpoint และด่าน
+  ⇒ **ใบที่ยืนยันแล้วจะไม่รับค่าทีมขายที่เปลี่ยนใน Odoo ทีหลังอีก** (ตั้งใจ — ตรงกับ snapshot
+  ช่องอื่นของใบ) · `NULL` = ใบที่ยืนยันก่อนเฟส H ⇒ ถอยไป join สดเหมือนเดิมทุกไบต์ (พิสูจน์ด้วย
+  md5 ของไฟล์ทั้งชุดก่อน–หลัง 1,931 ใบ) · **ห้ามลบท่อน `ODOO_EXPORT_SALES_TEAM_JOIN` ทิ้ง**
+  มันคือทางถอยของใบเก่าทุกใบ · จำลองอาการบนเครื่อง dev ได้ด้วย `scripts/dev/seedPhaseH.ts`
+  (ผู้ติดต่อหายจาก `customers_data_view` แล้วช่อง I ว่าง) · gate: `diag:confirm-race` +
+  `diag:odoo-export` ก่อนและหลัง
+
 - **ราคาต่ำกว่าขั้นต่ำจากหน้าเว็บ ติ๊กรับทราบเองไม่ได้แล้ว ต้องมีคนอนุมัติ** (2026-09-15) —
   กฎมีสามชั้นแทนสอง: ติ๊กเองได้ (ของหมด/MOQ/ระงับ/blacklist/เครดิตค้าง) · **ต้องอนุมัติ**
   (`MIN_PRICE_VIOLATION`) · ทะลุไม่ได้ (`SYSTEM_ERROR`) — ทั้งสามอยู่ที่ `blockingViolations()`
@@ -349,7 +360,7 @@ npm run logworker                                          # worker เขีย
 - **ห้าม `COMMENT ON` (COLUMN/TABLE/VIEW/INDEX)** ใน migration หรือยิงเข้า DB เว้นแต่ผู้ใช้สั่งเอง —
   อธิบายด้วย `--` ในไฟล์ migration แทน
 
-- **migration ใหม่ต้องยุบเข้า `migrations/schema.sql` ด้วย** (52 ไฟล์ใน `migrations/changes/`
+- **migration ใหม่ต้องยุบเข้า `migrations/schema.sql` ด้วย** (53 ไฟล์ใน `migrations/changes/`
   ณ 2026-09-18) ไม่งั้น schema เต็มจะค่อย ๆ ล้าสมัยจนตั้ง DB ใหม่จากศูนย์ไม่ได้ — วิธีตรวจอยู่หัวไฟล์
   **และ "อยู่ใน repo" ไม่ได้แปลว่า "ลงฐาน prod แล้ว"** — `npm run diag:migrations` คือตัวที่ตอบ
   คำถามหลัง (เกิดจริง 2026-09-15: คอลัมน์ของ `admin_users` ค้างไม่ได้รันมา 6 วัน หน้าเว็บขอ
@@ -388,8 +399,8 @@ chatbot/
 ├── migrations/
 │   ├── schema.sql        # schema เต็ม (ตั้ง DB ใหม่จากศูนย์ได้จริง — วิธีตรวจอยู่หัวไฟล์)
 │   └── changes/          # migration ทีละไฟล์ `YYYY-MM-DD_NN_*.sql`
-├── scripts/              # sync/ · diag/ · logworker/ · runMigration · dbDump/dbRestore
-│                         # · backfill* · evalCustomerSearch
+├── scripts/              # sync/ · diag/ · dev/ (seed ทดสอบ — เครื่อง dev เท่านั้น) · logworker/
+│                         # · runMigration · dbDump/dbRestore · backfill* · evalCustomerSearch
 ├── data/sale_sigs/       # ลายเซ็น — ชื่อไฟล์ต้องเป็น {salesperson_id}.png
 ├── frontend/             # Admin SPA (มี package.json/tsconfig/eslint ของตัวเอง)
 └── public/               # build output ของ admin — commit เข้า repo · ห้ามแก้ตรง ๆ

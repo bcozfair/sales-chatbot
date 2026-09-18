@@ -478,6 +478,59 @@ export const ODOO_EXPORT_SALES_TEAM_JOIN = `
   ) cust ON TRUE`;
 
 /**
+ * ค่าที่ลงช่อง Sales Team (คอลัมน์ I) จริง ๆ — "ค่าที่ตรึงไว้ในใบก่อน แล้วค่อยถอยไปใช้ join สด"
+ *
+ * เฟส H (2026-09-18): `confirmQuotationAtomic` ตรึง `quotations.customer_sales_team` ไว้ตอนยืนยัน
+ * เพราะผู้ติดต่อคนหนึ่งหายจาก `customers_data_view` ได้หลังจากใบออกไปแล้ว (Odoo เปลี่ยนผู้ติดต่อ ·
+ * เฟส I ถอยแถว local ให้แถวจริงที่ sync กลับมา) ⇒ ไฟล์ที่กดดาวน์โหลดทีหลังจะได้ช่อง I ว่าง
+ * ทั้งที่ตอนออกใบมีค่า และไม่มีอะไรฟ้อง
+ *
+ * `ODOO_EXPORT_SALES_TEAM_JOIN` ด้านบน **คงไว้ทั้งดุ้นเป็นทางถอย** — ใบที่ยืนยันก่อนเฟส H มีค่า
+ * เป็น NULL ทั้งตาราง จึงตกกลับไปใช้ join สดแบบเดิมทุกบิต (พิสูจน์ด้วย md5 ของไฟล์ก่อน–หลัง)
+ *
+ * ใช้ร่วมกันระหว่าง endpoint export (index.ts) กับ diag harness (odooExportSmoke.ts) เหมือนตัว JOIN
+ * ⇒ ต้องมี alias `q` = quotations และ alias `cust` จาก JOIN ข้างบนอยู่ก่อนหน้าในคำสั่ง
+ */
+export const ODOO_EXPORT_SALES_TEAM_COL = `COALESCE(q.customer_sales_team, cust.sales_team)`;
+
+/**
+ * หา "ทีมขายของผู้ติดต่อ" เพื่อตรึงลงใบตอนยืนยัน — ตรรกะเดียวกับ ODOO_EXPORT_SALES_TEAM_JOIN ทุกบิต
+ * (กรอง contact_id > 0 · เรียงให้แถวที่ company_id ตรงกับใบมาก่อน · LIMIT 1) เพื่อให้ใบที่ยืนยัน
+ * "วันนี้" ได้ค่าเดียวกับที่ไฟล์ export จะให้ถ้ากดดาวน์โหลด "วันนี้" — ต่างกันเมื่อไหร่คือบั๊ก
+ *
+ * ⚠️ เรียกอยู่ในทรานแซกชันของ confirmQuotationAtomic (ถือ row lock ของใบอยู่) จึงรับ executor
+ *    เข้ามาแทนการใช้ pool และ **ต้องเบา**: วัด 2026-09-18 บนฐาน dev = 1.6 ms (index skip scan บน
+ *    idx_cdv_company_contact) · ห้ามเติมงานอื่นเข้ามาในฟังก์ชันนี้
+ *
+ * ⚠️ ฟังก์ชันนี้ **ปล่อยให้ error ทะลุขึ้นไป** ต่างจาก SELECT ตัวอื่นในไฟล์นี้ที่กลืน error แล้วคืน []
+ *    — ถ้ากลืนแล้วคืน null ใบจะถูกยืนยันโดยไม่มีค่าตรึง แล้วเงียบ ๆ ตกไปใช้ join สด ซึ่งคือปัญหา
+ *    เดิมที่เฟส H ตั้งใจปิด (plan-web-quote-request.md §5.7)
+ */
+export async function resolveCustomerSalesTeam(
+  contactId: number | null | undefined,
+  customerId: number | null | undefined,
+  executor: DbExecutor
+): Promise<string | null> {
+  const cid = Number(contactId);
+  if (!Number.isFinite(cid) || cid <= 0) return null;
+  const { rows } = await executor.query(
+    `SELECT cd.sales_team
+       FROM customers_data_view cd
+      WHERE cd.contact_id = $1
+      ORDER BY (cd.company_id = $2) DESC NULLS LAST, cd.company_id
+      LIMIT 1`,
+    [cid, Number(customerId) || 0]
+  );
+  const team = rows[0]?.sales_team;
+  // ค่าว่าง = ผู้ติดต่อไม่มีทีมขายในฐานจริง (9 ใบจาก 1,931 ใบบนฐาน dev · วัด 2026-09-18)
+  // ⇒ เก็บ NULL ไม่ใช่ '' โดยตั้งใจ: ไม่เอาค่าว่างไปนั่งทับช่องที่ NULL แปลว่า "ยังไม่เคยตรึง"
+  // ผลที่ยอมรับแล้ว: ใบกลุ่มนี้ยังเดินผ่าน join สด ⇒ ถ้าวันหลัง Odoo ใส่ทีมขายให้ผู้ติดต่อคนนั้น
+  // ไฟล์จะได้ค่าใหม่ ไม่ใช่ค่าว่างที่ตรึงไว้ — รับได้เพราะช่อง I ไม่ได้อยู่บน PDF ที่ลูกค้าถือ
+  // และ "ว่าง → มีค่า" ไม่เคยทำให้นำเข้า Odoo ตก ต่างจาก "มีค่า → ว่าง" ที่เฟส H ตั้งใจปิด
+  return team && String(team).trim() ? String(team) : null;
+}
+
+/**
  * ท่อน JOIN ที่ดึง "ชื่อดิบ" ของบริษัท/ผู้ติดต่อจากตารางหลักให้ไฟล์นำเข้า Odoo
  *
  * ทำไมต้องมี: snapshot ใน quotations.customer_details ได้ชื่อมาจาก customers_data_view ซึ่งห่อทุกชื่อ
