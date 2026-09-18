@@ -123,7 +123,11 @@ export const SubCodeModal: React.FC<Props> = ({
     }
   }
 
-  const fld = 'w-full h-10 px-3 rounded-lg bg-surface border border-slate-200 text-sm text-slate-900';
+  // `bg-card` ไม่ใช่ `bg-surface` — ตัวหลังไม่มีอยู่จริง (มีแต่ `--color-card` ใน @theme)
+  // และ Tailwind v4 **ทิ้งคลาสที่ไม่รู้จักเงียบ ๆ** ⇒ build ผ่าน eslint ผ่าน แต่ช่องไม่มีพื้นหลัง
+  // ผลที่ตามมาคือรายการของ <select> ที่กางออกเป็นพื้นขาวบนหน้าจอมืด เพราะเบราว์เซอร์
+  // ใช้พื้นหลังของ <select> มาวาดรายการ ไม่มีให้ก็ตกไปเป็นค่าตั้งต้นของระบบ (บั๊ก 2026-09-18)
+  const fld = 'w-full h-10 px-3 rounded-lg bg-card border border-slate-200 text-sm text-slate-900';
   const lab = 'block text-xs font-bold text-slate-600 mb-1.5';
 
   return (
@@ -141,8 +145,10 @@ export const SubCodeModal: React.FC<Props> = ({
         </>
       }
     >
-      <div className="space-y-3.5">
-        <p className="text-xs text-slate-500 -mt-1">ตั้งครั้งเดียว รหัสอื่นที่มีตัวอักษรนี้คิดตามทั้งหมด</p>
+      {/* `p-5` เป็นหน้าที่ของเนื้อกล่อง ไม่ใช่ของ Modal — กล่องอื่นทุกใบก็ใส่เอง (ดูหัว Modal.tsx)
+          ลืมใส่แล้วเนื้อจะชนขอบ และบรรทัดแรกโดนขอบบนของกรอบที่เลื่อนได้เฉือนสระบนทิ้ง */}
+      <div className="p-5 space-y-3.5">
+        <p className="text-xs text-slate-500">ตั้งครั้งเดียว รหัสอื่นที่มีตัวอักษรนี้คิดตามทั้งหมด</p>
 
         <div>
           <label className={lab} htmlFor="sc-reads">
@@ -242,7 +248,7 @@ export const SubCodeModal: React.FC<Props> = ({
         </div>
 
         {preview && preview.after !== null && (
-          <div className="rounded-xl px-3.5 py-2.5 text-xs bg-surface border border-slate-200 text-slate-700">
+          <div className="rounded-xl px-3.5 py-2.5 text-xs bg-card border border-slate-200 text-slate-700">
             {preview.after === preview.before ? (
               <>ราคาไม่เปลี่ยน — ยังเป็น <b className="text-sm">{preview.before?.toLocaleString()} บาท</b></>
             ) : (
