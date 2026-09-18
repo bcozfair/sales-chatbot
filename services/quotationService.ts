@@ -481,6 +481,18 @@ export async function confirmQuotationAtomic(
       return { outcome: 'already_confirmed' as const, quotationNo: row.quotation_no || '-' };
     }
 
+    // 1.5) ตรึงทีมขายของผู้ติดต่อ — ช่อง Sales Team (คอลัมน์ I) ของไฟล์นำเข้า Odoo
+    //      ต้องอยู่ในทรานแซกชันเดียวกับการออกเลข ไม่ใช่หลังจากนั้น: ใบที่ยืนยันสำเร็จแต่ตรึงไม่สำเร็จ
+    //      จะได้ NULL แล้วเงียบ ๆ ตกไปใช้ join สด ซึ่งคือปัญหาที่เฟส H ตั้งใจปิด (plan §5.7)
+    //      ⇒ resolveCustomerSalesTeam ปล่อยให้ error ทะลุ = ROLLBACK ทั้งการยืนยัน ไม่ใช่ตรึงไม่ครบ
+    //
+    //      ⚠️ อยู่ "ก่อน" allocateQuotationNo โดยตั้งใจ — bumpCounter ถือ row lock ของ
+    //      quotation_counters (คีย์เดียวต่อเดือนต่อบริษัท = จุดที่ทุกการยืนยันในเดือนนั้นมาต่อคิวกัน)
+    //      ไปจน COMMIT ถ้าวางไว้หลังจากนั้น การอ่าน customers_data_view ที่ช้าจะลากคิวของทุกคนไปด้วย
+    //      วัดแล้วบนเครื่อง dev 2026-09-18: ปกติ 1.6 ms · กรณีเลวร้าย (ตารางถูกล็อกค้าง) ชน
+    //      statement_timeout ของ pool ที่ 15 วิ แล้ว rollback ทั้งใบ — ตอนนั้นต้องไม่มีใครติดอยู่ข้างหลัง
+    const customerSalesTeam = await resolveCustomerSalesTeam(row.contact_id, row.customer_id, client);
+
     // 2) จองเลข (ใช้เลขเดิมถ้ามีอยู่แล้ว เพื่อไม่เผาเลขซ้ำ) — created_at ยึดของ enrichedQuote (วันที่ร่าง)
     const quotationNo = row.quotation_no
       || await allocateQuotationNo(enrichedQuote, client);
@@ -506,13 +518,6 @@ export async function confirmQuotationAtomic(
     //      (ถ้าไปคำนวณตอนสร้างร่างแทน จะมีสองจุดที่ต้องดูแล คือ insert กับ PUT — เหมือนที่
     //       payment_terms_override เคยพลาดมาแล้ว)
     const odooManualReview = buildOdooManualReview(enrichedQuote);
-
-    // 2.8) ตรึงทีมขายของผู้ติดต่อลงใบ — ช่อง Sales Team (คอลัมน์ I) ของไฟล์นำเข้า Odoo
-    //      ต้องอยู่ในทรานแซกชันเดียวกับการออกเลข ไม่ใช่หลังจากนั้น: ใบที่ยืนยันสำเร็จแต่ตรึงไม่สำเร็จ
-    //      จะได้ NULL แล้วเงียบ ๆ ตกไปใช้ join สด ซึ่งคือปัญหาที่เฟส H ตั้งใจปิด (plan §5.7)
-    //      ⇒ resolveCustomerSalesTeam ปล่อยให้ error ทะลุ = ROLLBACK ทั้งการยืนยัน ไม่ใช่ตรึงไม่ครบ
-    //      เบา 1.6 ms (index skip scan) จึงอยู่ในล็อกได้โดยไม่ขยายเวลาถือ row lock อย่างมีนัย
-    const customerSalesTeam = await resolveCustomerSalesTeam(row.contact_id, row.customer_id, client);
 
     // 3) UPDATE แบบมีเงื่อนไข status + เช็ค rowCount (ห้ามเขียนทับ created_at เพราะเลขคำนวณจากมัน)
     const upd = await client.query(
