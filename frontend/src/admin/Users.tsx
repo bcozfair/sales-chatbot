@@ -10,12 +10,14 @@ import {
   ShieldCheck,
   BadgeCheck,
   FileText,
+  UserCheck,
   Loader2,
   AlertTriangle,
   CheckCircle2,
   X,
 } from 'lucide-react';
 import { PageHeader } from './PageHeader';
+import { ROLE_ORDER, ROLE_LABEL, ROLE_DESCRIPTION } from './roles';
 
 const BRAND = 'var(--brand-fg)';
 const MIN_PASSWORD_LENGTH = 8;
@@ -29,28 +31,16 @@ interface AdminUserRow {
   updated_at: string;
 }
 
-/** ลำดับที่ใช้แสดงทุกที่ในหน้านี้ — ไล่จากสิทธิ์มากไปน้อย */
-const ROLE_ORDER: Role[] = ['admin', 'approver', 'subadmin', 'user'];
-
-const ROLE_LABEL: Record<Role, string> = {
-  admin: 'ผู้ดูแลระบบ',
-  approver: 'ผู้อนุมัติใบเสนอราคา',
-  subadmin: 'ผู้ดูแลใบเสนอราคา',
-  user: 'ผู้ใช้ทั่วไป',
-};
-
-const ROLE_DESCRIPTION: Record<Role, string> = {
-  admin: 'จัดการได้ทุกเมนู รวมถึงผู้ใช้',
-  approver: 'ทำได้ทุกอย่างของผู้ดูแลใบเสนอราคา + อนุมัติราคาต่ำกว่าขั้นต่ำ',
-  subadmin: 'ขอใบเสนอราคาและดูประวัติใบเสนอราคา',
-  user: 'เข้าได้เฉพาะหน้าบัญชีห้ามเสนอราคา',
-};
+// ชื่อ/คำอธิบาย/ลำดับของ role อยู่ที่ roles.ts ที่เดียว — หน้านี้กับหน้า "สิทธิ์ตามบทบาท"
+// ต้องเรียก role ด้วยคำเดียวกัน ไม่งั้นคนใช้จะนึกว่าเป็นคนละอย่างกัน (docs/design.md ข้อ 4)
 
 /** สีและไอคอนของป้ายสิทธิ์ในตาราง — แยกเป็น map เพื่อไม่ต้องไล่แก้ ternary ทุกครั้งที่เพิ่ม role */
 const ROLE_BADGE: Record<Role, { className: string; Icon: typeof Shield }> = {
   admin: { className: 'bg-emerald-50 border-emerald-200 text-emerald-700', Icon: ShieldCheck },
   approver: { className: 'bg-violet-50 border-violet-200 text-violet-700', Icon: BadgeCheck },
   subadmin: { className: 'bg-sky-50 border-sky-200 text-sky-700', Icon: FileText },
+  // amber วัดแล้ว 9.72 (มืด) / 4.84 (สว่าง) — ผ่านเกณฑ์ 4.5 ทั้งสองธีม และไม่ชนสีของ role อื่น
+  salesperson: { className: 'bg-amber-50 border-amber-200 text-amber-700', Icon: UserCheck },
   user: { className: 'bg-slate-50 border-slate-200 text-slate-500', Icon: Shield },
 };
 

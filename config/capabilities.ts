@@ -57,6 +57,37 @@ export type SwitchableViolationType = (typeof SWITCHABLE_VIOLATION_TYPES)[number
 
 export type RuleCapability = `rule.${SwitchableViolationType}`;
 
+/**
+ * หน้าจอที่เข้าถึงได้ — หนึ่งช่องต่อหนึ่งเมนูใน Admin Portal (เจ้าของสั่งเพิ่ม 2026-09-18)
+ *
+ * ค่าเริ่มต้นของทุกช่อง **คัดลอกมาจาก `roles: [...]` ที่เขียนไว้ตายตัวใน AdminApp.tsx วันนี้**
+ * ⇒ ตารางว่าง = เมนูของทุกคนเหมือนเดิมเป๊ะ
+ *
+ * ⚠️ **การซ่อนเมนูไม่ใช่ด่านตรวจ** — ช่องพวกนี้ต้องถูกบังคับที่ route ของหน้านั้นด้วย ไม่งั้น
+ *    เปิดเมนูให้ใครแล้วเขาจะเห็นหน้าที่ยิง API ไม่ผ่านสักเส้น ซึ่งแย่กว่าไม่เห็นเมนูเลย
+ *    (จุดบังคับของแต่ละช่องเขียนไว้ที่ `enforcedAt` ของมันเอง)
+ *
+ * ⚠️ **หน้า "สิทธิ์ตามบทบาท" เองไม่อยู่ในรายการนี้โดยตั้งใจ** — ความสามารถที่ปิดตัวเองได้
+ *    คือความสามารถที่ล็อกคนสุดท้ายออกจากระบบได้ · มันเป็นของ `admin` ล้วนตลอดไป
+ */
+export type PageCapability =
+  | 'page.dashboard'
+  | 'page.approvals'
+  | 'page.quotations'
+  | 'page.settings_quotation'
+  | 'page.promotions'
+  | 'page.settings_optional'
+  | 'page.settings_stock'
+  | 'page.settings_moq'
+  | 'page.settings_block'
+  | 'page.settings_shipping'
+  | 'page.productsdata'
+  | 'page.customersdata'
+  | 'page.blacklist'
+  | 'page.salespersons'
+  | 'page.users'
+  | 'page.traffic';
+
 export type QuoteCapability =
   | 'quote.create'
   | 'quote.revise'
@@ -68,12 +99,15 @@ export type QuoteCapability =
   | 'approval.decide'
   | 'users.set_issuer_identity';
 
-export type Capability = RuleCapability | QuoteCapability;
+export type Capability = RuleCapability | QuoteCapability | PageCapability;
 
 export interface CapabilityDef {
   key: Capability;
-  /** 'rule' = ทะลุกฎข้อนั้นได้แค่ไหน · 'quote' = ทำงานกับใบ/ระบบได้แค่ไหน */
-  group: 'rule' | 'quote';
+  /**
+   * 'rule' = ทะลุกฎข้อนั้นได้แค่ไหน · 'quote' = ทำงานกับใบ/ระบบได้แค่ไหน ·
+   * 'page' = เข้าหน้าจอไหนได้บ้าง (หน้าจอวาดเป็นสามกลุ่มตามค่านี้)
+   */
+  group: 'rule' | 'quote' | 'page';
   label: string;
   /**
    * โหมดที่เลือกได้ของช่องนี้ — กฎเป็นสามค่า ความสามารถเป็นสวิตช์สองค่า
@@ -172,12 +206,15 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
 
   // ── ข. การทำงานกับใบ ──────────────────────────────────────────────────────
   {
+    // อยู่กลุ่ม 'page' เพราะมันคือ **ทั้งหน้า** "ขอใบเสนอราคา" ไม่ใช่ฟังก์ชันย่อยในหน้านั้น —
+    // ปิดช่องนี้แล้วทั้ง 8 เส้นของหน้านั้นตอบ 403 และเมนูหายไปพร้อมกัน ⇒ ไม่ต้องมีสวิตช์ที่สอง
+    // ชื่อ key ยังเป็น quote.create เหมือนเดิม เพราะมันถูกอ้างที่ route 8 จุดแล้วตั้งแต่ P2
     key: 'quote.create',
-    group: 'quote',
-    label: 'ขอใบเสนอราคาจากหน้าเว็บ',
+    group: 'page',
+    label: 'ขอใบเสนอราคา',
     modes: SWITCH,
     defaults: switchFor('allow', 'allow', 'allow', 'allow'),
-    enforcedAt: 'POST /api/admin/webquote/drafts',
+    enforcedAt: '/api/admin/webquote/* 8 เส้น (makers · me · salespersons · payment-terms · propose · preview · preview-pdf · drafts)',
   },
   {
     key: 'quote.revise',
@@ -247,6 +284,140 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     // ไม่ควรมีสวิตช์ เพราะสวิตช์คือคำเชิญให้เปิด
     defaults: switchFor('allow', 'deny', 'deny', 'deny'),
     enforcedAt: 'หน้าจัดการผู้ใช้ (P3.5)',
+  },
+
+  // ── ค. หน้าจอที่เข้าถึงได้ ──────────────────────────────────────────────────
+  //  ค่าเริ่มต้นทุกช่องคัดลอกจาก `roles: [...]` ใน AdminApp.tsx วันนี้ ⇒ ตารางว่าง = เมนูเหมือนเดิม
+  //  ⚠️ ซ่อนเมนูอย่างเดียวไม่พอ — route ของหน้านั้นต้องใช้ช่องเดียวกันเป็นด่านด้วย
+  {
+    key: 'page.dashboard',
+    group: 'page',
+    label: 'แผงควบคุม',
+    modes: SWITCH,
+    defaults: switchFor('allow', 'deny', 'deny', 'deny'),
+    enforcedAt: 'GET /api/admin/stats · /api/admin/sync/*',
+  },
+  {
+    key: 'page.approvals',
+    group: 'page',
+    label: 'อนุมัติราคา',
+    modes: SWITCH,
+    defaults: switchFor('allow', 'allow', 'allow', 'allow'),
+    enforcedAt: 'GET /api/admin/approvals/*',
+  },
+  {
+    key: 'page.quotations',
+    group: 'page',
+    label: 'ประวัติใบเสนอราคา',
+    modes: SWITCH,
+    defaults: switchFor('allow', 'allow', 'allow', 'allow'),
+    enforcedAt: 'GET /api/admin/quotations/*',
+  },
+  {
+    key: 'page.settings_quotation',
+    group: 'page',
+    label: 'เงื่อนไขหลัก',
+    modes: SWITCH,
+    defaults: switchFor('allow', 'deny', 'deny', 'deny'),
+    enforcedAt: '/api/admin/quotation-rules/*',
+  },
+  {
+    key: 'page.promotions',
+    group: 'page',
+    label: 'จัดการโปรโมชันส่วนลด',
+    modes: SWITCH,
+    defaults: switchFor('allow', 'deny', 'deny', 'deny'),
+    enforcedAt: '/api/admin/promotions/*',
+  },
+  {
+    key: 'page.settings_optional',
+    group: 'page',
+    label: 'สินค้าพ่วงเสริม',
+    modes: SWITCH,
+    defaults: switchFor('allow', 'deny', 'deny', 'deny'),
+    enforcedAt: '/api/admin/optional-links/*',
+  },
+  {
+    key: 'page.settings_stock',
+    group: 'page',
+    label: 'ระงับเมื่อหมดสต็อก',
+    modes: SWITCH,
+    defaults: switchFor('allow', 'deny', 'deny', 'deny'),
+    enforcedAt: '/api/admin/stock-rules/*',
+  },
+  {
+    key: 'page.settings_moq',
+    group: 'page',
+    label: 'ขั้นต่ำสั่งซื้อ',
+    modes: SWITCH,
+    defaults: switchFor('allow', 'deny', 'deny', 'deny'),
+    enforcedAt: '/api/admin/moq-rules/*',
+  },
+  {
+    key: 'page.settings_block',
+    group: 'page',
+    label: 'บล็อกสินค้า',
+    modes: SWITCH,
+    defaults: switchFor('allow', 'deny', 'deny', 'deny'),
+    enforcedAt: '/api/admin/block-rules/*',
+  },
+  {
+    key: 'page.settings_shipping',
+    group: 'page',
+    label: 'ค่าขนส่ง & เครดิต',
+    modes: SWITCH,
+    defaults: switchFor('allow', 'deny', 'deny', 'deny'),
+    enforcedAt: '/api/admin/shipping-fee/* · /api/admin/credit-policy/*',
+  },
+  {
+    key: 'page.productsdata',
+    group: 'page',
+    label: 'ข้อมูลสินค้า',
+    modes: SWITCH,
+    defaults: switchFor('allow', 'allow', 'allow', 'deny'),
+    enforcedAt: '/api/admin/data/products*',
+  },
+  {
+    key: 'page.customersdata',
+    group: 'page',
+    label: 'ข้อมูลลูกค้า',
+    modes: SWITCH,
+    defaults: switchFor('allow', 'allow', 'allow', 'deny'),
+    enforcedAt: '/api/admin/data/customers*',
+  },
+  {
+    key: 'page.blacklist',
+    group: 'page',
+    label: 'บัญชีห้ามเสนอราคา',
+    modes: SWITCH,
+    // ช่องเดียวในแคตตาล็อกที่ role `user` เป็น allow — วันนี้มันคือ **เมนูเดียวที่ role นั้นเห็น**
+    // (AdminApp.tsx: roles: ['admin', 'user']) ปิดช่องนี้ = บัญชีทั่วไปเข้าระบบมาแล้วไม่เหลืออะไรเลย
+    defaults: { admin: 'allow', approver: 'deny', subadmin: 'deny', salesperson: 'deny', user: 'allow' },
+    enforcedAt: '/api/admin/blacklist/*',
+  },
+  {
+    key: 'page.salespersons',
+    group: 'page',
+    label: 'จัดการพนักงานขาย',
+    modes: SWITCH,
+    defaults: switchFor('allow', 'deny', 'deny', 'deny'),
+    enforcedAt: '/api/admin/salespersons/* · /api/admin/signatures/*',
+  },
+  {
+    key: 'page.users',
+    group: 'page',
+    label: 'จัดการผู้ใช้งานระบบ',
+    modes: SWITCH,
+    defaults: switchFor('allow', 'deny', 'deny', 'deny'),
+    enforcedAt: '/api/admin/users/*',
+  },
+  {
+    key: 'page.traffic',
+    group: 'page',
+    label: 'รายงานการใช้งาน',
+    modes: SWITCH,
+    defaults: switchFor('allow', 'deny', 'deny', 'deny'),
+    enforcedAt: '/api/admin/logs/*',
   },
 ];
 

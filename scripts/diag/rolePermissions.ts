@@ -72,6 +72,25 @@ const TODAY: Record<Capability, [admin: PermissionMode, approver: PermissionMode
   'quote.act_as_any_salesperson': ['allow', 'allow', 'allow'],
   'approval.decide':              ['allow', 'allow', 'deny'],
   'users.set_issuer_identity':    ['allow', 'deny', 'deny'],
+  // ── หน้าจอ: คัดลอกมาจาก `roles: [...]` ใน AdminApp.tsx ตรง ๆ (วัด 2026-09-18) ──
+  //  ตารางนี้คือสำเนาที่ **ตั้งใจให้มี** — ถ้าใครแก้ค่าเริ่มต้นในแคตตาล็อกโดยไม่ได้ตั้งใจ
+  //  ด่านจะล้มพร้อมบอกช่องที่ต่าง · ถ้าแก้เมนูใน AdminApp.tsx จริง ต้องมาแก้ที่นี่ด้วย
+  'page.dashboard':               ['allow', 'deny', 'deny'],
+  'page.approvals':               ['allow', 'allow', 'allow'],
+  'page.quotations':              ['allow', 'allow', 'allow'],
+  'page.settings_quotation':      ['allow', 'deny', 'deny'],
+  'page.promotions':              ['allow', 'deny', 'deny'],
+  'page.settings_optional':       ['allow', 'deny', 'deny'],
+  'page.settings_stock':          ['allow', 'deny', 'deny'],
+  'page.settings_moq':            ['allow', 'deny', 'deny'],
+  'page.settings_block':          ['allow', 'deny', 'deny'],
+  'page.settings_shipping':       ['allow', 'deny', 'deny'],
+  'page.productsdata':            ['allow', 'allow', 'allow'],
+  'page.customersdata':           ['allow', 'allow', 'allow'],
+  'page.blacklist':               ['allow', 'deny', 'deny'],
+  'page.salespersons':            ['allow', 'deny', 'deny'],
+  'page.users':                   ['allow', 'deny', 'deny'],
+  'page.traffic':                 ['allow', 'deny', 'deny'],
 };
 
 async function tableExists(name: string): Promise<boolean> {
@@ -103,6 +122,14 @@ async function main() {
   const fromTypes = SWITCHABLE_VIOLATION_TYPES.map(t => `rule.${t}`).sort();
   ok('ความสามารถกลุ่ม rule.* ตรงกับชนิดกฎที่มีสวิตช์ได้พอดี',
     JSON.stringify(ruleKeys) === JSON.stringify(fromTypes), `${ruleKeys.length} ข้อ`);
+
+  // หน้า "สิทธิ์ตามบทบาท" ต้องไม่มีสวิตช์ของตัวเอง — ความสามารถที่ปิดตัวเองได้
+  // คือความสามารถที่ล็อกคนสุดท้ายออกจากระบบได้ (เหตุผลเดียวกับที่ admin ถูกล็อกทั้งแถว)
+  ok('ไม่มีช่องสำหรับหน้า "สิทธิ์ตามบทบาท" เอง',
+    !keys.some(k => /role.?permission|rolepermissions/i.test(k)));
+  const pageKeys = CAPABILITIES.filter(c => c.group === 'page');
+  ok('ทุกช่องของกลุ่มหน้าจอเป็นสวิตช์สองค่า (deny/allow) ไม่ใช่สามค่า',
+    pageKeys.every(c => c.modes.length === 2), `${pageKeys.length} หน้า`);
 
   // ── 2. SYSTEM_ERROR ────────────────────────────────────────────────────────
   console.log(`\n${BOLD}2. SYSTEM_ERROR ไม่มีสวิตช์${RESET}`);
