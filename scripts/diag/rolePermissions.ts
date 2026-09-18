@@ -18,7 +18,9 @@
 //  9. **สามเส้นทาง deny / approval / allow** ที่ `blockingViolations()` (§9 ข้อ 4 · §6)
 // 10. **ตัวกรอง "ใบของตัวเอง"** — ผูกรหัส = กรองด้วยรหัส · ไม่ผูก = ถอยไปใบของบัญชีตัวเอง (§13.7)
 // 11. **คำอนุมัติผูกกับตัวเลขของกฎข้อนั้น** — ราคา/จำนวน แล้วแต่ชนิด (§3.6 · §9 ข้อ 5)
+// 12. **ทุกช่องกลุ่ม "หน้าจอ" มีด่านที่ route จริง** และไม่มี route ไหนหลุดรายการ (P3c)
 // ─────────────────────────────────────────────────────────────────────────────
+import { readFileSync } from 'node:fs';
 import { pool } from '../../config/db.js';
 import {
   CAPABILITIES,
@@ -308,6 +310,66 @@ async function main() {
   ok('คำขอเก่าที่ไม่ได้เก็บ violations ⇒ ยังตีความเป็นคำขอราคาขั้นต่ำ',
     approvedViolationKeys({ status: 'approved', items: [{ model: 'DIAG-X', price: 100 }] },
       [vAt('MIN_PRICE_VIOLATION', { price: 100 })]).length === 1);
+
+
+  // ── 12. ทุกช่องกลุ่ม "หน้าจอ" มีด่านที่ route จริง (P3c) ────────────────────
+  //  ข้อนี้มีอยู่เพราะ "ซ่อนเมนูอย่างเดียว" ไม่ใช่สิทธิ์ — มันคือคำสัญญาที่ผิด: เปิดเมนูให้ใคร
+  //  แล้วเขาเห็นหน้าที่ยิง API ไม่ผ่านสักเส้น ซึ่งแย่กว่าไม่เห็นเมนูเลย
+  //  จึงอ่าน **ซอร์สของ index.ts** มาเทียบ ไม่ใช่เชื่อ `enforcedAt` ที่เป็นแค่ข้อความ
+  console.log(`\n${BOLD}12. ช่องกลุ่ม "หน้าจอ" มีด่านที่ route จริง${RESET}`);
+  const indexSrc = readFileSync(new URL('../../index.ts', import.meta.url), 'utf-8');
+
+  const pageCaps = CAPABILITIES.filter((c) => c.group === 'page');
+  const unenforced = pageCaps
+    .filter((c) => !indexSrc.includes(`requireCapability('${c.key}')`))
+    .map((c) => c.key);
+  ok(`ทุกช่องหน้าจอถูกใช้เป็นด่านใน index.ts (${pageCaps.length} ช่อง)`,
+    unenforced.length === 0, unenforced.join(' · '));
+
+  // route ที่ "ไม่มีด่านเลย" กับ "มีแต่ requireRole" ต้องตรงกับรายการที่ตั้งใจไว้ **เป๊ะ**
+  //  เทียบแบบเท่ากันทั้งเซ็ต ไม่ใช่ "อยู่ในรายการ" — เส้นใหม่ที่ลืมใส่ด่านจึงล้มด่านนี้ทันที
+  const NO_GUARD = [
+    'POST /api/admin/login',              // ยังไม่มีตัวตนให้ถาม
+    'GET /api/admin/verify',              // ตรวจ token ของตัวเอง
+    'POST /api/admin/change-password',    // รหัสของตัวเอง
+    'GET /api/admin/me/capabilities',     // ทุก role ต้องเรียกได้ เพราะเมนูของทุกคนอ่านจากเส้นนี้
+  ];
+  const ROLE_ONLY = [
+    'GET /api/admin/role-permissions',        // หน้าตั้งค่าสิทธิ์ จงใจไม่เอาตัวเองเข้าเมทริกซ์ (§4ข)
+    'PUT /api/admin/role-permissions',
+    'PUT /api/admin/webquote/me',             // ตัวตนบนใบ — §13.3 ห้ามเปิดให้ salesperson
+    'POST /api/admin/webquote/me/signature',
+    'DELETE /api/admin/webquote/me/signature',
+  ];
+  const noGuard: string[] = [];
+  const roleOnly: string[] = [];
+  for (const line of indexSrc.split('\n')) {
+    const m = /^app\.(get|post|put|patch|delete)\('(\/api\/admin[^']*)'([^\n]*)$/.exec(line);
+    if (!m) continue;
+    const name = `${m[1].toUpperCase()} ${m[2]}`;
+    if (m[3].includes('requireCapability')) continue;
+    (m[3].includes('requireRole') ? roleOnly : noGuard).push(name);
+  }
+  const sameSet = (a: string[], b: string[]) =>
+    a.length === b.length && [...a].sort().join('|') === [...b].sort().join('|');
+  ok('route ที่ไม่มีด่านเลย = รายการที่ตั้งใจไว้ เป๊ะทั้งเซ็ต',
+    sameSet(noGuard, NO_GUARD), noGuard.join(' · '));
+  ok('route ที่มีแต่ requireRole = รายการที่ตั้งใจไว้ เป๊ะทั้งเซ็ต',
+    sameSet(roleOnly, ROLE_ONLY), roleOnly.join(' · '));
+
+  // จุด mount ของ router ลูก — ด่านไม่ได้อยู่บนบรรทัด app.get/app.post จึงต้องตรวจแยก
+  ok('logsRouter บังคับด้วย page.traffic ที่จุด mount',
+    /app\.use\('\/api\/admin\/logs',[^)]*requireCapability\('page\.traffic'\)/.test(indexSrc));
+  ok('หน้าข้อมูลสินค้า/ลูกค้าเป็นด่าน **คนละตัว** ก่อนถึง router ตัวเดียวกัน',
+    /app\.use\('\/api\/admin\/data\/products',[^)]*requireCapability\('page\.productsdata'\)/.test(indexSrc) &&
+    /app\.use\('\/api\/admin\/data\/customers',[^)]*requireCapability\('page\.customersdata'\)/.test(indexSrc));
+  ok('  และจุด mount ของ dataDirectoryRouter ไม่เหลือ requireRole ค้างไว้ให้ตีความสองทาง',
+    /app\.use\('\/api\/admin\/data', adminAuthMiddleware, dataDirectoryRouter\)/.test(indexSrc));
+
+  // การตัดสินคำขอต้องซ้อนสองชั้น: ประตู (approval.decide) + ตัว service (canDecideApproval)
+  //  ถ้าเหลือชั้นเดียว เปิดสิทธิ์ให้ role ใหม่แล้วจะได้ครึ่งเดียว ซึ่งดูเหมือนบั๊กสุ่ม
+  const decideRoutes = (indexSrc.match(/requireCapability\('approval\.decide'\)/g) ?? []).length;
+  ok('3 เส้นที่ตัดสินคำขอมีด่าน approval.decide ที่ประตูด้วย', decideRoutes === 3, `${decideRoutes} เส้น`);
 
   console.log(`\n${BOLD}สรุป:${RESET} ${GREEN}ผ่าน ${pass}${RESET} · ${fail > 0 ? RED : DIM}ล้ม ${fail}${RESET}${skip ? ` · ${YELLOW}ข้าม ${skip}${RESET}` : ''}`);
   await pool.end();

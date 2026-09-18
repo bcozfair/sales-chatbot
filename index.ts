@@ -211,16 +211,20 @@ app.use(express.static(path.join(process.cwd(), 'public')));
 app.use('/data', express.static(path.join(process.cwd(), 'data')));
 
 // ── บันทึกและรายงาน (traffic / audit / system log) — ดู routes/logs.ts ────────────────────
-// สิทธิ์บังคับที่บรรทัดนี้บรรทัดเดียว: เปิดให้ role 'admin' เท่านั้น เท่ากับหน้า "บันทึกการเรียก API" เดิม
-// ถอนทั้งแผน log ออก = ลบ 2 บรรทัดนี้ (import ด้านบน + บรรทัดล่าง) แล้วระบบกลับไปเหมือนเดิมทันที
-app.use('/api/admin/logs', adminAuthMiddleware, requireRole('admin'), logsRouter);
+// สิทธิ์บังคับที่บรรทัดนี้บรรทัดเดียว: ช่อง `page.traffic` ของเมทริกซ์ ซึ่งค่าเริ่มต้นคือ admin เท่านั้น
+// เท่ากับ requireRole('admin') เดิมเป๊ะ · ถอนทั้งแผน log ออก = ลบ 2 บรรทัดนี้ (import ด้านบน +
+// บรรทัดล่าง) แล้วระบบกลับไปเหมือนเดิมทันที
+app.use('/api/admin/logs', adminAuthMiddleware, requireCapability('page.traffic'), logsRouter);
 
 // หน้า "ข้อมูลสินค้า" / "ข้อมูลลูกค้า" — อ่านอย่างเดียว ต้นทางคือ Odoo
-// สิทธิ์: admin · approver · subadmin (เจ้าของกำหนด 2026-09-17) — ไม่รวม role 'user'
-// ซึ่งเห็นได้แค่ "บัญชีห้ามเสนอราคา" เมนูเดียว · บังคับที่จุด mount ที่เดียวเหมือน logsRouter
-// ยังเป็น requireRole โดยตั้งใจ — เมนู "ข้อมูลสินค้า/ลูกค้า" เป็นคำถามของ *เมนู* ไม่ใช่ของ *ใบ*
-// และแคตตาล็อกสิทธิ์รอบแรกจงใจไม่รับเมนูเข้ามา (docs/plan-role-permissions.md §4ข ย่อหน้าท้าย)
-app.use('/api/admin/data', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), dataDirectoryRouter);
+// เป็น router ตัวเดียวแต่เป็น **สองเมนู** ที่เจ้าของเปิด/ปิดแยกกันได้ ⇒ ด่านจึงเป็น middleware
+// คนละตัวที่ผูกกับ path prefix แล้ววางไว้ก่อนจุด mount ไม่ใช่ด่านเดียวคร่อมทั้ง router
+// (ค่าเริ่มต้นทั้งสองช่อง = admin · approver · subadmin เท่ากับ requireRole เดิมเป๊ะ — เจ้าของ
+//  กำหนดไว้ 2026-09-17 · role 'user' ยังเห็นแค่ "บัญชีห้ามเสนอราคา" เมนูเดียวเหมือนเดิม)
+// path ที่ไม่ใช่ /products* หรือ /customers* ไม่มีอยู่ใน router นี้ จึงตก 404 ไม่ใช่หลุดด่าน
+app.use('/api/admin/data/products', adminAuthMiddleware, requireCapability('page.productsdata'));
+app.use('/api/admin/data/customers', adminAuthMiddleware, requireCapability('page.customersdata'));
+app.use('/api/admin/data', adminAuthMiddleware, dataDirectoryRouter);
 
 // Serve admin portal dashboard
 app.get('/admin', (req: any, res: any) => {
@@ -1816,7 +1820,7 @@ app.post('/api/admin/change-password', adminAuthMiddleware, express.json(), asyn
 });
 
 // --- รายชื่อผู้ใช้ทั้งหมด (admin เท่านั้น) ---
-app.get('/api/admin/users', adminAuthMiddleware, requireRole('admin'), async (req: any, res: any) => {
+app.get('/api/admin/users', adminAuthMiddleware, requireCapability('page.users'), async (req: any, res: any) => {
   console.log(">>> GET /api/admin/users received!");
   try {
     const result = await pool.query(
@@ -1830,7 +1834,7 @@ app.get('/api/admin/users', adminAuthMiddleware, requireRole('admin'), async (re
 });
 
 // --- สร้างผู้ใช้ใหม่ (admin เท่านั้น) ---
-app.post('/api/admin/users', adminAuthMiddleware, requireRole('admin'), express.json(), async (req: any, res: any) => {
+app.post('/api/admin/users', adminAuthMiddleware, requireCapability('page.users'), express.json(), async (req: any, res: any) => {
   console.log(">>> POST /api/admin/users received!", req.body?.username);
   try {
     const { username, password, name, role } = req.body;
@@ -1873,7 +1877,7 @@ app.post('/api/admin/users', adminAuthMiddleware, requireRole('admin'), express.
 });
 
 // --- แก้ชื่อ / สิทธิ์ของผู้ใช้ (admin เท่านั้น) ---
-app.put('/api/admin/users/:id', adminAuthMiddleware, requireRole('admin'), express.json(), async (req: any, res: any) => {
+app.put('/api/admin/users/:id', adminAuthMiddleware, requireCapability('page.users'), express.json(), async (req: any, res: any) => {
   const targetId = Number(req.params.id);
   console.log(">>> PUT /api/admin/users received!", targetId);
   try {
@@ -1926,7 +1930,7 @@ app.put('/api/admin/users/:id', adminAuthMiddleware, requireRole('admin'), expre
 });
 
 // --- ตั้งรหัสผ่านใหม่ให้ผู้ใช้คนอื่น (admin เท่านั้น ไม่ต้องรู้รหัสเดิม) ---
-app.put('/api/admin/users/:id/password', adminAuthMiddleware, requireRole('admin'), express.json(), async (req: any, res: any) => {
+app.put('/api/admin/users/:id/password', adminAuthMiddleware, requireCapability('page.users'), express.json(), async (req: any, res: any) => {
   const targetId = Number(req.params.id);
   console.log(">>> PUT /api/admin/users/:id/password received!", targetId);
   try {
@@ -1957,7 +1961,7 @@ app.put('/api/admin/users/:id/password', adminAuthMiddleware, requireRole('admin
 });
 
 // --- ลบผู้ใช้ (admin เท่านั้น) ---
-app.delete('/api/admin/users/:id', adminAuthMiddleware, requireRole('admin'), async (req: any, res: any) => {
+app.delete('/api/admin/users/:id', adminAuthMiddleware, requireCapability('page.users'), async (req: any, res: any) => {
   const targetId = Number(req.params.id);
   console.log(">>> DELETE /api/admin/users received!", targetId);
   try {
@@ -2109,10 +2113,11 @@ app.get('/api/admin/me/capabilities', adminAuthMiddleware, async (req: any, res:
 });
 
 // ═══════════════════ บัญชีห้ามเสนอราคา (blacklist) — admin + user ═══════════════════
-// เมนูเดียวที่ role 'user' เข้าถึงได้ ทุกเส้นจึงเป็น requireRole('admin', 'user')
+// เมนูเดียวที่ role 'user' เข้าถึงได้ ⇒ `page.blacklist` เป็นช่องเดียวในแคตตาล็อกที่ role นั้นเป็น
+// allow · ปิดช่องนี้ = บัญชีทั่วไปเข้าระบบมาแล้วไม่เหลือเมนูอะไรเลย
 // ตัวบล็อกจริงอยู่ที่ validateQuotationItems ไม่ใช่ที่นี่ — เส้นพวกนี้แค่จัดการรายการ
 
-app.get('/api/admin/blacklist', adminAuthMiddleware, requireRole('admin', 'user'), async (_req: any, res: any) => {
+app.get('/api/admin/blacklist', adminAuthMiddleware, requireCapability('page.blacklist'), async (_req: any, res: any) => {
   try {
     res.json(await listBlacklist());
   } catch (err: any) {
@@ -2121,7 +2126,7 @@ app.get('/api/admin/blacklist', adminAuthMiddleware, requireRole('admin', 'user'
   }
 });
 
-app.post('/api/admin/blacklist', adminAuthMiddleware, requireRole('admin', 'user'), express.json(), async (req: any, res: any) => {
+app.post('/api/admin/blacklist', adminAuthMiddleware, requireCapability('page.blacklist'), express.json(), async (req: any, res: any) => {
   try {
     const entry = await addBlacklistEntry({
       companyId: req.body?.companyId,
@@ -2144,7 +2149,7 @@ app.post('/api/admin/blacklist', adminAuthMiddleware, requireRole('admin', 'user
   }
 });
 
-app.put('/api/admin/blacklist/:id', adminAuthMiddleware, requireRole('admin', 'user'), express.json(), async (req: any, res: any) => {
+app.put('/api/admin/blacklist/:id', adminAuthMiddleware, requireCapability('page.blacklist'), express.json(), async (req: any, res: any) => {
   const targetId = Number(req.params.id);
   try {
     if (!Number.isInteger(targetId)) {
@@ -2168,7 +2173,7 @@ app.put('/api/admin/blacklist/:id', adminAuthMiddleware, requireRole('admin', 'u
   }
 });
 
-app.delete('/api/admin/blacklist/:id', adminAuthMiddleware, requireRole('admin', 'user'), async (req: any, res: any) => {
+app.delete('/api/admin/blacklist/:id', adminAuthMiddleware, requireCapability('page.blacklist'), async (req: any, res: any) => {
   const targetId = Number(req.params.id);
   try {
     if (!Number.isInteger(targetId)) {
@@ -2187,7 +2192,7 @@ app.delete('/api/admin/blacklist/:id', adminAuthMiddleware, requireRole('admin',
 // ค้นหาบริษัท/ผู้ติดต่อสำหรับ "เพิ่มรายการ" — ต้องได้ company_id/contact_id กลับมาด้วย
 // จึงใช้ searchCustomersAdmin ไม่ใช่ /api/admin/customers/search ที่คืนแค่ชื่อ+รหัสอ้างอิง
 // (เส้นนั้นเป็นของหน้าโปรโมชัน ห้ามไปแตะ — ดู docs/plan-user-roles-auth.md §4.6)
-app.get('/api/admin/blacklist/customers', adminAuthMiddleware, requireRole('admin', 'user'), async (req: any, res: any) => {
+app.get('/api/admin/blacklist/customers', adminAuthMiddleware, requireCapability('page.blacklist'), async (req: any, res: any) => {
   try {
     const rows = await searchCustomersAdmin(String(req.query.q || ''), 30);
     res.json(rows.map((r: any) => ({ id: r.id, display_name: r.display_name, reference: r.reference })));
@@ -2198,7 +2203,7 @@ app.get('/api/admin/blacklist/customers', adminAuthMiddleware, requireRole('admi
 });
 
 // รหัสบริษัททั้งหมดที่จะถูกครอบถ้าบล็อกรหัสนี้ — ให้แอดมินเห็นก่อนกดบันทึก
-app.get('/api/admin/blacklist/customers/:id/related', adminAuthMiddleware, requireRole('admin', 'user'), async (req: any, res: any) => {
+app.get('/api/admin/blacklist/customers/:id/related', adminAuthMiddleware, requireCapability('page.blacklist'), async (req: any, res: any) => {
   try {
     res.json(await listRelatedCompanies(req.params.id));
   } catch (err: any) {
@@ -2209,7 +2214,7 @@ app.get('/api/admin/blacklist/customers/:id/related', adminAuthMiddleware, requi
 
 // คู่ (บริษัท, ผู้ติดต่อ) ที่จะถูกครอบเมื่อเลือก "ระงับเฉพาะผู้ติดต่อ" — ชั้นผู้ติดต่อขยายด้วยชื่อ
 // แอดมินจึงต้องเห็นก่อนกดบันทึกเหมือนกัน (ดู listRelatedContacts)
-app.get('/api/admin/blacklist/customers/:id/related-contacts', adminAuthMiddleware, requireRole('admin', 'user'), async (req: any, res: any) => {
+app.get('/api/admin/blacklist/customers/:id/related-contacts', adminAuthMiddleware, requireCapability('page.blacklist'), async (req: any, res: any) => {
   try {
     res.json(await listRelatedContacts(req.params.id, req.query.contactId));
   } catch (err: any) {
@@ -2218,7 +2223,7 @@ app.get('/api/admin/blacklist/customers/:id/related-contacts', adminAuthMiddlewa
   }
 });
 
-app.get('/api/admin/blacklist/customers/:id/contacts', adminAuthMiddleware, requireRole('admin', 'user'), async (req: any, res: any) => {
+app.get('/api/admin/blacklist/customers/:id/contacts', adminAuthMiddleware, requireCapability('page.blacklist'), async (req: any, res: any) => {
   try {
     const rows = await getContactsByCustomerId(req.params.id);
     res.json(rows.map((r: any) => ({ id: r.id, name: r.name })));
@@ -2229,7 +2234,7 @@ app.get('/api/admin/blacklist/customers/:id/contacts', adminAuthMiddleware, requ
 });
 
 // --- API Endpoint: Upload Signature ---
-app.post('/api/admin/signatures/upload', adminAuthMiddleware, requireRole('admin'), express.json({ limit: '10mb' }), async (req: any, res: any) => {
+app.post('/api/admin/signatures/upload', adminAuthMiddleware, requireCapability('page.salespersons'), express.json({ limit: '10mb' }), async (req: any, res: any) => {
   console.log(">>> POST /api/admin/signatures/upload received!");
   try {
     const { salespersonId, image } = req.body;
@@ -2309,7 +2314,7 @@ app.post('/api/admin/signatures/upload', adminAuthMiddleware, requireRole('admin
 });
 
 // --- API Endpoint: Get All Salespersons with Signature Status ---
-app.get('/api/admin/salespersons', adminAuthMiddleware, requireRole('admin'), async (req: any, res: any) => {
+app.get('/api/admin/salespersons', adminAuthMiddleware, requireCapability('page.salespersons'), async (req: any, res: any) => {
   console.log(">>> GET /api/admin/salespersons received!");
   try {
     // query อยู่ที่ db/repositories.ts เพื่อให้ด่าน diag:pdf-issuer เคส 7 เรียกตัวเดียวกันได้
@@ -2347,7 +2352,7 @@ app.get('/api/admin/salespersons', adminAuthMiddleware, requireRole('admin'), as
 
 // --- API Endpoint: Admin แก้ไขข้อมูลพนักงานขาย (ชื่อ / เบอร์โทร / รหัสพนักงาน) ---
 // หน้า LIFF บังคับรหัสพนักงานแล้ว → ทางนี้คือทางเดียวที่เติมรหัสให้คนที่ยังไม่มีได้
-app.put('/api/admin/salespersons/:userId', adminAuthMiddleware, requireRole('admin'), express.json(), async (req: any, res: any) => {
+app.put('/api/admin/salespersons/:userId', adminAuthMiddleware, requireCapability('page.salespersons'), express.json(), async (req: any, res: any) => {
   console.log(">>> PUT /api/admin/salespersons received!", req.params.userId);
   try {
     const userId = req.params.userId;
@@ -2401,7 +2406,7 @@ app.put('/api/admin/salespersons/:userId', adminAuthMiddleware, requireRole('adm
 // แต่ q.user_id กลายเป็น NULL ถาวร (ผูกกลับคืนไม่ได้แม้ลงทะเบียนใหม่ด้วย LINE เดิม)
 // ชื่อ/เบอร์/รหัสยังอยู่ใน q.employee_details (snapshot) — PDF จึงยังออกได้ครบ
 // ไฟล์ลายเซ็นไม่ถูกลบ เพราะผูกกับรหัสพนักงาน ไม่ได้ผูกกับ user_id (และอาจมีคนอื่นใช้รหัสเดียวกัน)
-app.delete('/api/admin/salespersons/:userId', adminAuthMiddleware, requireRole('admin'), async (req: any, res: any) => {
+app.delete('/api/admin/salespersons/:userId', adminAuthMiddleware, requireCapability('page.salespersons'), async (req: any, res: any) => {
   console.log(">>> DELETE /api/admin/salespersons received!", req.params.userId);
   try {
     const userId = req.params.userId;
@@ -2715,7 +2720,9 @@ app.post('/api/admin/webquote/drafts', adminAuthMiddleware, requireCapability('q
 //
 //  สิทธิ์: อ่านได้ทุก role ที่ออกใบได้ (แต่คนที่ไม่ใช่ผู้อนุมัติเห็นเฉพาะคำขอของตัวเอง —
 //  กติกาอยู่ในตัว service ไม่ใช่ที่นี่ เพราะมันเป็นกฎของข้อมูล ไม่ใช่ของ endpoint)
-//  ส่วนการอนุมัติ/ไม่อนุมัติจำกัดที่ชั้น requireRole อีกชั้นหนึ่ง
+//  ส่วนการอนุมัติ/ไม่อนุมัติซ้อน `approval.decide` อีกชั้นที่ประตู — ช่องเดียวกับที่
+//  canDecideApproval() ในตัว service ถาม ⇒ เปิดสิทธิ์ให้ role ไหนแล้วได้ทั้งสองชั้นพร้อมกัน
+//  ไม่ใช่ผ่านประตูมาแล้วไปตกที่ service (หรือแย่กว่า: ผ่าน service แต่ประตูยังปิด)
 // ─────────────────────────────────────────────────────────────────────────────
 
 function actorOf(req: any) {
@@ -2732,7 +2739,7 @@ function sendApprovalError(res: any, where: string, err: any) {
 }
 
 /** คิวคำขอ — `?status=pending|rejected|approved` (ไม่ส่ง = ทุกสถานะที่ยังเป็นร่าง) */
-app.get('/api/admin/approvals', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin', 'salesperson'), async (req: any, res: any) => {
+app.get('/api/admin/approvals', adminAuthMiddleware, requireCapability('page.approvals'), async (req: any, res: any) => {
   try {
     res.json({ requests: await listApprovalRequests({ actor: actorOf(req), status: req.query?.status }) });
   } catch (err: any) {
@@ -2741,7 +2748,7 @@ app.get('/api/admin/approvals', adminAuthMiddleware, requireRole('admin', 'appro
 });
 
 /** ตัวเลขข้างเมนู — ผู้อนุมัติได้ "รออนุมัติกี่ชุด" · คนขอได้ "ของฉันถูกตีกลับกี่ชุด" */
-app.get('/api/admin/approvals/count', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin', 'salesperson'), async (req: any, res: any) => {
+app.get('/api/admin/approvals/count', adminAuthMiddleware, requireCapability('page.approvals'), async (req: any, res: any) => {
   try {
     res.json(await countOpenRequests(actorOf(req)));
   } catch (err: any) {
@@ -2750,7 +2757,7 @@ app.get('/api/admin/approvals/count', adminAuthMiddleware, requireRole('admin', 
 });
 
 /** รายละเอียดคำขอ 1 ชุด — รวมทุกบรรทัดของทุกใบ + ผลตรวจกฎ "สด" ณ ตอนเปิดดู */
-app.get('/api/admin/approvals/:requestId', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin', 'salesperson'), async (req: any, res: any) => {
+app.get('/api/admin/approvals/:requestId', adminAuthMiddleware, requireCapability('page.approvals'), async (req: any, res: any) => {
   try {
     res.json(await getApprovalRequest({ requestId: req.params.requestId, actor: actorOf(req) }));
   } catch (err: any) {
@@ -2759,7 +2766,7 @@ app.get('/api/admin/approvals/:requestId', adminAuthMiddleware, requireRole('adm
 });
 
 /** รายการของคำขอที่ถูกตีกลับ เพื่อเปิดกลับเข้าฟอร์มขอใบเสนอราคาแล้วแก้ต่อ */
-app.get('/api/admin/approvals/:requestId/form', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin', 'salesperson'), async (req: any, res: any) => {
+app.get('/api/admin/approvals/:requestId/form', adminAuthMiddleware, requireCapability('page.approvals'), async (req: any, res: any) => {
   try {
     res.json(await loadRequestIntoForm({ requestId: req.params.requestId, actor: actorOf(req) }));
   } catch (err: any) {
@@ -2771,7 +2778,7 @@ app.get('/api/admin/approvals/:requestId/form', adminAuthMiddleware, requireRole
  * ผู้อนุมัติแก้ตัวเลขในร่างเอง (จำนวน · ราคา · ส่วนลด) ก่อนกดอนุมัติ — ไม่ต้องตีกลับ
  * เพิ่ม/ลบสินค้า หรือเปลี่ยนลูกค้า ⇒ ยังต้องเปิดในฟอร์มขอใบเสนอราคา (เส้น `/form`)
  */
-app.put('/api/admin/approvals/:requestId/items', adminAuthMiddleware, requireRole('admin', 'approver'), express.json({ limit: '2mb' }), async (req: any, res: any) => {
+app.put('/api/admin/approvals/:requestId/items', adminAuthMiddleware, requireCapability('page.approvals'), requireCapability('approval.decide'), express.json({ limit: '2mb' }), async (req: any, res: any) => {
   try {
     res.json(await updateRequestItems({
       requestId: req.params.requestId,
@@ -2784,7 +2791,7 @@ app.put('/api/admin/approvals/:requestId/items', adminAuthMiddleware, requireRol
 });
 
 /** อนุมัติ แล้วออกใบทันที (เจ้าของเลือกไว้ — ไม่มีใบค้างเพราะคนลืมกลับมากด) */
-app.post('/api/admin/approvals/:requestId/approve', adminAuthMiddleware, requireRole('admin', 'approver'), express.json(), async (req: any, res: any) => {
+app.post('/api/admin/approvals/:requestId/approve', adminAuthMiddleware, requireCapability('page.approvals'), requireCapability('approval.decide'), express.json(), async (req: any, res: any) => {
   try {
     res.json(await approveRequest({ requestId: req.params.requestId, actor: actorOf(req), note: req.body?.note ?? null }));
   } catch (err: any) {
@@ -2793,7 +2800,7 @@ app.post('/api/admin/approvals/:requestId/approve', adminAuthMiddleware, require
 });
 
 /** ไม่อนุมัติ — ต้องมีเหตุผลเสมอ เพราะคนที่รับใบกลับไปต้องรู้ว่าจะแก้อะไร */
-app.post('/api/admin/approvals/:requestId/reject', adminAuthMiddleware, requireRole('admin', 'approver'), express.json(), async (req: any, res: any) => {
+app.post('/api/admin/approvals/:requestId/reject', adminAuthMiddleware, requireCapability('page.approvals'), requireCapability('approval.decide'), express.json(), async (req: any, res: any) => {
   try {
     res.json(await rejectRequest({ requestId: req.params.requestId, actor: actorOf(req), reason: req.body?.reason }));
   } catch (err: any) {
@@ -2802,7 +2809,7 @@ app.post('/api/admin/approvals/:requestId/reject', adminAuthMiddleware, requireR
 });
 
 /** คนขอยกเลิกคำขอของตัวเอง (หรือ admin ยกเลิกให้) — ใบกลายเป็น cancelled ด้วยกลไกเดิม */
-app.post('/api/admin/approvals/:requestId/cancel', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin', 'salesperson'), express.json(), async (req: any, res: any) => {
+app.post('/api/admin/approvals/:requestId/cancel', adminAuthMiddleware, requireCapability('page.approvals'), express.json(), async (req: any, res: any) => {
   try {
     res.json(await cancelRequest({ requestId: req.params.requestId, actor: actorOf(req) }));
   } catch (err: any) {
@@ -2825,7 +2832,7 @@ app.post('/api/admin/webquote/revise', adminAuthMiddleware, requireCapability('q
 });
 
 // --- API Endpoint: Dashboard stats (counts for summary cards) ---
-app.get('/api/admin/stats', adminAuthMiddleware, requireRole('admin'), async (req: any, res: any) => {
+app.get('/api/admin/stats', adminAuthMiddleware, requireCapability('page.dashboard'), async (req: any, res: any) => {
   console.log(">>> GET /api/admin/stats received!");
   try {
     const result = await pool.query(`
@@ -2861,7 +2868,7 @@ app.get('/api/admin/stats', adminAuthMiddleware, requireRole('admin'), async (re
 });
 
 // --- API Endpoint: Sync status (run-state + per-resource last-synced + schedule config) ---
-app.get('/api/admin/sync/status', adminAuthMiddleware, requireRole('admin'), async (req: any, res: any) => {
+app.get('/api/admin/sync/status', adminAuthMiddleware, requireCapability('page.dashboard'), async (req: any, res: any) => {
   try {
     const status = await getSyncStatus();
     res.json(status);
@@ -2872,7 +2879,7 @@ app.get('/api/admin/sync/status', adminAuthMiddleware, requireRole('admin'), asy
 });
 
 // --- API Endpoint: Trigger a sync now (manual) ---
-app.post('/api/admin/sync/run', adminAuthMiddleware, requireRole('admin'), express.json(), async (req: any, res: any) => {
+app.post('/api/admin/sync/run', adminAuthMiddleware, requireCapability('page.dashboard'), express.json(), async (req: any, res: any) => {
   try {
     const raw = req.body?.resources;
     // รับ ['products',...] หรือ 'all' (แปลว่าทั้งหมด)
@@ -2913,7 +2920,7 @@ app.post('/api/admin/sync/run', adminAuthMiddleware, requireRole('admin'), expre
 });
 
 // --- API Endpoint: Save auto-sync schedule settings ---
-app.put('/api/admin/sync/settings', adminAuthMiddleware, requireRole('admin'), express.json(), async (req: any, res: any) => {
+app.put('/api/admin/sync/settings', adminAuthMiddleware, requireCapability('page.dashboard'), express.json(), async (req: any, res: any) => {
   try {
     const settings = await saveSyncSettings(req.body || {});
     res.json({ message: 'บันทึกการตั้งค่าสำเร็จ', settings });
@@ -2924,7 +2931,7 @@ app.put('/api/admin/sync/settings', adminAuthMiddleware, requireRole('admin'), e
 });
 
 // --- API Endpoint: Delete Signature ---
-app.delete('/api/admin/signatures/:salespersonId', adminAuthMiddleware, requireRole('admin'), async (req: any, res: any) => {
+app.delete('/api/admin/signatures/:salespersonId', adminAuthMiddleware, requireCapability('page.salespersons'), async (req: any, res: any) => {
   const { salespersonId } = req.params;
   console.log(`>>> DELETE /api/admin/signatures/${salespersonId} received!`);
   try {
@@ -2965,7 +2972,7 @@ app.delete('/api/admin/signatures/:salespersonId', adminAuthMiddleware, requireR
 // --- API Endpoints: Promotions CRUD ---
 
 // 1. GET /api/admin/promotions - Get all promotions
-app.get('/api/admin/promotions', adminAuthMiddleware, requireRole('admin'), async (req: any, res: any) => {
+app.get('/api/admin/promotions', adminAuthMiddleware, requireCapability('page.promotions'), async (req: any, res: any) => {
   console.log(">>> GET /api/admin/promotions received!");
   try {
     const result = await pool.query('SELECT * FROM promotions ORDER BY created_at DESC');
@@ -2977,7 +2984,7 @@ app.get('/api/admin/promotions', adminAuthMiddleware, requireRole('admin'), asyn
 });
 
 // --- API Endpoint: Export promotions to CSV ---
-app.get('/api/admin/promotions/export', adminAuthMiddleware, requireRole('admin'), async (req: any, res: any) => {
+app.get('/api/admin/promotions/export', adminAuthMiddleware, requireCapability('page.promotions'), async (req: any, res: any) => {
   const code = req.query.code;
   console.log(`>>> GET /api/admin/promotions/export received! code: ${code || 'all'}`);
   try {
@@ -3035,7 +3042,7 @@ app.get('/api/admin/promotions/export', adminAuthMiddleware, requireRole('admin'
 });
 
 // 2. GET /api/admin/promotions/:id - Get specific promotion
-app.get('/api/admin/promotions/:id', adminAuthMiddleware, requireRole('admin'), async (req: any, res: any) => {
+app.get('/api/admin/promotions/:id', adminAuthMiddleware, requireCapability('page.promotions'), async (req: any, res: any) => {
   const { id } = req.params;
   console.log(`>>> GET /api/admin/promotions/${id} received!`);
   try {
@@ -3051,7 +3058,7 @@ app.get('/api/admin/promotions/:id', adminAuthMiddleware, requireRole('admin'), 
 });
 
 // 3. POST /api/admin/promotions - Create new promotion
-app.post('/api/admin/promotions', adminAuthMiddleware, requireRole('admin'), express.json(), async (req: any, res: any) => {
+app.post('/api/admin/promotions', adminAuthMiddleware, requireCapability('page.promotions'), express.json(), async (req: any, res: any) => {
   console.log(">>> POST /api/admin/promotions received! body:", JSON.stringify(req.body, null, 2));
   try {
     const {
@@ -3115,7 +3122,7 @@ app.post('/api/admin/promotions', adminAuthMiddleware, requireRole('admin'), exp
 });
 
 // 4. PUT /api/admin/promotions/:id - Update promotion
-app.put('/api/admin/promotions/:id', adminAuthMiddleware, requireRole('admin'), express.json(), async (req: any, res: any) => {
+app.put('/api/admin/promotions/:id', adminAuthMiddleware, requireCapability('page.promotions'), express.json(), async (req: any, res: any) => {
   const { id } = req.params;
   console.log(`>>> PUT /api/admin/promotions/${id} received! body:`, JSON.stringify(req.body, null, 2));
   try {
@@ -3195,7 +3202,7 @@ app.put('/api/admin/promotions/:id', adminAuthMiddleware, requireRole('admin'), 
 });
 
 // 5. DELETE /api/admin/promotions/:id - Delete promotion
-app.delete('/api/admin/promotions/:id', adminAuthMiddleware, requireRole('admin'), async (req: any, res: any) => {
+app.delete('/api/admin/promotions/:id', adminAuthMiddleware, requireCapability('page.promotions'), async (req: any, res: any) => {
   const { id } = req.params;
   console.log(`>>> DELETE /api/admin/promotions/${id} received!`);
   try {
@@ -3211,7 +3218,7 @@ app.delete('/api/admin/promotions/:id', adminAuthMiddleware, requireRole('admin'
 });
 
 // --- API Endpoint: Import promotions from JSON array ---
-app.post('/api/admin/promotions/import', adminAuthMiddleware, requireRole('admin'), express.json(), async (req: any, res: any) => {
+app.post('/api/admin/promotions/import', adminAuthMiddleware, requireCapability('page.promotions'), express.json(), async (req: any, res: any) => {
   console.log(">>> POST /api/admin/promotions/import received! count:", req.body?.length);
   try {
     const promotions = req.body;
@@ -3302,7 +3309,7 @@ app.post('/api/admin/promotions/import', adminAuthMiddleware, requireRole('admin
 // ============================================================
 
 // 1. GET /api/admin/quotation-rules/options - ดึงข้อมูลตัวเลือกสำหรับแอดมิน (ฝ่ายผลิต, ยี่ห้อ, ซีรีส์)
-app.get('/api/admin/quotation-rules/options', adminAuthMiddleware, requireRole('admin'), async (req: any, res: any) => {
+app.get('/api/admin/quotation-rules/options', adminAuthMiddleware, requireCapability('page.settings_quotation'), async (req: any, res: any) => {
   try {
     const prodRes = await pool.query("SELECT DISTINCT production FROM products WHERE production IS NOT NULL AND production != '' ORDER BY production");
     const brandRes = await pool.query("SELECT DISTINCT brand FROM products WHERE brand IS NOT NULL AND brand != '' ORDER BY brand");
@@ -3328,7 +3335,7 @@ app.get('/api/admin/quotation-rules/options', adminAuthMiddleware, requireRole('
 });
 
 // 2. GET /api/admin/quotation-rules - ดึงรายการกฎเงื่อนไขทั้งหมด
-app.get('/api/admin/quotation-rules', adminAuthMiddleware, requireRole('admin'), async (req: any, res: any) => {
+app.get('/api/admin/quotation-rules', adminAuthMiddleware, requireCapability('page.settings_quotation'), async (req: any, res: any) => {
   try {
     const result = await pool.query('SELECT * FROM quotation_rules ORDER BY production NULLS LAST, brand NULLS LAST, series NULLS LAST, id');
     res.json(result.rows);
@@ -3348,7 +3355,7 @@ function parseDeliveryQtyDays(raw: any): number | null | undefined {
 }
 
 // 3. POST /api/admin/quotation-rules - สร้างกฎเงื่อนไขใหม่
-app.post('/api/admin/quotation-rules', adminAuthMiddleware, requireRole('admin'), express.json(), async (req: any, res: any) => {
+app.post('/api/admin/quotation-rules', adminAuthMiddleware, requireCapability('page.settings_quotation'), express.json(), async (req: any, res: any) => {
   // frontend เก่าที่ค้างในเบราว์เซอร์ยังส่ง is_locked มาได้ — ไม่รับมาแล้ว ปล่อยให้ตกไปเฉย ๆ
   // (คอลัมน์ถูกลบในเฟส 5 · การบล็อกอยู่ที่ product_block_rules ทั้งหมด)
   const { production, brand, series, quote_company, warranty_years, warranty_unit, delivery_in_stock_days, delivery_out_of_stock_days,
@@ -3403,7 +3410,7 @@ app.post('/api/admin/quotation-rules', adminAuthMiddleware, requireRole('admin')
 });
 
 // 4. PUT /api/admin/quotation-rules/:id - แก้ไขกฎเงื่อนไข
-app.put('/api/admin/quotation-rules/:id', adminAuthMiddleware, requireRole('admin'), express.json(), async (req: any, res: any) => {
+app.put('/api/admin/quotation-rules/:id', adminAuthMiddleware, requireCapability('page.settings_quotation'), express.json(), async (req: any, res: any) => {
   const { id } = req.params;
   // is_locked ไม่รับแล้วเช่นเดียวกับ POST — ดูคำอธิบายที่นั่น
   const { production, brand, series, quote_company, warranty_years, warranty_unit, delivery_in_stock_days, delivery_out_of_stock_days,
@@ -3474,7 +3481,7 @@ app.put('/api/admin/quotation-rules/:id', adminAuthMiddleware, requireRole('admi
 });
 
 // 5. DELETE /api/admin/quotation-rules/:id - ลบกฎเงื่อนไข
-app.delete('/api/admin/quotation-rules/:id', adminAuthMiddleware, requireRole('admin'), async (req: any, res: any) => {
+app.delete('/api/admin/quotation-rules/:id', adminAuthMiddleware, requireCapability('page.settings_quotation'), async (req: any, res: any) => {
   const { id } = req.params;
   try {
     const result = await pool.query('DELETE FROM quotation_rules WHERE id = $1 RETURNING *', [id]);
@@ -3494,7 +3501,7 @@ app.delete('/api/admin/quotation-rules/:id', adminAuthMiddleware, requireRole('a
 //  ตารางนี้มีแถวเดียว (id = 1) จึงไม่มี POST/DELETE — มีแค่ GET กับ PUT
 // ============================================================
 
-app.get('/api/admin/shipping-fee-config', adminAuthMiddleware, requireRole('admin'), async (req: any, res: any) => {
+app.get('/api/admin/shipping-fee-config', adminAuthMiddleware, requireCapability('page.settings_shipping'), async (req: any, res: any) => {
   try {
     const { rows } = await pool.query(`
       SELECT c.*, p.product_template_id, p.model, p.name AS product_name,
@@ -3519,7 +3526,7 @@ app.get('/api/admin/shipping-fee-config', adminAuthMiddleware, requireRole('admi
   }
 });
 
-app.put('/api/admin/shipping-fee-config', adminAuthMiddleware, requireRole('admin'), express.json(), async (req: any, res: any) => {
+app.put('/api/admin/shipping-fee-config', adminAuthMiddleware, requireCapability('page.settings_shipping'), express.json(), async (req: any, res: any) => {
   try {
     const { is_active, threshold_before_vat, fee_price, fee_quantity, default_item_name } = req.body;
 
@@ -3571,7 +3578,7 @@ app.put('/api/admin/shipping-fee-config', adminAuthMiddleware, requireRole('admi
 //  ตัวบล็อกจริงอยู่ที่ validateQuotationItems ไม่ใช่ที่นี่ — เส้นพวกนี้แค่ตั้งเกณฑ์
 // ============================================================
 
-app.get('/api/admin/credit-policy', adminAuthMiddleware, requireRole('admin'), async (_req: any, res: any) => {
+app.get('/api/admin/credit-policy', adminAuthMiddleware, requireCapability('page.settings_shipping'), async (_req: any, res: any) => {
   try {
     res.json(await getCreditPolicyFresh());
   } catch (err: any) {
@@ -3580,7 +3587,7 @@ app.get('/api/admin/credit-policy', adminAuthMiddleware, requireRole('admin'), a
   }
 });
 
-app.put('/api/admin/credit-policy', adminAuthMiddleware, requireRole('admin'), express.json(), async (req: any, res: any) => {
+app.put('/api/admin/credit-policy', adminAuthMiddleware, requireCapability('page.settings_shipping'), express.json(), async (req: any, res: any) => {
   try {
     const saved = await saveCreditPolicy({
       mode: req.body?.mode,
@@ -3607,7 +3614,7 @@ app.put('/api/admin/credit-policy', adminAuthMiddleware, requireRole('admin'), e
 // --- API Endpoints: Products and Customers Search (for Promotions Modal) ---
 
 // 1. GET /api/admin/products/search - Search product models
-app.get('/api/admin/products/search', adminAuthMiddleware, requireRole('admin'), async (req: any, res: any) => {
+app.get('/api/admin/products/search', adminAuthMiddleware, requireCapability('page.promotions'), async (req: any, res: any) => {
   const query = req.query.q || '';
   try {
     const result = await pool.query(
@@ -3627,7 +3634,7 @@ app.get('/api/admin/products/search', adminAuthMiddleware, requireRole('admin'),
 });
 
 // 2. GET /api/admin/customers/search - Search customers by reference or display_name
-app.get('/api/admin/customers/search', adminAuthMiddleware, requireRole('admin'), async (req: any, res: any) => {
+app.get('/api/admin/customers/search', adminAuthMiddleware, requireCapability('page.promotions'), async (req: any, res: any) => {
   const query = req.query.q || '';
   try {
     const result = await pool.query(
@@ -3647,7 +3654,7 @@ app.get('/api/admin/customers/search', adminAuthMiddleware, requireRole('admin')
 });
 
 // 3. GET /api/admin/customers/types - Search customer types
-app.get('/api/admin/customers/types', adminAuthMiddleware, requireRole('admin'), async (req: any, res: any) => {
+app.get('/api/admin/customers/types', adminAuthMiddleware, requireCapability('page.promotions'), async (req: any, res: any) => {
   const query = req.query.q || '';
   try {
     const result = await pool.query(
@@ -3675,7 +3682,7 @@ const SP_CODE_SQL = `COALESCE(s.salesperson_id, q.employee_details->>'salesperso
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // --- API Endpoint: Admin Quotations List (with search, filter, pagination) ---
-app.get('/api/admin/quotations', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin', 'salesperson'), async (req: any, res: any) => {
+app.get('/api/admin/quotations', adminAuthMiddleware, requireCapability('page.quotations'), async (req: any, res: any) => {
   try {
     const search = req.query.search || '';
     const status = req.query.status || '';
@@ -3791,7 +3798,7 @@ app.get('/api/admin/quotations', adminAuthMiddleware, requireRole('admin', 'appr
 // และตัวกรอง exported ตั้งต้นเป็น 'no' ครั้งถัดไปจึงได้เฉพาะใบใหม่ (แอดมินถอยเครื่องหมายได้ถ้านำเข้าไม่ผ่าน)
 //
 // 1 ครั้ง = 1 บริษัท (company=qp|qt) เพราะ Odoo ของ PM กับ THT เป็นคนละระบบและใช้ชื่อภาษีคนละค่า
-app.get('/api/admin/quotations/export', adminAuthMiddleware, requireCapability('quote.export_odoo'), async (req: any, res: any) => {
+app.get('/api/admin/quotations/export', adminAuthMiddleware, requireCapability('page.quotations'), requireCapability('quote.export_odoo'), async (req: any, res: any) => {
   try {
     // บริษัทต้องส่งมาเสมอ ไม่มีค่าตั้งต้น — เดาผิดแปลว่าไฟล์ได้ชื่อภาษีของอีกบริษัท
     // แล้วใบชุดนั้นถูกมาร์ก "ส่งออกแล้ว" ไปเรียบร้อย กว่าจะรู้ตัวก็ตอนนำเข้า Odoo ไม่ผ่าน
@@ -3990,7 +3997,7 @@ app.get('/api/admin/quotations/export', adminAuthMiddleware, requireCapability('
 // --- API Endpoint: ยกเลิกเครื่องหมาย "ส่งออกแล้ว" ของใบเดียว ---
 //
 // ใช้ตอนนำเข้า Odoo ไม่ผ่าน หรือไฟล์หายระหว่างดาวน์โหลด — ใบจะกลับเข้าคิว export รอบถัดไป
-app.post('/api/admin/quotations/:id/unmark-export', adminAuthMiddleware, requireCapability('quote.unmark_export'), async (req: any, res: any) => {
+app.post('/api/admin/quotations/:id/unmark-export', adminAuthMiddleware, requireCapability('page.quotations'), requireCapability('quote.unmark_export'), async (req: any, res: any) => {
   try {
     const id = String(req.params.id || '').trim();
     if (!UUID_RE.test(id)) {
@@ -4024,7 +4031,7 @@ app.post('/api/admin/quotations/:id/unmark-export', adminAuthMiddleware, require
  * การลบกับการเขียน audit อยู่ใน transaction เดียวกัน ⇒ ไม่มีทางเกิด "ใบหายแต่ไม่มีบันทึกว่าใครลบ"
  * (เหตุผลเต็มอยู่ที่หัวของ `insertQuotationDeleteAudit`)
  */
-app.delete('/api/admin/quotations/:id', adminAuthMiddleware, requireRole('admin'), express.json(), async (req: any, res: any) => {
+app.delete('/api/admin/quotations/:id', adminAuthMiddleware, requireCapability('page.quotations'), requireRole('admin'), express.json(), async (req: any, res: any) => {
   try {
     const id = String(req.params.id || '').trim();
     if (!UUID_RE.test(id)) {
@@ -4071,7 +4078,7 @@ app.delete('/api/admin/quotations/:id', adminAuthMiddleware, requireRole('admin'
  * ตัวเลขนี้คือของสำคัญที่สุดของทั้งฟีเจอร์ — ใบกลุ่มนี้ **ไม่อยู่ในไฟล์ส่งออกปกติแล้ว**
  * ถ้าไม่มีใครเห็นยอดค้าง มันจะไม่ไปถึง Odoo เลยโดยไม่มีอะไรฟ้อง
  */
-app.get('/api/admin/quotations/manual-review-counts', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin', 'salesperson'), async (req: any, res: any) => {
+app.get('/api/admin/quotations/manual-review-counts', adminAuthMiddleware, requireCapability('page.quotations'), async (req: any, res: any) => {
   try {
     const groups = await getOdooManualReviewCounts(pool, await quoteScopeOf(req.admin));
     res.json({ total: groups.reduce((s, g) => s + g.count, 0), groups });
@@ -4083,7 +4090,7 @@ app.get('/api/admin/quotations/manual-review-counts', adminAuthMiddleware, requi
 
 // --- API Endpoint: ประวัติชุดการส่งออก Odoo ---
 // ประวัติ "ชุดการส่งออก" ไม่ใช่รายการใบ — คนที่ส่งออกไม่ได้ก็ไม่มีชุดของตัวเองให้ดู
-app.get('/api/admin/quotations/export-batches', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), async (req: any, res: any) => {
+app.get('/api/admin/quotations/export-batches', adminAuthMiddleware, requireCapability('page.quotations'), requireRole('admin', 'approver', 'subadmin'), async (req: any, res: any) => {
   try {
     const limit = Math.min(parseInt(req.query.limit) || 20, 100);
     const offset = parseInt(req.query.offset) || 0;
@@ -4096,7 +4103,7 @@ app.get('/api/admin/quotations/export-batches', adminAuthMiddleware, requireRole
 });
 
 // --- API Endpoint: ยกเลิกเครื่องหมายทั้งชุด (ไฟล์ทั้งไฟล์นำเข้า Odoo ไม่ผ่าน) ---
-app.post('/api/admin/quotations/export-batches/:batchId/unmark', adminAuthMiddleware, requireCapability('quote.unmark_export'), async (req: any, res: any) => {
+app.post('/api/admin/quotations/export-batches/:batchId/unmark', adminAuthMiddleware, requireCapability('page.quotations'), requireCapability('quote.unmark_export'), async (req: any, res: any) => {
   try {
     const batchId = String(req.params.batchId || '').trim();
     if (!UUID_RE.test(batchId)) {
@@ -4114,7 +4121,7 @@ app.post('/api/admin/quotations/export-batches/:batchId/unmark', adminAuthMiddle
 // --- Admin CRUD: optional-links ---
 
 // GET /api/admin/optional-links
-app.get('/api/admin/optional-links', adminAuthMiddleware, requireRole('admin'), async (req: any, res: any) => {
+app.get('/api/admin/optional-links', adminAuthMiddleware, requireCapability('page.settings_optional'), async (req: any, res: any) => {
   try {
     const { rows } = await pool.query(`
       SELECT 
@@ -4136,7 +4143,7 @@ app.get('/api/admin/optional-links', adminAuthMiddleware, requireRole('admin'), 
 });
 
 // POST /api/admin/optional-links
-app.post('/api/admin/optional-links', adminAuthMiddleware, requireRole('admin'), express.json(), async (req: any, res: any) => {
+app.post('/api/admin/optional-links', adminAuthMiddleware, requireCapability('page.settings_optional'), express.json(), async (req: any, res: any) => {
   try {
     const { trigger_product_id, optional_product_id, is_active, note } = req.body;
     if (!trigger_product_id || !optional_product_id) {
@@ -4157,7 +4164,7 @@ app.post('/api/admin/optional-links', adminAuthMiddleware, requireRole('admin'),
 });
 
 // PUT /api/admin/optional-links/:id
-app.put('/api/admin/optional-links/:id', adminAuthMiddleware, requireRole('admin'), express.json(), async (req: any, res: any) => {
+app.put('/api/admin/optional-links/:id', adminAuthMiddleware, requireCapability('page.settings_optional'), express.json(), async (req: any, res: any) => {
   try {
     const linkId = req.params.id;
     const { trigger_product_id, optional_product_id, is_active, note } = req.body;
@@ -4184,7 +4191,7 @@ app.put('/api/admin/optional-links/:id', adminAuthMiddleware, requireRole('admin
 });
 
 // DELETE /api/admin/optional-links/:id
-app.delete('/api/admin/optional-links/:id', adminAuthMiddleware, requireRole('admin'), async (req: any, res: any) => {
+app.delete('/api/admin/optional-links/:id', adminAuthMiddleware, requireCapability('page.settings_optional'), async (req: any, res: any) => {
   try {
     const linkId = req.params.id;
     const { rows } = await pool.query(`
@@ -4207,7 +4214,7 @@ app.delete('/api/admin/optional-links/:id', adminAuthMiddleware, requireRole('ad
 // --- Admin CRUD: stock-rules ---
 
 // GET /api/admin/stock-rules
-app.get('/api/admin/stock-rules', adminAuthMiddleware, requireRole('admin'), async (req: any, res: any) => {
+app.get('/api/admin/stock-rules', adminAuthMiddleware, requireCapability('page.settings_stock'), async (req: any, res: any) => {
   try {
     // JOIN ตรง ๆ — internal_reference ไม่ซ้ำใน products (มี unique index บังคับไว้)
     // อย่าเปลี่ยนเป็น LEFT JOIN LATERAL: ที่ 5 พันกฎช้าจาก 95ms เป็น 61 วินาที
@@ -4237,7 +4244,7 @@ const STOCK_RULE_PRODUCT_FILTER = `(p.production IS NULL OR LOWER(REPLACE(p.prod
 const STOCK_RULE_HAS_REF = `(p.internal_reference IS NOT NULL AND TRIM(p.internal_reference) <> '' AND p.internal_reference <> 'N/A')`;
 
 // GET /api/admin/stock-rules/productions - รายชื่อสายการผลิตพร้อมจำนวนสินค้าที่ตั้งกฎได้
-app.get('/api/admin/stock-rules/productions', adminAuthMiddleware, requireRole('admin'), async (req: any, res: any) => {
+app.get('/api/admin/stock-rules/productions', adminAuthMiddleware, requireCapability('page.settings_stock'), async (req: any, res: any) => {
   try {
     const { rows } = await pool.query(`
       SELECT
@@ -4259,7 +4266,7 @@ app.get('/api/admin/stock-rules/productions', adminAuthMiddleware, requireRole('
 
 // GET /api/admin/stock-rules/product-lookup - ค้นหาสินค้าเพื่อตั้งกฎ (ค้นได้ทั้งรุ่น ชื่อ แบรนด์ และสายการผลิต)
 // การเลือกยกทั้งสายการผลิตไม่ผ่าน endpoint นี้ — ส่งชื่อ production ไปที่ POST แล้วให้ DB ขยายเอง
-app.get('/api/admin/stock-rules/product-lookup', adminAuthMiddleware, requireRole('admin'), async (req: any, res: any) => {
+app.get('/api/admin/stock-rules/product-lookup', adminAuthMiddleware, requireCapability('page.settings_stock'), async (req: any, res: any) => {
   try {
     const q = String(req.query.q || '').trim();
     if (!q) {
@@ -4312,7 +4319,7 @@ app.get('/api/admin/stock-rules/product-lookup', adminAuthMiddleware, requireRol
 });
 
 // POST /api/admin/stock-rules
-app.post('/api/admin/stock-rules', adminAuthMiddleware, requireRole('admin'), express.json(), async (req: any, res: any) => {
+app.post('/api/admin/stock-rules', adminAuthMiddleware, requireCapability('page.settings_stock'), express.json(), async (req: any, res: any) => {
   try {
     const { internal_reference, internal_references, productions, is_active } = req.body;
 
@@ -4385,7 +4392,7 @@ app.post('/api/admin/stock-rules', adminAuthMiddleware, requireRole('admin'), ex
 });
 
 // PUT /api/admin/stock-rules/:internal_reference
-app.put('/api/admin/stock-rules/:internal_reference', adminAuthMiddleware, requireRole('admin'), express.json(), async (req: any, res: any) => {
+app.put('/api/admin/stock-rules/:internal_reference', adminAuthMiddleware, requireCapability('page.settings_stock'), express.json(), async (req: any, res: any) => {
   try {
     const internalReference = req.params.internal_reference;
     const { is_active } = req.body;
@@ -4409,7 +4416,7 @@ app.put('/api/admin/stock-rules/:internal_reference', adminAuthMiddleware, requi
 });
 
 // DELETE /api/admin/stock-rules/:internal_reference
-app.delete('/api/admin/stock-rules/:internal_reference', adminAuthMiddleware, requireRole('admin'), async (req: any, res: any) => {
+app.delete('/api/admin/stock-rules/:internal_reference', adminAuthMiddleware, requireCapability('page.settings_stock'), async (req: any, res: any) => {
   try {
     const internalReference = req.params.internal_reference;
     const { rows } = await pool.query(`
@@ -4432,7 +4439,7 @@ app.delete('/api/admin/stock-rules/:internal_reference', adminAuthMiddleware, re
 // --- Admin CRUD: moq-rules ---
 
 // GET /api/admin/moq-rules
-app.get('/api/admin/moq-rules', adminAuthMiddleware, requireRole('admin'), async (req: any, res: any) => {
+app.get('/api/admin/moq-rules', adminAuthMiddleware, requireCapability('page.settings_moq'), async (req: any, res: any) => {
   try {
     const { rows } = await pool.query(`
       SELECT 
@@ -4452,7 +4459,7 @@ app.get('/api/admin/moq-rules', adminAuthMiddleware, requireRole('admin'), async
 });
 
 // POST /api/admin/moq-rules
-app.post('/api/admin/moq-rules', adminAuthMiddleware, requireRole('admin'), express.json(), async (req: any, res: any) => {
+app.post('/api/admin/moq-rules', adminAuthMiddleware, requireCapability('page.settings_moq'), express.json(), async (req: any, res: any) => {
   try {
     const { internal_reference, min_order_qty, sale_line_warn_msg, is_active } = req.body;
     if (!internal_reference || !min_order_qty || !sale_line_warn_msg) {
@@ -4473,7 +4480,7 @@ app.post('/api/admin/moq-rules', adminAuthMiddleware, requireRole('admin'), expr
 });
 
 // PUT /api/admin/moq-rules/:internal_reference
-app.put('/api/admin/moq-rules/:internal_reference', adminAuthMiddleware, requireRole('admin'), express.json(), async (req: any, res: any) => {
+app.put('/api/admin/moq-rules/:internal_reference', adminAuthMiddleware, requireCapability('page.settings_moq'), express.json(), async (req: any, res: any) => {
   try {
     const internalReference = req.params.internal_reference;
     const { min_order_qty, sale_line_warn_msg, is_active } = req.body;
@@ -4500,7 +4507,7 @@ app.put('/api/admin/moq-rules/:internal_reference', adminAuthMiddleware, require
 });
 
 // DELETE /api/admin/moq-rules/:internal_reference
-app.delete('/api/admin/moq-rules/:internal_reference', adminAuthMiddleware, requireRole('admin'), async (req: any, res: any) => {
+app.delete('/api/admin/moq-rules/:internal_reference', adminAuthMiddleware, requireCapability('page.settings_moq'), async (req: any, res: any) => {
   try {
     const internalReference = req.params.internal_reference;
     const { rows } = await pool.query(`
@@ -4565,7 +4572,7 @@ const BLOCK_RULE_SPECIFICITY = `
 `;
 
 // GET /api/admin/block-rules
-app.get('/api/admin/block-rules', adminAuthMiddleware, requireRole('admin'), async (req: any, res: any) => {
+app.get('/api/admin/block-rules', adminAuthMiddleware, requireCapability('page.settings_block'), async (req: any, res: any) => {
   try {
     // ต่อชื่อสินค้าให้กฎระดับ model/ref เพื่อให้แอดมินเห็นว่ารหัสนั้นคือของอะไร
     // LATERAL + LIMIT 1 เพราะรหัสเดียวมีได้หลายแถวใน products
@@ -4589,7 +4596,7 @@ app.get('/api/admin/block-rules', adminAuthMiddleware, requireRole('admin'), asy
 });
 
 // POST /api/admin/block-rules
-app.post('/api/admin/block-rules', adminAuthMiddleware, requireRole('admin'), express.json(), async (req: any, res: any) => {
+app.post('/api/admin/block-rules', adminAuthMiddleware, requireCapability('page.settings_block'), express.json(), async (req: any, res: any) => {
   const parsed = readBlockRuleBody(req.body);
   if ('error' in parsed) return res.status(400).json({ error: parsed.error });
 
@@ -4624,7 +4631,7 @@ app.post('/api/admin/block-rules', adminAuthMiddleware, requireRole('admin'), ex
 });
 
 // PUT /api/admin/block-rules/:id
-app.put('/api/admin/block-rules/:id', adminAuthMiddleware, requireRole('admin'), express.json(), async (req: any, res: any) => {
+app.put('/api/admin/block-rules/:id', adminAuthMiddleware, requireCapability('page.settings_block'), express.json(), async (req: any, res: any) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'id ไม่ถูกต้อง' });
 
@@ -4664,7 +4671,7 @@ app.put('/api/admin/block-rules/:id', adminAuthMiddleware, requireRole('admin'),
 });
 
 // PATCH /api/admin/block-rules/:id/active — ปุ่มเปิด/ปิดในตาราง (ไม่ต้องส่งทั้งฟอร์ม)
-app.patch('/api/admin/block-rules/:id/active', adminAuthMiddleware, requireRole('admin'), express.json(), async (req: any, res: any) => {
+app.patch('/api/admin/block-rules/:id/active', adminAuthMiddleware, requireCapability('page.settings_block'), express.json(), async (req: any, res: any) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'id ไม่ถูกต้อง' });
   if (typeof req.body?.is_active !== 'boolean') {
@@ -4690,7 +4697,7 @@ app.patch('/api/admin/block-rules/:id/active', adminAuthMiddleware, requireRole(
 });
 
 // DELETE /api/admin/block-rules/:id
-app.delete('/api/admin/block-rules/:id', adminAuthMiddleware, requireRole('admin'), async (req: any, res: any) => {
+app.delete('/api/admin/block-rules/:id', adminAuthMiddleware, requireCapability('page.settings_block'), async (req: any, res: any) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'id ไม่ถูกต้อง' });
 
@@ -4728,7 +4735,7 @@ function apiLogDateRange(q: any): { dateFrom: string; dateTo: string } {
 
 const API_LOG_METHODS = new Set(['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'TASK']);
 
-app.get('/api/admin/api-logs', adminAuthMiddleware, requireRole('admin'), async (req: any, res: any) => {
+app.get('/api/admin/api-logs', adminAuthMiddleware, requireCapability('page.traffic'), async (req: any, res: any) => {
   try {
     const q = req.query;
     const { dateFrom, dateTo } = apiLogDateRange(q);
@@ -4761,7 +4768,7 @@ app.get('/api/admin/api-logs', adminAuthMiddleware, requireRole('admin'), async 
   }
 });
 
-app.get('/api/admin/api-logs/stats', adminAuthMiddleware, requireRole('admin'), async (req: any, res: any) => {
+app.get('/api/admin/api-logs/stats', adminAuthMiddleware, requireCapability('page.traffic'), async (req: any, res: any) => {
   try {
     const { dateFrom, dateTo } = apiLogDateRange(req.query);
     const stats = await getApiLogStats(dateFrom, dateTo);
@@ -4772,7 +4779,7 @@ app.get('/api/admin/api-logs/stats', adminAuthMiddleware, requireRole('admin'), 
   }
 });
 
-app.get('/api/admin/api-logs/:id', adminAuthMiddleware, requireRole('admin'), async (req: any, res: any) => {
+app.get('/api/admin/api-logs/:id', adminAuthMiddleware, requireCapability('page.traffic'), async (req: any, res: any) => {
   try {
     // ต้องตรวจก่อน ไม่งั้น cast เป็น bigint จะพังเป็น 500 แทนที่จะเป็น 400
     if (!/^\d+$/.test(req.params.id)) {

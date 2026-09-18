@@ -273,7 +273,7 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     label: 'อนุมัติ / ไม่อนุมัติคำขอ',
     modes: SWITCH,
     defaults: switchFor('allow', 'allow', 'deny', 'deny'),
-    enforcedAt: 'services/priceApprovalService.ts (canDecideApproval)',
+    enforcedAt: 'services/priceApprovalService.ts (canDecideApproval) + 3 route ที่ตัดสินคำขอ (items · approve · reject)',
   },
   {
     key: 'users.set_issuer_identity',
@@ -288,14 +288,16 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
 
   // ── ค. หน้าจอที่เข้าถึงได้ ──────────────────────────────────────────────────
   //  ค่าเริ่มต้นทุกช่องคัดลอกจาก `roles: [...]` ใน AdminApp.tsx วันนี้ ⇒ ตารางว่าง = เมนูเหมือนเดิม
-  //  ⚠️ ซ่อนเมนูอย่างเดียวไม่พอ — route ของหน้านั้นต้องใช้ช่องเดียวกันเป็นด่านด้วย
+  //  ทุกช่องบังคับที่ route ของหน้านั้นจริงแล้ว (P3c) — `enforcedAt` คือรายการเส้นที่มันคุม
+  //  ⚠️ เพิ่มช่องใหม่ในกลุ่มนี้ = ต้องเติมด่านที่ route ด้วยเสมอ ไม่งั้นเปิดเมนูให้ใครแล้วเขาจะเห็น
+  //     หน้าที่ยิง API ไม่ผ่านสักเส้น ซึ่งแย่กว่าไม่เห็นเมนูเลย
   {
     key: 'page.dashboard',
     group: 'page',
     label: 'แผงควบคุม',
     modes: SWITCH,
     defaults: switchFor('allow', 'deny', 'deny', 'deny'),
-    enforcedAt: 'GET /api/admin/stats · /api/admin/sync/*',
+    enforcedAt: 'GET /api/admin/stats · /api/admin/sync/* (4 เส้น)',
   },
   {
     key: 'page.approvals',
@@ -303,7 +305,7 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     label: 'อนุมัติราคา',
     modes: SWITCH,
     defaults: switchFor('allow', 'allow', 'allow', 'allow'),
-    enforcedAt: 'GET /api/admin/approvals/*',
+    enforcedAt: '/api/admin/approvals/* ทั้ง 8 เส้น (3 เส้นที่ตัดสินคำขอซ้อน approval.decide อีกชั้น)',
   },
   {
     key: 'page.quotations',
@@ -311,7 +313,7 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     label: 'ประวัติใบเสนอราคา',
     modes: SWITCH,
     defaults: switchFor('allow', 'allow', 'allow', 'allow'),
-    enforcedAt: 'GET /api/admin/quotations/*',
+    enforcedAt: '/api/admin/quotations/* ทั้ง 7 เส้น (เส้นที่มีด่านของตัวเองอยู่แล้วถูกซ้อนไว้ข้างหน้า)',
   },
   {
     key: 'page.settings_quotation',
@@ -319,7 +321,7 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     label: 'เงื่อนไขหลัก',
     modes: SWITCH,
     defaults: switchFor('allow', 'deny', 'deny', 'deny'),
-    enforcedAt: '/api/admin/quotation-rules/*',
+    enforcedAt: '/api/admin/quotation-rules/* (5 เส้น)',
   },
   {
     key: 'page.promotions',
@@ -327,7 +329,7 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     label: 'จัดการโปรโมชันส่วนลด',
     modes: SWITCH,
     defaults: switchFor('allow', 'deny', 'deny', 'deny'),
-    enforcedAt: '/api/admin/promotions/*',
+    enforcedAt: '/api/admin/promotions/* (7) + /api/admin/products/search · /customers/search · /customers/types (ช่องค้นหาในตัวแก้โปรโมชัน)',
   },
   {
     key: 'page.settings_optional',
@@ -335,7 +337,7 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     label: 'สินค้าพ่วงเสริม',
     modes: SWITCH,
     defaults: switchFor('allow', 'deny', 'deny', 'deny'),
-    enforcedAt: '/api/admin/optional-links/*',
+    enforcedAt: '/api/admin/optional-links/* (4 เส้น)',
   },
   {
     key: 'page.settings_stock',
@@ -343,7 +345,7 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     label: 'ระงับเมื่อหมดสต็อก',
     modes: SWITCH,
     defaults: switchFor('allow', 'deny', 'deny', 'deny'),
-    enforcedAt: '/api/admin/stock-rules/*',
+    enforcedAt: '/api/admin/stock-rules/* (6 เส้น)',
   },
   {
     key: 'page.settings_moq',
@@ -351,7 +353,7 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     label: 'ขั้นต่ำสั่งซื้อ',
     modes: SWITCH,
     defaults: switchFor('allow', 'deny', 'deny', 'deny'),
-    enforcedAt: '/api/admin/moq-rules/*',
+    enforcedAt: '/api/admin/moq-rules/* (4 เส้น)',
   },
   {
     key: 'page.settings_block',
@@ -359,7 +361,7 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     label: 'บล็อกสินค้า',
     modes: SWITCH,
     defaults: switchFor('allow', 'deny', 'deny', 'deny'),
-    enforcedAt: '/api/admin/block-rules/*',
+    enforcedAt: '/api/admin/block-rules/* (5 เส้น)',
   },
   {
     key: 'page.settings_shipping',
@@ -367,7 +369,7 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     label: 'ค่าขนส่ง & เครดิต',
     modes: SWITCH,
     defaults: switchFor('allow', 'deny', 'deny', 'deny'),
-    enforcedAt: '/api/admin/shipping-fee/* · /api/admin/credit-policy/*',
+    enforcedAt: '/api/admin/shipping-fee-config · /api/admin/credit-policy (อย่างละ GET+PUT)',
   },
   {
     key: 'page.productsdata',
@@ -375,7 +377,7 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     label: 'ข้อมูลสินค้า',
     modes: SWITCH,
     defaults: switchFor('allow', 'allow', 'allow', 'deny'),
-    enforcedAt: '/api/admin/data/products*',
+    enforcedAt: 'app.use(/api/admin/data/products) — ด่านวางก่อนจุด mount ของ dataDirectoryRouter',
   },
   {
     key: 'page.customersdata',
@@ -383,7 +385,7 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     label: 'ข้อมูลลูกค้า',
     modes: SWITCH,
     defaults: switchFor('allow', 'allow', 'allow', 'deny'),
-    enforcedAt: '/api/admin/data/customers*',
+    enforcedAt: 'app.use(/api/admin/data/customers) — ด่านวางก่อนจุด mount ของ dataDirectoryRouter',
   },
   {
     key: 'page.blacklist',
@@ -393,7 +395,7 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     // ช่องเดียวในแคตตาล็อกที่ role `user` เป็น allow — วันนี้มันคือ **เมนูเดียวที่ role นั้นเห็น**
     // (AdminApp.tsx: roles: ['admin', 'user']) ปิดช่องนี้ = บัญชีทั่วไปเข้าระบบมาแล้วไม่เหลืออะไรเลย
     defaults: { admin: 'allow', approver: 'deny', subadmin: 'deny', salesperson: 'deny', user: 'allow' },
-    enforcedAt: '/api/admin/blacklist/*',
+    enforcedAt: '/api/admin/blacklist/* (8 เส้น)',
   },
   {
     key: 'page.salespersons',
@@ -401,7 +403,7 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     label: 'จัดการพนักงานขาย',
     modes: SWITCH,
     defaults: switchFor('allow', 'deny', 'deny', 'deny'),
-    enforcedAt: '/api/admin/salespersons/* · /api/admin/signatures/*',
+    enforcedAt: '/api/admin/salespersons/* (3) · /api/admin/signatures/* (2)',
   },
   {
     key: 'page.users',
@@ -409,7 +411,7 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     label: 'จัดการผู้ใช้งานระบบ',
     modes: SWITCH,
     defaults: switchFor('allow', 'deny', 'deny', 'deny'),
-    enforcedAt: '/api/admin/users/*',
+    enforcedAt: '/api/admin/users/* (5 เส้น)',
   },
   {
     key: 'page.traffic',
@@ -417,7 +419,7 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     label: 'รายงานการใช้งาน',
     modes: SWITCH,
     defaults: switchFor('allow', 'deny', 'deny', 'deny'),
-    enforcedAt: '/api/admin/logs/*',
+    enforcedAt: 'app.use(/api/admin/logs) + /api/admin/api-logs/* (แท็บย่อยของหน้าเดียวกัน)',
   },
 ];
 

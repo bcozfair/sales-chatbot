@@ -13,7 +13,8 @@ import { DIRECTORY_MAX_LIMIT } from '../db/dataDirectoryRepo.js';
  *    ถอนทั้งงานออก = ลบไฟล์นี้ + services/dataDirectoryService.ts + db/dataDirectoryRepo.ts
  *    + services/rules/productRuleSets.ts + 2 บรรทัดใน index.ts
  *
- * **สิทธิ์บังคับที่จุด mount ใน index.ts** (adminAuthMiddleware + requireRole) ไม่ใช่ในไฟล์นี้
+ * **สิทธิ์บังคับที่จุด mount ใน index.ts** ไม่ใช่ในไฟล์นี้ — และเป็น **สองด่านแยกกัน**
+ * (`page.productsdata` / `page.customersdata`) เพราะเจ้าของเปิด-ปิดสองเมนูนี้แยกกันได้
  * ⇒ ไม่มีทางที่ route ใหม่จะหลุดออกไปโดยไม่มีการตรวจสิทธิ์
  * เจ้าของกำหนด 2026-09-17: admin · approver · subadmin เห็นได้ (ไม่รวม role 'user')
  *

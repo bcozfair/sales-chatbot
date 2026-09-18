@@ -19,7 +19,7 @@ import {
  * ⚠️ ไฟล์ใหม่ทั้งไฟล์ ไม่แตะ endpoint เดิมสักตัว — /api/admin/api-logs ของเดิมยังอยู่ใน index.ts
  *   เหมือนเดิมทุกบรรทัด · ถอนทั้งแผนออก = ลบไฟล์นี้ + db/logRepositories.ts + 2 บรรทัดใน index.ts
  *
- * สิทธิ์เข้าถึงถูกบังคับที่จุด mount ใน index.ts (adminAuthMiddleware + requireRole('admin'))
+ * สิทธิ์เข้าถึงถูกบังคับที่จุด mount ใน index.ts (adminAuthMiddleware + requireCapability('page.traffic'))
  * ไม่ใช่ในไฟล์นี้ ⇒ ไม่มีทางที่ route ใหม่จะหลุดออกไปโดยไม่มีการตรวจสิทธิ์
  */
 export const logsRouter = Router();
