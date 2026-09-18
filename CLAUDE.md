@@ -454,7 +454,7 @@ chatbot/
 - **`docs/plan-quote-price-approval.md`** — คิวอนุมัติราคาต่ำกว่าขั้นต่ำ + role `approver`
 - **`docs/plan-web-quote-logging.md`** — ประวัตของหน้าเว็บใน `messages` (`web_*` + `meta`) และวิธีวัด `chosen_rank`
 - **`docs/plan-product-block-rules.md`** — กฎบล็อกสินค้า
-- **`docs/plan-pricing-subcodes.md`** — พิมพ์รหัสสินค้าสั่งทำแล้วได้ราคา + ตารางรหัสย่อยที่แอดมินตั้งราคา/กฎเองได้ (เฟส A+B ทำแล้วใน `prototypes/pricing/` — มีหน้าจอให้กดเพิ่มแล้ว · เฟส C–D ยังเป็นแบบที่เสนอ)
+- **`docs/plan-pricing-subcodes.md`** — พิมพ์รหัสสินค้าสั่งทำแล้วได้ราคา + ตารางรหัสย่อยที่แอดมินตั้งราคา/กฎเองได้ (เฟส A+B ทำแล้ว · **อยู่ในแอดมินจริงแล้วเป็นโมดูลที่ถอดออกได้** — ดู `services/pricingLab/README.md` · เฟส C–D ยังเป็นแบบที่เสนอ)
 - **`docs/plan-logging-audit-compliance.md`** — ระบบ log / audit / ข้อกำหนดตามกฎหมาย
 - **`docs/plan-user-roles-auth.md`** — สิทธิ์ผู้ใช้และการยืนยันตัวตน
 - **`docs/plan-role-permissions.md`** — เมทริกซ์สิทธิ์ต่อ role ที่ตั้งจากหน้าจอได้ + role `salesperson` + ตัวตนบนใบที่ออกจากเว็บ

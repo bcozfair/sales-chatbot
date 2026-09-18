@@ -1,7 +1,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
-//  PROTOTYPE — เครื่องคิดราคา (pure function ล้วน)
+//  เครื่องคิดราคา (pure function ล้วน)
 //
-//  ⚠️ ของทดลอง ไม่มีใครใน production import ไฟล์นี้ · ดู prototypes/pricing/README.md
+//  โมดูล "คิดราคาสินค้าสั่งทำ" — ถอดออกได้ทั้งก้อน ดู services/pricingLab/README.md
+//
+//  ⚠️ โมดูลนี้ถูกเรียกจาก routes/pricingLab.ts เท่านั้น และ **ห้ามมีโค้ดเดิมที่ไหน import
+//     โฟลเดอร์นี้** — การพึ่งพาเป็นทางเดียวคือสิ่งเดียวที่ทำให้ "ลบทิ้งเมื่อไหร่ก็ได้" เป็นจริง
+//     ไม่ใช่แค่ความตั้งใจ · เฟสแรกยังไม่ต่อกับใบเสนอราคา คิดราคาให้ดูอย่างเดียว
+//  ด่านตรวจของไฟล์กลุ่มนี้ยังอยู่ที่ prototypes/pricing/ (golden.ts · roundtrip.ts)
+//  ซึ่ง import ตัวจริงจากที่นี่ ⇒ แก้โค้ดตรงนี้แล้วด่านเห็นทันที ไม่ใช่ด่านที่เฝ้าสำเนา
 //
 //  **ห้ามมี import ของ DB / network / LLM ในไฟล์นี้เด็ดขาด** เหตุผลสามข้อ:
 //
@@ -28,6 +34,7 @@ import type {
   Violation
 } from './types.js';
 import { matchedSubCodes } from './subcodes.js';
+import { axisLabel } from './labels.js';
 
 /** ปัดเป็นสตางค์ — ตัวเลขในไฟล์ Excel มี float noise จริง 182 เซลล์ (วัด 2026-09-17) */
 function money(n: number): Money {
@@ -147,14 +154,16 @@ function computeBase(
         amount: 0,
         label: 'ฐานราคา',
         // ชีตเว้นช่องนี้ไว้ = ไม่รับผลิต ไม่ใช่ราคา 0
-        reason: `ไม่มีราคาสำหรับ ${base.axes.map((a) => `${a}=${axes[a] ?? '-'}`).join(' · ')} — ไม่รับผลิตขนาดนี้`
+        // คนอ่านบรรทัดนี้คือแอดมินที่กำลังจะตอบลูกค้า ไม่ใช่คนที่เปิดชีตราคาอยู่
+        reason: `ไม่มีราคาสำหรับ ${base.axes.map((a) => `${axisLabel(a)} ${axes[a] ?? '-'}`).join(' · ')} — ไม่รับผลิตขนาดนี้`
       };
     }
     return {
       ok: true,
       amount: money(cell),
       label: `ราคาตั้ง ${model.code}`,
-      detail: base.axes.map((a) => `${a} ${axes[a]}`).join(' · ')
+      // ชื่อแกนต้องเป็นคำไทย — คนอ่านบรรทัดนี้คือแอดมินที่ไม่เคยเปิดชีต Excel มาก่อน
+      detail: base.axes.map((a) => `${axisLabel(a)} ${axes[a]}`).join(' · ')
     };
   }
 

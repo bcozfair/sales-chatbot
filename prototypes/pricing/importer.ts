@@ -19,7 +19,7 @@ import ExcelJS from 'exceljs';
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Adder, Band, Constraint, DerivedDim, PriceBook, PriceModel, SubCode } from './types.js';
+import type { Adder, Band, Constraint, DerivedDim, PriceBook, PriceModel, SubCode } from '../../services/pricingLab/types.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 

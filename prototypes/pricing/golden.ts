@@ -12,9 +12,9 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseProductCode } from './code.js';
-import { computePrice, formatOutcome } from './engine.js';
-import type { PriceBook, ProductConfig, SubCode } from './types.js';
+import { parseProductCode } from '../../services/pricingLab/code.js';
+import { computePrice, formatOutcome } from '../../services/pricingLab/engine.js';
+import type { PriceBook, ProductConfig, SubCode } from '../../services/pricingLab/types.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const book = JSON.parse(readFileSync(join(HERE, 'book.json'), 'utf8')) as PriceBook;

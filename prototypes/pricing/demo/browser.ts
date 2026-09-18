@@ -8,9 +8,9 @@
 //  มีแต่หน้าเว็บที่รัน ด่านตรวจใน Node มองไม่เห็น แล้วสองฝั่งจะคิดเลขไม่ตรงกัน
 // ─────────────────────────────────────────────────────────────────────────────
 
-export { computePrice, formatOutcome, resolveModel, matrixKey, evalPredicate } from '../engine.js';
-export { parseProductCode, unknownParts, axisValues } from '../code.js';
-export { findSubCode, scopeRank, subCodeMatches, matchedSubCodes, unsetSubCodes, subCodeOption, SUBCODE_PREFIX } from '../subcodes.js';
+export { computePrice, formatOutcome, resolveModel, matrixKey, evalPredicate } from '../../../services/pricingLab/engine.js';
+export { parseProductCode, unknownParts, axisValues } from '../../../services/pricingLab/code.js';
+export { findSubCode, scopeRank, subCodeMatches, matchedSubCodes, unsetSubCodes, subCodeOption, SUBCODE_PREFIX } from '../../../services/pricingLab/subcodes.js';
 export { bookToSheets, sheetsToBook, predicateToText, parsePredicate, SHEET_NAMES, VOCAB } from '../sheet.js';
 export { bookToOdooSheets } from '../odoo.js';
 export { writeXlsx, readXlsxInBrowser } from '../xlsxlite.js';

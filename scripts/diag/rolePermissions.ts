@@ -88,6 +88,8 @@ const TODAY: Record<Capability, [admin: PermissionMode, approver: PermissionMode
   'page.settings_moq':            ['allow', 'deny', 'deny'],
   'page.settings_block':          ['allow', 'deny', 'deny'],
   'page.settings_shipping':       ['allow', 'deny', 'deny'],
+  // โมดูลทดลอง — หน้าที่ยังไม่เคยมี ⇒ ไม่มีใครเสียสิทธิ์ที่เคยมี · เจ้าของเปิดให้ role อื่นเองได้
+  'page.pricing':                 ['allow', 'deny', 'deny'],
   'page.productsdata':            ['allow', 'allow', 'allow'],
   'page.customersdata':           ['allow', 'allow', 'allow'],
   'page.blacklist':               ['allow', 'deny', 'deny'],
