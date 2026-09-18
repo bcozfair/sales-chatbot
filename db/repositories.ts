@@ -8,7 +8,7 @@
  *  - ชื่อคอลัมน์ mapping ที่ dbClient เคยซ่อนไว้ ถูกเขียนตรงๆ ใน SQL:
  *      customers_view.branch → alias เป็น branch_code
  */
-import { pool, type DbExecutor } from '../config/db.js';
+import { pool, withTransaction, type DbExecutor } from '../config/db.js';
 import { companyKeysSql, matchesKeysSql } from './companyIdentity.js';
 
 function logErr(fn: string, err: any): void {
@@ -1581,4 +1581,30 @@ export function ownQuotesCondition(scope: OwnQuotesScope, paramIndex: number): {
     return { sql: `${QUOTE_SALESPERSON_CODE_SQL} = ANY($${paramIndex})`, params: [scope.salespersonIds] };
   }
   return { sql: `q.user_id LIKE $${paramIndex}`, params: [`web:${scope.adminId}:%`] };
+}
+
+/**
+ * เขียนทั้งเมทริกซ์ในครั้งเดียว — **ลบทิ้งทั้งตารางแล้วใส่ใหม่ใน transaction เดียว**
+ *
+ * ทำแบบนี้เพราะตารางนี้เก็บ **เฉพาะช่องที่ต่างจากค่าเริ่มต้น** ⇒ "คืนค่าเริ่มต้น" คือการ
+ * *ไม่ส่งแถวนั้นมา* ไม่ใช่การส่งค่ามาให้เท่ากับค่าเริ่มต้น (ซึ่งจะทำให้แถวค้างอยู่แล้วกลายเป็น
+ * คำตอบเก่าในวันที่แคตตาล็อกเปลี่ยนค่าเริ่มต้น — เหตุผลเต็มอยู่หัวไฟล์ config/capabilities.ts)
+ * · ทั้งตารางมีไม่เกินหลักสิบแถว การเขียนใหม่ทั้งก้อนจึงถูกกว่าการไล่ diff ทีละช่อง
+ * · ผู้เรียก **ต้องคัดแถวของ admin ออกก่อน** — ที่นี่ไม่รู้จักกติกานั้น (§3.4)
+ */
+export async function replaceRolePermissions(
+  rows: { role: string; capability: string; mode: string }[],
+  updatedBy: number | null
+): Promise<void> {
+  await withTransaction(async (client) => {
+    await client.query('DELETE FROM role_permissions');
+    if (rows.length === 0) return;
+    // UNNEST ยิงครั้งเดียว ไม่วนทีละแถว — ล็อกตารางสั้นที่สุดเท่าที่ทำได้
+    await client.query(
+      `INSERT INTO role_permissions (role, capability, mode, updated_by)
+       SELECT t.role, t.capability, t.mode, $4::integer
+         FROM UNNEST($1::varchar[], $2::varchar[], $3::varchar[]) AS t(role, capability, mode)`,
+      [rows.map(r => r.role), rows.map(r => r.capability), rows.map(r => r.mode), updatedBy]
+    );
+  });
 }

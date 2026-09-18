@@ -50,8 +50,13 @@ import {
   getApiLogStats,
   insertMessage,
   ownQuotesCondition,
+  getRolePermissionRows,
+  replaceRolePermissions,
 } from './db/repositories.js';
-import { quoteScopeOf } from './config/capabilities.js';
+import {
+  quoteScopeOf, capsOf, capabilityDef, invalidateCapabilityCache,
+  CAPABILITIES, ROLES, type Capability, type PermissionMode,
+} from './config/capabilities.js';
 import {
   confirmQuotationAtomic, enrichQuotationData, buildItemSnapshots, buildViolationDisplay,
   blockingViolations, approvedViolationKeys, ODOO_MANUAL_REASON_KINDS,
@@ -1983,6 +1988,122 @@ app.delete('/api/admin/users/:id', adminAuthMiddleware, requireRole('admin'), as
     res.json({ success: true });
   } catch (err: any) {
     console.error("DELETE /api/admin/users error:", err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ═══════════════════ เมทริกซ์สิทธิ์ต่อ role — admin เท่านั้น ═══════════════════
+//
+// หน้าตั้งค่านี้เป็น "คนที่ตั้งกฎ" ซึ่งเป็นคำถามคนละข้อกับ "คนที่ทำงานกับใบ" ⇒ ยังเป็นของ
+// admin ล้วนเหมือนเมนูตั้งค่าอื่นทุกหน้า และ **จงใจไม่เอาตัวมันเองเข้าเมทริกซ์** —
+// ความสามารถที่เปิดให้ตั้งค่าตัวเองได้ คือความสามารถที่ปิดตัวเองออกจากระบบได้
+// (docs/plan-role-permissions.md §4ข ย่อหน้าท้าย)
+
+/** แคตตาล็อก + ค่าที่ตั้งไว้ — หน้าจอวาดตารางจากคำตอบนี้ก้อนเดียว ไม่ถือแคตตาล็อกสำเนาของตัวเอง */
+app.get('/api/admin/role-permissions', adminAuthMiddleware, requireRole('admin'), async (_req: any, res: any) => {
+  try {
+    const rows = await getRolePermissionRows();
+    if (rows === null) {
+      // แยก "อ่านฐานไม่ได้" ออกจาก "ไม่มีใครแก้ค่าเริ่มต้น" ให้ชัดตั้งแต่ปากทาง — ถ้าตอบ []
+      // หน้าจอจะวาดว่า "ทุกช่องเป็นค่าเริ่มต้น" แล้วคนกดบันทึกทับของจริงที่ตั้งไว้ทิ้งทั้งตาราง
+      return res.status(503).json({
+        error: 'อ่านตารางสิทธิ์ไม่สำเร็จ — ลองใหม่อีกครั้ง',
+        // สาเหตุที่พบบ่อยที่สุดคือยังไม่ได้รัน migration บนเครื่องนั้น ("อยู่ใน repo" ไม่ได้แปลว่า
+        // "ลงฐานแล้ว") ⇒ บอกชื่อไฟล์ไปเลย คนที่รับเรื่องจะได้ไม่ต้องไล่หา
+        hint: 'ถ้าเพิ่งขึ้นระบบใหม่ ตรวจว่ารัน migrations/changes/2026-09-18_01_role_permissions.sql แล้วหรือยัง',
+      });
+    }
+    // ค่าที่ใช้จริงของทุก role (ค่าเริ่มต้นทับด้วยค่าใน DB แล้ว) — หน้าจอไม่ต้องคำนวณเอง
+    // ไม่งั้นกติกา "แถวของ admin ถูกล็อก" จะมีสำเนาที่สองอยู่บนหน้าจอ
+    const effective: Record<string, Record<string, PermissionMode>> = {};
+    for (const role of ROLES) effective[role] = await capsOf(role);
+    res.json({
+      roles: ROLES,
+      capabilities: CAPABILITIES.map((c) => ({
+        key: c.key, group: c.group, label: c.label, modes: c.modes, defaults: c.defaults,
+      })),
+      effective,
+      // ช่องที่ "ถูกแก้จากค่าเริ่มต้น" — หน้าจอใช้ขึ้นจุดกำกับ ไม่ต้องเทียบเอง
+      overrides: rows.filter((r) => r.role !== 'admin'),
+    });
+  } catch (err: any) {
+    console.error('GET /api/admin/role-permissions error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+/**
+ * บันทึกทั้งเมทริกซ์ในครั้งเดียว — body คือ **เฉพาะช่องที่ต่างจากค่าเริ่มต้น**
+ *
+ * ทั้งตารางถูกเขียนใหม่ทั้งก้อน ⇒ ช่องที่ไม่ส่งมา = คืนค่าเริ่มต้น · หน้าจอจึงไม่ต้องส่ง
+ * "คำสั่งลบ" แยก และไม่มีสถานะกลางที่บันทึกไปครึ่งหนึ่งแล้วค้าง
+ */
+app.put('/api/admin/role-permissions', adminAuthMiddleware, requireRole('admin'), express.json(), async (req: any, res: any) => {
+  try {
+    const raw = req.body?.overrides;
+    if (!Array.isArray(raw)) {
+      return res.status(400).json({ error: 'ต้องส่ง overrides เป็น array' });
+    }
+    if (raw.length > CAPABILITIES.length * ROLES.length) {
+      return res.status(400).json({ error: 'จำนวนช่องที่ส่งมาเกินขนาดของเมทริกซ์' });
+    }
+
+    const clean: { role: string; capability: string; mode: string }[] = [];
+    const seen = new Set<string>();
+    for (const entry of raw) {
+      const role = String(entry?.role ?? '');
+      const capability = String(entry?.capability ?? '');
+      const mode = String(entry?.mode ?? '');
+
+      // แถวของ admin ถูกปฏิเสธที่ฝั่งเขียนด้วย ไม่ใช่แค่ถูกมองข้ามตอนอ่าน (§3.4) —
+      // ระบบที่ล็อกคนสุดท้ายออกจากตัวเองได้ คือระบบที่ต้องแก้ด้วย psql ตอนตีสอง
+      if (role === 'admin') {
+        return res.status(400).json({ error: 'สิทธิ์ของผู้ดูแลระบบ (admin) แก้ไม่ได้' });
+      }
+      if (!(ROLES as readonly string[]).includes(role)) {
+        return res.status(400).json({ error: `ไม่รู้จัก role: ${role}` });
+      }
+      const def = capabilityDef(capability as Capability);
+      if (!def) {
+        return res.status(400).json({ error: `ไม่รู้จักความสามารถ: ${capability}` });
+      }
+      if (!def.modes.includes(mode as PermissionMode)) {
+        return res.status(400).json({ error: `โหมด "${mode}" ใช้กับ "${def.label}" ไม่ได้` });
+      }
+      const key = `${role}|${capability}`;
+      if (seen.has(key)) {
+        return res.status(400).json({ error: `ส่งช่องเดิมมาซ้ำ: ${key}` });
+      }
+      seen.add(key);
+
+      // ค่าที่เท่ากับค่าเริ่มต้นอยู่แล้ว **ไม่เก็บเป็นแถว** — ตารางนี้แปลว่า "ช่องที่ถูกแก้"
+      // แถวที่ค้างอยู่เฉย ๆ จะกลายเป็นคำตอบเก่าในวันที่ค่าเริ่มต้นในแคตตาล็อกเปลี่ยน
+      if (mode === def.defaults[role as Role]) continue;
+      clean.push({ role, capability, mode });
+    }
+
+    await replaceRolePermissions(clean, req.admin?.id ?? null);
+    // ล้าง cache ทันที ไม่รอ TTL — คนตั้งค่าจะกดทดสอบทันทีที่กดเสร็จ
+    invalidateCapabilityCache();
+    res.json({ success: true, saved: clean.length });
+  } catch (err: any) {
+    console.error('PUT /api/admin/role-permissions error:', err);
+    res.status(500).json({ error: 'ไม่สามารถบันทึกสิทธิ์ได้' });
+  }
+});
+
+/**
+ * ความสามารถของ "คนที่ล็อกอินอยู่" — ทุก role เรียกได้ เพราะเมนูของทุกคนอ่านจากคำตอบนี้
+ *
+ * มีเส้นนี้เพราะเมนูที่ยังเขียน `roles: ['admin','approver','subadmin']` ไว้ตายตัว จะไม่รู้เรื่อง
+ * ค่าที่เจ้าของเพิ่งตั้งจากหน้าจอ ⇒ เปิดสิทธิ์ให้ใครแล้วเมนูไม่โผล่ ต้องแก้โค้ดตาม
+ * ⚠️ **นี่คือการซ่อนเมนู ไม่ใช่ด่านตรวจ** — ด่านจริงอยู่ที่ `requireCapability()` ของแต่ละ route
+ */
+app.get('/api/admin/me/capabilities', adminAuthMiddleware, async (req: any, res: any) => {
+  try {
+    res.json({ role: req.admin.role, capabilities: await capsOf(req.admin.role) });
+  } catch (err: any) {
+    console.error('GET /api/admin/me/capabilities error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
