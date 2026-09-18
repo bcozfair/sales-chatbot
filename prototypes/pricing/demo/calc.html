@@ -259,7 +259,7 @@
     if (unknown.length) {
       const d = el('div', 'banner amber');
       d.append(el('div', null,
-        `ราคาข้างล่างยังไม่รวมของที่อ่านไม่ออก ${unknown.length} ท่อน (${unknown.map((u) => u.text).join(' · ')}) — ` +
+        `ราคาข้างล่างยังไม่รวมของที่อ่านไม่ออก ${unknown.length} ตัว (${unknown.map((u) => u.text).join(' · ')}) — ` +
         'ตรวจกับฝ่ายขายก่อนส่งให้ลูกค้า'));
       codeOut.append(d);
     }
