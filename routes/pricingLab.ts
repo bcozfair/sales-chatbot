@@ -45,10 +45,23 @@ pricingLabRouter.use(json({ limit: '64kb' }));
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-/** จำนวนรหัสจริงที่มีรหัสย่อยแต่ละตัว — ภาพนิ่ง ไม่ได้ต่อฐานตอนรัน (ดูหัวไฟล์ census) */
+/**
+ * จำนวนรหัสจริงที่มีรหัสย่อยแต่ละตัว — ภาพนิ่ง ไม่ได้ต่อฐานตอนรัน (ดูหัวไฟล์ census)
+ *
+ * **ตัดท่อนที่เป็นตัวเลขล้วนทิ้ง** — `(11.5)` `(12.7)` `(1.5)` ในรหัสจริงคือ *ขนาด* ไม่ใช่
+ * รหัสย่อยที่ต้องตั้งราคา (ตัวอ่านรหัสจัดการให้แล้วจากแม่แบบของรุ่น) · วัด 2026-09-18:
+ * 8 จาก 60 รายการในไฟล์เป็นแบบนี้ และสองตัวแรกขึ้นติดอันดับบนสุดของรายการ "ยังไม่ได้ตั้งค่า"
+ * ⇒ ถ้าไม่กรอง หน้าจอจะสั่งให้แอดมินไปตั้งค่าของที่ตั้งไม่ได้ ซึ่งทำให้ทั้งรายการดูเชื่อไม่ได้
+ *
+ * กรองที่นี่ ไม่ใช่ที่หน้าจอ เพราะมันเป็นข้อเท็จจริงของข้อมูล ไม่ใช่รสนิยมการแสดงผล
+ */
+const IS_NUMBER_ONLY = /^[\d.]+$/;
+
 const census: unknown = (() => {
   try {
-    return JSON.parse(readFileSync(join(HERE, '../services/pricingLab/subcode-census.json'), 'utf8'));
+    const raw = JSON.parse(readFileSync(join(HERE, '../services/pricingLab/subcode-census.json'), 'utf8'));
+    if (!raw || !Array.isArray(raw.items)) return raw;
+    return { ...raw, items: raw.items.filter((it: { token?: string }) => !IS_NUMBER_ONLY.test(it.token ?? '')) };
   } catch {
     return null;
   }
