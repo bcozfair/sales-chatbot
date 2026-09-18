@@ -65,6 +65,33 @@
   .rtot .vat { display: block; font-size: 11px; font-weight: 400; color: var(--c-text-faint); }
 
   .empty { padding: 20px 0; text-align: center; color: var(--c-text-faint); font-size: 12.5px; }
+
+  /* ── ช่องพิมพ์รหัส ──────────────────────────────────────────────────────
+     ช่องนี้ต้องเด่นกว่าช่องอื่นในหน้า เพราะมันคือทางลัดที่ทำให้ไม่ต้องกรอกอะไรเลย
+     ส่วน "อ่านรหัสได้ว่าอะไร" ต้องอยู่ติดกันทันที ไม่ใช่ซ่อนไว้ให้กด — คนต้องเห็นว่า
+     ระบบเข้าใจรหัสตรงกับที่ตัวเองคิดไหม ก่อนจะเชื่อตัวเลขทางขวา */
+  .coderow { display: flex; gap: 8px; flex-wrap: wrap; }
+  .coderow input.cell {
+    flex: 1; min-width: 200px; height: 42px; font-size: 15px;
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; letter-spacing: .2px;
+  }
+  .coderow .btn { height: 42px; padding: 0 18px; font-weight: 700; flex: none; }
+
+  .reads { display: grid; grid-template-columns: auto auto 1fr; gap: 2px 10px; margin-top: 12px; }
+  .reads .t {
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    font-size: 12.5px; font-weight: 700; color: var(--c-text-max); white-space: nowrap;
+  }
+  .reads .k { font-size: 11px; white-space: nowrap; align-self: center; }
+  .reads .w { font-size: 12px; color: var(--c-text-muted); min-width: 0; overflow-wrap: anywhere; }
+  .reads .k.ok   { color: var(--c-text-faint); }
+  .reads .k.warn { color: var(--amber-800); font-weight: 700; }
+  .reads .k.bad  { color: var(--red-700); font-weight: 700; }
+  @media (max-width: 520px) {
+    .reads { grid-template-columns: 1fr; gap: 0; }
+    .reads .w { margin-bottom: 8px; }
+  }
+  #code-out.stale .reads, #code-out.stale .banner { opacity: .5; }
 </style>
 </head>
 <body>
@@ -72,11 +99,20 @@
 <div class="doc">
 
   <h1>ลองคิดราคา</h1>
-  <p class="sub">เลือกสเปกทางซ้าย ราคาและที่มาจะขึ้นทางขวาทันที · ยังไม่รู้จักคำไหน ดูได้ที่ <a href="pr-manual.html" style="color:var(--brand-fg)">คู่มือการใช้งาน</a></p>
+  <p class="sub">มีรหัสสินค้าอยู่แล้ว พิมพ์รหัสได้เลย · ไม่มีก็เลือกสเปกทางซ้าย ราคาและที่มาจะขึ้นทางขวาทันที · ยังไม่รู้จักคำไหน ดูได้ที่ <a href="pr-manual.html" style="color:var(--brand-fg)">คู่มือการใช้งาน</a></p>
 
   <div id="edited-banner"></div>
 
-  <div class="pick" id="pick"></div>
+  <div class="card" id="card-code">
+    <h2 class="sec"><span class="stepno">·</span>พิมพ์รหัสสินค้า</h2>
+    <div class="coderow">
+      <input class="cell" id="code-in" spellcheck="false" autocomplete="off"
+             placeholder="เช่น  TSK-04(S2)6x300+3M">
+      <button class="btn" id="code-go" type="button">อ่านรหัส</button>
+    </div>
+    <div id="code-out"></div>
+    <div class="pick" id="pick" style="margin:12px 0 0"></div>
+  </div>
 
   <div class="cols">
     <div>
@@ -125,33 +161,124 @@
   const editedNote = U.editedBanner(B);
   if (editedNote) document.getElementById('edited-banner').appendChild(editedNote);
 
-  // ── ชุดสเปกสำเร็จรูป ไว้กดโชว์ตอนพรีเซนต์ ────────────────────────────────
+  // ── รหัสตัวอย่าง ไว้กดโชว์ตอนพรีเซนต์ ────────────────────────────────────
+  //
+  // เป็น "รหัสจริง" ทั้งหมด ไม่ใช่รหัสที่แต่งขึ้นให้ผ่าน — สองอันแรกคือเคสที่ฝ่ายขาย
+  // เขียนเฉลยไว้ในชีตเอง อีกสามอันมาจากตาราง products ของจริง
   const PRESETS = [
-    { t: 'ตัวอย่างจากไฟล์ราคา BH', cfg: { model: 'BH-01C', axes: {}, dims: { dia_mm: 600, width_mm: 150, hold_od_mm: 0, cable_cm: 30, cable_extra_m: 0 }, options: ['conn:pl2'] } },
-    { t: 'ตัวอย่างจากไฟล์ราคา TS-14', cfg: { model: 'TS-14', axes: { sensor: 'K', dia_group: 'Ø6mm./12.7mm.' }, dims: { L1: 200, L2: 150 }, options: [] } },
-    { t: 'งานทั่วไป เทอร์โมคัปเปิลเกลียว', cfg: { model: 'TSK-04', axes: { D: '6', thread: '1/2”' }, dims: { L1: 300, teflon_mm: 0 }, options: [] } },
-    { t: 'เคสที่โรงงานไม่รับผลิต', cfg: { model: 'TSK-04', axes: { D: '19', thread: '1/8”' }, dims: { L1: 100, teflon_mm: 0 }, options: [] } },
-    { t: 'เคสที่ต้องขอราคาจากผลิต 2', cfg: { model: 'TS-18', axes: { D: '6', sensor: 'Type K/J', flange: 'ANSI 150# 3"' }, dims: { L1: 100, L2: 50 }, options: [] } }
+    { t: 'ตัวอย่างจากไฟล์ราคา BH', code: 'BH-01C-600x150-380-4950W-PL2' },
+    { t: 'ตัวอย่างจากไฟล์ราคา TS-14', code: 'TSK-14 6x200+150' },
+    { t: 'งานทั่วไป เทอร์โมคัปเปิลเกลียว', code: 'TSK-04(S4)6x300+3M' },
+    { t: 'เคสที่โรงงานไม่รับผลิต', code: 'TSK-04(S1)19x100+1M' },
+    { t: 'เคสที่ต้องขอราคาจากผลิต 2', code: 'TSP-18(F5)6-6x100+50' }
   ];
 
-  let cfg = JSON.parse(JSON.stringify(PRESETS[0].cfg));
-  let activePreset = 0;
+  let cfg = { model: 'BH-01C', axes: {}, dims: {}, options: [] };
+  let activePreset = -1;
 
   const pick = document.getElementById('pick');
   PRESETS.forEach((p, i) => {
     const b = el('button', 'btn', p.t);
     b.type = 'button';
     b.addEventListener('click', () => {
-      cfg = JSON.parse(JSON.stringify(p.cfg));
       activePreset = i;
-      document.getElementById('model').value = cfg.model;
-      draw();
+      applyCode(p.code);
     });
     pick.append(b);
   });
   function markPreset() {
     [...pick.children].forEach((b, i) => b.classList.toggle('on', i === activePreset));
   }
+
+  // ── รหัส → สเปก ──────────────────────────────────────────────────────────
+  //
+  // ตัวอ่านรหัสเป็นตัวเดียวกับที่ `cli.ts` และด่านตรวจใน Node เรียก (code.ts ผ่าน esbuild)
+  // ⇒ ที่เห็นบนจอคือสิ่งที่ระบบอ่านได้จริง ไม่ใช่ตัวอ่านคนละตัวที่เขียนไว้ให้หน้าเว็บ
+  const codeIn = document.getElementById('code-in');
+  const codeOut = document.getElementById('code-out');
+  let codeShown = false;
+
+  // แก้สเปกด้วยมือหลังอ่านรหัสแล้ว = ตาราง"อ่านรหัสได้ว่าอะไร" ข้างบนไม่ตรงกับราคาข้างล่างอีกต่อไป
+  // ปล่อยให้มันค้างอยู่เฉย ๆ คือการโกหกคนอ่านแบบเงียบที่สุด
+  function hand() {
+    if (!codeShown) return;
+    codeShown = false;
+    codeOut.classList.add('stale');
+    const n = el('div', 'tiny faint', 'แก้สเปกด้วยมือหลังอ่านรหัสแล้ว — ราคาข้างล่างคิดจากช่องที่เห็น ไม่ใช่จากรหัสข้างบน');
+    n.style.marginTop = '8px';
+    codeOut.append(n);
+  }
+
+  function applyCode(text) {
+    codeOut.classList.remove('stale');
+    codeShown = true;
+    codeIn.value = text;
+    const parsed = PR_ENGINE.parseProductCode(text, B);
+    renderReads(parsed);
+    if (!parsed.cfg) return;
+
+    cfg = {
+      model: parsed.cfg.model,
+      axes: { ...(parsed.cfg.axes || {}) },
+      dims: { ...(parsed.cfg.dims || {}) },
+      options: [...(parsed.cfg.options || [])]
+    };
+
+    // แกนของตารางราคาที่รหัสไม่ได้บอก ต้องขึ้นเป็น "ยังไม่ได้เลือก" ไม่ใช่ถูกเติมค่าแรกให้
+    // เพราะค่าแรกของตารางคือราคาถูกที่สุดเสมอ — เติมให้เงียบ ๆ = ใบเสนอราคาที่ต่ำกว่าจริง
+    const m = PR_ENGINE.resolveModel(B, cfg.model);
+    if (m && m.base.kind === 'matrix') {
+      for (const ax of m.base.axes) if (cfg.axes[ax] === undefined) cfg.axes[ax] = '';
+    }
+
+    document.getElementById('model').value = m ? m.code : cfg.model;
+    draw();
+  }
+
+  function renderReads(parsed) {
+    codeOut.replaceChildren();
+
+    for (const p of parsed.problems) {
+      const d = el('div', 'banner amber', null);
+      d.append(el('div', null, p));
+      codeOut.append(d);
+    }
+    if (!parsed.parts.length) return;
+
+    const g = el('div', 'reads');
+    for (const part of parsed.parts) {
+      const bad = part.kind === 'unknown';
+      const tag = bad ? 'อ่านไม่ออก' : part.guess ? 'ตีความเอง' : part.kind === 'noPrice' ? 'ไม่มีผลกับราคา' : 'อ่านได้';
+      g.append(el('span', 't', part.text));
+      g.append(el('span', 'k ' + (bad ? 'bad' : part.guess ? 'warn' : 'ok'), tag));
+      g.append(el('span', 'w', part.reads));
+    }
+    codeOut.append(g);
+
+    const unknown = parsed.parts.filter((p) => p.kind === 'unknown');
+    if (unknown.length) {
+      const d = el('div', 'banner amber');
+      d.append(el('div', null,
+        `ราคาข้างล่างยังไม่รวมของที่อ่านไม่ออก ${unknown.length} ท่อน (${unknown.map((u) => u.text).join(' · ')}) — ` +
+        'ตรวจกับฝ่ายขายก่อนส่งให้ลูกค้า'));
+      codeOut.append(d);
+    }
+    for (const w of parsed.warnings) {
+      const d = el('div', 'banner amber');
+      d.append(el('div', null, w));
+      codeOut.append(d);
+    }
+  }
+
+  document.getElementById('code-go').addEventListener('click', () => {
+    activePreset = -1;
+    applyCode(codeIn.value);
+  });
+  codeIn.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    activePreset = -1;
+    applyCode(codeIn.value);
+  });
 
   // ── รูปทรงของรุ่น: แกนไหน ขนาดไหน ตัวเลือกไหน ────────────────────────────
   function collectOptions(pred, into) {
@@ -206,14 +333,21 @@
       f.append(el('label', null, U.axis(ax) + (meta.unit ? ` (${meta.unit})` : '')));
       const s = el('select', 'cell');
       s.id = 'ax-' + ax;
-      for (const v of axisValues(m, i)) {
+      const vals = axisValues(m, i);
+      // ค่าว่างเกิดได้ทางเดียว: อ่านมาจากรหัสแล้วรหัสไม่ได้บอกแกนนี้ ⇒ ต้องให้เห็นว่ายังขาด
+      if (cfg.axes[ax] === '') {
+        const none = el('option', null, '— ยังไม่ได้เลือก —');
+        none.value = '';
+        s.append(none);
+      }
+      for (const v of vals) {
         const o = el('option', null, avail.has(v) ? v : `${v}  ·  ไม่รับผลิต`);
         o.value = v;
         s.append(o);
       }
-      if (!cfg.axes[ax] || !axisValues(m, i).includes(cfg.axes[ax])) cfg.axes[ax] = axisValues(m, i)[0];
+      if (cfg.axes[ax] === undefined || (cfg.axes[ax] !== '' && !vals.includes(cfg.axes[ax]))) cfg.axes[ax] = vals[0];
       s.value = cfg.axes[ax];
-      s.addEventListener('change', () => { cfg.axes[ax] = s.value; activePreset = -1; draw(); });
+      s.addEventListener('change', () => { cfg.axes[ax] = s.value; hand(); activePreset = -1; draw(); });
       f.append(s);
       if (i > 0) f.append(el('span', 'std', `ขนาดนี้ผลิตได้ ${avail.size} จาก ${axisValues(m, i).length} แบบ`));
       axBox.append(f);
@@ -224,11 +358,15 @@
       f.append(el('label', null, U.axis(ax)));
       const s = el('select', 'cell');
       s.id = 'ax-' + ax;
-      const none = el('option', null, '— ไม่มี —'); none.value = ''; s.append(none);
+      // แกนที่มีค่ามาตรฐานอยู่ในสมุดราคา (ชนิดสาย) ต้องขึ้นค่ามาตรฐานให้เห็น ไม่ใช่ "— ไม่มี —"
+      // ไม่งั้นจอบอกว่าไม่ได้เลือกอะไร แต่ราคาทางขวาคิดค่าสายไปแล้ว = จอกับราคาเล่าคนละเรื่อง
+      const def = (m.axisDefaults || {})[ax];
+      if (!def) { const none = el('option', null, '— ไม่มี —'); none.value = ''; s.append(none); }
       for (const v of vals) { const o = el('option', null, v); o.value = v; s.append(o); }
-      const other = el('option', null, 'อื่น ๆ นอกรายการ'); other.value = 'ANSI 150# 3"'; s.append(other);
+      if (!def) { const other = el('option', null, 'อื่น ๆ นอกรายการ'); other.value = 'ANSI 150# 3"'; s.append(other); }
+      if (def && !cfg.axes[ax]) cfg.axes[ax] = def;
       s.value = cfg.axes[ax] || '';
-      s.addEventListener('change', () => { cfg.axes[ax] = s.value; activePreset = -1; render(); });
+      s.addEventListener('change', () => { cfg.axes[ax] = s.value; hand(); activePreset = -1; render(); });
       f.append(s);
       if ((L.axes[ax] || {}).what) f.append(el('span', 'what', L.axes[ax].what));
       axBox.append(f);
@@ -246,7 +384,7 @@
       const inp = el('input', 'cell r');
       inp.type = 'number'; inp.id = 'dim-' + d; inp.min = '0'; inp.step = 'any';
       inp.value = cfg.dims[d] ?? m.standard[d] ?? 0;
-      inp.addEventListener('input', () => { cfg.dims[d] = Number(inp.value) || 0; activePreset = -1; render(); });
+      inp.addEventListener('input', () => { cfg.dims[d] = Number(inp.value) || 0; hand(); activePreset = -1; render(); });
       row.append(inp);
       if (meta.unit) row.append(el('span', 'u', meta.unit));
       f.append(row);
@@ -265,6 +403,7 @@
       c.type = 'checkbox'; c.id = 'opt-' + o; c.checked = cfg.options.includes(o);
       c.addEventListener('change', () => {
         cfg.options = c.checked ? [...new Set([...cfg.options, o])] : cfg.options.filter((x) => x !== o);
+        hand();
         activePreset = -1;
         render();
       });
@@ -347,11 +486,16 @@
   msel.value = cfg.model;
   msel.addEventListener('change', () => {
     cfg = { model: msel.value, axes: {}, dims: {}, options: [] };
+    codeIn.value = '';
+    codeOut.replaceChildren();
+    codeShown = false;
     activePreset = -1;
     draw();
   });
 
-  draw();
+  // เปิดหน้ามาให้เห็นของจริงทันที — รหัสตัวอย่างตัวแรกคือเคสที่ชีตเขียนเฉลยไว้เอง
+  activePreset = 0;
+  applyCode(PRESETS[0].code);
 })();
 </script>
 </body>

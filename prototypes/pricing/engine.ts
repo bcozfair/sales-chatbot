@@ -274,7 +274,10 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
     };
   }
 
-  const axes = { ...(cfg.axes ?? {}) };
+  // ค่าว่างใน cfg.axes แปลว่า "ไม่ได้ระบุ" ไม่ใช่ "เลือกค่าว่าง" ⇒ กรองทิ้งก่อนเติมค่าเริ่มต้น
+  // ไม่งั้นช่อง "— ไม่มี —" บนหน้าจอจะลบค่ามาตรฐานของแกนนั้นไปเงียบ ๆ
+  const given = Object.fromEntries(Object.entries(cfg.axes ?? {}).filter(([, v]) => v !== ''));
+  const axes = { ...(model.axisDefaults ?? {}), ...given };
   // standard คือสเปกที่รวมอยู่ในราคาตั้งแล้ว ⇒ เป็นค่าตั้งต้นของทุก dim ที่ผู้ใช้ไม่ได้ระบุ
   const dims: Record<string, number> = { ...model.standard, ...(cfg.dims ?? {}) };
   const options = new Set(cfg.options ?? []);

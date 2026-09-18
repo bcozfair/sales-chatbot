@@ -8,11 +8,13 @@
 //    npx tsx prototypes/pricing/cli.ts TSK-04 --axis D=6 --axis "thread=1/2”" --dim L1=300
 //    npx tsx prototypes/pricing/cli.ts BH-01C --dim dia_mm=600 --dim width_mm=150 --opt conn:pl2
 //    npx tsx prototypes/pricing/cli.ts TSK-04 --options D   (ดูว่าแกน D รับค่าอะไรได้บ้าง)
+//    npx tsx prototypes/pricing/cli.ts --code "TSK-04(S2)6x300+3M"   (อ่านรหัสแล้วคิดราคาให้เลย)
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseProductCode } from './code.js';
 import { computePrice, formatOutcome, resolveModel } from './engine.js';
 import type { PriceBook, ProductConfig } from './types.js';
 
@@ -24,6 +26,33 @@ function collect(flag: string): string[] {
   const out: string[] = [];
   for (let i = 0; i < argv.length; i++) if (argv[i] === flag && argv[i + 1]) out.push(argv[++i]!);
   return out;
+}
+
+// ── --code "<รหัสสินค้า>": อ่านรหัสแล้วคิดราคาให้เลย ─────────────────────────
+//
+// ท่อนที่อ่านไม่ออกต้องถูกพิมพ์ออกมาให้เห็นทุกท่อน ไม่ใช่เงียบ ๆ แล้วโชว์แต่ราคา
+// เพราะราคาที่ตกของไปหนึ่งท่อนหน้าตาเหมือนราคาที่ถูกต้องทุกประการ
+const codeArg = collect('--code')[0];
+if (codeArg) {
+  const parsed = parseProductCode(codeArg, book);
+  console.log('');
+  console.log(`รหัสที่พิมพ์มา: ${parsed.input}`);
+  console.log('');
+  for (const part of parsed.parts) {
+    const tag =
+      part.kind === 'unknown' ? 'อ่านไม่ออก' : part.kind === 'noPrice' ? 'ไม่มีผลกับราคา' : part.guess ? 'ตีความเอง' : 'อ่านได้';
+    console.log(`  ${part.text.padEnd(14)} ${`[${tag}]`.padEnd(16)} ${part.reads}`);
+  }
+  for (const w of parsed.warnings) console.log(`  ⚠ ${w}`);
+  for (const p of parsed.problems) console.log(`  ✗ ${p}`);
+  console.log('');
+  if (parsed.cfg) {
+    console.log(`สเปกที่อ่านได้: ${JSON.stringify(parsed.cfg)}`);
+    console.log('');
+    console.log(formatOutcome(computePrice(parsed.cfg, book)));
+    console.log('');
+  }
+  process.exit(parsed.cfg ? 0 : 1);
 }
 
 // ── --list: รุ่นทั้งหมดในสมุดราคา ─────────────────────────────────────────────

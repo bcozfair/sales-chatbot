@@ -55,7 +55,13 @@ interface RefSpec {
 interface AdderSpec extends Omit<Adder, 'rates' | 'amount'> {
   amount?: number;
   /** ดึงราคาต่อหน่วยจากคอลัมน์หนึ่ง โดยใช้ค่าในคอลัมน์ key เป็นกุญแจ */
-  ratesFrom?: CellRange & { keyCol: string };
+  /**
+   * `sheet` มีไว้เพราะราคาบางอย่างไม่ได้อยู่ในชีตของรุ่นตัวเอง — ราคาสายต่อเมตรของ TC
+   * ทุกรุ่นอยู่ที่ `TS-21+22+25` ที่เดียว และชีตนั้นเขียนกำกับไว้เองว่า "สายType ไหน
+   * ให้เอาราคาสายType นั้นมาบวกเพิ่มกรณีเกิน 1 เมตร"
+   * ⇒ ก๊อปตัวเลขมาไว้ในแมปของแต่ละรุ่น = วันที่ราคาสายขยับจะมีรุ่นที่ลืมแก้
+   */
+  ratesFrom?: CellRange & { keyCol: string; sheet?: string };
   /** ดึงจำนวนคงที่จากเซลล์เดียว เช่น "B16" */
   amountFrom?: string;
 }
@@ -67,6 +73,7 @@ interface SheetMap {
   label: string;
   aliases?: string[];
   standard: Record<string, number>;
+  axisDefaults?: Record<string, string>;
   derivedDims?: DerivedDim[];
   base: MatrixSpec | BandedSpec | RefSpec;
   adders: AdderSpec[];
@@ -143,7 +150,11 @@ export interface ImportReport {
   floatNoiseFixed: number;
 }
 
-function importSheet(map: SheetMap, ws: ExcelJS.Worksheet): { model: PriceModel; report: ImportReport } {
+function importSheet(
+  map: SheetMap,
+  ws: ExcelJS.Worksheet,
+  wb: ExcelJS.Workbook
+): { model: PriceModel; report: ImportReport } {
   const report: ImportReport = {
     code: map.code,
     sheet: map.sheet,
@@ -215,11 +226,13 @@ function importSheet(map: SheetMap, ws: ExcelJS.Worksheet): { model: PriceModel;
 
     if (ratesFrom) {
       const rates: Record<string, number> = {};
+      const src = ratesFrom.sheet ? wb.getWorksheet(ratesFrom.sheet) : ws;
+      if (!src) throw new Error(`ไม่พบชีต "${ratesFrom.sheet}" ที่ ${map.code} อ้างถึงใน adder ${spec.id}`);
       for (let r = ratesFrom.rows[0]; r <= ratesFrom.rows[1]; r++) {
-        const key = cellText(ws, r, ratesFrom.keyCol);
+        const key = cellText(src, r, ratesFrom.keyCol);
         if (!key) continue;
-        countNoise(r, ratesFrom.col);
-        const v = cellMoney(ws, r, ratesFrom.col);
+        if (src === ws) countNoise(r, ratesFrom.col);
+        const v = cellMoney(src, r, ratesFrom.col);
         if (v === undefined) continue; // ช่องว่าง = ไม่รับทำตัวเลือกนี้กับค่าแกนนี้
         rates[key] = v;
         report.adderRates++;
@@ -236,6 +249,7 @@ function importSheet(map: SheetMap, ws: ExcelJS.Worksheet): { model: PriceModel;
     sheet: map.sheet,
     aliases: map.aliases,
     standard: map.standard,
+    axisDefaults: map.axisDefaults,
     derivedDims: map.derivedDims,
     base,
     adders,
@@ -273,7 +287,7 @@ export async function buildBook(dataDir: string, mapDir: string): Promise<{ book
     const ws = wb.getWorksheet(map.sheet);
     if (!ws) throw new Error(`ไม่พบชีต "${map.sheet}" ในไฟล์ ${map.file}`);
 
-    const { model, report } = importSheet(map, ws);
+    const { model, report } = importSheet(map, ws, wb);
     models[model.code] = model;
     reports.push(report);
   }

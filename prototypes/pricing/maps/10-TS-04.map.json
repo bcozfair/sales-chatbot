@@ -5,6 +5,7 @@
   "label": "Thermocouple TS-04 (เกลียว)",
   "aliases": ["TSJ-04", "TS-04"],
   "standard": { "L1": 100, "cable_m": 1 },
+  "axisDefaults": { "cable": "สายสแตนเลสถัก" },
   "base": {
     "kind": "matrix",
     "axes": ["D", "thread"],
@@ -46,6 +47,19 @@
       "byAxis": "D",
       "ratesFrom": { "col": "J", "keyCol": "A", "rows": [11, 47] },
       "source": "TS-04!J9"
+    },
+    {
+      "id": "cable_over_1m",
+      "label": "สายส่วนที่ยาวเกิน 1 เมตร",
+      "order": 45,
+      "kind": "perUnit",
+      "dim": "cable_m",
+      "step": 1,
+      "round": "ceil",
+      "unit": " m",
+      "byAxis": "cable",
+      "ratesFrom": { "sheet": "TS-21+22+25", "col": "B", "keyCol": "A", "rows": [26, 29] },
+      "source": "TS-21+22+25!A26:B29 'บวกเพิ่มเมตรละ' + A44 'สายType ไหน ให้เอาราคาสายType นั้นมาบวกเพิ่มกรณีเกิน 1 เมตร' — ชีต TS-04 เองไม่มีคอลัมน์ราคาสาย ทั้งที่ราคาตั้งของมันคือ '6x100+1M' (A7) ⇒ ทุกรหัสที่สั่งสายยาวกว่า 1 M ต้องบวกจากตารางนี้ (เจ้าของเคาะ 2026-09-18)"
     },
     {
       "id": "coat_teflon",

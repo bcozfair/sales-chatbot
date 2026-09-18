@@ -3,6 +3,7 @@
     "name": "BH-01C 600×150 + Male Connector PL-2",
     "source": "BH!E19:E22 — \"600x3.14x150/645 = 438.14 ปัดเป็น 439x25 = 10,975\" → \"+20% = 13,170\" → \"+320 = 13,490\"",
     "kind": "เฉลยจากชีต",
+    "code": "BH-01C-600x150-380-4950W-PL2",
     "cfg": { "model": "BH-01C", "dims": { "dia_mm": 600, "width_mm": 150 }, "options": ["conn:pl2"] },
     "expectPrice": 13490,
     "show": true
@@ -11,6 +12,7 @@
     "name": "TSK-14 6x200+150-BU",
     "source": "TS-14!A21:A23 — \"4000+(200+150-100=250 mm.)+(150-50=100 mm.)\" → \"= 4000+(3*300)+(1*130) = 5,030\"",
     "kind": "เฉลยจากชีต",
+    "code": "TSK-14 6x200+150",
     "cfg": {
       "model": "TS-14",
       "axes": { "sensor": "K", "dia_group": "Ø6mm./12.7mm." },
@@ -23,6 +25,7 @@
     "name": "TSK-04 แกน 6 เกลียว 1/2\" ยาว 300 mm",
     "source": "TS-04!F25 = 770 (ราคาตั้ง Standard 6x100) · B25 = 120 (บวกเพิ่ม 100 mm ละ)",
     "kind": "คิดจากตาราง",
+    "code": "TSK-04(S4)6x300",
     "cfg": { "model": "TSK-04", "axes": { "D": "6", "thread": "1/2”" }, "dims": { "L1": 300 } },
     "expectPrice": 1010,
     "show": true
@@ -45,6 +48,7 @@
     "name": "ช่องว่างในตาราง = ไม่รับผลิต ไม่ใช่ราคา 0 (D=19 มีแค่ 3/4\" กับ 1\")",
     "source": "TS-04 แถว 44: คอลัมน์ C–F ว่าง เหลือแค่ G,H",
     "kind": "กฎ",
+    "code": "TSK-04(S1)19x100",
     "cfg": { "model": "TSK-04", "axes": { "D": "19", "thread": "1/8”" }, "dims": { "L1": 100 } },
     "expectStatus": "notManufacturable",
     "show": true
@@ -72,7 +76,12 @@
     "name": "TS-18 สองมิติความยาวคนละ step (L1 ทีละ 100 · L2 ทีละ 10)",
     "source": "TS-18!B15 (D=6 → 120/100mm) · C15 (D=6 → 25/10mm) · D25 = 880",
     "kind": "คิดจากตาราง",
-    "cfg": { "model": "TS-18", "axes": { "D": "6", "sensor": "Type K/J" }, "dims": { "L1": 250, "L2": 80 } },
+    "code": "TSK-18 6-6x250+80",
+    "cfg": {
+      "model": "TS-18",
+      "axes": { "D": "6", "sensor": "Type K/J" },
+      "dims": { "L1": 250, "L2": 80 }
+    },
     "expectPrice": 1195,
     "show": true
   },
@@ -80,6 +89,7 @@
     "name": "BH-03 Ceramic 300×80 @ 2000W — ค่ากำลังไฟ \"หายไป\" อย่างถูกต้อง",
     "source": "BH!E8 ช่วง \"101 - ขึ้นไป\" = 65฿/in² · G8 เว้นว่าง (ช่วงอื่น G3:G7 = 10)",
     "kind": "กฎ",
+    "code": "BH-03 300x80-220-2000W",
     "cfg": { "model": "BH-03", "dims": { "dia_mm": 300, "width_mm": 80, "watt": 2000 } },
     "expectPrice": 7605,
     "show": true
@@ -88,7 +98,43 @@
     "name": "BH ขนาดต่ำกว่าที่ทำได้ ต้องถูกบล็อก",
     "source": "BH!H3 \"ขนาดเล็กสุดที่ทำได้ OD = 65mm\"",
     "kind": "กฎ",
+    "code": "BH-01 50x40-220-300W",
     "cfg": { "model": "BH-01", "dims": { "dia_mm": 50, "width_mm": 40 } },
     "expectStatus": "notManufacturable"
+  },
+  {
+    "name": "อ่านรหัสที่สั่งสายยาว 3 เมตร (ราคาสายมาจากชีต TS-21+22+25)",
+    "source": "TS-04!A7 ราคาตั้ง Standard คือ `6x100+1M` · TS-21+22+25!A26:B29 สายสแตนเลสถัก 80 บาท/เมตร",
+    "kind": "อ่านจากรหัส",
+    "code": "TSK-04(S2)6x100+3M",
+    "cfg": {
+      "model": "TSK-04",
+      "axes": { "thread": "1/4”", "D": "6" },
+      "dims": { "L1": 100, "cable_m": 3 }
+    },
+    "expectPrice": 775,
+    "show": true
+  },
+  {
+    "name": "รหัสเกลียวมิล (M8) ต้องไม่ได้ราคาเงียบ ๆ",
+    "source": "TS-04!C9:H9 มีแต่เกลียวนิ้ว 1/8\"–1\" · ของจริงในฐานสินค้ามี (M8) 184 รหัส",
+    "kind": "อ่านจากรหัส",
+    "code": "TSJ-04(M8)5x150+3M-S000",
+    "cfg": { "model": "TSK-04", "axes": { "D": "5" }, "dims": { "L1": 150, "cable_m": 3 } },
+    "expectStatus": "notManufacturable",
+    "show": true
+  },
+  {
+    "name": "รหัสหน้าแปลนนอกรายการ → ต้องขอราคา ไม่ใช่คิดราคาโดยไม่มีหน้าแปลน",
+    "source": "TW!L34 หน้าแปลนนอกเหนือจากนี้ให้ขอราคาจากผลิต 2",
+    "kind": "อ่านจากรหัส",
+    "code": "TSP-18(F5)6-6x100+50",
+    "cfg": {
+      "model": "TS-18",
+      "axes": { "sensor": "PT100 Class B (TSP)", "flange": "F5", "D": "6" },
+      "dims": { "L1": 100, "L2": 50 }
+    },
+    "expectStatus": "quoteOnRequest",
+    "show": true
   }
 ]

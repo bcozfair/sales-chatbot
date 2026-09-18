@@ -276,6 +276,26 @@ function pairsToText(m: Record<string, number> | undefined): string {
     .join('; ');
 }
 
+/** เหมือน pairsToText แต่ค่าเป็นข้อความ (ชื่อตัวเลือกของแกน เช่น ชนิดสาย) */
+function strPairsToText(m: Record<string, string> | undefined): string {
+  if (!m) return String();
+  return Object.entries(m)
+    .map(([k, v]) => k + String.fromCharCode(61) + v)
+    .join('; ');
+}
+
+function textToStrPairs(s: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const part of s.split(';')) {
+    const i = part.indexOf('=');
+    if (i < 0) continue;
+    const k = part.slice(0, i).trim();
+    const v = part.slice(i + 1).trim();
+    if (k !== '' && v !== '') out[k] = v;
+  }
+  return out;
+}
+
 function textToPairs(s: string): Record<string, number> {
   const out: Record<string, number> = {};
   for (const part of s.split(';')) {
@@ -367,6 +387,7 @@ function modelsSheet(book: PriceBook): SheetTable {
       m.sheet ?? '',
       (m.aliases ?? []).join(', '),
       pairsToText(m.standard),
+      strPairsToText(m.axisDefaults),
       m.base.kind === 'matrix' ? 'ตาราง' : m.base.kind === 'banded' ? 'ช่วง' : `ใช้ฐานของ ${m.base.model}`
     ]);
   }
@@ -379,6 +400,7 @@ function modelsSheet(book: PriceBook): SheetTable {
       { label: 'ชีตต้นทาง', width: 12 },
       { label: 'รหัสอื่นที่ใช้ตารางเดียวกัน', width: 24 },
       { label: 'สเปกที่รวมในราคาตั้งแล้ว', width: 30 },
+      { label: 'ตัวเลือกที่ใช้เมื่อไม่ได้ระบุ', width: 28 },
       { label: 'แบบของราคาตั้ง', width: 18 }
     ],
     rows,
@@ -722,6 +744,10 @@ export function sheetsToBook(grids: RawSheet[]): { book: PriceBook | null; issue
       sheet: toText(cell(row, mh.index, 'ชีตต้นทาง')) || undefined,
       aliases: aliases.length ? aliases : undefined,
       standard: textToPairs(toText(cell(row, mh.index, 'สเปกที่รวมในราคาตั้งแล้ว'))),
+      axisDefaults: (() => {
+        const d = textToStrPairs(toText(cell(row, mh.index, 'ตัวเลือกที่ใช้เมื่อไม่ได้ระบุ')));
+        return Object.keys(d).length ? d : undefined;
+      })(),
       base: { kind: 'matrix', axes: [], cells: {} }, // ถูกแทนด้วยของจริงจากชีต ฐาน-* ข้างล่าง
       adders: [],
       constraints: []

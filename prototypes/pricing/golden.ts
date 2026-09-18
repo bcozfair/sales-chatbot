@@ -12,6 +12,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseProductCode } from './code.js';
 import { computePrice, formatOutcome } from './engine.js';
 import type { PriceBook, ProductConfig } from './types.js';
 
@@ -24,6 +25,8 @@ interface Case {
   source: string;
   kind: string;
   cfg: ProductConfig;
+  /** รหัสสินค้าที่ต้องอ่านแล้วได้ `cfg` ข้างบนนี้เป๊ะ — มีเฉพาะเคสที่เขียนเป็นรหัสจริงได้ */
+  code?: string;
   expectPrice?: number;
   expectStatus?: 'priced' | 'quoteOnRequest' | 'notManufacturable';
   /** พิมพ์ breakdown เต็มออกมาด้วย */
@@ -74,6 +77,45 @@ for (const c of CASES) {
 // ไม่ใช่ทุกตัวอย่างในชีตจะยังตรงกับตารางของตัวเอง — ตัวอย่างถูกเขียนครั้งเดียว
 // แต่ตารางราคาถูกแก้เรื่อย ๆ ⇒ ต้องแยก "เฉลยที่เชื่อได้" ออกจาก "เฉลยที่ค้างมาจากราคาเก่า"
 // ก่อนเอาไปใช้เป็น golden ไม่งั้นจะไปแก้ engine ให้ตรงกับหมายเหตุที่ล้าสมัย
+
+// ── ด่านตรวจตัวอ่านรหัส ──────────────────────────────────────────────────────
+//
+// เทียบ "สเปกที่อ่านได้จากรหัส" กับ "สเปกที่คนเขียนไว้ในเคส" ทีละคีย์
+// เทียบราคาอย่างเดียวไม่พอ เพราะอ่านผิดคนละท่อนแล้วบังเอิญได้ราคาเท่ากันเป็นไปได้
+// (เช่น อ่านความยาวไม่เจอ แล้วไปเจอส่วนบวกเพิ่มอีกตัวที่บังเอิญเท่ากัน)
+
+const sortKeys = (o: unknown): unknown => {
+  if (Array.isArray(o)) return [...o].sort();
+  if (o && typeof o === 'object') {
+    return Object.fromEntries(
+      Object.entries(o as Record<string, unknown>)
+        .filter(([, v]) => !(v && typeof v === 'object' && Object.keys(v).length === 0))
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([k, v]) => [k, sortKeys(v)])
+    );
+  }
+  return o;
+};
+const same = (a: unknown, b: unknown) => JSON.stringify(sortKeys(a)) === JSON.stringify(sortKeys(b));
+
+console.log('─'.repeat(70));
+console.log('ด่านตรวจตัวอ่านรหัส — รหัสต้องแปลงเป็นสเปกเดียวกับที่เขียนไว้ในเคส');
+console.log('─'.repeat(70));
+for (const c of CASES.filter((x) => x.code)) {
+  const parsed = parseProductCode(c.code!, book);
+  const ok = parsed.cfg !== undefined && same(parsed.cfg, c.cfg);
+  ok ? pass++ : fail++;
+  const unknown = parsed.parts.filter((p) => p.kind === 'unknown').map((p) => p.text);
+  console.log(`${ok ? '✓' : '✗ FAIL'}  ${c.code}`);
+  if (!ok) {
+    console.log(`   คาดหวัง ${JSON.stringify(sortKeys(c.cfg))}`);
+    console.log(`   อ่านได้ ${JSON.stringify(sortKeys(parsed.cfg))}`);
+    if (parsed.problems.length) console.log(`   ปัญหา: ${parsed.problems.join(' · ')}`);
+  } else if (unknown.length) {
+    console.log(`   (มีท่อนที่อ่านไม่ออกและถูกรายงานไว้: ${unknown.join(' · ')})`);
+  }
+}
+console.log('');
 
 console.log('─'.repeat(70));
 console.log('ตรวจตัวอย่างในชีตที่ "ไม่ควรเชื่อ" — TS-18');
