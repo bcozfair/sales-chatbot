@@ -1,5 +1,5 @@
 /**
- * ด่านของโมดูล "คิดราคาสินค้าสั่งทำ" — พิสูจน์สายที่ Node ตรวจได้ทั้งเส้น
+ * ด่านของโมดูล "คิดราคาสินค้า" — พิสูจน์สายที่ Node ตรวจได้ทั้งเส้น
  *
  *   pricebook/book.json → ตาราง pricing_subcodes → engine → ราคาบนจอ
  *
@@ -54,7 +54,7 @@ async function cleanupTestRows() {
 }
 
 async function main() {
-  console.log(`\n${BOLD}ด่านโมดูลคิดราคาสินค้าสั่งทำ${RESET}\n`);
+  console.log(`\n${BOLD}ด่านโมดูลคิดราคาสินค้า${RESET}\n`);
 
   console.log(`${BOLD}1. สมุดราคา${RESET}`);
   const status = bookStatus();

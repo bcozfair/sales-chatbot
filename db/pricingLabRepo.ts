@@ -2,7 +2,7 @@ import { pool } from '../config/db.js';
 import type { SubCode, SubCodeEffect } from '../services/pricingLab/types.js';
 
 /**
- * คำสั่ง SQL ของโมดูล "คิดราคาสินค้าสั่งทำ" — ตาราง `pricing_subcodes` ตารางเดียว
+ * คำสั่ง SQL ของโมดูล "คิดราคาสินค้า" — ตาราง `pricing_subcodes` ตารางเดียว
  *
  * ⚠️ ไฟล์ใหม่แยกจาก db/repositories.ts โดยเจตนา (เหตุผลเดียวกับ db/logRepositories.ts) —
  *   ไฟล์นั้นเป็นเส้นทางที่ระบบหลักใช้ทุกวินาที การไปแทรกโค้ดของโมดูลทดลองในนั้น

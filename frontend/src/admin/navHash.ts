@@ -21,7 +21,7 @@ import { readHash } from './logs/useHashState';
 export type MainTab =
   | 'dashboard' | 'quoterequest' | 'approvals' | 'quotations' | 'salespersons' | 'promotions' | 'users' | 'blacklist'
   | 'rolepermissions'
-  // โมดูลทดลอง "คิดราคาสินค้าสั่งทำ" (services/pricingLab/) — ถอดออก = ลบคำนี้กับแถวใน TAB_SLUG
+  // โมดูลทดลอง "คิดราคาสินค้า" (services/pricingLab/) — ถอดออก = ลบคำนี้กับแถวใน TAB_SLUG
   | 'pricing'
   // สองหน้าข้อมูลอ้างอิงจาก Odoo (อ่านอย่างเดียว)
   | 'productsdata' | 'customersdata'

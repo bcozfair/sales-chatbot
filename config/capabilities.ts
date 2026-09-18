@@ -378,7 +378,7 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     // และเจ้าของเปิดให้ role อื่นเองได้จากหน้าเมทริกซ์สิทธิ์เมื่อพร้อมให้คนทดลอง
     key: 'page.pricing',
     group: 'page',
-    label: 'คิดราคาสินค้าสั่งทำ',
+    label: 'คิดราคาสินค้า',
     modes: SWITCH,
     defaults: switchFor('allow', 'deny', 'deny', 'deny'),
     enforcedAt: 'app.use(/api/admin/pricing) — ด่านวางก่อนจุด mount ของ pricingLabRouter',

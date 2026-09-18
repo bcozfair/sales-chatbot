@@ -22,7 +22,7 @@ import { ShippingFee } from './ShippingFee';
 import { SyncPanel } from './SyncPanel';
 import { ProductsDirectory } from './ProductsDirectory';
 import { CustomersDirectory } from './CustomersDirectory';
-// โมดูลทดลอง "คิดราคาสินค้าสั่งทำ" — ถอดออก = ลบ import นี้ + 1 เมนู + 1 แถวใน PAGE_TITLES + 1 สาขา render
+// โมดูลทดลอง "คิดราคาสินค้า" — ถอดออก = ลบ import นี้ + 1 เมนู + 1 แถวใน PAGE_TITLES + 1 สาขา render
 import { PricingLab } from './pricingLab/PricingLab';
 import { LogsShell } from './logs/LogsShell';
 import type { LogTab } from './logs/LogsShell';
@@ -62,7 +62,7 @@ import {
   Database,
   Package,
   ShieldCheck,
-  Calculator,
+  CircleDollarSign,
 } from 'lucide-react';
 
 // MainTab / SubTab ย้ายไป navHash.ts แล้ว เพราะชื่อแท็บกลายเป็นส่วนหนึ่งของ URL (ดูเหตุผลในไฟล์นั้น)
@@ -129,7 +129,11 @@ const NAV_GROUPS: { key: string; label: string; icon: typeof LayoutDashboard; it
       { tab: 'quotations', label: 'ประวัติใบเสนอราคา', icon: FileText, roles: ['admin', 'approver', 'subadmin'], cap: 'page.quotations' },
       // เครื่องมือที่ใช้ตอนกำลังทำใบ ไม่ใช่ค่าที่ตั้งทิ้งไว้ให้ระบบใช้เอง จึงอยู่กลุ่มนี้ไม่ใช่ "เงื่อนไข & กฎ"
       // (เจ้าของเคาะ 2026-09-18) · ค่าเริ่มต้นคือ admin คนเดียว เพราะเป็นหน้าที่ยังไม่เคยมี
-      { tab: 'pricing', label: 'คิดราคาสินค้าสั่งทำ', icon: Calculator, roles: ['admin'], cap: 'page.pricing' },
+      // ไอคอนเคยเป็น `Calculator` แล้วเปลี่ยนเมื่อ 2026-09-19 เพราะ **บนแถบนี้ไอคอนสูง 18px
+      // และปุ่มกด 7 จุดของมันเป็น `h.01` ⇒ หายหมดที่ขนาดนั้น เหลือเป็นกล่องสี่เหลี่ยมเปล่า**
+      // — ตัวที่เลือกมาแทนต้องเป็นทรงที่ยังอ่านออกตอนย่อ (เจ้าของเลือกจาก mockup/ic-index.html)
+      // ส่วน `Calculator` ย้ายไปอยู่บนปุ่ม "คิดราคา" ในหน้านั้นแทน ซึ่งใหญ่พอให้เห็นลายจริง
+      { tab: 'pricing', label: 'คิดราคาสินค้า', icon: CircleDollarSign, roles: ['admin'], cap: 'page.pricing' },
     ],
   },
   {
@@ -210,7 +214,7 @@ const PAGE_TITLES: Record<MainTab, string> = {
   users: 'จัดการผู้ใช้งานระบบ',
   rolepermissions: 'สิทธิ์ตามบทบาท',
   blacklist: 'บัญชีห้ามเสนอราคา',
-  pricing: 'คิดราคาสินค้าสั่งทำ',
+  pricing: 'คิดราคาสินค้า',
   productsdata: 'ข้อมูลสินค้า',
   customersdata: 'ข้อมูลลูกค้า & ผู้ติดต่อ',
   traffic: 'รายงานการใช้งาน',

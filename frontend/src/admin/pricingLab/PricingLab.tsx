@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Calculator, AlertTriangle, Info, Plus, Search, Tag } from 'lucide-react';
+import { Calculator, CircleDollarSign, AlertTriangle, Info, Plus, Tag } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { PageHeader } from '../PageHeader';
 import { Button } from '../Button';
@@ -9,7 +9,7 @@ import { SubCodeModal } from './SubCodeModal';
 import { EFFECT_TH, type Overview, type ParsedCode, type PriceOutcome, type SubCode } from './types';
 
 /**
- * หน้า "คิดราคาสินค้าสั่งทำ" — โมดูลทดลองที่ถอดออกได้ทั้งก้อน
+ * หน้า "คิดราคาสินค้า" — โมดูลทดลองที่ถอดออกได้ทั้งก้อน
  *
  * เจ้าของสั่ง 2026-09-18 · เคาะหน้าตาจาก mockup/pl-pricing.html วันเดียวกัน
  * **เฟสแรกยังไม่ต่อกับใบเสนอราคา — คิดราคาให้ดูอย่างเดียว**
@@ -124,8 +124,8 @@ export const PricingLab: React.FC = () => {
   return (
     <div className="space-y-3.5">
       <PageHeader
-        icon={Calculator}
-        title="คิดราคาสินค้าสั่งทำ"
+        icon={CircleDollarSign}
+        title="คิดราคาสินค้า"
         description={
           overview?.book.ok
             ? `สมุดราคา ${overview.book.models} รุ่น · ${overview.version ?? ''} · ยังไม่ต่อกับใบเสนอราคา`
@@ -151,7 +151,7 @@ export const PricingLab: React.FC = () => {
               placeholder="เช่น TSK-14 6x200+150-BU"
             />
           </div>
-          <Button variant="primary" size="md" icon={Search} busy={busy}
+          <Button variant="primary" size="md" icon={Calculator} busy={busy}
                   onClick={() => void quote(code)} disabled={!!bookMissing}>
             คิดราคา
           </Button>

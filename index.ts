@@ -227,7 +227,7 @@ app.use('/api/admin/data/products', adminAuthMiddleware, requireCapability('page
 app.use('/api/admin/data/customers', adminAuthMiddleware, requireCapability('page.customersdata'));
 app.use('/api/admin/data', adminAuthMiddleware, dataDirectoryRouter);
 
-// ── โมดูลทดลอง "คิดราคาสินค้าสั่งทำ" — ดู routes/pricingLab.ts ──────────────────────────
+// ── โมดูลทดลอง "คิดราคาสินค้า" — ดู routes/pricingLab.ts ──────────────────────────────
 // เจ้าของสั่ง 2026-09-18 ให้เอาเข้าหน้าแอดมินจริงเพื่อทดลองใช้หลังล็อกอิน **ยังไม่ต่อกับใบเสนอราคา**
 // ถอนโมดูลออก = ลบ 2 บรรทัดนี้ (import ด้านบน + บรรทัดล่าง) + 1 ช่องใน capabilities.ts
 // + 1 เมนูใน AdminApp.tsx + 4 โฟลเดอร์/ไฟล์ของโมดูล + DROP TABLE pricing_subcodes
