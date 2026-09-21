@@ -888,7 +888,9 @@ export const Quotations: React.FC = () => {
                   >
                     สถานะ Odoo {renderSortIcon('odoo_exported_at')}
                   </th>
-                  <th className="px-4 py-3 text-center whitespace-nowrap">จัดการ</th>
+                  {/* ชิดขวา ไม่ใช่กึ่งกลาง — จำนวนปุ่มต่อแถวไม่เท่ากัน (ใบไม่มีเลขที่ไม่มีปุ่ม PDF)
+                      ถ้าจัดกึ่งกลาง ถังขยะของแต่ละแถวจะเยื้องกันจนไล่กดตามแนวตั้งไม่ได้ */}
+                  <th className="px-4 py-3 text-right whitespace-nowrap">จัดการ</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -997,9 +999,9 @@ export const Quotations: React.FC = () => {
                           })()}
                         </td>
 
-                        {/* Actions */}
-                        <td className="px-4 py-2.5 text-center whitespace-nowrap">
-                          <div className="flex items-center justify-center gap-2">
+                        {/* Actions — ชิดขวาให้ถังขยะของทุกแถวอยู่แนวเดียวกัน (ดูหัวคอลัมน์) */}
+                        <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-2">
                             {quote.quotation_no && (
                               <a
                                 href={`/download-pdf/${quote.id}/${encodeURIComponent(quote.quotation_no)}`}
