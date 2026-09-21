@@ -42,7 +42,8 @@ import { Button } from './Button';
 import { ComboBox, type ComboOption } from './PersonComboBox';
 import { ConfirmIssueModal } from './ConfirmIssueModal';
 import { describeApiError } from './apiError';
-import { LocalContactModal, DeleteContactModal, isLocalContactId } from './LocalContactModal';
+import { LocalContactModal, DeleteContactModal } from './LocalContactModal';
+import { isLocalContactId } from './localContacts';
 import {
   AlertCircle,
   AlertTriangle,
@@ -2161,12 +2162,15 @@ export const QuoteRequest: React.FC = () => {
    * ⚠️ ค่าเครดิตที่ตั้งทับอยู่ในลิสต์ของ effect ด้วย — `has_credit_terms` ของก้อนนี้คิดจาก
    *    "ค่าที่ใบจะใช้จริง" ไม่ใช่ของลูกค้าเสมอไป (กติกาเดียวกับที่ /preview ใช้)
    */
-  const [party, setParty] = useState<PreviewResult['customer'] | null>(null);
+  /**
+   * เก็บคู่กับ "คีย์ของคนที่ค่านี้เป็นของเขา" ไม่ใช่ก้อนเปล่า ๆ — แล้วอ่านผ่าน `partyBlock`
+   * ซึ่งทิ้งของที่คีย์ไม่ตรงทันที ⇒ ค่าของผู้ติดต่อคนก่อนไม่มีทางค้างบนจอแม้แต่เฟรมเดียว
+   * โดยไม่ต้องล้าง state ในตัว effect (ซึ่งกฎ react-hooks/set-state-in-effect ปฏิเสธ)
+   */
+  const [party, setParty] = useState<{ key: string; block: PreviewResult['customer'] } | null>(null);
+  const partyKey = customerId !== null && contactId !== null ? `${customerId}:${contactId}` : '';
   useEffect(() => {
-    if (customerId === null || contactId === null) {
-      setParty(null);
-      return;
-    }
+    if (customerId === null || contactId === null) return;
     let cancelled = false;
     (async () => {
       try {
@@ -2177,14 +2181,16 @@ export const QuoteRequest: React.FC = () => {
         if (paymentTerms !== null) qs.set('payment_terms_override', paymentTerms);
         const res = await fetch(`/api/admin/webquote/party?${qs.toString()}`, { headers: authHeaders });
         const data = res.ok ? await res.json() : null;
-        if (!cancelled) setParty(data?.customer ?? null);
+        if (!cancelled && data?.customer) setParty({ key: `${customerId}:${contactId}`, block: data.customer });
       } catch {
-        // อ่านไม่ได้ = หัวใบกลับไปเป็น "—" เหมือนเดิม ไม่ใช่ค้างค่าของผู้ติดต่อคนก่อน
-        if (!cancelled) setParty(null);
+        // อ่านไม่ได้ = หัวใบคงเป็น "—" เหมือนเดิม · ของเก่าไม่ค้างอยู่แล้วเพราะคีย์ไม่ตรง
       }
     })();
     return () => { cancelled = true; };
   }, [customerId, contactId, paymentTerms, authHeaders]);
+
+  /** ก้อนของ "คนที่เลือกอยู่ตอนนี้" เท่านั้น — คีย์ไม่ตรง = ของรอบก่อน ทิ้ง */
+  const partyBlock = party && party.key === partyKey ? party.block : null;
 
   // ค้นบริษัทเพิ่ม — หน่วง 300ms เท่ากับช่องค้นสินค้า ไม่งั้นยิงคิวรีทุกตัวอักษรที่พิมพ์
   useEffect(() => {
@@ -3024,7 +3030,7 @@ export const QuoteRequest: React.FC = () => {
   /** ทุกอย่างที่เอกสารต้องใช้เพื่อเป็นฟอร์ม — ก้อนเดียว ส่งให้ทุกใบใช้ร่วมกัน */
   const docCtx: DocCtx = {
     // พรีวิวมาแล้วใช้ของพรีวิว (ก้อนเดียวกัน แต่สดกว่าเพราะคิดพร้อมกับรายการ) ไม่มีก็ใช้ /party
-    customer: preview?.customer ?? party,
+    customer: preview?.customer ?? partyBlock,
     identity,
     svcCfg,
     matched: matched.byRow,

@@ -370,10 +370,16 @@ async function main(): Promise<void> {
     const msSeeded = await timedBuild(client, 'cdv_after');
 
     // ── ข้อ 1: แถวของ Odoo ต้องไม่ขยับแม้แต่บิตเดียว ───────────────────────
+    // ⚠️ ต้องกรอง `source <> 'local'` **ทั้งสองฝั่ง** — ฐานที่มีผู้ติดต่อ local ค้างอยู่ก่อนแล้ว
+    //    (เช่น คนที่แอดมินเพิ่มไว้จริง) จะทำให้ cdv_before มีแถว local ที่ฝั่งขวากรองทิ้ง
+    //    แล้วด่านฟ้องว่า "แถวของ Odoo หาย 1" ทั้งที่ไม่มีแถวของ Odoo หายสักแถว
+    //    (เจอจริง 2026-09-21 · ก่อนหน้านี้หมายเหตุด้านบนอ้างว่า "นับส่วนต่างเอา" ซึ่งข้อนี้ไม่ได้ทำ)
     const { rows: drift } = await client.query(
       `SELECT
-         (SELECT count(*)::int FROM (TABLE cdv_before EXCEPT ALL SELECT * FROM cdv_after WHERE source <> 'local') a) AS lost,
-         (SELECT count(*)::int FROM (SELECT * FROM cdv_after WHERE source <> 'local' EXCEPT ALL TABLE cdv_before) b)  AS gained`
+         (SELECT count(*)::int FROM (SELECT * FROM cdv_before WHERE source <> 'local'
+                              EXCEPT ALL SELECT * FROM cdv_after  WHERE source <> 'local') a) AS lost,
+         (SELECT count(*)::int FROM (SELECT * FROM cdv_after  WHERE source <> 'local'
+                              EXCEPT ALL SELECT * FROM cdv_before WHERE source <> 'local') b) AS gained`
     );
     if (drift[0].lost === 0 && drift[0].gained === 0) {
       ok('แถวของ Odoo ไม่ขยับสักบิตหลังมีแถว local', `(เทียบสองทาง ${beforeCount[0].n} แถว × 24 คอลัมน์)`);

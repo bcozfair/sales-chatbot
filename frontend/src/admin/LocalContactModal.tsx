@@ -43,14 +43,6 @@ import { Modal } from './Modal';
 import { Button } from './Button';
 import { describeApiError } from './apiError';
 
-/** ผู้ติดต่อที่แอดมินเพิ่มเองเริ่มที่ 900,000,001 — ข้อตกลงเดียวกับ CHECK `local_contacts_id_range` */
-export const LOCAL_CONTACT_ID_MIN = 900000000;
-
-/** คนที่เลือกอยู่เป็นคนที่เราเพิ่มเองไหม — ตัวตัดสินว่าจะโชว์ปุ่มแก้/ลบข้างช่องหรือไม่ */
-export function isLocalContactId(id: number | null | undefined): id is number {
-  return typeof id === 'number' && Number.isFinite(id) && id >= LOCAL_CONTACT_ID_MIN;
-}
-
 /** แถวที่ server คืนกลับมา — เท่าที่หน้าจอใช้ */
 interface ContactBrief {
   contact_id: number;
