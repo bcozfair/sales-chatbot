@@ -165,7 +165,7 @@ const MultiSelectSearch: React.FC<MultiSelectSearchProps> = ({
             <button
               type="button"
               onMouseDown={() => addValue(query.trim())}
-              className="w-full text-left px-4 py-2.5 text-xs text-[var(--brand-fg)] bg-emerald-55/30 hover:bg-emerald-50 transition-colors font-semibold flex items-center justify-between"
+              className="w-full text-left px-4 py-2.5 text-xs text-[var(--brand-fg)] bg-emerald-50/30 hover:bg-emerald-50 transition-colors font-semibold flex items-center justify-between"
             >
               <span>เพิ่มค่ากำหนดเอง: "{query.trim()}"</span>
               <Plus className="w-3.5 h-3.5" />
@@ -179,7 +179,7 @@ const MultiSelectSearch: React.FC<MultiSelectSearchProps> = ({
             </div>
           ) : results.length === 0 ? (
             !query.trim() ? (
-              <div className="p-3 text-center text-xs text-slate-450">
+              <div className="p-3 text-center text-xs text-slate-400">
                 เริ่มพิมพ์เพื่อค้นหาตัวเลือกในฐานข้อมูล
               </div>
             ) : null
@@ -312,11 +312,11 @@ const CustomerRefMultiSelect: React.FC<CustomerRefSelectProps> = ({
             </div>
           ) : results.length === 0 ? (
             !query.trim() ? (
-              <div className="p-3 text-center text-xs text-slate-450">
+              <div className="p-3 text-center text-xs text-slate-400">
                 เริ่มพิมพ์เพื่อค้นหาลูกค้าในฐานข้อมูล
               </div>
             ) : (
-              <div className="p-3 text-center text-xs text-slate-450">
+              <div className="p-3 text-center text-xs text-slate-400">
                 ไม่พบลูกค้าที่ค้นหา
               </div>
             )
@@ -1489,7 +1489,7 @@ export const Promotions: React.FC = () => {
             
             <div className="space-y-4">
               <div className="flex items-center gap-2.5 border-b border-slate-100 pb-3">
-                <div className="w-9 h-9 rounded-xl bg-emerald-50 text-[var(--brand-fg)] flex items-center justify-center border border-emerald-105">
+                <div className="w-9 h-9 rounded-xl bg-emerald-50 text-[var(--brand-fg)] flex items-center justify-center border border-emerald-100">
                   <Info className="w-5 h-5" />
                 </div>
                 <div>

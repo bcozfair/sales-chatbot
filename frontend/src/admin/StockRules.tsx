@@ -256,7 +256,7 @@ const ProductMultiSelect: React.FC<ProductMultiSelectProps> = ({
         type="button"
         disabled={isDisabled}
         onClick={() => handleToggleProduct(prod)}
-        className={`w-full text-left px-4 py-2.5 text-xs hover:bg-slate-50 transition-colors flex items-center justify-between gap-3 ${isDisabled ? 'opacity-60 cursor-not-allowed bg-slate-55' : ''
+        className={`w-full text-left px-4 py-2.5 text-xs hover:bg-slate-50 transition-colors flex items-center justify-between gap-3 ${isDisabled ? 'opacity-60 cursor-not-allowed bg-slate-50' : ''
           }`}
       >
         <div className="flex flex-col gap-0.5 flex-1 min-w-0">
@@ -322,7 +322,7 @@ const ProductMultiSelect: React.FC<ProductMultiSelectProps> = ({
                   ? 'border-red-300 bg-red-50/10'
                   : selectedProducts.length > 0
                     ? 'border-slate-300 bg-card'
-                    : 'border-slate-200 bg-slate-55 hover:border-slate-300'
+                    : 'border-slate-200 bg-slate-50 hover:border-slate-300'
             }`}
           onClick={() => !disabled && setIsOpen(true)}
         >
@@ -355,7 +355,7 @@ const ProductMultiSelect: React.FC<ProductMultiSelectProps> = ({
         {isOpen && !disabled && (
           <div className="absolute z-50 mt-1.5 w-full bg-card border border-slate-200 rounded-xl shadow-xl max-h-80 overflow-hidden flex flex-col">
             {results.length > 0 && (
-              <div className="p-2 bg-slate-50 flex items-center justify-between gap-2 text-xs border-b border-slate-150 flex-shrink-0">
+              <div className="p-2 bg-slate-50 flex items-center justify-between gap-2 text-xs border-b border-slate-200 flex-shrink-0">
                 <span className="text-slate-500 font-medium">
                   พบ {totalFound} รายการ{isTruncated ? ` (แสดง ${results.length})` : ''}
                 </span>
