@@ -1478,7 +1478,9 @@ COALESCE(q.customer_sales_team, st.sales_team)   -- ← ที่จุดปร
 > **ความหมายของสถานะ:** ⬜ ยังไม่เริ่ม · 🟨 โค้ดเสร็จและ push ขึ้น `dev` แล้ว แต่ยังมีด่านที่
 > **ทำบนเครื่อง dev ไม่ได้** ค้างอยู่ · ✅ ผ่านด่านครบทุกตัวของเฟสนั้น · ⚪ ยกเลิก (v5 ไม่ใช้แล้ว)
 >
-> **เฟส H = 🟨** (2026-09-18) — โค้ด + migration `2026-09-18_03_quotations_customer_sales_team.sql`
+> **เฟส H = 🟨** (เขียน 2026-09-18 · **merge เข้า `dev` 2026-09-21** — ก่อนหน้านั้นค้างอยู่บน branch
+> ของ worktree ไม่ใช่บน `dev` ทั้งที่ไฟล์นี้เขียนว่า 🟨 ซึ่งแปลว่า "ขึ้น `dev` แล้ว" ⇒ ที่มาของสถานะ
+> ต้องอ้าง `git log` ไม่ใช่ความจำ) — โค้ด + migration `2026-09-18_03_quotations_customer_sales_team.sql`
 > เสร็จและด่านผ่านครบ **บนเครื่อง dev**: `diag:odoo-export` เต็มคอร์ปัส QP 1,386 ใบ / QT 545 ใบ
 > ได้ไฟล์ **md5 เท่าเดิมทุกไบต์** ก่อน–หลัง (ใบเก่าไม่มีค่าตรึง ⇒ ถอยไป join สด) ·
 > `diag:confirm-race` ผ่านเท่ากันทั้งก่อน (เซิร์ฟเวอร์โค้ดเก่า) และหลัง · `diag:web-quote` 133/133
@@ -1486,7 +1488,8 @@ COALESCE(q.customer_sales_team, st.sales_team)   -- ← ที่จุดปร
 > รัน `diag:odoo-export` ทั้ง qp/qt + `diag:confirm-race` บน server อีกรอบ **ก่อนและหลัง deploy**
 > · จำลองอาการ "ผู้ติดต่อหายจาก view" ได้ด้วย `scripts/dev/seedPhaseH.ts` (เครื่อง dev เท่านั้น)
 >
-> **เฟส I = ⬜ แต่ก้อน I1 เสร็จแล้วบนเครื่อง dev** (2026-09-18) — เฟสนี้ถูกซอยเป็น 5 ก้อนที่ขึ้น prod
+> **เฟส I = ⬜ แต่ก้อน I1 เสร็จแล้วบนเครื่อง dev** (เขียน 2026-09-18 · merge เข้า `dev` 2026-09-21)
+> — เฟสนี้ถูกซอยเป็น 5 ก้อนที่ขึ้น prod
 > เดี่ยวได้ (ตาราง §8 ของ [แผนของโมดูล](plan-local-contacts.md)) · **I1 = ชั้นฐานข้อมูลล้วน ยังไม่มี
 > ใครเรียก**: migration `2026-09-18_04_local_contacts.sql` (ตาราง + Arm 3 + audit) · watermark ใน
 > `refreshCustomerDirectory.ts` · `db/localContactsRepo.ts` · ด่านใหม่ `npm run diag:local-contacts`
