@@ -151,7 +151,15 @@ npm run logworker                                          # worker เขีย
   ไม่งั้นผู้ติดต่อที่เพิ่งเพิ่มจะขยับค่าระดับบริษัทและคำตอบของด่านเครดิตได้ · แถวใหม่ต้องเขียนสองที่
   (`local_contacts` + `ensureDirectoryRow()` ลง `customers_data_view`) เพราะ rebuild กินเวลาถึง 10 นาที
   · ทีมขายของแถว local **สืบทอดจากบริษัทตอนอ่าน ไม่เก็บซ้ำ** และกติกาต้องตรงกันทั้งสองฝั่งเป๊ะ
-  · gate: `npm run diag:local-contacts`
+  **ตั้งแต่ 2026-09-21 "เข้า Odoo แล้วหรือยัง" ระบบตอบเอง — ห้ามเพิ่มปุ่มให้คนติ๊ก** เพราะคนที่
+  คีย์ชื่อผิดแล้วกดติ๊กว่าเสร็จจะทำให้ระบบเชื่อว่าพร้อม แล้วปล่อยใบเข้าไฟล์ปกติไปตกที่ Odoo
+  โดยไม่มีใครรู้สาเหตุ · สองสัญญาณอยู่ที่ `reconcileLocalContactOdooLinks()` เรียกท้ายรอบ sync
+  **หลัง** `refreshCustomerDataView()` และ `reconcileQuotationOdooLinks()` (A เทียบรายชื่อที่เพิ่ง
+  rebuild · B อ่าน `odoo_imported_at` ที่ตัวหลังเพิ่งเขียน) · เกณฑ์ของ A ต้อง **เท่ากับ CTE
+  `local_taken` ทุกตัวอักษร** ⇒ "มาร์กว่าเข้าแล้ว" กับ "หายจาก view" เป็นเรื่องเดียวกันเสมอ
+  · สิทธิ์ของ 5 endpoint คือ **`quote.manage_contacts` ไม่ใช่ `page.*`** เพราะด่าน
+  `diag:role-permissions` ข้อ 12 บังคับว่าทุกช่องกลุ่ม `page` ต้องมีเมนูใน `AdminApp.tsx` แล้ว
+  (หน้าจอมาที่ก้อน I4) · gate: `npm run diag:local-contacts`
 
 - **`date AT TIME ZONE` ที่ไม่มี `::timestamp` เพี้ยนตาม TZ ของโปรเซส — และห้ามเดาว่าฝั่งไหนเป็น
   โซนอะไร** เพราะเคยสลับด้านกันมาแล้ว วัด 2026-09-15: **host (เครื่อง dev) = `Etc/UTC`** ส่วน
@@ -426,6 +434,7 @@ chatbot/
 | สกัดคำสั่งซื้อด้วย AI | `services/quoteExtraction.ts` · `config/clients.ts` |
 | สร้าง/ยืนยัน/แก้ใบเสนอราคา | `services/quotationService.ts` · `services/quotationAgent.ts` (แก้ใบเดิม) |
 | หน้าเว็บ "ขอใบเสนอราคา" | `services/webQuoteService.ts` · `webIdentity.ts` · `chatChannel.ts` · `salespersonPicker.ts` |
+| เพิ่มผู้ติดต่อใหม่เอง (`local_contacts`) | `routes/localContacts.ts` · `services/localContacts.ts` · `db/localContactsRepo.ts` |
 | ค้นหา/จับคู่สินค้า/ลูกค้า | `services/productService.ts` · `services/customerService.ts` |
 | ราคา / โปรโมชัน | `utils/pricing.ts` · `utils/promotionValidator.ts` · `services/rules/` |
 | ห้ามเสนอราคา / เครดิตลูกค้า | `services/blacklistService.ts` · `services/creditHoldService.ts` |

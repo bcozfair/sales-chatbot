@@ -96,6 +96,7 @@ export type QuoteCapability =
   | 'quote.export_odoo'
   | 'quote.unmark_export'
   | 'quote.payment_terms_override'
+  | 'quote.manage_contacts'
   | 'quote.act_as_any_salesperson'
   | 'approval.decide'
   | 'users.set_issuer_identity';
@@ -250,6 +251,20 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     modes: SWITCH,
     defaults: switchFor('allow', 'allow', 'allow', 'deny'),
     enforcedAt: 'POST /api/admin/quotations/unmark-export · …/export-batches/:id/unmark',
+  },
+  {
+    key: 'quote.manage_contacts',
+    group: 'quote',
+    label: 'เพิ่ม/แก้ผู้ติดต่อใหม่ใต้บริษัทเดิม',
+    modes: SWITCH,
+    // เจ้าของเคาะ 2026-09-17: ฟีเจอร์นี้อยู่บนหน้าเว็บเท่านั้น ไม่เปิดให้ฝั่ง LINE
+    // เพราะคนใน LINE คือเซลส์ ไม่ใช่แอดมิน (docs/plan-local-contacts.md §9 ข้อ 1)
+    //
+    // ⚠️ "เพิ่มจาก LINE ไม่ได้" ≠ "ไม่โผล่ใน LINE" — ผู้ติดต่อที่แอดมินเพิ่มอยู่ใน
+    //    customers_data_view ⇒ โผล่ใน picker ของ LIFF และในแชทด้วย และเซลส์ออกใบให้คนนั้นได้
+    //    ช่องนี้คุมแค่ "ใครสร้างได้" ไม่ได้คุมว่า "ใครเห็น"
+    defaults: switchFor('allow', 'allow', 'allow', 'deny'),
+    enforcedAt: 'จุด mount /api/admin/webquote/contacts ใน index.ts (5 เส้น)',
   },
   {
     key: 'quote.payment_terms_override',

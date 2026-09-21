@@ -46,6 +46,7 @@ import {
   type DraftQuoteOverrides,
 } from './quotationService.js';
 import { ruleModesOf, can } from '../config/capabilities.js';
+import { isLocalContactId, ensureDirectoryRow, getLocalContactById } from '../db/localContactsRepo.js';
 import type { Role } from '../config/auth.js';
 import {
   buildApprovalItems,
@@ -761,7 +762,28 @@ export async function createDraft(params: {
 
   return runQueued(webUserId, async () => {
     const startedAt = Date.now();
-    const contact = await getContactById(contactId);
+    let contact = await getContactById(contactId);
+
+    // ── ผู้ติดต่อที่แอดมินเพิ่มเอง: เติมแถวกลับแล้วลองใหม่ครั้งเดียว ───────────────────
+    //  ช่องว่างที่ปิดตรงนี้กว้างแค่ ~2–3 วิ แต่เจ็บจริง: ถ้ารอบ rebuild ของ customers_data_view
+    //  เริ่ม `CREATE TABLE AS` ไปก่อนที่การเพิ่มผู้ติดต่อจะ commit แถวใหม่จะตกอยู่ในตารางเก่า
+    //  ที่กำลังจะถูก DROP ⇒ คนที่เพิ่งเพิ่มหายไปจนกว่าจะ rebuild รอบหน้า (≤10 นาที) และ
+    //  snapshot ของใบจะไม่มีชื่อผู้ติดต่อ · `ensureDirectoryRow()` idempotent อยู่แล้ว
+    //  (docs/plan-local-contacts.md §3.4)
+    //  ⚠️ ยิงเฉพาะเมื่อ contact_id >= 900,000,000 ⇒ ใบปกติทั้งหมดจ่าย 0 query
+    if (!contact && isLocalContactId(contactId)) {
+      const local = await getLocalContactById(contactId);
+      if (local) {
+        await ensureDirectoryRow({
+          contact_id: local.contact_id,
+          company_id: local.company_id,
+          contact_name: local.contact_name,
+          contact_phone: local.contact_phone,
+          contact_email: local.contact_email,
+        });
+        contact = await getContactById(contactId);
+      }
+    }
     if (!contact) throw new WebQuoteError('BAD_REQUEST', `ไม่พบผู้ติดต่อ id=${contactId}`, 400);
 
     // ผู้ติดต่อที่เลือกอาจอยู่ใต้ company_id ของสาขาอื่นในนิติบุคคลเดียวกัน — ผูกใบตามบริษัทของ

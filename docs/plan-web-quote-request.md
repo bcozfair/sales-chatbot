@@ -1497,8 +1497,14 @@ COALESCE(q.customer_sales_team, st.sales_team)   -- ← ที่จุดปร
 > และเวลา build ไม่ถอย (5,748 ms เดิม เทียบ 5,866 ms มี Arm 3 = ต่างกัน 2%)
 > · ด่านข้างเคียงผ่านครบ: `diag:credit-hold` · `diag:data-directory` · `diag:customer-search`
 > · **`diag:migrations` รันบนเครื่องนี้ไม่ได้** (เรียก `docker compose exec db`) ⇒ ต้องรันบน server
-> · **ที่ยังไม่เริ่ม: I2–I5** (repo/service/endpoint · ปุ่มในหน้าขอใบเสนอราคา · หน้ารายการงานค้าง +
-> ไฟล์ export · ธง `new_contact` เข้าคิวแก้มือ)
+> · **ก้อน I2 เสร็จบนเครื่อง dev 2026-09-21** — repo + service + 5 endpoint ใต้
+> `/api/admin/webquote/contacts` (ด่าน `quote.manage_contacts`) + `reconcileLocalContactOdooLinks()`
+> ท้ายรอบ sync · ด่าน `diag:local-contacts` ขยายเป็น **19/19** (ข้อ 1–9 ครบ) · ด่านข้างเคียงผ่าน:
+> `tsc --noEmit` · `diag:web-quote` 133/133 · `diag:role-permissions` 46/46 · `diag:odoo-export`
+> · `diag:customer-search` · `diag:credit-hold` · `diag:data-directory`
+> · **ยังไม่มี UI เรียกสักเส้น** ⇒ ขึ้น prod เดี่ยวได้โดยไม่มีใครเห็นอะไรเปลี่ยน
+> · **ที่ยังไม่เริ่ม: I3–I5** (ปุ่มในหน้าขอใบเสนอราคา · หน้ารายการงานค้าง + badge + ป้าย 🔴 ·
+> ธง `new_contact` เข้าคิวแก้มือ)
 >
 > **เฟส D = 🟨** — โค้ดครบและ push ขึ้น `dev` แล้ว (`services/webQuoteService.ts` · 4 route ·
 > `scripts/diag/webQuoteSmoke.ts`) แต่ **เขียนบน server ซึ่ง DB ยังไม่มีคอลัมน์ของเฟส B/B2**

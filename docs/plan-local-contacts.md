@@ -9,8 +9,22 @@
 > (เหลือรัน migration + ด่านซ้ำบน server ตอน deploy)
 > · **ก้อน I1 เสร็จบนเครื่อง dev** — migration `2026-09-18_04_local_contacts.sql` รันแล้ว · Arm 3
 > เข้า `customers_data_build` แล้ว · watermark เติมแล้ว · audit trigger ติดแล้ว · ด่านใหม่
-> `npm run diag:local-contacts` ผ่าน 6/6 · **I2–I5 ยังไม่เริ่ม**
+> `npm run diag:local-contacts` ผ่าน 6/6
+> · **ก้อน I2 เสร็จบนเครื่อง dev 2026-09-21** — `db/localContactsRepo.ts` (CRUD · รายการ · reconcile)
+> · `services/localContacts.ts` · `routes/localContacts.ts` (5 เส้นใต้ `/api/admin/webquote/contacts`)
+> · `reconcileLocalContactOdooLinks()` ต่อท้ายรอบ sync · ด่านขยายเป็น **19/19** (ข้อ 1–9 ครบ)
+> · **ยังไม่มี UI เรียกสักเส้น** — ปุ่มมาที่ I3 · หน้ารายการมาที่ I4 · **I3–I5 ยังไม่เริ่ม**
 > (รายละเอียดในตารางเฟสของ [แผนใหญ่](plan-web-quote-request.md) · เจ้าของเคาะลำดับไว้ที่ §7.6)
+>
+> **สองข้อที่ I2 ตัดสินต่างจากที่ §4.1 ร่างไว้ — และเหตุผล**
+> 1. **สิทธิ์เป็นช่อง `quote.manage_contacts` ไม่ใช่ `page.odoocontacts`** — ด่าน
+>    `diag:role-permissions` ข้อ 12 บังคับว่า *ทุกช่องกลุ่ม `page` ต้องมีเมนูของตัวเองใน
+>    `AdminApp.tsx`* การเปิดช่อง `page` ไว้ล่วงหน้าตอนที่ยังไม่มีหน้าจอจะทำให้ด่านล้มทั้งที่
+>    ไม่มีอะไรผิด ⇒ **I4 เพิ่ม `page.odoocontacts` พร้อมเมนูของมัน** แล้วซ้อนเป็นด่านที่สอง
+>    ที่จุด mount เดิม (เพิ่มได้ ไม่ต้องรื้อของเดิม) · ค่าเริ่มต้นของช่องนี้ = admin · approver ·
+>    subadmin ตรงตามที่เจ้าของเคาะ 2026-09-17 ทุกประการ
+> 2. **`GET /export` อยู่ใน I2 แล้ว** (เป็น 1 ใน 5 เส้นของ §4.1) ส่วนที่ I4 เหลือทำคือ *ปุ่ม*
+>    ที่เรียกมัน ไม่ใช่ตัวไฟล์
 >
 > ⚠️ **"เสร็จบนเครื่อง dev" ≠ "อยู่บน branch `dev`" — สองคำนี้เคยถูกสลับกันในไฟล์นี้เอง**
 > ระหว่าง 2026-09-18 ถึง 2026-09-21 งานทั้ง H และ I1 อยู่บน branch ของ worktree
@@ -650,7 +664,7 @@ merge เข้า branch `dev` 2026-09-21**
 | --- | --- | --- | --- |
 | **H** | ตรึงทีมขายตอนยืนยันใบ (เฟสอิสระ · ทำที่ server เพราะกระทบใบ LINE) | ใบเก่าไม่มีค่าที่ตรึง → `COALESCE` ตกกลับไปใช้ join สดทุกบิต | `diag:confirm-race` · `diag:odoo-export` **ก่อนและหลัง** |
 | **I1** ✅ dev | migration + Arm 3 + watermark + audit | ตารางว่าง ⇒ view ให้ผลเดิมทุกแถวทุกคอลัมน์ | `diag:local-contacts` ข้อ 1–3 · `diag:migrations` · `diag:customer-search` (ก่อน–หลัง) · `diag:credit-hold` · `diag:data-directory` |
-| **I2** | repo + service + 5 endpoint + reconcile ท้าย sync | ยังไม่มี UI เรียก · reconcile กับตารางว่าง = no-op | `npx tsc --noEmit` · `diag:local-contacts` ข้อ 4–8 |
+| **I2** ✅ dev | repo + service + 5 endpoint + reconcile ท้าย sync | ยังไม่มี UI เรียก · reconcile กับตารางว่าง = no-op | `npx tsc --noEmit` · `diag:local-contacts` ข้อ 4–8 |
 | **I3** | ปุ่ม + กล่องในหน้าขอใบเสนอราคา | **← ฟีเจอร์ใช้ได้จริงครั้งแรก** | `lint` · `build` · `diag:web-quote` |
 | **I4** | หน้ารายการงานค้าง + badge + ไฟล์ export + ป้าย 🔴 | หน้าใหม่ ไม่แตะของเดิม | `lint` · `build` · วัดที่ 390px |
 | **I5** | ธง `new_contact` → คิวแก้มือ + ตัวเลขพร้อม/ไม่พร้อมในเมนูส่งออก | ใบเก่าไม่มีธง ⇒ พฤติกรรมเดิมทุกใบ | `diag:confirm-race` · `diag:odoo-export` **ก่อนและหลัง** · `diag:web-quote` ข้อ 8 |
