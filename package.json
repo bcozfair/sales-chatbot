@@ -70,7 +70,8 @@
     "backfill:audit-actor": "tsx scripts/logworker/backfillActor.ts",
     "test": "echo \"Error: no test specified\" && exit 1",
     "diag:lc-ui": "tsx scripts/diag/lcUiProbe.ts",
-    "diag:oc-ui": "tsx scripts/diag/odooContactsUiProbe.ts"
+    "diag:oc-ui": "tsx scripts/diag/odooContactsUiProbe.ts",
+    "diag:dead-classes": "tsx scripts/diag/deadClasses.ts"
   },
   "dependencies": {
     "@line/bot-sdk": "^11.0.0",
