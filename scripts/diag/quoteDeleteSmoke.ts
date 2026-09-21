@@ -7,15 +7,16 @@
 //     และมัน **สร้างใบทดสอบของตัวเอง** ไม่ได้หยิบใบจริงมาลบ แม้จะ ROLLBACK อยู่ดีก็ตาม
 //
 //  ครอบคลุม: เลขที่ตรงเท่านั้นถึงลบได้ · พิมพ์ผิด/ตัวพิมพ์ไม่ตรง/มีช่องว่างเกิน = ไม่ลบอะไรเลย ·
-//            เลขที่ของ "ใบอื่น" ปนมาไม่ได้ · ใบที่ยังไม่มีเลขที่ลบทางนี้ไม่ได้ ·
+//            เลขที่ของ "ใบอื่น" ปนมาไม่ได้ · ใบที่ยังไม่มีเลขที่ลบได้ด้วยค่าว่าง แต่ค่าว่าง
+//            **ไม่ใช่กุญแจผีของใบที่มีเลขที่** ·
 //            audit_logs ได้ snapshot ทั้งใบในทรานแซกชันเดียวกัน · ประวัติการส่งออกไม่หายตามใบ ·
 //            การถอยส่งออกทั้งชุดยังทำงานได้หลังใบในชุดถูกลบ
-//  ให้รันซ้ำทุกครั้งที่แตะ deleteQuotationByNo, insertQuotationDeleteAudit
+//  ให้รันซ้ำทุกครั้งที่แตะ deleteQuotationConfirmed, insertQuotationDeleteAudit
 //  หรือ endpoint DELETE /api/admin/quotations/:id
 // ─────────────────────────────────────────────────────────────────────────────
 import { pool } from '../../config/db.js';
 import {
-  deleteQuotationByNo,
+  deleteQuotationConfirmed,
   insertExportBatch,
   insertExportLogRows,
   unmarkExportBatch,
@@ -63,25 +64,47 @@ try {
   };
 
   ok('พิมพ์เลขที่ผิดไป 1 ตัว → ไม่ลบ',
-    (await deleteQuotationByNo(client, idA, 'ZZTEST-0091')) === null && await stillThere(idA));
+    (await deleteQuotationConfirmed(client, idA, 'ZZTEST-0091')) === null && await stillThere(idA));
 
   ok('พิมพ์ถูกแต่เป็นตัวพิมพ์เล็ก → ไม่ลบ (เทียบตรงตัว ไม่ทำ case-insensitive)',
-    (await deleteQuotationByNo(client, idA, NO_A.toLowerCase())) === null && await stillThere(idA));
+    (await deleteQuotationConfirmed(client, idA, NO_A.toLowerCase())) === null && await stillThere(idA));
 
   ok('พิมพ์ถูกแต่มีช่องว่างท้าย → ไม่ลบ (ด่านนี้ไม่ trim ให้)',
-    (await deleteQuotationByNo(client, idA, `${NO_A} `)) === null && await stillThere(idA));
+    (await deleteQuotationConfirmed(client, idA, `${NO_A} `)) === null && await stillThere(idA));
 
-  ok('ส่งค่าว่างมา → ไม่ลบ',
-    (await deleteQuotationByNo(client, idA, '')) === null && await stillThere(idA));
+  // ข้อนี้สำคัญขึ้นตั้งแต่ 2026-09-21 ที่ค่าว่างกลายเป็น "คำยืนยันของใบที่ยังไม่ออกเลข" —
+  // ถ้าวันไหนมันลบใบที่มีเลขที่ได้ แปลว่าค่าว่างกลายเป็นกุญแจผีของทั้งระบบ
+  ok('ใบที่มีเลขที่ + ส่งค่าว่างมา → ไม่ลบ (ค่าว่างไม่ใช่กุญแจผี)',
+    (await deleteQuotationConfirmed(client, idA, '')) === null && await stillThere(idA));
 
   // เคสที่อันตรายที่สุด: เลขที่ถูกต้องจริง แต่เป็นของ "อีกใบ" ⇒ ต้องไม่ลบใบไหนเลยสักใบ
   ok('id ของใบ A + เลขที่ของใบ B → ไม่ลบ และใบ B ไม่ถูกแตะ',
-    (await deleteQuotationByNo(client, idA, NO_B)) === null
+    (await deleteQuotationConfirmed(client, idA, NO_B)) === null
     && await stillThere(idA) && await stillThere(idB));
 
-  // ── 2. ใบที่ยังไม่มีเลขที่ ลบทางนี้ไม่ได้ ──────────────────────────────
-  ok('ใบที่ไม่มีเลขที่ + ส่งค่าว่าง → ไม่ลบ (กติกาที่เจ้าของเลือก: ซ่อนปุ่มในแถวแบบนี้)',
-    (await deleteQuotationByNo(client, idC, '')) === null && await stillThere(idC));
+  // ── 2. ใบที่ยังไม่มีเลขที่ — ลบได้ด้วยค่าว่างเท่านั้น (เจ้าของสั่งเปิด 2026-09-21) ──
+  ok('ใบที่ไม่มีเลขที่ + ส่งเลขที่ของใบอื่นมา → ไม่ลบ',
+    (await deleteQuotationConfirmed(client, idC, NO_B)) === null && await stillThere(idC));
+
+  const deletedC = await deleteQuotationConfirmed(client, idC, '');
+  ok('ใบที่ไม่มีเลขที่ + ส่งค่าว่าง → ลบได้ (จอให้กดยืนยันเฉย ๆ ไม่มีอะไรให้พิมพ์)',
+    deletedC !== null && !(await stillThere(idC)));
+
+  // audit ของใบไม่มีเลขที่ต้องเขียนได้เหมือนกัน — ไม่งั้นจะได้ "ใบหายแต่ไม่มีบันทึกว่าใครลบ"
+  // ซึ่งเป็นสิ่งเดียวที่ทั้งฟีเจอร์นี้ตั้งใจกันไว้ตั้งแต่ต้น
+  if (deletedC) {
+    await insertQuotationDeleteAudit(client, {
+      actorId: 999998, actorName: 'ผู้ดูแลทดสอบ', requestId: 'diagdel1',
+      ip: '127.0.0.1', quotation: deletedC,
+    });
+    const { rows: auditC } = await client.query(
+      `SELECT entity_label, note, before FROM audit_logs WHERE entity_id = $1 ORDER BY id DESC LIMIT 1`,
+      [idC]);
+    ok('audit ของใบไม่มีเลขที่: entity_label = NULL แต่ note อ่านออกว่าเป็นใบไหน',
+      auditC[0]?.entity_label === null
+      && String(auditC[0]?.note || '').includes('(ไม่มีเลขที่)')
+      && auditC[0]?.before?.customer_details?.customer_name === 'บจก. ทดสอบการลบ');
+  }
 
   // ── 3. ประวัติการส่งออกของใบ A ต้องรอดหลังใบถูกลบ ─────────────────────
   const batchId = await insertExportBatch(client, {
@@ -97,7 +120,7 @@ try {
     [[idA, idB]]);
 
   // ── 4. เลขที่ตรง = ลบได้ และได้ทั้งแถวกลับมาทำ snapshot ───────────────
-  const deleted = await deleteQuotationByNo(client, idA, NO_A);
+  const deleted = await deleteQuotationConfirmed(client, idA, NO_A);
   ok('เลขที่ตรงทุกตัวอักษร → ลบสำเร็จ', deleted !== null && !(await stillThere(idA)));
   ok('คืนทั้งแถวกลับมาให้ทำ snapshot ไม่ใช่แค่ id',
     !!deleted && String(deleted.id) === idA && deleted.quotation_no === NO_A
@@ -106,7 +129,7 @@ try {
     deleted ? `(คอลัมน์ที่ได้กลับมา ${Object.keys(deleted).length} ช่อง)` : '');
 
   ok('ลบซ้ำใบเดิม → คืน null เฉย ๆ ไม่ throw (idempotent)',
-    (await deleteQuotationByNo(client, idA, NO_A)) === null);
+    (await deleteQuotationConfirmed(client, idA, NO_A)) === null);
 
   // ── 5. audit_logs ได้ snapshot ครบในทรานแซกชันเดียวกัน ────────────────
   await insertQuotationDeleteAudit(client, {

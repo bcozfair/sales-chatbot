@@ -1015,8 +1015,13 @@ export async function countExportBatches(): Promise<number> {
  * ตรงกลางให้ใบถูกแก้/ออกเลขคั่นได้ ⇒ คนกดเห็นเลขหนึ่งแต่ลบอีกใบหนึ่ง ที่นี่จึงเทียบและลบในจังหวะเดียว
  * (เทียบตรงตัวทุกอักขระ ไม่ trim ไม่แปลงพิมพ์เล็กใหญ่ — ด่านนี้มีไว้ให้ "พิมพ์ผิดแล้วไม่ลบ")
  *
- * **ใบที่ยังไม่มีเลขที่ลบทางนี้ไม่ได้โดยตั้งใจ** (เงื่อนไข `TRIM(quotation_no) <> ''`) — ไม่มีอะไรให้
- * พิมพ์ยืนยันก็ไม่มีด่าน และร่างพวกนั้นถูกกวาดทิ้งเองเมื่อผู้ขายเริ่มใบใหม่อยู่แล้ว (หน้าจอก็ไม่แสดงปุ่ม)
+ * **ด่านแรงไม่เท่ากันตามความเสียหาย** (เจ้าของสั่งเปิดให้ลบได้ทุกแถว 2026-09-21 — เดิมใบที่ยังไม่มี
+ * เลขที่ลบทางนี้ไม่ได้เลย): ใบที่ **มีเลขที่** = เอกสารที่ออกไปถึงลูกค้าแล้ว ต้องพิมพ์เลขที่มายืนยัน ·
+ * ใบที่ **ยังไม่มีเลขที่** (ร่าง/ยกเลิกก่อนออกเลข) ไม่เคยมีเอกสารออกไปข้างนอก จอจึงให้กดยืนยันเฉย ๆ
+ * แล้วส่ง `quotationNo` เป็นค่าว่างมา
+ *
+ * ⚠️ `CASE` ข้างล่างคือสิ่งที่ทำให้ค่าว่าง **ไม่ใช่ประตูผ่านของใบที่มีเลขที่** — ค่าว่างลบได้เฉพาะแถวที่
+ * ในฐานไม่มีเลขที่จริง ๆ *ณ วินาทีที่ลบ* ⇒ ถ้าใบถูกออกเลขคั่นระหว่างเปิดกล่องกับกดยืนยัน จะไม่ลบอะไรเลย
  *
  * ของที่ "ไม่" หายตามใบไปด้วย และตั้งใจให้เป็นแบบนั้น:
  *   · `quotation_export_log` — FK เป็น `ON DELETE SET NULL` และตัวแถวเก็บ `quotation_no` ไว้เอง
@@ -1025,14 +1030,16 @@ export async function countExportBatches(): Promise<number> {
  *   · `quotation_counters` — เลขเดินหน้าอย่างเดียว ⇒ เลขของใบที่ลบไป **ไม่ถูกนำกลับมาใช้ซ้ำ**
  *     ซึ่งถูกแล้วสำหรับเอกสารที่ออกไปถึงลูกค้าแล้ว
  */
-export async function deleteQuotationByNo(
+export async function deleteQuotationConfirmed(
   db: DbExecutor, id: string, quotationNo: string
 ): Promise<Record<string, any> | null> {
   const { rows } = await db.query(
     `DELETE FROM quotations
       WHERE id = $1::uuid
-        AND quotation_no = $2
-        AND TRIM(quotation_no) <> ''
+        AND CASE
+              WHEN COALESCE(TRIM(quotation_no), '') = '' THEN $2::text = ''
+              ELSE quotation_no = $2::text
+            END
       RETURNING *`,
     [id, quotationNo]);
   return rows[0] ?? null;

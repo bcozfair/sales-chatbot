@@ -13,9 +13,12 @@
 //  **ไม่ trim ค่าที่พิมพ์** ด้วยเหตุผลเดียวกับที่ server ไม่ทำ: ด่านนี้มีไว้ให้ "พิมพ์ผิดแล้วไม่ลบ"
 //  การเก็บกวาดช่องว่างให้ผู้ใช้คือการทำให้ด่านหลวมลงโดยไม่ได้อะไรกลับมา
 //
-//  ใบที่ยังไม่มีเลขที่ไม่มีทางมาถึงกล่องนี้ — หน้าประวัติไม่แสดงปุ่มลบในแถวแบบนั้น
-//  (เจ้าของเลือกเมื่อ 2026-09-16: ไม่มีอะไรให้พิมพ์ยืนยันก็ไม่มีด่าน และร่างพวกนั้นถูกกวาดทิ้งเอง
-//   อยู่แล้วเมื่อผู้ขายเริ่มใบใหม่)
+//  **ใบที่ยังไม่มีเลขที่มาถึงกล่องนี้ได้แล้ว และไม่มีช่องให้พิมพ์** (เจ้าของสั่ง 2026-09-21 — เดิม
+//  หน้าประวัติซ่อนปุ่มลบในแถวแบบนั้นทั้งแถว) เหตุผลที่ด่านต่างกัน: ใบที่มีเลขที่คือเอกสารที่ออกไป
+//  ถึงลูกค้าแล้ว ส่วนใบที่ยังไม่ออกเลขไม่เคยมีอะไรออกไปข้างนอก และในจอมีหลายใบให้เก็บกวาด
+//  ⇒ กล่องนี้จึงมีสองหน้าในตัวเดียว ไม่ใช่สองกล่อง — สำเนาที่แยกร่างไปแล้วไม่เคยถูกแก้พร้อมกัน
+//  ⚠️ แต่ **"ไม่ต้องพิมพ์" ไม่ได้แปลว่า "ไม่มีด่าน"**: ฝั่ง server ยอมรับค่าว่างเฉพาะแถวที่ในฐาน
+//  ยังไม่มีเลขที่จริง ๆ ณ วินาทีที่ลบ ⇒ ใบที่เพิ่งถูกออกเลขคั่นจะไม่ถูกลบและได้ข้อความให้โหลดหน้าใหม่
 // ─────────────────────────────────────────────────────────────────────────────
 import React, { useId, useState } from 'react';
 import { AlertTriangle, Info, Trash2 } from 'lucide-react';
@@ -23,8 +26,8 @@ import { Modal } from './Modal';
 import { Button } from './Button';
 
 interface Props {
-  /** ใบที่จะลบ — ต้องมีเลขที่เสมอ (แถวที่ไม่มีเลขที่ไม่มีปุ่มให้กด) */
-  quotationNo: string;
+  /** เลขที่ใบ — `null`/ค่าว่าง = ใบที่ยังไม่ออกเลข (กล่องจะไม่ขอให้พิมพ์ยืนยัน) */
+  quotationNo: string | null;
   customerName: string;
   salespersonName: string;
   /** ยอดรวมที่จัดรูปแบบมาแล้วจากหน้าเรียก — กล่องนี้ไม่ถือกติกาการแสดงตัวเลขของตัวเอง */
@@ -49,7 +52,11 @@ export const DeleteQuotationModal: React.FC<Props> = ({
 }) => {
   const inputId = useId();
   const [typed, setTyped] = useState('');
-  const matched = typed === quotationNo;
+  /** ใบนี้ออกเลขแล้วหรือยัง — ตัวแยก "สองหน้า" ของกล่องนี้ทั้งหมดอยู่ที่ตัวแปรเดียวนี้ */
+  const hasNo = !!quotationNo;
+  // ใบที่ยังไม่ออกเลขส่งค่าว่างไปให้ server ซึ่งเป็นสิ่งที่ SQL ฝั่งโน้นรับเฉพาะแถวแบบนี้
+  const confirmValue = hasNo ? typed : '';
+  const matched = hasNo ? typed === quotationNo : true;
 
   return (
     <Modal
@@ -68,7 +75,7 @@ export const DeleteQuotationModal: React.FC<Props> = ({
             icon={Trash2}
             busy={busy}
             disabled={!matched}
-            onClick={() => onConfirm(typed)}
+            onClick={() => onConfirm(confirmValue)}
           >
             ลบถาวร
           </Button>
@@ -79,7 +86,8 @@ export const DeleteQuotationModal: React.FC<Props> = ({
         {/* สรุปใบอยู่บนสุด — คนต้องอ่านว่ากำลังลบใบไหนก่อนจะเห็นช่องพิมพ์ */}
         <dl className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 space-y-1.5">
           {[
-            ['เลขที่', quotationNo],
+            // ใบที่ยังไม่ออกเลขต้องบอกด้วยคำ ไม่ใช่ปล่อยขีดกลางให้เดาว่าข้อมูลหาย
+            ['เลขที่', quotationNo || 'ยังไม่ออกเลขที่'],
             ['ลูกค้า', customerName || '-'],
             ['ผู้ขาย', salespersonName || '-'],
             ['ยอดรวม', `${totalText} บาท`],
@@ -98,8 +106,15 @@ export const DeleteQuotationModal: React.FC<Props> = ({
           <div className="space-y-1">
             <p className="font-bold">ลบแล้วเอากลับมาไม่ได้</p>
             <ul className="pl-4 list-disc space-y-1 leading-relaxed">
-              <li>ใบนี้จะหายจากหน้าประวัติ และดาวน์โหลด PDF ไม่ได้อีก</li>
-              <li>เลขที่ <b>{quotationNo}</b> จะไม่ถูกนำกลับมาใช้ซ้ำ</li>
+              {hasNo ? (
+                <>
+                  <li>ใบนี้จะหายจากหน้าประวัติ และดาวน์โหลด PDF ไม่ได้อีก</li>
+                  <li>เลขที่ <b>{quotationNo}</b> จะไม่ถูกนำกลับมาใช้ซ้ำ</li>
+                </>
+              ) : (
+                // ใบยังไม่ออกเลข = ไม่มี PDF และไม่มีเลขให้พูดถึง เหลือแค่ผลที่เกิดจริง
+                <li>ใบนี้จะหายจากหน้าประวัติ พร้อมรายการสินค้าและข้อมูลลูกค้าที่อยู่ในใบ</li>
+              )}
               <li>ระบบบันทึกไว้ว่าใครลบเมื่อไหร่ พร้อมสำเนาทั้งใบ — ดูได้ที่ “บันทึกการแก้ไข”</li>
             </ul>
           </div>
@@ -124,6 +139,15 @@ export const DeleteQuotationModal: React.FC<Props> = ({
           </section>
         )}
 
+        {!hasNo ? (
+          /* ไม่มีช่องพิมพ์ แต่ต้องบอกว่า "ทำไมรอบนี้ถึงไม่ต้องพิมพ์" ไม่งั้นคนที่เคยเห็นช่อง
+             จะนึกว่าจอเสีย และจะไม่รู้ว่าใบที่มีเลขที่ยังต้องพิมพ์อยู่เหมือนเดิม */
+          <p className="text-slate-500 leading-relaxed">
+            ใบนี้ยังไม่ออกเลขที่ จึงไม่มีเลขให้พิมพ์ยืนยัน — กด “ลบถาวร” ได้เลย
+            <br />
+            (ใบที่ออกเลขที่แล้วยังต้องพิมพ์เลขที่ยืนยันเหมือนเดิม)
+          </p>
+        ) : (
         <div>
           <label htmlFor={inputId} className="block font-bold text-slate-700 mb-1.5">
             พิมพ์ <span className="px-1.5 py-0.5 rounded-md bg-slate-100 border border-slate-200 text-red-700">{quotationNo}</span> เพื่อยืนยันการลบ
@@ -153,6 +177,7 @@ export const DeleteQuotationModal: React.FC<Props> = ({
                 : 'ยังไม่ตรงกับเลขที่ใบนี้'}
           </p>
         </div>
+        )}
 
         {error && (
           <p className="bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 text-red-700 font-semibold">

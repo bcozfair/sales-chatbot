@@ -329,9 +329,13 @@ export const Quotations: React.FC = () => {
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result?.error || 'ลบใบเสนอราคาไม่สำเร็จ');
 
+      // ใบที่ยังไม่ออกเลขไม่มีเลขให้อ้างในข้อความ — บอกด้วยชื่อลูกค้าแทน ไม่ใช่ปล่อยเป็น "ลบใบ null"
       const deletedNo = deleteTarget.quotation_no;
+      const deletedLabel = deletedNo
+        ? `ลบใบ ${deletedNo} ออกจากระบบแล้ว`
+        : `ลบใบที่ยังไม่ออกเลขที่ของ ${deleteTarget.customer_name || 'ลูกค้าไม่ระบุ'} ออกจากระบบแล้ว`;
       closeDelete();
-      showToast(`ลบใบ ${deletedNo} ออกจากระบบแล้ว`);
+      showToast(deletedLabel);
       // ยอดรวมและจำนวนหน้าเปลี่ยนไปด้วย ⇒ โหลดใหม่ ไม่ตัดแถวออกจาก state เอง
       fetchQuotations();
       void fetchManualCounts();
@@ -1021,14 +1025,17 @@ export const Quotations: React.FC = () => {
                                   : <RotateCcw className="w-4 h-4" />}
                               </button>
                             )}
-                            {/* ลบได้เฉพาะ admin และเฉพาะใบที่มีเลขที่ — ใบร่างไม่มีอะไรให้พิมพ์ยืนยัน
-                                (server ก็ปฏิเสธใบไม่มีเลขที่อยู่แล้ว ปุ่มนี้แค่ไม่ชวนให้กดเปล่า) */}
-                            {canDelete && quote.quotation_no && (
+                            {/* ลบได้เฉพาะ admin แต่ขึ้นครบทุกแถวรวมใบที่ยังไม่ออกเลขที่ (เจ้าของสั่ง
+                                2026-09-21) — ความแรงของด่านไปอยู่ในกล่องยืนยันแทน: ใบมีเลขที่ต้อง
+                                พิมพ์เลขที่ · ใบยังไม่ออกเลขกดยืนยันได้เลย และ server ตรวจซ้ำทั้งสองแบบ */}
+                            {canDelete && (
                               <button
                                 type="button"
                                 className="p-2 bg-card hover:bg-red-50 text-slate-500 hover:text-red-600 border border-slate-200 hover:border-red-200 rounded-xl transition-all active:scale-95 shadow-sm"
                                 title="ลบใบเสนอราคาถาวร"
-                                aria-label={`ลบใบเสนอราคา ${quote.quotation_no} ถาวร`}
+                                aria-label={quote.quotation_no
+                                  ? `ลบใบเสนอราคา ${quote.quotation_no} ถาวร`
+                                  : `ลบใบเสนอราคาที่ยังไม่ออกเลขที่ของ ${quote.customer_name || 'ลูกค้าไม่ระบุ'} ถาวร`}
                                 onClick={(e) => { e.stopPropagation(); openDelete(quote); }}
                               >
                                 <Trash2 className="w-4 h-4" />
@@ -1283,7 +1290,7 @@ export const Quotations: React.FC = () => {
         </div>
       )}
 
-      {deleteTarget?.quotation_no && (
+      {deleteTarget && (
         <DeleteQuotationModal
           quotationNo={deleteTarget.quotation_no}
           customerName={deleteTarget.customer_name}
