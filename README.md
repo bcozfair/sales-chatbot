@@ -32,7 +32,7 @@
 | GET | `/api/admin/quotations` | ดึงใบเสนอราคาทั้งหมด (pagination, filter, sort) |
 | GET | `/api/admin/quotations/export` | Export ไฟล์นำเข้า Sale Order ของ Odoo (xlsx/csv) — ตั้งต้นเฉพาะใบที่ยังไม่เคยส่ง แล้วมาร์กใบที่ลงไฟล์ว่าส่งออกแล้ว |
 | POST | `/api/admin/quotations/:id/unmark-export` | ยกเลิกเครื่องหมาย "ส่งออกแล้ว" ของใบเดียว |
-| DELETE | `/api/admin/quotations/:id` | ลบใบเสนอราคาถาวร — **role `admin` เท่านั้น** · body ต้องส่ง `quotationNo` มาให้ตรงกับในฐาน (ใบที่ยังไม่มีเลขที่ลบทางนี้ไม่ได้) · เขียน `audit_logs` พร้อม snapshot ทั้งใบในทรานแซกชันเดียวกัน |
+| DELETE | `/api/admin/quotations/:id` | ลบใบเสนอราคาถาวร — **role `admin` เท่านั้น** · body ส่ง `quotationNo` ให้ตรงกับในฐาน · ใบที่ยังไม่ออกเลขที่ส่งค่าว่าง `""` มา (และค่าว่างลบใบที่มีเลขที่ไม่ได้) · เขียน `audit_logs` พร้อม snapshot ทั้งใบในทรานแซกชันเดียวกัน |
 | GET | `/api/admin/quotations/export-batches` | ประวัติชุดการส่งออก Odoo |
 | POST | `/api/admin/quotations/export-batches/:batchId/unmark` | ยกเลิกเครื่องหมายส่งออกทั้งชุด |
 | GET | `/api/admin/promotions` | ดึงโปรโมชันทั้งหมด |
@@ -308,7 +308,7 @@ user_id, message_id, type, content, reply_token, reply_content, meta (jsonb), cr
 | POST | `/api/quotation/:id/confirm` | - | ยืนยันและออกเลขที่ |
 | GET | `/api/admin/quotations` | JWT | ดึงรายการ (pagination + filter) |
 | GET | `/api/admin/quotations/export` | JWT | Export ไฟล์นำเข้า Odoo (กันส่งออกซ้ำด้วย `odoo_exported_at`) |
-| DELETE | `/api/admin/quotations/:id` | JWT (`admin`) | ลบใบถาวร — ต้องส่งเลขที่ใบมายืนยัน |
+| DELETE | `/api/admin/quotations/:id` | JWT (`admin`) | ลบใบถาวร — ใบที่มีเลขที่ต้องส่งเลขที่มายืนยัน · ใบที่ยังไม่ออกเลขที่ส่งค่าว่าง |
 | POST | `/api/admin/login` | - | เข้าสู่ระบบแอดมิน |
 | GET | `/download-pdf/:id` | - | ดาวน์โหลด PDF |
 | POST | `/api/admin/signatures/:type` | JWT | อัปโหลดลายเซ็น |

@@ -43,7 +43,7 @@ import {
   unmarkExportBatch,
   getExportBatches,
   countExportBatches,
-  deleteQuotationByNo,
+  deleteQuotationConfirmed,
   listApiLogs,
   countApiLogs,
   getApiLogById,
@@ -4030,8 +4030,13 @@ app.post('/api/admin/quotations/:id/unmark-export', adminAuthMiddleware, require
  * ด้วย เพราะทุกตัวข้างบนย้อนได้ (ถอยเครื่องหมายส่งออกแล้วส่งใหม่) ส่วนตัวนี้ย้อนไม่ได้
  *
  * **เลขที่ใบที่พิมพ์ยืนยันถูกตรวจซ้ำที่นี่ ไม่ใช่เชื่อฝั่งจอ** — ปุ่มที่จอปลดล็อกให้เป็นเรื่องของ
- * ความสะดวก ส่วนด่านจริงคือเงื่อนไขใน SQL ของ `deleteQuotationByNo()` (กฎเหล็ก "ตรวจทั้งสองฝั่ง")
+ * ความสะดวก ส่วนด่านจริงคือเงื่อนไขใน SQL ของ `deleteQuotationConfirmed()` (กฎเหล็ก "ตรวจทั้งสองฝั่ง")
  * ⇒ ยิง API ตรงโดยข้ามหน้าจอก็ยังต้องส่งเลขที่ที่ตรงกับในฐานมาอยู่ดี
+ *
+ * **`quotationNo` ที่เป็นค่าว่าง = ตั้งใจลบใบที่ยังไม่มีเลขที่** (ร่าง/ยกเลิกก่อนออกเลข — เจ้าของสั่ง
+ * เปิดให้ลบได้ทุกแถว 2026-09-21) จึงไม่มี `if (!confirm) 400` ที่นี่อีก **และการถอดออกไม่ได้ทำให้ด่าน
+ * หลวม** เพราะ SQL ยอมรับค่าว่างเฉพาะแถวที่ในฐานไม่มีเลขที่จริง ๆ — ค่าว่างที่ยิงใส่ใบที่มีเลขที่
+ * ลบอะไรไม่ได้เลย
  *
  * **ใบที่ส่งออก/นำเข้า Odoo แล้วลบได้ ไม่บล็อก** (เจ้าของตัดสิน 2026-09-16) — หน้าจอเตือนให้เห็น
  * ก่อนกดว่าเอกสารฝั่ง Odoo ไม่ถูกลบตาม ระบบนี้ไม่มีทางไปลบของใน Odoo ให้อยู่แล้ว
@@ -4048,14 +4053,11 @@ app.delete('/api/admin/quotations/:id', adminAuthMiddleware, requireCapability('
 
     // ไม่ trim ค่าที่พิมพ์มา — ด่านนี้คือ "พิมพ์ให้ตรง" การเก็บกวาดให้ผู้ใช้ทำให้ด่านหลวมลงเปล่า ๆ
     const confirm = typeof req.body?.quotationNo === 'string' ? req.body.quotationNo : '';
-    if (!confirm) {
-      return res.status(400).json({ error: 'ต้องพิมพ์เลขที่ใบเสนอราคาเพื่อยืนยันการลบ' });
-    }
 
     const admin = req.admin as AdminIdentity;
 
     const deleted = await withTransaction(async client => {
-      const row = await deleteQuotationByNo(client, id, confirm);
+      const row = await deleteQuotationConfirmed(client, id, confirm);
       if (!row) return null;
       await insertQuotationDeleteAudit(client, {
         actorId: admin.id,
@@ -4068,9 +4070,12 @@ app.delete('/api/admin/quotations/:id', adminAuthMiddleware, requireCapability('
     });
 
     // แยกไม่ออกว่า "ไม่มีใบนี้" หรือ "เลขที่ไม่ตรง" ด้วย query เดียว และไม่ต้องแยก —
-    // ทั้งสองกรณีคำตอบที่ถูกต้องคือ "ยังไม่ได้ลบอะไร ไปตรวจเลขที่ใหม่"
+    // ทั้งสองกรณีคำตอบที่ถูกต้องคือ "ยังไม่ได้ลบอะไร ไปเปิดหน้าใหม่แล้วดูของจริง"
+    // (ใบที่ไม่มีเลขที่มาถึงตรงนี้ได้กรณีเดียว: มันเพิ่งถูกออกเลขคั่นระหว่างเปิดกล่องกับกดยืนยัน)
     if (!deleted) {
-      return res.status(409).json({ error: 'เลขที่ใบเสนอราคาที่พิมพ์ไม่ตรงกับใบนี้ หรือใบนี้ถูกลบไปแล้ว' });
+      return res.status(409).json({
+        error: 'เลขที่ใบเสนอราคาไม่ตรงกับใบนี้ หรือใบนี้ถูกลบ/ถูกออกเลขที่ไปแล้ว — โหลดหน้าใหม่แล้วลองอีกครั้ง',
+      });
     }
 
     res.json({ success: true, quotation_no: deleted.quotation_no });
