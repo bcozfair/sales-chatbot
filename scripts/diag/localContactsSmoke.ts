@@ -610,7 +610,9 @@ async function main(): Promise<void> {
       );
       await client.query('DROP TABLE cdv_mismatch');
 
-      const { items } = await listLocalContacts({ filter: 'pending' }, client);
+      // ก้อน I4 แยก 'pending' (ยังไม่มีใครคีย์) ออกจาก 'not_matched' (ยังไม่มีใน Odoo)
+      // — เคสนี้คือแถวชื่อไม่ตรง ซึ่งอยู่ใน 'not_matched' แต่ไม่อยู่ใน 'pending' อีกแล้ว
+      const { items } = await listLocalContacts({ filter: 'not_matched' }, client);
       const row = items.find((r) => Number(r.contact_id) === mismatch.localId);
       const view = row ? decorate(row) : null;
 

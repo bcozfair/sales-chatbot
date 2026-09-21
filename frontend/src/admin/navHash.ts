@@ -25,6 +25,8 @@ export type MainTab =
   | 'pricing'
   // สองหน้าข้อมูลอ้างอิงจาก Odoo (อ่านอย่างเดียว)
   | 'productsdata' | 'customersdata'
+  // คิวงานค้างของโมดูล local_contacts — ผู้ติดต่อที่แอดมินเพิ่มเองแต่ยังไม่มีใน Odoo
+  | 'odoocontacts'
   // กลุ่ม "บันทึกและรายงาน" — 5 หน้าที่อยู่ใต้หัวข้อพับได้อันเดียวกัน
   | 'traffic' | 'apilogs' | 'auditlogs' | 'systemlogs' | 'backups'
   | 'settings';
@@ -59,6 +61,7 @@ export const TAB_SLUG: Record<MainTab, string> = {
   pricing: 'pricing',
   productsdata: 'productsdata',
   customersdata: 'customersdata',
+  odoocontacts: 'odoocontacts',
   traffic: 'traffic',
   apilogs: 'apilogs',
   auditlogs: 'audit',

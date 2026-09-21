@@ -102,9 +102,6 @@ const normName = (col: string): string =>
 /** เกณฑ์ชั้นรอง — สะกดเพี้ยน (`สมชาย` ~ `สมชาญ` = 0.692) · pg_trgm ติดตั้งอยู่แล้วบนฐานนี้ */
 const SIMILARITY_FLOOR = 0.4;
 
-/** ค้างเกินกี่วันถึงเปลี่ยนจาก "รอคีย์" เป็น "ค้าง N วัน" (§5.5) */
-export const STALE_AFTER_DAYS = 7;
-
 export interface LocalContactRecord {
   contact_id: number;
   company_id: number;
@@ -316,6 +313,16 @@ export async function deleteDirectoryRow(
 }
 
 /**
+ * ตัวกรองของหน้ารายการ — สามค่าหลังตรงกับ `LocalContactStatus` ที่ `decorate()` คำนวณเป๊ะ
+ *
+ * ⚠️ **`'not_matched'` ไม่เท่ากับ `'pending'`** — ตัวแรกคือ "ยังไม่มีใน Odoo" ทั้งหมด
+ *    (รวมคนที่ชื่อไม่ตรง) ส่วนตัวหลังคือเฉพาะคนที่ไม่มีชื่อใกล้เคียงใน Odoo เลย
+ *    ⇒ **ค่าตั้งต้นของไฟล์ส่งออกต้องเป็น `'not_matched'`** ไม่งั้นคนกลุ่มชื่อไม่ตรง
+ *    จะหายจากไฟล์เงียบ ๆ ทั้งที่เขาคือกลุ่มที่ต้องลงมือมากที่สุด
+ */
+export type LocalContactFilter = 'not_matched' | 'pending' | 'name_mismatch' | 'matched' | 'all';
+
+/**
  * รายการผู้ติดต่อที่แอดมินเพิ่มเอง + ป้ายที่ระบบคำนวณให้ (§5.5)
  *
  * `similar_odoo_name` คือหัวใจของกับดัก §7.4 — คนคีย์ชื่อใน Odoo ไม่ตรงเป๊ะแล้วทั้งสัญญาณ A
@@ -324,19 +331,30 @@ export async function deleteDirectoryRow(
  *
  * ⚠️ หาเฉพาะแถวที่ยังไม่ match — แถวที่ match แล้วไม่มีอะไรให้เตือนอีก และการยิง similarity
  *    กับทุกแถวของบริษัทโดยไม่จำเป็นคือค่าใช้จ่ายที่โตตามจำนวนผู้ติดต่อที่เคยเพิ่มมาทั้งหมด
+ *
+ * ⚠️ **การกรองด้วย `name_mismatch` คร่อมทั้งผลลัพธ์ ไม่ใช่เขียน subquery ซ้ำใน WHERE**
+ *    สำเนาที่สองของเกณฑ์ similarity คือสิ่งที่วันหนึ่งจะมีแถวติดป้ายแต่ไม่โผล่ในตัวกรอง
+ *    (หรือกลับกัน) โดยไม่มีอะไรฟ้อง ⇒ ห่อผลเป็น CTE แล้วกรองจากคอลัมน์เดียวกับที่หน้าจออ่าน
+ *    ตารางนี้เป็น "คิวงานค้าง" ขนาดหลักร้อย (วัด 2026-09-18: 202 แถว) คำนวณทั้งชุดจึงถูกกว่าเขียนซ้ำ
+ *
+ * ยอดรวมมาจาก `count(*) OVER ()` ใน query เดียวกัน — ไม่งั้นต้องคำนวณ CTE สองรอบ
  */
 export async function listLocalContacts(
-  opts: { filter?: 'pending' | 'all'; q?: string; limit?: number; offset?: number } = {},
+  opts: { filter?: LocalContactFilter; q?: string; limit?: number; offset?: number } = {},
   executor: DbExecutor = pool
 ): Promise<{ items: LocalContactListRow[]; total: number }> {
-  const pendingOnly = (opts.filter ?? 'pending') === 'pending';
+  const filter: LocalContactFilter = opts.filter ?? 'not_matched';
   const q = (opts.q ?? '').trim();
   const limit = Math.min(Math.max(Number(opts.limit) || 100, 1), 500);
   const offset = Math.max(Number(opts.offset) || 0, 0);
 
   const where: string[] = [];
   const vals: unknown[] = [];
-  if (pendingOnly) where.push('l.odoo_matched_at IS NULL');
+  // สามค่านี้ตัดสินจากคอลัมน์เดียว ⇒ กรองใน CTE ได้เลย ไม่ต้องรอคำนวณ similarity
+  if (filter === 'not_matched' || filter === 'pending' || filter === 'name_mismatch') {
+    where.push('l.odoo_matched_at IS NULL');
+  }
+  if (filter === 'matched') where.push('l.odoo_matched_at IS NOT NULL');
   if (q) {
     vals.push(`%${q}%`);
     where.push(`(l.contact_name ILIKE $${vals.length}
@@ -345,6 +363,12 @@ export async function listLocalContacts(
               OR COALESCE(v.customer_tax_id, '') ILIKE $${vals.length})`);
   }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+  // สองค่านี้ต้องรู้คำตอบของ similarity ก่อนถึงตัดสินได้ ⇒ กรองที่ชั้นนอกของ CTE
+  const outerWhere =
+    filter === 'name_mismatch' ? 'WHERE similar_odoo_name IS NOT NULL'
+      : filter === 'pending' ? 'WHERE similar_odoo_name IS NULL'
+        : '';
 
   // แถวตัวแทนของบริษัท (contact_id น้อยสุด) = ที่มาของชื่อบริษัท/รหัส/เลขภาษี
   // เกณฑ์เดียวกับ local_anchor ของ Arm 3 เพื่อให้ชื่อบริษัทบนจอตรงกับที่ใบจะได้
@@ -356,42 +380,45 @@ export async function listLocalContacts(
        LIMIT 1
     ) v ON true`;
 
-  const { rows: totalRows } = await executor.query(
-    `SELECT count(*)::int AS n FROM public.local_contacts l ${company} ${whereSql}`,
-    vals
-  );
-
   vals.push(limit, offset);
   const { rows } = await executor.query(
-    `SELECT l.contact_id, l.company_id, l.contact_name, l.job_position, l.contact_phone,
-            l.contact_email, l.created_by, l.created_at, l.updated_at,
-            l.odoo_matched_at, l.odoo_matched_contact_id, l.odoo_matched_by,
-            v.customer_name, v.customer_reference, v.customer_tax_id,
-            a.name AS created_by_name,
-            (SELECT count(*)::int FROM public.quotations q WHERE q.contact_id = l.contact_id) AS quote_count,
-            CASE WHEN l.odoo_matched_at IS NOT NULL THEN NULL ELSE (
-              SELECT s.contact_name
-                FROM public.customers_data_view s
-               WHERE s.company_id = l.company_id
-                 AND s.source <> 'local'
-                 AND s.contact_id > 0
-                 AND s.contact_name IS NOT NULL
-                 AND btrim(s.contact_name) <> btrim(l.contact_name)
-                 AND (${normName('s.contact_name')} = ${normName('l.contact_name')}
-                      OR similarity(s.contact_name, l.contact_name) >= ${SIMILARITY_FLOOR})
-               ORDER BY similarity(s.contact_name, l.contact_name) DESC, s.contact_id
-               LIMIT 1
-            ) END AS similar_odoo_name
-       FROM public.local_contacts l
-       ${company}
-       LEFT JOIN public.admin_users a ON a.id = l.created_by
-       ${whereSql}
-      ORDER BY l.odoo_matched_at NULLS FIRST, l.created_at, l.contact_id
+    `WITH base AS (
+       SELECT l.contact_id, l.company_id, l.contact_name, l.job_position, l.contact_phone,
+              l.contact_email, l.created_by, l.created_at, l.updated_at,
+              l.odoo_matched_at, l.odoo_matched_contact_id, l.odoo_matched_by,
+              v.customer_name, v.customer_reference, v.customer_tax_id,
+              a.name AS created_by_name,
+              (SELECT count(*)::int FROM public.quotations q WHERE q.contact_id = l.contact_id) AS quote_count,
+              CASE WHEN l.odoo_matched_at IS NOT NULL THEN NULL ELSE (
+                SELECT s.contact_name
+                  FROM public.customers_data_view s
+                 WHERE s.company_id = l.company_id
+                   AND s.source <> 'local'
+                   AND s.contact_id > 0
+                   AND s.contact_name IS NOT NULL
+                   AND btrim(s.contact_name) <> btrim(l.contact_name)
+                   AND (${normName('s.contact_name')} = ${normName('l.contact_name')}
+                        OR similarity(s.contact_name, l.contact_name) >= ${SIMILARITY_FLOOR})
+                 ORDER BY similarity(s.contact_name, l.contact_name) DESC, s.contact_id
+                 LIMIT 1
+              ) END AS similar_odoo_name
+         FROM public.local_contacts l
+         ${company}
+         LEFT JOIN public.admin_users a ON a.id = l.created_by
+         ${whereSql}
+     )
+     SELECT *, count(*) OVER ()::int AS total_count
+       FROM base
+       ${outerWhere}
+      ORDER BY odoo_matched_at NULLS FIRST, created_at, contact_id
       LIMIT $${vals.length - 1} OFFSET $${vals.length}`,
     vals
   );
 
-  return { items: rows, total: Number(totalRows[0]?.n ?? 0) };
+  // หน้าที่ไม่มีแถวเลย ⇒ ไม่มี total_count ให้อ่าน ซึ่งแปลว่า 0 จริง ๆ
+  const total = Number(rows[0]?.total_count ?? 0);
+  const items = rows.map(({ total_count: _drop, ...r }) => r) as LocalContactListRow[];
+  return { items, total };
 }
 
 // ═════════════════════════════════════════════════════════════════════════════

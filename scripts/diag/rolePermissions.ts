@@ -95,6 +95,7 @@ const TODAY: Record<Capability, [admin: PermissionMode, approver: PermissionMode
   'page.pricing':                 ['allow', 'deny', 'deny'],
   'page.productsdata':            ['allow', 'allow', 'allow'],
   'page.customersdata':           ['allow', 'allow', 'allow'],
+  'page.odoocontacts':            ['allow', 'allow', 'allow'],
   'page.blacklist':               ['allow', 'deny', 'deny'],
   'page.salespersons':            ['allow', 'deny', 'deny'],
   'page.users':                   ['allow', 'deny', 'deny'],

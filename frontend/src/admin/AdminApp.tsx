@@ -22,6 +22,7 @@ import { ShippingFee } from './ShippingFee';
 import { SyncPanel } from './SyncPanel';
 import { ProductsDirectory } from './ProductsDirectory';
 import { CustomersDirectory } from './CustomersDirectory';
+import { OdooContacts } from './OdooContacts';
 // โมดูลทดลอง "คิดราคาสินค้า" — ถอดออก = ลบ import นี้ + 1 เมนู + 1 แถวใน PAGE_TITLES + 1 สาขา render
 import { PricingLab } from './pricingLab/PricingLab';
 import { LogsShell } from './logs/LogsShell';
@@ -35,6 +36,7 @@ import {
   Loader2,
   Tag,
   UserCheck,
+  UserPlus,
   FileText,
   Sliders,
   SlidersHorizontal,
@@ -168,6 +170,9 @@ const NAV_GROUPS: { key: string; label: string; icon: typeof LayoutDashboard; it
     items: [
       { tab: 'productsdata', label: 'ข้อมูลสินค้า', icon: Package, roles: ['admin', 'approver', 'subadmin'], cap: 'page.productsdata' },
       { tab: 'customersdata', label: 'ข้อมูลลูกค้า', icon: Contact, roles: ['admin', 'approver', 'subadmin'], cap: 'page.customersdata' },
+      // คิวงานค้าง ไม่ใช่ข้อมูลอ้างอิง แต่อยู่กลุ่มนี้เพราะมันคือรายชื่อผู้ติดต่อ — คนที่มาหามันมาหาต่อจาก
+      // "ข้อมูลลูกค้า" ที่อยู่เหนือมัน · ตัวเลขข้างเมนู = คนที่ยังไม่มีใน Odoo (เจ้าของเคาะ 2026-09-21)
+      { tab: 'odoocontacts', label: 'ผู้ติดต่อเพิ่มเอง', icon: UserPlus, roles: ['admin', 'approver', 'subadmin'], cap: 'page.odoocontacts' },
       { tab: 'blacklist', label: 'บัญชีห้ามเสนอราคา', icon: Ban, roles: ['admin', 'user'], cap: 'page.blacklist' },
     ],
   },
@@ -219,6 +224,7 @@ const PAGE_TITLES: Record<MainTab, string> = {
   pricing: 'คิดราคาสินค้า',
   productsdata: 'ข้อมูลสินค้า',
   customersdata: 'ข้อมูลลูกค้า & ผู้ติดต่อ',
+  odoocontacts: 'ผู้ติดต่อที่ต้องคีย์เข้า Odoo',
   traffic: 'รายงานการใช้งาน',
   apilogs: 'บันทึกการเรียก API',
   auditlogs: 'บันทึกการแก้ไข',
@@ -328,6 +334,31 @@ function AdminContent() {
     return () => { cancelled = true; };
   }, [token, showsApprovals, activeTab]);
 
+  /**
+   * ตัวเลขข้างเมนู "ผู้ติดต่อเพิ่มเอง" — จำนวนคนที่ยังไม่มีใน Odoo (เจ้าของเคาะ 2026-09-21)
+   *
+   * เหตุผลเดียวกับ badge ของ "อนุมัติราคา": ระบบนี้ห้ามใช้ LINE push ⇒ ถ้าไม่มีตัวเลขตรงนี้
+   * งานค้างจะไม่มีอะไรบอกใครเลย · ใช้เส้น `/count` ที่นับอย่างเดียว ไม่ใช่เส้นรายการที่ต้องคำนวณชื่อคล้ายทุกแถว
+   */
+  const [odooContactBadge, setOdooContactBadge] = useState(0);
+  const showsOdooContacts = visibleTabs.includes('odoocontacts');
+  useEffect(() => {
+    if (!token || !showsOdooContacts) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/admin/webquote/contacts/count', { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok) return;
+        const data = await res.json();
+        const n = Number(data?.pending ?? 0);
+        if (!cancelled) setOdooContactBadge(Number.isFinite(n) ? n : 0);
+      } catch {
+        // นับไม่ได้ไม่ใช่เหตุให้ทั้งเมนูพัง — ไม่มีตัวเลขก็ยังกดเข้าไปดูได้
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token, showsOdooContacts, activeTab]);
+
   // แท็บที่แสดงจริง — activeTab ตั้งต้นเป็น 'dashboard' ซึ่ง role 'user' ไม่มีสิทธิ์เห็น
   // คำนวณตอน render แทนการ setState ใน effect: ไม่มี re-render รอบพิเศษ และครอบเคสถูกลดสิทธิ์
   // ระหว่างเปิดหน้าค้างไว้ด้วย (adminAuthMiddleware อ่าน role สดจาก DB ทุก request)
@@ -435,8 +466,11 @@ function AdminContent() {
   const renderNavItem = (item: NavItem, nested: boolean) => {
     const Icon = item.icon;
     const active = isItemActive(item);
-    const pendingLabel =
-      item.tab === 'approvals' && approvalBadge > 0 ? `${item.label} (${approvalBadge} รายการ)` : item.label;
+    // สองเมนูมีตัวเลขค้างของตัวเอง — อ่านจากแมปที่เดียว ไม่งั้นทุกจุดที่วาดป้ายต้องมี if ของตัวเอง
+    const badge = item.tab === 'approvals' ? approvalBadge
+      : item.tab === 'odoocontacts' ? odooContactBadge
+        : 0;
+    const pendingLabel = badge > 0 ? `${item.label} (${badge} รายการ)` : item.label;
     // ความมนอยู่ในบรรทัดของแต่ละแบบ ไม่ใช่ในบรรทัดฐาน — `rounded-lg` กับ `rounded-xl` ที่อยู่
     // ในคลาสเดียวกัน ตัวที่ชนะคือตัวที่ Tailwind เรียงไว้ทีหลังใน CSS ไม่ใช่ตัวที่พิมพ์ทีหลัง
     // (กับดักเดียวกับ `border-transparent` ใน docs/design.md หัวข้อ 2.1)
@@ -473,17 +507,17 @@ function AdminContent() {
             ใช้คู่ `--btn-primary-bg` + `--btn-primary-ink` ซึ่งเป็นคู่ "พื้น + หมึก" ที่วัดมาแล้ว
             ในทั้งสองธีม (ดู index.css) · พื้นทึบยังอ่านออกตอนเมนูนี้ถูกเลือกอยู่ ซึ่งพื้นแถวเป็น
             เขียวจาง — ป้ายพื้นจางบนแถวพื้นจางจะกลายเป็นป้ายที่ไม่มีรูปร่าง */}
-        {item.tab === 'approvals' && approvalBadge > 0 && !collapsed && (
+        {badge > 0 && !collapsed && (
           <span
             className="ml-auto px-1.5 min-w-5 text-center rounded-lg text-[11px] font-bold"
             style={{ backgroundColor: 'var(--btn-primary-bg)', color: 'var(--btn-primary-ink)' }}
           >
-            {approvalBadge}
+            {badge}
           </span>
         )}
         {/* ย่ออยู่แล้วตัวเลขไม่มีที่อยู่ — เหลือจุดบอกว่ามีของค้าง ส่วนจำนวนอยู่ใน title ของปุ่ม
             (ระบบนี้ห้ามใช้ LINE push ⇒ ถ้าตรงนี้ไม่บอก จะไม่มีอะไรบอกใครเลยว่ามีของรออยู่) */}
-        {item.tab === 'approvals' && approvalBadge > 0 && collapsed && (
+        {badge > 0 && collapsed && (
           <span
             className="absolute translate-x-3 -translate-y-2.5 w-1.5 h-1.5 rounded-full"
             style={{ backgroundColor: BRAND }}
@@ -785,6 +819,10 @@ function AdminContent() {
           ) : effectiveTab === 'customersdata' ? (
             <div className="animate-fade-in">
               <CustomersDirectory />
+            </div>
+          ) : effectiveTab === 'odoocontacts' ? (
+            <div className="animate-fade-in">
+              <OdooContacts />
             </div>
           ) : effectiveTab === 'salespersons' ? (
             <div className="animate-fade-in">
