@@ -36,7 +36,7 @@ import {
   countQuotationsByContactId, listLocalContacts, ensureDirectoryRow,
   syncDirectoryRow, deleteDirectoryRow, markMatchedByContactSync,
   markMatchedByImportedOrder, countPendingLocalContacts,
-  STALE_AFTER_DAYS, type LocalContactRecord, type LocalContactListRow,
+  type LocalContactRecord, type LocalContactListRow, type LocalContactFilter,
 } from '../db/localContactsRepo.js';
 
 export type LocalContactErrorCode = 'BAD_REQUEST' | 'NOT_FOUND' | 'DUPLICATE' | 'LOCKED';
@@ -129,42 +129,38 @@ function parseInput(body: LocalContactInput, opts: { requireCompany: boolean }):
 //  สถานะและสิทธิ์ของแต่ละแถว — ระบบตัดสินจากข้อมูล ไม่มีใครเลือก (§5.5)
 // ═════════════════════════════════════════════════════════════════════════════
 
-export type LocalContactStatus = 'matched' | 'pending' | 'stale' | 'name_mismatch';
+export type LocalContactStatus = 'matched' | 'pending' | 'name_mismatch';
 
 export interface LocalContactView extends LocalContactListRow {
   status: LocalContactStatus;
-  pending_days: number;
   can_edit_name: boolean;
   can_edit_fields: boolean;
   can_delete: boolean;
 }
 
-function daysSince(iso: string | null): number {
-  if (!iso) return 0;
-  const ms = Date.now() - new Date(iso).getTime();
-  return ms > 0 ? Math.floor(ms / 86_400_000) : 0;
-}
-
 /**
- * ⚠️ ลำดับการตัดสินสำคัญ: **`name_mismatch` มาก่อน `stale`** — แถวที่ค้าง 30 วันเพราะคีย์ชื่อผิด
- * กับแถวที่ค้าง 30 วันเพราะยังไม่มีใครคี้ย์ ต้องทำคนละอย่างกันโดยสิ้นเชิง ถ้าเอา "ค้างกี่วัน"
- * ขึ้นก่อน ป้าย 🔴 จะไม่มีวันโผล่ให้ใครเห็นเลยหลังวันที่ 7
+ * ⚠ **ไม่มีสถานะ "ค้างนาน" โดยตั้งใจ** (เจ้าของเคาะ 2026-09-21) — เคยมีชั้นกลางที่
+ * เปลี่ยนสีเมื่อค้างเกิน 7 วัน แต่ถูกถอดออก เพราะ "ค้าง 3 วัน" กับ "ค้าง 30 วัน" สั่งให้
+ * ทำสิ่งเดียวกันเป๊ะ คือ เอาไปคีย์ ⇒ สองป้ายที่สั่งงานเหมือนกัน คือป้ายที่แบ่งคนอ่านออกเป็นสองกอง
+ * โดยที่กองที่สองต้องทำอย่างเดียวกัน · "เพิ่มเมื่อ" ยังเป็นคอลัมน์หนึ่งในตารางเหมือนเดิม
+ * คนที่อยากไล่ของเก่าเรียงจากคอลัมน์นั้นได้
+ *
+ * สามสถานะที่เหลือตอบคนละคำถาม: `matched` = จบแล้ว · `name_mismatch` = มีคนทำแต่
+ * ชื่อไม่ตรง ⇒ **ต้องมีคนไปแก้ชื่อ** · `pending` = ยังไม่มีใครคีย์ ⇒ **เอาไปคีย์**
+ * ลำดับการตัดสินยังสำคัญเหมือนเดิม: `name_mismatch` มาก่อน `pending` — สลับกันแล้ว
+ * ป้ายชื่อไม่ตรงจะไม่โผล่ให้ใครเห็นเลย
  */
 export function decorate(row: LocalContactListRow): LocalContactView {
   const matched = row.odoo_matched_at !== null;
-  const pendingDays = matched ? 0 : daysSince(row.created_at);
   const status: LocalContactStatus = matched
     ? 'matched'
     : row.similar_odoo_name
       ? 'name_mismatch'
-      : pendingDays >= STALE_AFTER_DAYS
-        ? 'stale'
-        : 'pending';
+      : 'pending';
   const hasQuotes = Number(row.quote_count) > 0;
   return {
     ...row,
     status,
-    pending_days: pendingDays,
     can_edit_name: !matched && !hasQuotes,
     can_edit_fields: !matched,
     can_delete: !matched && !hasQuotes,
@@ -313,7 +309,7 @@ export async function deleteLocalContactById(contactId: number): Promise<void> {
 }
 
 export async function listContacts(
-  opts: { filter?: 'pending' | 'all'; q?: string; limit?: number; offset?: number }
+  opts: { filter?: LocalContactFilter; q?: string; limit?: number; offset?: number }
 ): Promise<{ items: LocalContactView[]; total: number; pending: number }> {
   const { items, total } = await listLocalContacts(opts);
   return { items: items.map(decorate), total, pending: await countPendingLocalContacts() };
@@ -339,8 +335,7 @@ export const EXPORT_HEADERS = [
 
 const STATUS_TEXT: Record<LocalContactStatus, string> = {
   matched: 'เข้า Odoo แล้ว',
-  pending: 'รอคีย์',
-  stale: 'ค้างนาน',
+  pending: 'รอนำเข้า',
   name_mismatch: 'น่าจะคีย์แล้วแต่ชื่อไม่ตรง',
 };
 

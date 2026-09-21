@@ -84,6 +84,7 @@ export type PageCapability =
   | 'page.pricing'
   | 'page.productsdata'
   | 'page.customersdata'
+  | 'page.odoocontacts'
   | 'page.blacklist'
   | 'page.salespersons'
   | 'page.users'
@@ -413,6 +414,20 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     modes: SWITCH,
     defaults: switchFor('allow', 'allow', 'allow', 'deny'),
     enforcedAt: 'app.use(/api/admin/data/customers) — ด่านวางก่อนจุด mount ของ dataDirectoryRouter',
+  },
+  {
+    // หน้า "ผู้ติดต่อเพิ่มเอง" — รายชื่อที่ยังไม่มีใน Odoo + ไฟล์ให้เอาไปคีย์
+    //
+    // ⚠ **คนละช่องกับ `quote.manage_contacts` โดยตั้งใจ** — ช่องนั้นคือ "ใครเพิ่มคนได้
+    //    ตอนออกใบ" ส่วนช่องนี้คือ "ใครดูกองงานค้างของทั้งร้านได้" ถ้ามัดรวมเป็นช่องเดียว
+    //    การปิดหน้านี้ให้ subadmin จะทำให้เขาเพิ่มผู้ติดต่อตอนออกใบไม่ได้ไปด้วย ซึ่งไม่มีใครเดาถูก
+    key: 'page.odoocontacts',
+    group: 'page',
+    label: 'ผู้ติดต่อเพิ่มเอง',
+    modes: SWITCH,
+    // เจ้าของเคาะ 2026-09-17 (§9 ข้อ 2): admin · approver · subadmin — ตรงกับ quote.manage_contacts
+    defaults: switchFor('allow', 'allow', 'allow', 'deny'),
+    enforcedAt: 'GET /api/admin/webquote/contacts · /export — ด่านที่สองใน routes/localContacts.ts ซ้อนกับ quote.manage_contacts ที่จุด mount',
   },
   {
     key: 'page.blacklist',
