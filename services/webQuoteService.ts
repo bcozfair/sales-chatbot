@@ -722,7 +722,7 @@ export async function createDraft(params: {
   requestApproval?: boolean;
   /** เหตุผลที่ขอขายต่ำกว่าขั้นต่ำ — ผู้อนุมัติอ่านอันนี้ก่อนตัดสิน */
   approvalNote?: string | null;
-  /** คำขอเดิมที่ถูกตีกลับแล้วแก้มาส่งใหม่ — ใบเก่าถูกยกเลิก *หลัง* ใบใหม่สร้างสำเร็จเท่านั้น */
+  /** คำขอเดิมที่ถูกตีกลับแล้วแก้มาส่งใหม่ — ร่างเก่าถูก **ทิ้ง** *หลัง* ใบใหม่สร้างสำเร็จเท่านั้น */
   replacesRequestId?: string | null;
 }): Promise<CreateDraftResult> {
   if (!Array.isArray(params.items) || params.items.length === 0) {
@@ -901,17 +901,38 @@ export async function createDraft(params: {
         violations: needApproval,
       };
 
-      // คำขอเดิมที่ถูกตีกลับแล้วแก้มาส่งใหม่ — ยกเลิก *หลัง* ใบใหม่ถูกสร้างและผูกคำขอเรียบร้อย
-      // ถ้ายกเลิกก่อน แล้วขั้นใดขั้นหนึ่งล้ม คนขอจะเหลือมือเปล่าทั้งที่ยังไม่ได้อะไรใหม่เลย
-      const replaces = String(params.replacesRequestId ?? '').trim();
-      if (replaces !== '') {
-        try {
-          await pool.query(
-            `UPDATE quotations SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
-              WHERE price_approval->>'request_id' = $1 AND status = 'draft'`, [replaces]);
-        } catch (err) {
-          console.error('[webQuote] ยกเลิกคำขอเดิมไม่สำเร็จ:', err);
-        }
+    }
+
+    // ── ร่างของคำขอเดิมที่แก้มาส่งใหม่ — **ทิ้งทั้งแถว ไม่ใช่มาร์กว่ายกเลิก** ──────
+    //  เจ้าของสั่ง 2026-09-21: "แก้แล้วส่งใหม่" คือการ *แก้ทับร่างเดิม* ไม่ใช่การยกเลิกมัน
+    //  ⇒ ประวัติใบเสนอราคาต้องไม่มีแถว "ยกเลิก" ที่ไม่มีเลขที่ โผล่มาทุกครั้งที่มีคนแก้คำขอ
+    //  และสถานะ `cancelled` เหลือความหมายเดียว: **มีคนกดยกเลิกจริง ๆ** (`cancelRequest`)
+    //  ซึ่งตรงกับกติกาที่ระบบใช้อยู่แล้วทั้งสองเส้น — ร่างที่ยังไม่มีเลขที่ถูก DELETE
+    //  (`POST /api/quotation/:id/cancel` · ปุ่มยกเลิกใน LINE) ส่วนใบที่มีเลขที่แล้วถูกมาร์ก
+    //
+    //  ทำ *หลัง* ใบใหม่ถูกสร้างและผูกคำขอเรียบร้อย — ถ้าทิ้งก่อนแล้วขั้นใดขั้นหนึ่งล้ม
+    //  คนขอจะเหลือมือเปล่าทั้งที่ยังไม่ได้อะไรใหม่เลย
+    //
+    //  **อยู่นอกบล็อก `needApproval` ตั้งแต่ 2026-09-21** — แก้ราคาขึ้นจนไม่ติดขั้นต่ำแล้ว
+    //  ส่งใหม่ ก็ต้องเก็บร่างเดิมเหมือนกัน ตอนที่เงื่อนไขนี้อยู่ข้างในบล็อก เคสนั้นได้ใบจริง
+    //  ออกไปแล้ว **แต่คำขอที่ถูกตีกลับยังค้างอยู่ในคิวตลอดไป** โดยไม่มีปุ่มไหนปิดมันได้
+    //
+    //  ใครล้างได้ = ใครเปิดคำขอนี้เข้าฟอร์มได้ (`loadRequestRows`): เจ้าของคำขอ หรือคนที่มี
+    //  สิทธิ์ตัดสิน · `replaces_request_id` มาจาก body ของ request ⇒ ถ้าไม่กรองเจ้าของ
+    //  ใครยิง id ของคนอื่นเข้ามาก็ลบร่างที่คนอื่นรออนุมัติอยู่ได้
+    const replaces = String(params.replacesRequestId ?? '').trim();
+    if (replaces !== '') {
+      const anyOwner = params.role ? await can(params.role, 'approval.decide') : false;
+      try {
+        await pool.query(
+          `DELETE FROM quotations
+            WHERE price_approval->>'request_id' = $1
+              AND status = 'draft'
+              AND quotation_no IS NULL
+              AND ($2::text IS NULL OR price_approval->>'requested_by_id' = $2)`,
+          [replaces, anyOwner ? null : String(params.adminId)]);
+      } catch (err) {
+        console.error('[webQuote] ล้างร่างของคำขอเดิมไม่สำเร็จ:', err);
       }
     }
 
@@ -1655,19 +1676,15 @@ export async function reviseQuotation(params: {
       throw new WebQuoteError('RULE_VIOLATION', buildViolationText(revBlockers), 422, { violations: revBlockers });
     }
 
-    // ยกเลิกร่างที่ค้างของ "คู่ (แอดมิน × เซลส์) นี้เท่านั้น" — ไม่แตะร่างของเซลส์ตัวจริง
-    // และไม่แตะร่างที่แอดมินคนเดียวกันทำค้างไว้ในนามเซลส์คนอื่น
-    try {
-      // `price_approval IS NULL` — ร่างที่รออนุมัติราคาไม่ใช่ "ร่างค้าง" ของคู่นี้ที่ทิ้งได้
-      // มันคือคำขอที่มีคนอื่นกำลังรอตัดสินอยู่ (docs/plan-quote-price-approval.md §2.3)
-      await pool.query(
-        `UPDATE quotations SET status = 'cancelled'
-          WHERE user_id = $1 AND status = ANY($2) AND price_approval IS NULL`,
-        [webUserId, ['pending_company', 'pending_contact', 'draft']]
-      );
-    } catch (err) {
-      console.error('[webQuote] cancel pending drafts error:', err);
-    }
+    // ร่างที่ค้างของ "คู่ (แอดมิน × เซลส์) นี้" ถูกเก็บกวาดโดย insertDraftQuotations ข้างล่าง
+    // ซึ่ง **DELETE** ด้วยขอบเขตเดียวกันเป๊ะ (`user_id` + สามสถานะ + `price_approval IS NULL`)
+    // อยู่ในทรานแซกชันเดียวกับ INSERT ⇒ ที่นี่ไม่ต้องทำอะไรอีก
+    //
+    // เคยมี `UPDATE … SET status = 'cancelled'` ยืนอยู่ตรงนี้ **ถอดออก 2026-09-21** เพราะมันไม่ได้
+    // ซ้ำซ้อนเฉย ๆ แต่ทำให้ตัวเก็บกวาดข้างล่างหาไม่เจอ (แถวไม่ใช่ `draft` แล้ว) ⇒ ทุกครั้งที่มีคน
+    // กดแก้ใบ จะมีแถว "ยกเลิก" ที่ไม่มีเลขที่ตกค้างในประวัติใบเสนอราคาหนึ่งแถวเสมอ
+    // และยังเสียทางถอยด้วย: ถ้า INSERT ล้ม ร่างเดิมถูกยกเลิกไปแล้วฟรี ๆ ส่วน DELETE ใน
+    // ทรานแซกชันจะ rollback คืนให้เอง
 
     const quotes = await insertDraftQuotations(
       webUserId,

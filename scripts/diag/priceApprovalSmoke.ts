@@ -10,11 +10,16 @@
 //  4. confirm ใบที่ยัง pending ⇒ 422 (คำรับทราบของคนออกใบปลดไม่ได้)
 //  5. คำขอโผล่ในคิวของผู้อนุมัติ · เปิดรายละเอียดแล้วเห็นผลตรวจกฎ "สด"
 //  6. ไม่อนุมัติโดยไม่ใส่เหตุผล ⇒ 400 · ใส่แล้ว ⇒ rejected และใบยังเป็นร่าง · confirm ยัง 422
-//  7. แก้แล้วส่งใหม่ (replacesRequestId) ⇒ คำขอเดิมถูกยกเลิก คำขอใหม่ pending
+//  7. แก้แล้วส่งใหม่ (replacesRequestId) ⇒ **ร่างของคำขอเดิมถูกทิ้งทั้งแถว** คำขอใหม่ pending
 //  8. insertDraftQuotations รอบใหม่ของ user เดิม ⇒ **ใบที่รออนุมัติไม่ถูกลบ**
 //  9. **ผู้อนุมัติแก้ตัวเลขในร่างเองได้** ⇒ ราคาในใบเปลี่ยนจริง · คำขออัปเดตตามราคาใหม่
 // 10. **อนุมัติใบที่ตัวเองเป็นคนขอได้** (เจ้าของสั่งปลดด่านนี้) ⇒ ทุกใบในชุดได้เลขที่
 // 11. ราคาที่ถูกแก้ให้ต่ำลงกว่าที่อนุมัติ ⇒ คำอนุมัติเดิมใช้ไม่ได้ (approvedViolationKeys)
+// 12. **กดยกเลิกคำขอเอง ⇒ ใบต้องเป็น `cancelled` จริงและยังอยู่ในประวัติ** — ข้อยกเว้นข้อเดียว
+//     ของข้อ 7 · คู่กันสองข้อนี้คือสิ่งที่ทำให้ "ยกเลิก" ในประวัติแปลว่า *มีคนกดยกเลิก* เสมอ
+// 13. ถูกตีกลับ แล้ว **แก้ราคาขึ้นจนไม่ต้องขออนุมัติ** แล้วส่งใหม่ ⇒ ร่างเดิมต้องไม่ค้างในคิว
+//     (เคสนี้เคยหลุดทั้งสองชั้น: หน้าจอไม่ส่ง `replaces_request_id` และ server เช็กเฉพาะ
+//      ตอนยังต้องขออนุมัติ ⇒ คำขอที่ถูกตีกลับค้างในคิวตลอดไปโดยไม่มีปุ่มไหนปิดได้)
 //
 //  ⚠️ เขียนข้อมูลจริงลง DB (salesperson · admin_users · quotations · messages ของชุดทดสอบ)
 //     แล้วลบทิ้งใน finally ทุกกรณี · ข้อ 9 **กินเลขที่ใบจริง 1 เลข** จาก quotation_counters
@@ -33,7 +38,7 @@ import { confirmQuotationById } from '../../services/quotationConfirm.js';
 import { buildResolvedItem } from '../../services/quoteExtraction.js';
 import { createDraft, previewDraft, resolveWebUserId, WebQuoteError } from '../../services/webQuoteService.js';
 import {
-  approveRequest, rejectRequest, listApprovalRequests, getApprovalRequest, updateRequestItems,
+  approveRequest, rejectRequest, cancelRequest, listApprovalRequests, getApprovalRequest, updateRequestItems,
   PriceApprovalError, type ApprovalActor,
 } from '../../services/priceApprovalService.js';
 
@@ -266,7 +271,7 @@ async function case5to6(requestId: string) {
 
 /** ข้อ 7–8 — แก้แล้วส่งใหม่ · ร่างที่รออนุมัติต้องไม่ถูกลบโดยรอบถัดไป */
 async function case7to8(cust: any, pick: any, oldRequestId: string): Promise<string> {
-  console.log(`\n${BOLD}7) แก้แล้วส่งใหม่ → คำขอเดิมถูกยกเลิก คำขอใหม่ pending${RESET}`);
+  console.log(`\n${BOLD}7) แก้แล้วส่งใหม่ → ร่างของคำขอเดิมถูกทิ้ง คำขอใหม่ pending${RESET}`);
   const again = await createDraft({
     adminId,
     role: 'admin', spUserId: TEST_SP_USER, customerId: cust.customerId, contactId: cust.contactId,
@@ -276,10 +281,14 @@ async function case7to8(cust: any, pick: any, oldRequestId: string): Promise<str
   const newId = String(again.approval?.request_id);
   ok('ได้คำขอใหม่', !!newId && newId !== oldRequestId);
 
+  // **ทิ้งทั้งแถว ไม่ใช่มาร์ก cancelled** (เจ้าของสั่ง 2026-09-21) — ร่างที่ถูกแก้ทับต้องไม่
+  // โผล่เป็นแถว "ยกเลิก" ที่ไม่มีเลขที่ในประวัติใบเสนอราคา สถานะนั้นเหลือไว้ให้ของที่มีคน
+  // กดยกเลิกจริง ๆ เท่านั้น (ข้อ 12 เป็นคนพิสูจน์ฝั่งนั้น)
   const oldRows = (await pool.query(
     "SELECT status FROM quotations WHERE price_approval->>'request_id' = $1", [oldRequestId]
   )).rows;
-  ok('ใบของคำขอเดิมถูกยกเลิกทุกใบ', oldRows.length > 0 && oldRows.every((r: any) => r.status === 'cancelled'));
+  ok('ร่างของคำขอเดิมถูกทิ้งหมด ไม่เหลือแถวยกเลิกค้าง', oldRows.length === 0,
+    oldRows.length === 0 ? '' : `เหลือ ${oldRows.length} แถว: ${oldRows.map((r: any) => r.status).join(', ')}`);
 
   console.log(`\n${BOLD}8) สร้างร่างรอบใหม่ของ user เดิม → ใบที่รออนุมัติต้องไม่ถูกลบ${RESET}`);
   const { itemForDb: plainItem } = buildResolvedItem(pick.product, { quantity: 1 }, {});
@@ -389,6 +398,69 @@ function case11() {
     blockingViolations([mk(100)], ['MIN_PRICE_VIOLATION|DIAG-X'], approvedViolationKeys(null, [mk(100)])).length === 1);
 }
 
+/**
+ * ข้อ 12 — กดยกเลิกคำขอเอง ⇒ ใบต้องเป็น `cancelled` จริง **และต้องไม่ถูกลบทิ้ง**
+ *
+ * นี่คือข้อยกเว้นข้อเดียวของข้อ 7 และเป็นครึ่งที่ขาดไม่ได้ของกติกาที่เจ้าของสั่งไว้ 2026-09-21:
+ * แถว "ยกเลิก" ในประวัติใบเสนอราคาต้องแปลว่า **มีคนกดยกเลิก** เสมอ ⇒ ถ้าวันหนึ่งมีใครไป
+ * เปลี่ยน `cancelRequest` ให้ลบแถวทิ้งตามข้อ 7 ไปด้วย หลักฐานว่าใครยกเลิกอะไรจะหายเงียบ ๆ
+ */
+async function case12(cust: any, pick: any) {
+  console.log(`\n${BOLD}12) กดยกเลิกคำขอเอง → ใบเป็น "ยกเลิก" จริงและยังอยู่ในประวัติ${RESET}`);
+  const draft = await createDraft({
+    adminId, role: 'admin', spUserId: TEST_SP_USER,
+    customerId: cust.customerId, contactId: cust.contactId,
+    items: pick.items, requestApproval: true, approvalNote: 'จะกดยกเลิกเอง (diag)',
+    adminUsername: TEST_ADMIN_USERNAME,
+  });
+  const reqId = String(draft.approval?.request_id);
+  await cancelRequest({ requestId: reqId, actor: adminActor });
+
+  const rows = (await pool.query(
+    "SELECT status FROM quotations WHERE price_approval->>'request_id' = $1", [reqId]
+  )).rows;
+  ok('ใบยังอยู่ ไม่ถูกลบทิ้ง', rows.length > 0, `${rows.length} ใบ`);
+  ok('ทุกใบขึ้นสถานะยกเลิก', rows.length > 0 && rows.every((r: any) => r.status === 'cancelled'),
+    rows.map((r: any) => r.status).join(', '));
+  const queue = await listApprovalRequests({ actor: adminActor, status: 'pending' });
+  ok('หลุดออกจากคิวรออนุมัติแล้ว', !queue.some((r) => r.request_id === reqId));
+}
+
+/** ข้อ 13 — ถูกตีกลับ แล้วแก้ราคาขึ้นจนไม่ต้องขออนุมัติ ⇒ ร่างเดิมต้องไม่ค้างในคิว */
+async function case13(cust: any, pick: any) {
+  console.log(`\n${BOLD}13) ถูกตีกลับ → แก้ราคาขึ้นจนไม่ติดขั้นต่ำ → ร่างเดิมต้องไม่ค้าง${RESET}`);
+  const draft = await createDraft({
+    adminId, role: 'admin', spUserId: TEST_SP_USER,
+    customerId: cust.customerId, contactId: cust.contactId,
+    items: pick.items, requestApproval: true, approvalNote: 'จะถูกตีกลับแล้วขึ้นราคา (diag)',
+    adminUsername: TEST_ADMIN_USERNAME,
+  });
+  const oldId = String(draft.approval?.request_id);
+  await rejectRequest({ requestId: oldId, actor: approverActor, reason: 'ต่ำไป ให้ขึ้นราคา (diag)' });
+
+  // ยืนยันก่อนว่าราคาใหม่ "ไม่ต้องขออนุมัติจริง" — ถ้ามันยังติดกฎอยู่ เคสนี้จะไหลไปทางเดียว
+  // กับข้อ 7 แล้วผ่านโดยไม่ได้ทดสอบสิ่งที่ตั้งใจจะทดสอบเลยสักบรรทัด
+  const okPrice = Math.max(Number(pick.product.minimum_sales_price), Number(pick.product.sales_price));
+  const fixed = [{ product_template_id: pick.product.product_template_id, quantity: 1, price: okPrice }];
+  const pv = await previewDraft({ customerId: cust.customerId, contactId: cust.contactId, items: fixed });
+  ok('ราคาใหม่ไม่ต้องขออนุมัติแล้ว', pv.needs_approval === false, `฿${okPrice}`);
+
+  const again = await createDraft({
+    adminId, role: 'admin', spUserId: TEST_SP_USER,
+    customerId: cust.customerId, contactId: cust.contactId,
+    items: fixed, adminUsername: TEST_ADMIN_USERNAME, replacesRequestId: oldId,
+  });
+  ok('ได้ร่างที่ออกใบได้เลย ไม่มีคำขอใหม่', (again.quotes?.length ?? 0) > 0 && !again.approval);
+
+  const oldRows = (await pool.query(
+    "SELECT status FROM quotations WHERE price_approval->>'request_id' = $1", [oldId]
+  )).rows;
+  ok('ร่างของคำขอที่ถูกตีกลับถูกทิ้งไปแล้ว', oldRows.length === 0,
+    oldRows.length === 0 ? '' : `เหลือ ${oldRows.length} แถว: ${oldRows.map((r: any) => r.status).join(', ')}`);
+  const queue = await listApprovalRequests({ actor: adminActor, status: 'rejected' });
+  ok('ไม่ค้างอยู่ในคิว "ไม่อนุมัติ"', !queue.some((r) => r.request_id === oldId));
+}
+
 async function main() {
   console.log(`${BOLD}diag:price-approval — คิวอนุมัติราคาต่ำกว่าขั้นต่ำ${RESET}`);
   try {
@@ -405,6 +477,8 @@ async function main() {
     await case9(newRequestId, pick);
     await case10(newRequestId);
     case11();
+    await case12(cust, pick);
+    await case13(cust, pick);
   } catch (err) {
     fail++;
     console.error(`\n${RED}ด่านล้มกลางคัน:${RESET}`, err);

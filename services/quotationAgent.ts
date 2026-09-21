@@ -110,15 +110,11 @@ export async function handleQuotationEditRequest(params: {
     return { messages: [{ type: 'text', text: t }], replyText: t };
   }
 
-  // ยกเลิกใบร่างที่ค้างอยู่ของเซลส์คนนี้ก่อน (เหมือน flow revise เดิม)
-  try {
-    await pool.query(
-      "UPDATE quotations SET status = 'cancelled' WHERE user_id = $1 AND status = ANY($2)",
-      [userId, ['pending_company', 'pending_contact', 'draft']]
-    );
-  } catch (err) {
-    console.error('[quotationAgent] cancel pending drafts error:', err);
-  }
+  // ร่างที่ค้างอยู่ของเซลส์คนนี้ถูกเก็บกวาดโดย insertDraftQuotations ข้างล่าง ซึ่ง **DELETE**
+  // ด้วยขอบเขตเดียวกัน (`user_id` + สามสถานะเดียวกัน) ในทรานแซกชันเดียวกับ INSERT
+  // เคยมี `UPDATE … SET status = 'cancelled'` ยืนอยู่ตรงนี้ **ถอดออก 2026-09-21** ด้วยเหตุผล
+  // เดียวกับ flow revise ใน handlers/lineHandler.ts — มันทำให้ตัวเก็บกวาดหาแถวไม่เจอ แล้วเหลือ
+  // แถว "ยกเลิก" ที่ไม่มีเลขที่ค้างในประวัติทุกครั้งที่มีคนกดแก้ใบ
 
   const revisedCustomerName = appendReviseFrom(activeQuote.customer_name, activeQuote.quotation_no);
 
