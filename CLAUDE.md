@@ -466,6 +466,7 @@ chatbot/
 - **`docs/SYNC_API.md`** — API ให้ระบบภายนอกดึงข้อมูล (3 โหมด sync และเกณฑ์เลือก)
 - **`docs/plan-web-quote-request.md`** — หน้าเว็บขอใบเสนอราคา เฟส A–D (แผนยาว อ่านเฉพาะหัวข้อที่ตรงงาน)
 - **`docs/plan-local-contacts.md`** — เพิ่มผู้ติดต่อใหม่ (`local_contacts` + Arm 3) เฟส I · แบบของโมดูล
+- **`docs/plan-local-products.md`** — เพิ่มสินค้าใหม่ (`local_products`) เฟส J · **รูปแบบ `internal_reference` ถอดจากข้อมูลจริง + อัลกอริทึมออกรหัสต่อจากรหัสเดิม** · ยังไม่เริ่มเขียนโค้ด (เจ้าของเคาะ §2 ครบแล้ว 2026-09-21)
 - **`docs/plan-quote-price-approval.md`** — คิวอนุมัติราคาต่ำกว่าขั้นต่ำ + role `approver`
 - **`docs/plan-web-quote-logging.md`** — ประวัตของหน้าเว็บใน `messages` (`web_*` + `meta`) และวิธีวัด `chosen_rank`
 - **`docs/plan-product-block-rules.md`** — กฎบล็อกสินค้า
