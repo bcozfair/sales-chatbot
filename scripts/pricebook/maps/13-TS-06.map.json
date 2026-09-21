@@ -1,0 +1,122 @@
+{
+  "file": "ราคาTC อัพเดต (13-05-69).xlsx",
+  "sheet": "TS-06",
+  "code": "TSK-06",
+  "label": "Thermocouple TS-06 (เกลียว + หัวกระโหลก)",
+  "aliases": ["TSJ-06", "TS-06"],
+  "standard": { "L1": 100 },
+  "base": {
+    "kind": "matrix",
+    "axes": ["D", "thread"],
+    "rowHeaderCol": "B",
+    "rows": [17, 53],
+    "colHeaderRow": 15,
+    "cols": ["D", "E", "F", "G", "H", "I"]
+  },
+  "adders": [
+    {
+      "id": "len_l1",
+      "label": "ความยาวแกน L1",
+      "order": 20,
+      "kind": "perUnit",
+      "dim": "L1",
+      "step": 100,
+      "round": "ceil",
+      "unit": "mm",
+      "byAxis": "D",
+      "ratesFrom": { "col": "C", "keyCol": "B", "rows": [17, 53] },
+      "source": "TS-06!C15 'บวกเพิ่ม 100 mm ละ'"
+    },
+    {
+      "id": "sensor_t",
+      "label": "Type T (บวกเพิ่มจาก Type K/J)",
+      "order": 30,
+      "kind": "flat",
+      "when": { "option": "sensor:T" },
+      "byAxis": "D",
+      "ratesFrom": { "col": "J", "keyCol": "B", "rows": [17, 53] },
+      "source": "TS-06!J14 'Type T บวกเพิ่ม'"
+    },
+    {
+      "id": "sensor_ntc",
+      "label": "NTC / PTC (บวกเพิ่มจาก Type K/J)",
+      "order": 30,
+      "kind": "flat",
+      "when": { "option": "sensor:NTC" },
+      "byAxis": "D",
+      "ratesFrom": { "col": "K", "keyCol": "B", "rows": [17, 53] },
+      "source": "TS-06!K14 'NTC / PTC บวกเพิ่ม'"
+    },
+    {
+      "id": "element_2",
+      "label": "2 element (Type K/J)",
+      "order": 35,
+      "kind": "flat",
+      "when": { "option": "element:2" },
+      "byAxis": "D",
+      "ratesFrom": { "col": "L", "keyCol": "B", "rows": [17, 53] },
+      "source": "TS-06!L14 '2 element บวกเพิ่ม for Type K/J' — ชีตเว้นช่องของแกนเล็กไว้ ⇒ แกนที่ทำไม่ได้จะถูกบล็อกเองตอนคิดราคา ไม่ต้องเขียนข้อห้ามซ้ำ"
+    },
+    {
+      "id": "coat_teflon",
+      "label": "หุ้มเทปล่อน",
+      "order": 40,
+      "kind": "perUnit",
+      "when": { "option": "coat:teflon" },
+      "dim": "teflon_mm",
+      "over": 0,
+      "step": 100,
+      "round": "ceil",
+      "unit": "mm",
+      "byAxis": "D",
+      "ratesFrom": { "col": "M", "keyCol": "B", "rows": [17, 53] },
+      "source": "TS-06!M14 'หุ้มเทปล่อน เพิ่ม 100มม. ละ'"
+    },
+    {
+      "id": "head_blacklite_s",
+      "label": "หัวกระโหลก Blacklite เล็ก",
+      "order": 50,
+      "kind": "flat",
+      "when": { "option": "head:blacklite_s" },
+      "amountFrom": "L9",
+      "source": "TS-06!J9:L9 'ราคาหัวกระโหลก · Blacklite เล็ก'"
+    },
+    {
+      "id": "head_alu_l",
+      "label": "หัวกระโหลก อลูมิเนียม ใหญ่",
+      "order": 50,
+      "kind": "flat",
+      "when": { "option": "head:alu_l" },
+      "amountFrom": "L10",
+      "source": "TS-06!J10:L10"
+    },
+    {
+      "id": "head_blacklite_l",
+      "label": "หัวกระโหลก Blacklite ใหญ่",
+      "order": 50,
+      "kind": "flat",
+      "when": { "option": "head:blacklite_l" },
+      "amountFrom": "L11",
+      "source": "TS-06!J11:L11"
+    },
+    {
+      "id": "bend_l",
+      "label": "หัก L ดัดงอ",
+      "order": 55,
+      "kind": "flat",
+      "when": { "option": "bend:L" },
+      "amount": 100,
+      "source": "TS-06!C11 'สำหรับรุ่นหัก L ดัดงอ บวกเพิ่ม 100 บาท'"
+    },
+    {
+      "id": "bend_square",
+      "label": "หักฉาก (เชื่อมฉาก)",
+      "order": 55,
+      "kind": "flat",
+      "when": { "option": "bend:square" },
+      "amount": 200,
+      "source": "TS-06!C11 'แบบฉาก (เชื่อมฉาก) บวกเพิ่ม 200 บาท'"
+    }
+  ],
+  "constraints": []
+}

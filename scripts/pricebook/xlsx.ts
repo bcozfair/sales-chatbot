@@ -1,11 +1,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
-//  PROTOTYPE — คำสั่งบรรทัดคำสั่งสำหรับแม่แบบ .xlsx
+//  คำสั่งบรรทัดคำสั่งสำหรับแม่แบบ .xlsx
 //
-//  ⚠️ ของทดลอง ไม่มีใครใน production import ไฟล์นี้ · ดู prototypes/pricing/README.md
+//  เครื่องมือของสมุดราคา — ดู services/pricingLab/README.md
 //
-//    npx tsx prototypes/pricing/xlsx.ts export [--out ไฟล์.xlsx]   แม่แบบกฎราคา (แก้แล้วนำกลับได้)
-//    npx tsx prototypes/pricing/xlsx.ts odoo   [--out ไฟล์.xlsx]   ตารางราคาสำหรับนำเข้า Odoo
-//    npx tsx prototypes/pricing/xlsx.ts import <ไฟล์.xlsx> [--save]
+//    npm run pricebook:xlsx -- export [--out ไฟล์.xlsx]   แม่แบบกฎราคา (แก้แล้วนำกลับได้)
+//    npm run pricebook:xlsx -- odoo   [--out ไฟล์.xlsx]   ตารางราคาสำหรับนำเข้า Odoo
+//    npm run pricebook:xlsx -- import <ไฟล์.xlsx> [--save]
 //
 //  **เขียนด้วย xlsxlite (เขียนเอง) แต่อ่านด้วย exceljs (ไลบรารีจริง) โดยตั้งใจ**
 //  ถ้าใช้ตัวเดียวกันทั้งอ่านและเขียน ความผิดพลาดที่สมมาตรจะมองไม่เห็น — เขียนผิดแบบไหน
@@ -22,12 +22,13 @@ import { bookToOdooSheets } from './odoo.js';
 import { bookToSheets, sheetsToBook } from './sheet.js';
 import type { CellValue, ImportIssue, RawSheet } from './sheet.js';
 import type { PriceBook } from '../../services/pricingLab/types.js';
+import { BOOK_PATH } from '../../services/pricingLab/bookStore.js';
 import { writeXlsx } from './xlsxlite.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 export function loadBook(): PriceBook {
-  return JSON.parse(readFileSync(join(HERE, 'book.json'), 'utf8')) as PriceBook;
+  return JSON.parse(readFileSync(BOOK_PATH, 'utf8')) as PriceBook;
 }
 
 // ── อ่านไฟล์ที่คนแก้กลับมา ───────────────────────────────────────────────────
@@ -96,7 +97,7 @@ async function main(): Promise<void> {
     const bytes = writeXlsx(bookToSheets(book, { exportedAt: today }));
     writeFileSync(out, bytes);
     console.log(`แม่แบบกฎราคา → ${out}  (${(bytes.length / 1024).toFixed(0)} KB)`);
-    console.log('แก้ในไฟล์นี้แล้วนำกลับด้วย:  npx tsx prototypes/pricing/xlsx.ts import "<ไฟล์>"');
+    console.log('แก้ในไฟล์นี้แล้วนำกลับด้วย:  npm run pricebook:xlsx -- import "<ไฟล์>"');
     return;
   }
 
@@ -114,7 +115,7 @@ async function main(): Promise<void> {
   if (cmd === 'import') {
     const path = args[1];
     if (!path) {
-      console.error('ต้องบอกชื่อไฟล์:  npx tsx prototypes/pricing/xlsx.ts import "<ไฟล์.xlsx>"');
+      console.error('ต้องบอกชื่อไฟล์:  npm run pricebook:xlsx -- import "<ไฟล์.xlsx>"');
       process.exit(1);
     }
     const grids = await readWorkbook(resolve(path));
@@ -138,18 +139,18 @@ async function main(): Promise<void> {
       console.log(`  ${m.code.padEnd(8)} ${base.padEnd(18)} กฎบวกเพิ่ม ${m.adders.length} · ข้อห้าม ${m.constraints.length}`);
     }
     if (args.includes('--save')) {
-      writeFileSync(join(HERE, 'book.json'), JSON.stringify(book, null, 2), 'utf8');
-      console.log('\nบันทึกทับ book.json แล้ว — รัน golden.ts ต่อเพื่อดูว่าราคาที่เคยถูกยังถูกอยู่ไหม');
+      writeFileSync(BOOK_PATH, JSON.stringify(book, null, 2), 'utf8');
+      console.log('\nบันทึกทับ pricebook/book.json แล้ว — รัน npm run diag:pricing ต่อเพื่อดูว่าราคาที่เคยถูกยังถูกอยู่ไหม');
     } else {
-      console.log('\n(ยังไม่ได้บันทึกทับ book.json — ใส่ --save ถ้าต้องการ)');
+      console.log('\n(ยังไม่ได้บันทึกทับ pricebook/book.json — ใส่ --save ถ้าต้องการ)');
     }
     return;
   }
 
   console.log('คำสั่ง:');
-  console.log('  npx tsx prototypes/pricing/xlsx.ts export [--out ไฟล์.xlsx]   แม่แบบกฎราคา');
-  console.log('  npx tsx prototypes/pricing/xlsx.ts odoo   [--out ไฟล์.xlsx]   ตารางราคาสำหรับ Odoo');
-  console.log('  npx tsx prototypes/pricing/xlsx.ts import <ไฟล์.xlsx> [--save]');
+  console.log('  npm run pricebook:xlsx -- export [--out ไฟล์.xlsx]   แม่แบบกฎราคา');
+  console.log('  npm run pricebook:xlsx -- odoo   [--out ไฟล์.xlsx]   ตารางราคาสำหรับ Odoo');
+  console.log('  npm run pricebook:xlsx -- import <ไฟล์.xlsx> [--save]');
   process.exit(1);
 }
 

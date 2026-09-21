@@ -1,12 +1,12 @@
 // ─────────────────────────────────────────────────────────────────────────────
-//  PROTOTYPE — ด่านตรวจ: เทียบผลของ engine กับ "ตัวอย่างการคิดราคา" ที่เขียนอยู่ในชีตเอง
+//  ด่านตรวจ: เทียบผลของ engine กับ "ตัวอย่างการคิดราคา" ที่เขียนอยู่ในชีตเอง
 //
-//  ⚠️ ของทดลอง ไม่มีใครใน production import ไฟล์นี้ · ดู prototypes/pricing/README.md
+//  เครื่องมือของสมุดราคา — ดู services/pricingLab/README.md
 //
 //  ชีตแถมข้อสอบพร้อมเฉลยมาให้แล้ว — ฝ่ายขายเขียน "วิธีคิดราคา" ไว้ข้าง ๆ ตาราง
 //  นี่คือ golden case ที่ดีที่สุดที่หาได้ เพราะมันคือสิ่งที่ "คนที่รู้เรื่องจริง" บอกว่าถูก
 //
-//  รัน:  npx tsx prototypes/pricing/golden.ts
+//  รัน:  npm run diag:pricing
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { readFileSync } from 'node:fs';
@@ -15,9 +15,10 @@ import { fileURLToPath } from 'node:url';
 import { parseProductCode } from '../../services/pricingLab/code.js';
 import { computePrice, formatOutcome } from '../../services/pricingLab/engine.js';
 import type { PriceBook, ProductConfig, SubCode } from '../../services/pricingLab/types.js';
+import { BOOK_PATH } from '../../services/pricingLab/bookStore.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const book = JSON.parse(readFileSync(join(HERE, 'book.json'), 'utf8')) as PriceBook;
+const book = JSON.parse(readFileSync(BOOK_PATH, 'utf8')) as PriceBook;
 
 interface Case {
   name: string;
@@ -35,7 +36,7 @@ interface Case {
 
 // เคสอยู่ในไฟล์ JSON ไฟล์เดียว เพราะหน้าเดโม (demo/) ใช้ชุดเดียวกันนี้
 // ถ้าปล่อยให้ต่างคนต่างถือรายการ วันหนึ่งด่านกับหน้าที่เอาไปให้คนดูจะเล่าคนละเรื่อง
-const CASES = JSON.parse(readFileSync(join(HERE, 'cases.json'), 'utf8')) as Case[];
+const CASES = JSON.parse(readFileSync(join(HERE, 'fixtures', 'pricingCases.json'), 'utf8')) as Case[];
 
 // ── รัน ──────────────────────────────────────────────────────────────────────
 

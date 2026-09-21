@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
-//  PROTOTYPE — ตัวนำเข้า: ไฟล์ Excel ของฝ่ายขาย → สมุดราคา JSON
+//  ตัวนำเข้า: ไฟล์ Excel ของฝ่ายขาย → สมุดราคา JSON
 //
-//  ⚠️ ของทดลอง ไม่มีใครใน production import ไฟล์นี้ · ดู prototypes/pricing/README.md
+//  เครื่องมือของสมุดราคา — ดู services/pricingLab/README.md
 //
 //  **ทำไมต้องมีไฟล์ map เขียนมือ ไม่ใช่ auto-detect**
 //  30 ชีตวางหัวตารางคนละแบบ และ "ชนิดเซนเซอร์" ปรากฏ 3 รูปแบบข้ามชีต (เป็น prefix ของรุ่น ·
@@ -20,6 +20,7 @@ import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Adder, Band, Constraint, DerivedDim, PriceBook, PriceModel, SubCode } from '../../services/pricingLab/types.js';
+import { BOOK_PATH } from '../../services/pricingLab/bookStore.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -35,7 +36,15 @@ interface MatrixSpec {
   axes: string[];
   rowHeaderCol: string;
   rows: [number, number];
-  colHeaderRow: number;
+  /**
+   * แถวหัวคอลัมน์ — **ใส่หลายแถวได้** เพราะชีต RTD (TS-08 · TS-10) ซ้อนหัวสองชั้น:
+   * แถวบนเป็นขนาดเกลียว แถวล่างเป็นชนิดหัววัด (`1/8" / TSP` · `1/8" / TSPA` · ...)
+   * ⇒ หนึ่งคอลัมน์ = ค่าของสองแกนพร้อมกัน ถ้าอ่านแถวเดียวจะได้ 6 คอลัมน์ที่ชื่อซ้ำกันสามรอบ
+   * แล้วราคาของ TSPA/TSZ จะทับราคาของ TSP เงียบ ๆ (ตารางเหลือ 1 ใน 3 โดยไม่มีอะไรฟ้อง)
+   *
+   * จำนวนแถวหัวต้องเท่ากับ `axes.length - 1` เสมอ (แกนแรกคือแกนแถว) — ตัวนำเข้าตรวจให้
+   */
+  colHeaderRow: number | number[];
   cols: string[];
 }
 
@@ -177,7 +186,15 @@ function importSheet(
   if (map.base.kind === 'matrix') {
     const spec = map.base;
     const cells: Record<string, number> = {};
-    const colHeaders = spec.cols.map((c) => cellText(ws, spec.colHeaderRow, c));
+    const headerRows = Array.isArray(spec.colHeaderRow) ? spec.colHeaderRow : [spec.colHeaderRow];
+    if (headerRows.length !== spec.axes.length - 1) {
+      throw new Error(
+        `${map.code}: มีแกน ${spec.axes.length} แกน (${spec.axes.join(' · ')}) แต่บอกแถวหัวคอลัมน์มา ` +
+          `${headerRows.length} แถว — ต้องเท่ากับจำนวนแกนลบหนึ่ง (แกนแรกคือแกนแถว)`
+      );
+    }
+    // หัวของคอลัมน์หนึ่ง = ค่าของทุกแกนคอลัมน์ ต่อกันด้วยตัวคั่นเดียวกับ matrixKey
+    const colHeaders = spec.cols.map((c) => headerRows.map((hr) => cellText(ws, hr, c)).join(' | '));
     for (let r = spec.rows[0]; r <= spec.rows[1]; r++) {
       const rowKey = cellText(ws, r, spec.rowHeaderCol);
       if (!rowKey) continue;
@@ -325,7 +342,7 @@ if (isMain) {
   const dataArg = process.argv.indexOf('--data');
   const dataDir = dataArg > -1 ? process.argv[dataArg + 1]! : resolve(HERE, '../../data');
   const mapDir = join(HERE, 'maps');
-  const outFile = join(HERE, 'book.json');
+  const outFile = BOOK_PATH;
 
   const { book, reports } = await buildBook(dataDir, mapDir);
   writeFileSync(outFile, JSON.stringify(book, null, 2), 'utf8');

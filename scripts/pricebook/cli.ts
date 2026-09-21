@@ -1,14 +1,14 @@
 // ─────────────────────────────────────────────────────────────────────────────
-//  PROTOTYPE — เครื่องคิดราคาบรรทัดคำสั่ง ไว้ลองด้วยมือ
+//  เครื่องคิดราคาบรรทัดคำสั่ง ไว้ลองด้วยมือ
 //
-//  ⚠️ ของทดลอง ไม่มีใครใน production import ไฟล์นี้ · ดู prototypes/pricing/README.md
+//  เครื่องมือของสมุดราคา — ดู services/pricingLab/README.md
 //
 //  ตัวอย่าง:
-//    npx tsx prototypes/pricing/cli.ts --list
-//    npx tsx prototypes/pricing/cli.ts TSK-04 --axis D=6 --axis "thread=1/2”" --dim L1=300
-//    npx tsx prototypes/pricing/cli.ts BH-01C --dim dia_mm=600 --dim width_mm=150 --opt conn:pl2
-//    npx tsx prototypes/pricing/cli.ts TSK-04 --options D   (ดูว่าแกน D รับค่าอะไรได้บ้าง)
-//    npx tsx prototypes/pricing/cli.ts --code "TSK-04(S2)6x300+3M"   (อ่านรหัสแล้วคิดราคาให้เลย)
+//    npm run pricebook:calc -- --list
+//    npm run pricebook:calc -- TSK-04 --axis D=6 --axis "thread=1/2”" --dim L1=300
+//    npm run pricebook:calc -- BH-01C --dim dia_mm=600 --dim width_mm=150 --opt conn:pl2
+//    npm run pricebook:calc -- TSK-04 --options D   (ดูว่าแกน D รับค่าอะไรได้บ้าง)
+//    npm run pricebook:calc -- --code "TSK-04(S2)6x300+3M"   (อ่านรหัสแล้วคิดราคาให้เลย)
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { readFileSync } from 'node:fs';
@@ -17,9 +17,10 @@ import { fileURLToPath } from 'node:url';
 import { parseProductCode } from '../../services/pricingLab/code.js';
 import { computePrice, formatOutcome, resolveModel } from '../../services/pricingLab/engine.js';
 import type { PriceBook, ProductConfig } from '../../services/pricingLab/types.js';
+import { BOOK_PATH } from '../../services/pricingLab/bookStore.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const book = JSON.parse(readFileSync(join(HERE, 'book.json'), 'utf8')) as PriceBook;
+const book = JSON.parse(readFileSync(BOOK_PATH, 'utf8')) as PriceBook;
 const argv = process.argv.slice(2);
 
 function collect(flag: string): string[] {

@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
-//  PROTOTYPE — ด่านตรวจของแม่แบบ .xlsx: ส่งออก → อ่านกลับ → ราคาต้องเท่าเดิมทุกบาท
+//  ด่านตรวจของแม่แบบ .xlsx: ส่งออก → อ่านกลับ → ราคาต้องเท่าเดิมทุกบาท
 //
-//  ⚠️ ของทดลอง ไม่มีใครใน production import ไฟล์นี้ · ดู prototypes/pricing/README.md
+//  เครื่องมือของสมุดราคา — ดู services/pricingLab/README.md
 //
 //  **คำถามที่ด่านนี้ตอบ** — ไม่ใช่ "โค้ดรันผ่านไหม" แต่คือ:
 //    1. ไฟล์ที่เราปั้นเอง เป็น .xlsx จริงหรือเปล่า (ให้ exceljs ซึ่งเป็นคนละตัวกับตัวเขียน เป็นคนอ่าน)
@@ -11,7 +11,7 @@
 //    4. แก้ไฟล์แล้วราคาเปลี่ยนตามจริงไหม — จำลองการแก้แบบที่แอดมินจะทำ 3 แบบ
 //       (เปลี่ยน % · ปิดกฎ · เพิ่มกฎใหม่) แล้วเทียบกับเลขที่คำนวณด้วยมือ
 //
-//  รัน:  npx tsx prototypes/pricing/roundtrip.ts
+//  รัน:  npm run diag:pricing
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -19,16 +19,17 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { computePrice } from '../../services/pricingLab/engine.js';
-import { bookToOdooSheets } from './odoo.js';
-import { bookToSheets, sheetsToBook, SHEET_NAMES, VOCAB } from './sheet.js';
-import type { CellValue, RawSheet } from './sheet.js';
+import { bookToOdooSheets } from '../pricebook/odoo.js';
+import { bookToSheets, sheetsToBook, SHEET_NAMES, VOCAB } from '../pricebook/sheet.js';
+import type { CellValue, RawSheet } from '../pricebook/sheet.js';
 import type { PriceBook, ProductConfig } from '../../services/pricingLab/types.js';
-import { readWorkbook } from './xlsx.js';
-import { writeXlsx } from './xlsxlite.js';
+import { BOOK_PATH } from '../../services/pricingLab/bookStore.js';
+import { readWorkbook } from '../pricebook/xlsx.js';
+import { writeXlsx } from '../pricebook/xlsxlite.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const book = JSON.parse(readFileSync(join(HERE, 'book.json'), 'utf8')) as PriceBook;
-const CASES = JSON.parse(readFileSync(join(HERE, 'cases.json'), 'utf8')) as {
+const book = JSON.parse(readFileSync(BOOK_PATH, 'utf8')) as PriceBook;
+const CASES = JSON.parse(readFileSync(join(HERE, 'fixtures', 'pricingCases.json'), 'utf8')) as {
   name: string;
   cfg: ProductConfig;
 }[];
