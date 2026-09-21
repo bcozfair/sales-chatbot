@@ -42,6 +42,7 @@ import { Button } from './Button';
 import { ComboBox, type ComboOption } from './PersonComboBox';
 import { ConfirmIssueModal } from './ConfirmIssueModal';
 import { describeApiError } from './apiError';
+import { AddContactModal } from './AddContactModal';
 import {
   AlertCircle,
   AlertTriangle,
@@ -1192,6 +1193,8 @@ interface DocCtx {
   contactOpt: { id: string; name: string; phone: string } | null;
   contactOpts: { id: string; name: string; phone: string }[];
   onPickContact: (id: number) => void;
+  /** เปิดกล่อง "เพิ่มผู้ติดต่อใหม่" พร้อมชื่อที่พิมพ์ค้างไว้ในช่องค้น (ว่างได้) */
+  onAddContact: (prefill: string) => void;
   paymentTerms: string | null;
   paymentTermOpts: string[];
   setPaymentTerms: (v: string | null) => void;
@@ -1341,6 +1344,22 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
                 searchText={(o) => `${o.name} ${o.phone}`}
                 facts={(o) => (
                   <span className="shrink-0 text-[11px] text-slate-500 whitespace-nowrap">{o.phone || '—'}</span>
+                )}
+                /*
+                 * ทางเข้าของ "เพิ่มผู้ติดต่อใหม่" — เจ้าของเลือกแบบนี้จาก mockup ชุด lc-* (2026-09-21)
+                 * อยู่ท้ายรายการเพราะนั่นคือจังหวะที่คนกำลังหาคนที่ไม่มีอยู่พอดี และไม่กินความกว้าง
+                 * ของช่องบนใบ (มีแค่ 320px) · ช่องนี้ disabled อยู่แล้วเมื่อยังไม่เลือกบริษัท
+                 * ⇒ กางไม่ออก = กดไม่ได้ ไม่ต้องมีสถานะ disabled ของแถวนี้แยกอีกชั้น
+                 */
+                action={(q) => (
+                  <button
+                    type="button"
+                    onClick={() => ctx.onAddContact(q)}
+                    className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-xs font-bold text-[var(--brand-fg)] bg-slate-50 hover:bg-[var(--brand-soft)] transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5 shrink-0" />
+                    เพิ่มผู้ติดต่อใหม่
+                  </button>
                 )}
               />
             </span>
@@ -1901,6 +1920,14 @@ export const QuoteRequest: React.FC = () => {
   const [proposeError, setProposeError] = useState('');
   const [systemBusy, setSystemBusy] = useState(false);
 
+  /**
+   * กล่อง "เพิ่มผู้ติดต่อใหม่" — `null` = ปิดอยู่ · สตริง = เปิดพร้อมชื่อที่พิมพ์ค้างไว้
+   *
+   * เก็บเป็น "ชื่อที่พิมพ์ค้าง" ไม่ใช่ boolean คู่กับ state อีกตัว เพราะสองตัวที่ต้องเปลี่ยน
+   * พร้อมกันเสมอคือสองตัวที่วันหนึ่งจะไม่ตรงกัน (เปิดกล่องแต่ชื่อเป็นของรอบก่อน)
+   */
+  const [addContactFor, setAddContactFor] = useState<string | null>(null);
+
   // ── ส่วนที่ 2 ──
   const [webUserId, setWebUserId] = useState('');
   // ประวัติของขั้น propose — ไม่มีผลกับสิ่งที่แสดงบนหน้าจอ ใช้ผูกแถว web_draft กลับไปหาแถว
@@ -2115,6 +2142,31 @@ export const QuoteRequest: React.FC = () => {
     [contacts],
   );
   const contactOpt = contactOpts.find((o) => o.id === String(contactId)) ?? null;
+
+  const openAddContact = useCallback((prefill: string) => setAddContactFor(prefill), []);
+
+  /**
+   * เพิ่มผู้ติดต่อสำเร็จ (หรือกด "ใช้คนเดิม" ตอนชื่อซ้ำ) — เจ้าของเคาะ 2026-09-21 ว่า
+   * **ให้เลือกคนนั้นในใบทันที** เพราะคนกดเพิ่มเพราะกำลังจะออกใบให้เขาอยู่แล้ว
+   *
+   * ⚠️ ดึงรายชื่อใหม่ทั้งชุดแทนการต่อแถวเข้าไปเอง — ทางลัดนั้นใช้ไม่ได้กับปุ่ม "ใช้คนเดิม"
+   *    ซึ่งคืน `contact_id` ของคนที่อาจเป็นของ Odoo และอาจยังไม่อยู่ในรายการรอบนี้
+   *    (server จับคู่ชื่อแบบ btrim ข้ามทั้งบริษัท) ⇒ ยิงเส้นเดิมของ LIFF ซ้ำหนึ่งครั้ง จบทุกเคส
+   */
+  const onContactAdded = useCallback(
+    async (newId: number) => {
+      setAddContactFor(null);
+      try {
+        const res = await fetch(`/api/customer/${customerId}/contacts`);
+        const data = res.ok ? await res.json() : [];
+        if (Array.isArray(data)) setContacts(data as ContactRow[]);
+      } catch {
+        /* ดึงรายชื่อใหม่ไม่ได้ = ยังเลือกคนที่เพิ่งเพิ่มได้อยู่ดี (id ถูกต้องแล้ว) */
+      }
+      setContactId(newId);
+    },
+    [customerId],
+  );
 
   // ── ส่วนที่ 1: วางข้อความ → ร่าง ──
   const propose = async () => {
@@ -2867,6 +2919,7 @@ export const QuoteRequest: React.FC = () => {
     contactOpt,
     contactOpts,
     onPickContact: setContactId,
+    onAddContact: openAddContact,
     paymentTerms,
     paymentTermOpts,
     setPaymentTerms,
@@ -3298,6 +3351,21 @@ export const QuoteRequest: React.FC = () => {
           busy={confirming}
           onCancel={() => setConfirmOpen(false)}
           onConfirm={confirmAll}
+        />
+      )}
+
+      {/* ผู้ติดต่อใหม่ใต้บริษัทที่เลือกอยู่ — เปิดจากท้ายรายการในช่อง "ผู้ติดต่อ" (ก้อน I3)
+          `customerOpt` ต้องมีค่าเสมอตรงนี้ เพราะช่องผู้ติดต่อ disabled อยู่จนกว่าจะเลือกบริษัท
+          — เช็กอีกชั้นไว้เพราะ state สองตัวนี้ไม่ได้ผูกกันด้วยชนิดข้อมูล */}
+      {addContactFor !== null && customerId !== null && customerOpt && (
+        <AddContactModal
+          companyId={customerId}
+          companyName={customerOpt.name}
+          companyRef={customerOpt.row.reference ?? null}
+          initialName={addContactFor}
+          authHeaders={authHeaders}
+          onClose={() => setAddContactFor(null)}
+          onPicked={onContactAdded}
         />
       )}
 

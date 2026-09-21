@@ -58,6 +58,16 @@ interface ComboProps<T extends ComboOption> {
   disabled?: boolean;
   /** หมายเหตุใต้รายการ — โชว์ตอนกางเท่านั้น เพราะมันอธิบาย "รายการ" ไม่ใช่ "ค่าที่เลือก" */
   footer?: React.ReactNode;
+  /**
+   * แถวกดได้ท้ายรายการ — สำหรับ "ของที่ยังไม่มีในรายการนี้" เช่นปุ่มเพิ่มผู้ติดต่อใหม่
+   *
+   * ต่างจาก `footer` ตรงที่มัน **กดได้และเต็มความกว้าง** (ไม่มี padding ของโครงกลางมาครอบ)
+   * ⇒ ผู้เรียกเป็นคนตั้งหน้าตาเอง · โครงกลางรับผิดชอบแค่ "กดแล้วกล่องต้องหุบ" ซึ่งผู้เรียก
+   * ทำเองไม่ได้เพราะ `close()` เป็นของข้างใน
+   *
+   * รับ `query` ที่พิมพ์ค้างไว้ไปด้วย — คนที่พิมพ์ชื่อแล้วไม่เจอ ไม่ควรต้องพิมพ์ซ้ำในกล่องถัดไป
+   */
+  action?: (query: string) => React.ReactNode;
   /** ข้อเท็จจริงท้ายบรรทัด — ตัวเดียวใช้ทั้งในช่องและในรายการ ไม่งั้นคนนึกว่าคนละชุดข้อมูล */
   facts?: (opt: T) => React.ReactNode;
   /** ข้อความที่เอาไปกรองในเครื่อง (ค่าเริ่มต้น = ชื่อ) */
@@ -82,6 +92,7 @@ export function ComboBox<T extends ComboOption>({
   invalid,
   disabled,
   footer,
+  action,
   facts,
   searchText,
   onQueryChange,
@@ -210,6 +221,9 @@ export function ComboBox<T extends ComboOption>({
             )}
           </div>
           {footer && <div className="border-t border-slate-100 bg-slate-50 px-3.5 py-2 text-[11px] text-slate-500">{footer}</div>}
+          {/* กดแล้วต้องหุบกล่องเสมอ — ตัวจัดการ mousedown ข้างบนไม่หุบให้ เพราะแถวนี้อยู่ใน boxRef
+              (มันหุบเฉพาะคลิกที่ "นอก" กล่อง) ⇒ ดักที่ขาขึ้นของ onClick หลัง handler ของผู้เรียกทำงานแล้ว */}
+          {action && <div onClick={close} className="border-t border-slate-100">{action(query.trim())}</div>}
         </div>
       )}
     </div>
