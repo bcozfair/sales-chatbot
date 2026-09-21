@@ -1,0 +1,98 @@
+{
+  "file": "ราคาTC อัพเดต (13-05-69).xlsx",
+  "sheet": "TSP-12",
+  "code": "TSP-12",
+  "label": "RTD TS-12 (มีด้ามจับ)",
+  "aliases": ["TSPA-12", "TSZ-12"],
+  "standard": { "L1": 100, "cable_m": 1 },
+  "base": {
+    "kind": "matrix",
+    "axes": ["D", "sensor"],
+    "rowHeaderCol": "A",
+    "rows": [12, 27],
+    "colHeaderRow": 10,
+    "cols": ["C", "D", "E"]
+  },
+  "adders": [
+    {
+      "id": "len_l1",
+      "label": "ความยาวแกน L1",
+      "order": 20,
+      "kind": "perUnit",
+      "dim": "L1",
+      "step": 100,
+      "round": "ceil",
+      "unit": "mm",
+      "byAxis": "D",
+      "ratesFrom": { "col": "B", "keyCol": "A", "rows": [12, 27] },
+      "source": "TSP-12!B10 'บวกเพิ่ม 100 mm ละ'"
+    },
+    {
+      "id": "cable_over_1m",
+      "label": "ราคาสายส่วนที่ยาวเกิน 1 เมตร (ต้องเลือกชนิดสายก่อน)",
+      "order": 45,
+      "kind": "perUnit",
+      "dim": "cable_m",
+      "step": 1,
+      "round": "ceil",
+      "unit": " m",
+      "byAxis": "cable",
+      "ratesFrom": { "sheet": "TS-21+22+25", "col": "B", "keyCol": "A", "rows": [26, 29] },
+      "source": "TSP-12!B29 'สายยาวกว่า 1 M บวกเพิ่มตามราคาสาย' + TS-21+22+25!A26:B29 — ⚠️ B30 เขียนว่า 'สาย Standard PT100 / PT1000 = PVC' แต่ TS-12,13!A39 ของไฟล์เดียวกันเขียนว่า 'เทปล่อน' ⇒ **ขัดกันเอง** จึงไม่ตั้งค่าเริ่มต้นให้ ต้องเลือกเองก่อนถึงจะมีราคา (ราคาสองแบบต่างกัน 80 บาท/เมตร)"
+    },
+    {
+      "id": "coat_teflon",
+      "label": "หุ้มเทปล่อน",
+      "order": 40,
+      "kind": "perUnit",
+      "when": { "option": "coat:teflon" },
+      "dim": "teflon_mm",
+      "over": 0,
+      "step": 100,
+      "round": "ceil",
+      "unit": "mm",
+      "byAxis": "D",
+      "ratesFrom": { "col": "G", "keyCol": "A", "rows": [12, 27] },
+      "source": "TSP-12!G10 'หุ้มเทปล่อน เพิ่ม 100มม. ละ'"
+    },
+    {
+      "id": "bend_l",
+      "label": "หัก L ดัดงอ",
+      "order": 55,
+      "kind": "flat",
+      "when": { "option": "bend:L" },
+      "amount": 100,
+      "source": "TSP-12!B7 'สำหรับรุ่นหัก L ดัดงอ บวกเพิ่ม 100 บาท'"
+    },
+    {
+      "id": "bend_square",
+      "label": "หักฉาก (เชื่อมฉาก)",
+      "order": 55,
+      "kind": "flat",
+      "when": { "option": "bend:square" },
+      "amount": 200,
+      "source": "TSP-12!B7 'แบบฉาก (เชื่อมฉาก) บวกเพิ่ม 200 บาท'"
+    }
+  ],
+  "constraints": [
+    {
+      "id": "ELEM2_MIN_DIA",
+      "when": {
+        "all": [
+          { "option": "element:2" },
+          { "axis": "D", "in": ["3.2", "3.2A", "4", "4A", "4.8", "4.8A", "5"] }
+        ]
+      },
+      "level": "block",
+      "message": "2 element ทำได้ตั้งแต่แกน 6 mm ขึ้นไป",
+      "source": "TSP-12!F12 'ตั้งแต่แกน 6 mm ขึ้นไป'"
+    },
+    {
+      "id": "ELEM2_ASK_PRODUCTION",
+      "when": { "option": "element:2" },
+      "level": "quoteOnRequest",
+      "message": "2 element — ชีตเขียนว่า 'ใช้ราคาสาย X2 + 750' ไม่ได้เขียนเป็นตัวเลขต่อขนาด ⇒ ปรึกษาผลิต 2 ก่อนยืนยันราคา",
+      "source": "TSP-12!F12"
+    }
+  ]
+}

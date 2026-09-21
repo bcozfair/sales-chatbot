@@ -6,7 +6,7 @@
 //  ⚠️ โมดูลนี้ถูกเรียกจาก routes/pricingLab.ts เท่านั้น และ **ห้ามมีโค้ดเดิมที่ไหน import
 //     โฟลเดอร์นี้** — การพึ่งพาเป็นทางเดียวคือสิ่งเดียวที่ทำให้ "ลบทิ้งเมื่อไหร่ก็ได้" เป็นจริง
 //     ไม่ใช่แค่ความตั้งใจ · เฟสแรกยังไม่ต่อกับใบเสนอราคา คิดราคาให้ดูอย่างเดียว
-//  ด่านตรวจของไฟล์กลุ่มนี้ยังอยู่ที่ prototypes/pricing/ (golden.ts · roundtrip.ts)
+//  ด่านตรวจของไฟล์กลุ่มนี้อยู่ที่ scripts/diag/ (pricingGolden.ts · pricingRoundtrip.ts)
 //  ซึ่ง import ตัวจริงจากที่นี่ ⇒ แก้โค้ดตรงนี้แล้วด่านเห็นทันที ไม่ใช่ด่านที่เฝ้าสำเนา
 //
 //  **ทำไมถึงมีไฟล์นี้:** แอดมินมีรหัสอยู่ในมืออยู่แล้ว (จากใบสั่งซื้อ · จาก Odoo · จากแชท)
@@ -87,6 +87,18 @@ function matchValue(values: string[], raw: string): string | undefined {
 }
 
 /**
+ * เกลียวมิล: รหัสเขียนแค่ `M6` แต่หัวคอลัมน์เขียนระยะพิตช์ด้วย (`M6x1.0`)
+ * และ TS-01!C16:D16 เขียนกำกับเองว่าพิตช์อีกแบบ (`*M8x1.25` `*M10x1.5`) **ใช้ราคาเดียวกัน**
+ * ⇒ จับคู่ด้วยเลขหลัง M เท่านั้น และ **ต้องเหลือค่าเดียว** ไม่งั้นถือว่าอ่านไม่ออก
+ */
+function matchMetricThread(values: string[], raw: string): string | undefined {
+  const m = norm(raw).match(/^M(\d+(?:\.\d+)?)/i);
+  if (!m) return undefined;
+  const hits = values.filter((v) => norm(v).toUpperCase().match(/^M(\d+(?:\.\d+)?)/)?.[1] === m[1]);
+  return hits.length === 1 ? hits[0] : undefined;
+}
+
+/**
  * `S2` `S4` ในรหัส = ขนาดเกลียวเป็น "หุน" (1 หุน = 1/8 นิ้ว)
  * พิสูจน์ด้วยราคาจริงใน Odoo เทียบกับตาราง TS-04 (วัด 2026-09-18):
  *   `TSK-04(S2)6x100+1M` = 615 = TS-04!D25 (แกน 6 · เกลียว 1/4") ตรงเป๊ะ
@@ -115,12 +127,115 @@ function threadFromHun(hun: number): string[] {
  * ⇒ จับคู่จากข้อความในวงเล็บของค่าแกน ไม่ต้องมีตารางแปลแยกที่จะลืมแก้ตามกัน
  */
 function matchSensor(values: string[], prefix: string, letter: string): string | undefined {
-  const byPrefix = values.find((v) => v.toUpperCase().includes(`(${prefix.toUpperCase()})`));
-  if (byPrefix) return byPrefix;
+  const P = prefix.toUpperCase();
+  const tokens = (v: string) => v.toUpperCase().split(/[^A-Z0-9]+/);
+
+  // ⚠️ ลำดับนี้สลับไม่ได้: **เจาะจงกว่าต้องมาก่อน** ไม่งั้น `TSPA` จะไปตรงกับคอลัมน์ `TSP`
+  // แล้ว PT100 Class A จะถูกคิดราคาเป็น Class B เงียบ ๆ (ต่างกันจริง 500 บาทขึ้นไปทุกขนาด)
+  const byParen = values.find((v) => v.toUpperCase().includes(`(${P})`));
+  if (byParen) return byParen;
+  // ชีต RTD (TS-08 · TS-10) เขียนรหัสตระกูลเป็นหัวคอลัมน์ตรง ๆ ไม่มีวงเล็บ: `TSP` `TSPA` `TSZ`
+  const whole = values.find((v) => v.toUpperCase() === P);
+  if (whole) return whole;
+  // TS-01 เขียนรวมสองตระกูลไว้ช่องเดียว: `TSK/TSJ`
+  const byToken = values.find((v) => tokens(v).includes(P));
+  if (byToken) return byToken;
+  // ชีตที่เรียกด้วยชื่อหัววัดแทนรหัสตระกูล (TSP-12!E10 = `PT1000` เฉย ๆ ไม่มี `(TSZ)` กำกับ)
+  // — ใช้ได้ **ต่อเมื่อตรงกับค่าเดียวเท่านั้น** ถ้ากำกวมให้ถือว่าอ่านไม่ออก
+  for (const alias of SENSOR_ALIAS[P] ?? []) {
+    const hits = values.filter((v) => tokens(v).includes(alias));
+    if (hits.length === 1) return hits[0];
+  }
   const exact = values.find((v) => v.toUpperCase() === letter.toUpperCase());
   if (exact) return exact;
   // 'Type K/J' — ชีตรวม K กับ J ไว้ช่องเดียวเพราะราคาเท่ากัน
-  return values.find((v) => v.toUpperCase().split(/[^A-Z0-9]+/).includes(letter.toUpperCase()));
+  return values.find((v) => tokens(v).includes(letter.toUpperCase()));
+}
+
+/**
+ * ชื่อหัววัดที่ชีตใช้แทนรหัสตระกูล — ใช้เป็นทางสุดท้ายและเฉพาะตอนที่ตรงกับค่าเดียว
+ * (`PT100` ใส่ไม่ได้ เพราะทุกชีตมีทั้ง Class A และ Class B ⇒ กำกวมเสมอ)
+ */
+const SENSOR_ALIAS: Record<string, string[]> = {
+  TSZ: ['PT1000'],
+  TSN: ['NTC', 'PTC']
+};
+
+/**
+ * หัววัดที่ชีต **ไม่ได้ทำคอลัมน์ราคาตั้งของตัวเองไว้** แต่เขียนกำกับว่า "บวกเพิ่มจาก" คอลัมน์ไหน
+ *
+ * ตารางนี้เป็น **ไวยากรณ์ของรหัส** ชุดเดียวกับ `threadFromHun` ไม่ใช่ราคา — ราคายังอยู่ใน
+ * สมุดราคาทั้งหมด ตารางนี้บอกแค่ว่า "รหัสขึ้นต้นแบบนี้ ให้ยืนอยู่บนคอลัมน์ไหนแล้วติ๊กอะไรเพิ่ม"
+ * และจะถูกใช้ **ต่อเมื่อรุ่นนั้นมีกฎบวกเพิ่มของ option นั้นจริง** ⇒ รุ่นที่ชีตไม่ได้เขียนไว้
+ * จะออกมาเป็น "อ่านไม่ออก" ไม่ใช่เงียบ ๆ คิดราคาให้
+ */
+const SENSOR_ADDON: Record<
+  string,
+  { option: string; basePrefix: string; baseLetter: string; reads: string; guess?: string }
+> = {
+  TST: { option: 'sensor:T', basePrefix: 'TST', baseLetter: 'K', reads: 'Type T (บวกเพิ่มจาก Type K/J)' },
+  TSN: { option: 'sensor:NTC', basePrefix: 'TSN', baseLetter: 'K', reads: 'NTC / PTC (บวกเพิ่มจาก Type K/J)' },
+  TSZ: {
+    option: 'sensor:PT1000',
+    basePrefix: 'TSP',
+    baseLetter: 'P',
+    reads: 'PT1000 (บวกเพิ่มจาก PT100)',
+    // TS-11!H10 เขียนว่า "PT 1000 บวกเพิ่มจาก PT100" เฉย ๆ ทั้งที่ชีตเดียวกันมี PT100 สองคลาส
+    // ⇒ ระบบยืนบน Class B (TSP) แล้ว **ติดป้ายว่าตีความเอง** ไม่ใช่ตอบเหมือนของที่ชีตเขียนชัด
+    guess: 'ชีตไม่ได้บอกว่าบวกจาก PT100 คลาสไหน — ระบบใช้ Class B (TSP) เป็นฐาน'
+  }
+};
+
+/** รุ่นนี้มีกฎบวกเพิ่มที่ติ๊กด้วย option นี้จริงไหม */
+function hasOptionAdder(model: PriceModel, option: string): boolean {
+  return model.adders.some((a) => a.when !== undefined && 'option' in a.when && a.when.option === option);
+}
+
+/**
+ * ตัวอักษรหลัง `TS` → ชนิดหัววัด — ใช้ได้กับทุกชีตที่วางหัววัดไว้สองแบบ:
+ * เป็น **คอลัมน์ของตารางราคาตั้ง** (TS-01 · TS-08 · TS-10 · TS-11) หรือเป็น **กฎบวกเพิ่ม**
+ * (TS-04 · TS-06) — ตัวอ่านดูจากสมุดราคาว่าเป็นแบบไหน ไม่ได้ผูกกับรหัสรุ่นในโค้ด
+ */
+function readSensor(c: Ctx, prefix: string, letter: string): void {
+  const values = axisValues(c.model, 'sensor');
+
+  if (values.length > 0) {
+    const hit = matchSensor(values, prefix, letter);
+    if (hit) {
+      c.cfg.axes = { ...c.cfg.axes, sensor: hit };
+      add(c, { text: prefix, reads: `หัววัด ${hit}`, kind: 'axis' });
+      return;
+    }
+    const addon = SENSOR_ADDON[prefix];
+    const base = addon ? matchSensor(values, addon.basePrefix, addon.baseLetter) : undefined;
+    if (addon && base && hasOptionAdder(c.model, addon.option)) {
+      c.cfg.axes = { ...c.cfg.axes, sensor: base };
+      c.cfg.options = [...(c.cfg.options ?? []), addon.option];
+      add(c, {
+        text: prefix,
+        reads: addon.guess ? `${addon.reads} — ${addon.guess}` : `${addon.reads} · ฐานคือ ${base}`,
+        kind: 'axis',
+        guess: addon.guess !== undefined
+      });
+      return;
+    }
+    add(c, { text: prefix, reads: `ไม่มีหัววัดชนิด ${prefix} ในตารางราคา ${c.model.sheet ?? c.model.code}`, kind: 'unknown' });
+    return;
+  }
+
+  // ชีตนี้มีราคาตั้งชุดเดียว (Type K/J) — หัววัดอื่นเป็นกฎบวกเพิ่ม
+  if (letter === '' || 'KJ'.includes(letter)) return;
+  const addon = SENSOR_ADDON[prefix];
+  if (addon && hasOptionAdder(c.model, addon.option)) {
+    c.cfg.options = [...(c.cfg.options ?? []), addon.option];
+    add(c, { text: prefix, reads: addon.reads, kind: 'option' });
+    return;
+  }
+  add(c, {
+    text: prefix,
+    reads: `ตารางราคา ${c.model.sheet ?? c.model.code} ไม่มีราคาของหัววัดชนิด ${prefix}`,
+    kind: 'unknown'
+  });
 }
 
 // ── ตัวอ่านของแต่ละตระกูล ────────────────────────────────────────────────────
@@ -187,12 +302,27 @@ function readCable(c: Ctx, token: string): boolean {
 }
 
 /**
- * TS-04 — `TS_-04(S_) 6x100+1M` (TS-04!A7)
+ * ไวยากรณ์ร่วมของ TC แบบ "แกน × เกลียว" — `TS_-04(S_) 6x100+1M` (TS-04!A7)
  * วงเล็บ = ขนาดเกลียว · ก่อน x = แกน D · หลัง x = ความยาว L1 · +NM = ความยาวสาย
+ *
+ * ใช้ร่วมกันหลายชีตเพราะหัวตารางเขียนรหัสมาตรฐานไว้เป็นแบบเดียวกัน (TS-04 · TS-06 · TS-08 ·
+ * TS-10 · TS-11 · TS-12 · TS-01) — **ส่วนไหนอ่านหรือไม่อ่าน ดูจากแกนที่รุ่นนั้นมีจริงในสมุดราคา**
+ * ไม่ใช่จากรหัสรุ่นที่เขียนไว้ในโค้ด: TS-11/TS-12 ไม่มีเกลียวจึงไม่มีวงเล็บ · TS-01 ไม่มีแกน D
+ * เพราะทั้งรุ่นใช้ขนาดเดียว (4.8) ⇒ เตือนว่า "ไม่มีวงเล็บ" เฉพาะรุ่นที่มีแกนเกลียวจริงเท่านั้น
  */
-function readTs04(c: Ctx, rest: string, prefix: string): void {
+function readTsGeneric(c: Ctx, rest: string, prefix: string): void {
+  const hasThread = axisValues(c.model, 'thread').length > 0;
+  const hasD = axisValues(c.model, 'D').length > 0;
+
   const paren = rest.match(/^\(([^)]*)\)/);
-  if (paren) {
+  if (paren && !hasThread) {
+    // รุ่นที่ไม่มีแกนเกลียว แต่รหัสมีวงเล็บมา — ลองตารางรหัสย่อยก่อน ไม่งั้นบอกว่าอ่านไม่ออก
+    const raw = paren[1] ?? '';
+    if (!readFromTable(c, raw, `(${raw})`)) {
+      add(c, { text: `(${raw})`, reads: `ตารางราคา ${c.model.sheet ?? c.model.code} ไม่มีแกนเกลียว — ยังไม่ได้ตั้งค่าว่าวงเล็บนี้แปลว่าอะไร`, kind: 'unknown' });
+    }
+    rest = rest.slice(paren[0].length);
+  } else if (paren) {
     const raw = paren[1] ?? '';
     const threads = axisValues(c.model, 'thread');
     const hun = raw.match(/^S(\d+)$/i);
@@ -202,39 +332,60 @@ function readTs04(c: Ctx, rest: string, prefix: string): void {
         hit = hit ?? matchValue(threads, cand);
       }
     } else {
-      hit = matchValue(threads, raw);
+      hit = matchValue(threads, raw) ?? matchMetricThread(threads, raw);
     }
     if (hit) {
       c.cfg.axes = { ...c.cfg.axes, thread: hit };
       add(c, { text: `(${raw})`, reads: `เกลียว ${hit}${hun ? ` (${hun[1]} หุน)` : ''}`, kind: 'axis' });
     } else if (readFromTable(c, raw, `(${raw})`)) {
       // มีแถวในตารางรหัสย่อยแล้ว — จบตรงนี้
-    } else if (/^M\d+$/i.test(raw)) {
+    } else if (/^M\d/i.test(raw)) {
       add(c, {
         text: `(${raw})`,
-        reads: `เกลียวมิล ${raw.toUpperCase()} — ตารางราคา TS-04 มีแต่เกลียวนิ้ว ยังไม่ได้ตั้งค่าว่าคิดเท่าไหร่`,
+        reads: `เกลียวมิล ${raw.toUpperCase()} — ตารางราคา ${c.model.sheet ?? c.model.code} มีแต่เกลียวนิ้ว ยังไม่ได้ตั้งค่าว่าคิดเท่าไหร่`,
         kind: 'unknown'
       });
     } else {
       add(c, { text: `(${raw})`, reads: 'อ่านไม่ออกว่าเป็นเกลียวขนาดไหน', kind: 'unknown' });
     }
     rest = rest.slice(paren[0].length);
-  } else {
+  } else if (hasThread) {
     c.warnings.push('รหัสนี้ไม่มีวงเล็บบอกขนาดเกลียว — ต้องเลือกเกลียวเองในช่องข้างล่าง');
   }
 
   const core = rest.match(/^([0-9.]+[A-WYZ]*)(?:x([0-9.]+))?/i);
   if (core) {
-    const dHit = matchValue(axisValues(c.model, 'D'), core[1] ?? '');
-    if (dHit) {
-      c.cfg.axes = { ...c.cfg.axes, D: dHit };
-      add(c, { text: core[1] ?? '', reads: `แกน D = ${dHit} mm`, kind: 'axis' });
+    const dText = core[1] ?? '';
+    if (hasD) {
+      const dHit = matchValue(axisValues(c.model, 'D'), dText);
+      if (dHit) {
+        c.cfg.axes = { ...c.cfg.axes, D: dHit };
+        add(c, { text: dText, reads: `แกน D = ${dHit} mm`, kind: 'axis' });
+      } else {
+        add(c, { text: dText, reads: `ไม่มีแกน ${dText} ในตารางราคา ${c.model.sheet ?? c.model.code}`, kind: 'unknown' });
+      }
+    } else if (Number(dText) === c.model.standard.dia_mm) {
+      // TS-01 ทั้งรุ่นใช้แกนขนาดเดียว (ชีตเขียนไว้ในรหัสมาตรฐานเอง) ⇒ ตัวเลขนี้ไม่ได้เลือกอะไร
+      add(c, { text: dText, reads: `แกน ${dText} mm — ขนาดเดียวของรุ่นนี้ ไม่มีผลกับราคา`, kind: 'noPrice' });
     } else {
-      add(c, { text: core[1] ?? '', reads: `ไม่มีแกน ${core[1]} ในตารางราคา TS-04`, kind: 'unknown' });
+      add(c, {
+        text: dText,
+        reads: `ตารางราคา ${c.model.sheet ?? c.model.code} มีขนาดแกนเดียวคือ ${c.model.standard.dia_mm ?? '—'} mm — ยังไม่ได้ตั้งค่าว่า ${dText} คิดเท่าไหร่`,
+        kind: 'unknown'
+      });
     }
     if (core[2]) {
-      c.cfg.dims = { ...c.cfg.dims, L1: Number(core[2]) };
-      add(c, { text: `x${core[2]}`, reads: `ความยาวแกน L1 = ${core[2]} mm`, kind: 'dim' });
+      // ความยาวแกนคิดเงินได้ก็ต่อเมื่อชีตมีคอลัมน์ "บวกเพิ่ม 100 mm ละ" ของรุ่นนั้น
+      if (c.model.adders.some((a) => a.dim === 'L1')) {
+        c.cfg.dims = { ...c.cfg.dims, L1: Number(core[2]) };
+        add(c, { text: `x${core[2]}`, reads: `ความยาวแกน L1 = ${core[2]} mm`, kind: 'dim' });
+      } else {
+        add(c, {
+          text: `x${core[2]}`,
+          reads: `ตารางราคา ${c.model.sheet ?? c.model.code} ไม่มีราคาส่วนต่างความยาว — ยังไม่ได้ตั้งค่าว่า ${core[2]} mm คิดเท่าไหร่`,
+          kind: 'unknown'
+        });
+      }
     }
     rest = rest.slice(core[0].length);
   }
@@ -446,14 +597,21 @@ function readTail(c: Ctx, rest: string, prefix: string): void {
  * เพราะชีตเดียวใช้กับหลายตัวอักษร (TS-04 ใช้กับทั้ง TSK-04 และ TSJ-04 ราคาเท่ากัน)
  */
 function findModel(book: PriceBook, prefix: string, num: string, suffix: string): PriceModel | undefined {
-  const cands = [
-    `${prefix}-${num}${suffix}`,
-    `${prefix}-${num}`,
-    `TSK-${num}`,
-    `TS-${num}`,
-    `BH-${num}${suffix}`,
-    `BH-${num}`
-  ];
+  // ⚠️ ทางถอยต้องอยู่ใน **ตระกูลเดียวกัน** เท่านั้น — เดิมไล่ `BH-<เลข>` ให้ทุกรหัสรวมทั้งที่
+  //    ขึ้นต้นด้วย TS ⇒ `TSK-01` (เทอร์โมคัปเปิล 1,210 รหัส) ตกไปใช้ตารางราคาของ Band Heater
+  //    `BH-01` แล้วคืนราคาออกมาเป็นปกติ ไม่มีอะไรฟ้อง (เจอ 2026-09-21 ตอนวัดความครอบคลุม)
+  const cands = prefix === 'BH'
+    ? [`BH-${num}${suffix}`, `BH-${num}`]
+    : [
+        `${prefix}-${num}${suffix}`,
+        `${prefix}-${num}`,
+        `TSK-${num}${suffix}`,
+        `TSP-${num}${suffix}`,
+        `TSK-${num}`,
+        `TSP-${num}`,
+        `TS-${num}${suffix}`,
+        `TS-${num}`
+      ];
   for (const c of cands) {
     const m = resolveModel(book, c);
     if (m) return m;
@@ -469,15 +627,17 @@ export function parseProductCode(input: string, book: PriceBook): ParsedCode {
     return out;
   }
 
-  const head = normalized.match(/^(BH|TS[A-Z]*)-?(\d{2})([A-Z]*)/i);
+  // `(-0)?` มีไว้สำหรับ `TS_-01-0` ซึ่งเป็น **ตารางราคาคนละตารางในชีตเดียวกัน** (เกลียว M4–M10
+  // แทน M6–5/16") ไม่ใช่รหัสย่อยต่อท้าย — 377 จาก 1,210 รหัสของตระกูล 01 เป็นแบบนี้
+  const head = normalized.match(/^(BH|TS[A-Z]*)-?(\d{2})(-0)?([A-Z]*)/i);
   if (!head) {
     out.problems.push('อ่านไม่ออกว่ารหัสนี้เป็นรุ่นอะไร — รหัสต้องขึ้นต้นด้วยตระกูลและเลขรุ่น เช่น TSK-04 หรือ BH-01');
     return out;
   }
 
   const prefix = (head[1] ?? '').toUpperCase();
-  const num = head[2] ?? '';
-  const suffix = (head[3] ?? '').toUpperCase();
+  const num = (head[2] ?? '') + (head[3] ?? '');
+  const suffix = (head[4] ?? '').toUpperCase();
   const model = findModel(book, prefix, num, suffix);
   if (!model) {
     out.problems.push(
@@ -493,6 +653,17 @@ export function parseProductCode(input: string, book: PriceBook): ParsedCode {
   const c: Ctx = { book, model, cfg: { model: model.code }, parts: [], warnings: out.warnings };
   add(c, { text: normalized.slice(0, head[0].length), reads: `รุ่น ${model.code} — ${model.label}`, kind: 'model' });
 
+  // ตัวอักษรท้ายเลขรุ่นที่สมุดราคาไม่มีตารางของมัน (`TSK-11P` · `TSP-11L` · `TSK-01S`)
+  // **ห้ามกลืนทิ้ง** — มันถูกจับเข้าหัวรหัสไปแล้วโดยที่ไม่มีใครตั้งราคาให้ ⇒ ราคาที่ออกมา
+  // จะเป็นของรุ่นฐาน หน้าตาเหมือนถูกทุกประการ (`11P` 1,465 รหัส · `11L` 211 · `11LP` 112)
+  if (suffix !== '' && !model.code.toUpperCase().endsWith(suffix)) {
+    add(c, {
+      text: suffix,
+      reads: `ตัวอักษรท้ายเลขรุ่น — สมุดราคามีแต่ตารางของ ${model.code} ยังไม่ได้ตั้งค่าว่า ${suffix} ต่างจากรุ่นฐานยังไง`,
+      kind: 'unknown'
+    });
+  }
+
   const rest = normalized.slice(head[0].length);
   // ตัวอักษรตัวแรกหลัง TS บอกชนิดหัววัด (TSK → K) · BH ไม่มีชนิดหัววัด
   const letter = prefix.startsWith('TS') ? prefix.slice(2, 3) : '';
@@ -500,17 +671,11 @@ export function parseProductCode(input: string, book: PriceBook): ParsedCode {
   if (prefix === 'BH') readBh(c, rest);
   else if (model.code === 'TS-14') readTs14(c, rest, prefix, letter);
   else if (model.code === 'TS-18') readTs18(c, rest, prefix, letter);
-  else readTs04(c, rest, prefix);
-
-  // TS-04 คิดราคา Type K/J เป็นราคาตั้ง ส่วน T กับ NTC เป็นตัวเลือกที่บวกเพิ่ม
-  if (model.code === 'TSK-04' && letter && !'KJ'.includes(letter)) {
-    const opt = letter === 'T' ? 'sensor:T' : letter === 'N' ? 'sensor:NTC' : '';
-    if (opt) {
-      c.cfg.options = [...(c.cfg.options ?? []), opt];
-      add(c, { text: prefix, reads: `หัววัด ${letter === 'T' ? 'Type T' : 'NTC / PTC'} (บวกเพิ่มจาก Type K/J)`, kind: 'option' });
-    } else {
-      add(c, { text: prefix, reads: `ไม่รู้จักหัววัดชนิด ${letter} ของตระกูล TS-04`, kind: 'unknown' });
-    }
+  else {
+    readTsGeneric(c, rest, prefix);
+    // หัววัดอ่านหลังส่วนขนาด เพราะบางชีตคิดมันเป็น "คอลัมน์ของตารางราคาตั้ง" (ต้องรู้แกนอื่นก่อน)
+    // และบางชีตคิดเป็น "กฎบวกเพิ่ม" — `readSensor` ดูจากสมุดราคาเองว่าเป็นแบบไหน
+    readSensor(c, prefix, letter);
   }
 
   out.parts = c.parts;

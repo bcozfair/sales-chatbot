@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
-//  PROTOTYPE — แม่แบบ Excel ของสมุดราคา: สมุดราคา ⇄ ตารางที่คนแก้เองได้
+//  แม่แบบ Excel ของสมุดราคา: สมุดราคา ⇄ ตารางที่คนแก้เองได้
 //
-//  ⚠️ ของทดลอง ไม่มีใครใน production import ไฟล์นี้ · ดู prototypes/pricing/README.md
+//  เครื่องมือของสมุดราคา — ดู services/pricingLab/README.md
 //
 //  **ไฟล์นี้ไม่รู้จัก .xlsx** — มันแปลงระหว่าง `PriceBook` กับ "ตารางเป็นแถว ๆ" เท่านั้น
 //  ส่วนการห่อเป็นไฟล์ .xlsx จริงอยู่ที่ `xlsxlite.ts` (เขียน) และ `xlsx.ts` / เบราว์เซอร์ (อ่าน)
@@ -483,27 +483,32 @@ function baseSheet(m: PriceModel): SheetTable {
     };
   }
 
-  // matrix — แกนแรกเป็นแถว แกนที่สองเป็นคอลัมน์ (ถ้ามีแกนเดียวก็เหลือคอลัมน์ราคาเดียว)
-  const [rowAxis, colAxis] = m.base.axes;
+  // matrix — แกนแรกเป็นแถว **แกนที่เหลือทั้งหมดเป็นคอลัมน์** (ถ้ามีแกนเดียวก็เหลือคอลัมน์ราคาเดียว)
+  //
+  // รุ่น RTD (TS-08 · TS-10) มีสามแกน: ขนาดแกน × ขนาดเกลียว × ชนิดหัววัด ⇒ หัวคอลัมน์เป็น
+  // ค่าของสองแกนต่อกันด้วย ` | ` ซึ่งเป็น **ตัวคั่นเดียวกับ `matrixKey`** จึงตัดกลับเป็นคีย์เดิมได้
+  // โดยไม่ต้องจำอะไรจากตอนส่งออก · ช่องซ้ายบนบอกชื่อแกนครบทุกแกน คั่นด้วย backslash
+  const rowAxis = m.base.axes[0];
+  const colAxes = m.base.axes.slice(1);
   const rowValues: string[] = [];
   const colValues: string[] = [];
   for (const key of Object.keys(m.base.cells)) {
     const parts = key.split(' | ');
     if (!rowValues.includes(parts[0]!)) rowValues.push(parts[0]!);
-    const c = parts[1] ?? '';
-    if (colAxis && !colValues.includes(c)) colValues.push(c);
+    const c = parts.slice(1).join(' | ');
+    if (colAxes.length > 0 && !colValues.includes(c)) colValues.push(c);
   }
 
-  const header = colAxis ? `${rowAxis} \\ ${colAxis}` : `${rowAxis}`;
+  const header = [rowAxis, ...colAxes].join(' \\ ');
   const columns: SheetColumn[] = [{ label: header, width: 16 }];
-  if (colAxis) for (const c of colValues) columns.push({ label: c || BLANK_TOKEN, width: 11 });
+  if (colAxes.length > 0) for (const c of colValues) columns.push({ label: c || BLANK_TOKEN, width: 11 });
   else columns.push({ label: 'ราคา', width: 12 });
 
   const rows: CellValue[][] = rowValues.map((rv) => {
     const line: CellValue[] = [rv];
-    if (colAxis) {
+    if (colAxes.length > 0) {
       for (const cv of colValues) {
-        const cell = m.base.kind === 'matrix' ? m.base.cells[matrixKey(m.base.axes, { [rowAxis!]: rv, [colAxis]: cv })] : undefined;
+        const cell = m.base.kind === 'matrix' ? m.base.cells[`${rv} | ${cv}`] : undefined;
         line.push(cell === undefined ? '' : cell);
       }
     } else {
@@ -1085,15 +1090,16 @@ function readBase(model: PriceModel, name: string, grid: CellValue[][], R: Reade
 
   const headRow = (grid[headAt] ?? []).map(toText);
   const firstCol = headRow.findIndex((t) => t === axisCell);
+  // ช่องซ้ายบนบอกชื่อแกนครบทุกแกน — สองแกนเป็น `D \ เกลียว` สามแกนเป็น `D \ เกลียว \ หัววัด`
   const parts = axisCell.split('\\').map((s) => s.trim());
   const rowAxis = parts[0] ?? '';
-  const colAxis = parts[1] ?? '';
+  const colAxes = parts.slice(1).filter((p) => p !== '');
   if (rowAxis === '') {
     R.err(name, 'อ่านชื่อแกนจากช่องซ้ายบนไม่ออก', headAt + 1);
     return;
   }
 
-  const axes = colAxis ? [rowAxis, colAxis] : [rowAxis];
+  const axes = [rowAxis, ...colAxes];
   const cells: Record<string, Money> = {};
   let filled = 0;
   let blank = 0;
@@ -1104,7 +1110,7 @@ function readBase(model: PriceModel, name: string, grid: CellValue[][], R: Reade
     const rv = toText(row[firstCol] ?? '');
     if (rv === '') continue;
 
-    if (!colAxis) {
+    if (colAxes.length === 0) {
       const priceCol = headRow.findIndex((t) => t === 'ราคา');
       const v = toNumber(row[priceCol] ?? null);
       if (v === undefined) blank++;
@@ -1124,7 +1130,8 @@ function readBase(model: PriceModel, name: string, grid: CellValue[][], R: Reade
         blank++;
         continue;
       }
-      cells[matrixKey(axes, { [rowAxis]: rv, [colAxis]: cv })] = v;
+      // `cv` เป็นค่าของแกนคอลัมน์ทุกแกนต่อกันอยู่แล้ว ⇒ ต่อท้ายแกนแถวได้ตรง ๆ
+      cells[`${rv} | ${cv}`] = v;
       filled++;
     }
   }

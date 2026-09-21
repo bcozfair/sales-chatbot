@@ -1,0 +1,523 @@
+[
+  {
+    "name": "BH-01C 600×150 + Male Connector PL-2",
+    "source": "BH!E19:E22 — \"600x3.14x150/645 = 438.14 ปัดเป็น 439x25 = 10,975\" → \"+20% = 13,170\" → \"+320 = 13,490\"",
+    "kind": "เฉลยจากชีต",
+    "code": "BH-01C-600x150-380-4950W-PL2",
+    "cfg": {
+      "model": "BH-01C",
+      "dims": {
+        "dia_mm": 600,
+        "width_mm": 150
+      },
+      "options": [
+        "conn:pl2"
+      ]
+    },
+    "expectPrice": 13490,
+    "show": true
+  },
+  {
+    "name": "TSK-14 6x200+150-BU",
+    "source": "TS-14!A21:A23 — \"4000+(200+150-100=250 mm.)+(150-50=100 mm.)\" → \"= 4000+(3*300)+(1*130) = 5,030\"",
+    "kind": "เฉลยจากชีต",
+    "code": "TSK-14 6x200+150",
+    "cfg": {
+      "model": "TS-14",
+      "axes": {
+        "sensor": "K",
+        "dia_group": "Ø6mm./12.7mm."
+      },
+      "dims": {
+        "L1": 200,
+        "L2": 150
+      }
+    },
+    "expectPrice": 5030,
+    "show": true
+  },
+  {
+    "name": "TSK-04 แกน 6 เกลียว 1/2\" ยาว 300 mm",
+    "source": "TS-04!F25 = 770 (ราคาตั้ง Standard 6x100) · B25 = 120 (บวกเพิ่ม 100 mm ละ)",
+    "kind": "คิดจากตาราง",
+    "code": "TSK-04(S4)6x300",
+    "cfg": {
+      "model": "TSK-04",
+      "axes": {
+        "D": "6",
+        "thread": "1/2”"
+      },
+      "dims": {
+        "L1": 300
+      }
+    },
+    "expectPrice": 1010,
+    "show": true
+  },
+  {
+    "name": "TSK-04 สเปกตรง Standard เป๊ะ (ไม่ต้องบวกอะไรเลย)",
+    "source": "TS-04!C11 = 430",
+    "kind": "คิดจากตาราง",
+    "cfg": {
+      "model": "TSK-04",
+      "axes": {
+        "D": "2",
+        "thread": "1/8”"
+      }
+    },
+    "expectPrice": 430
+  },
+  {
+    "name": "TSJ-04 (alias ของ TSK-04) ต้องได้ราคาเดียวกัน",
+    "source": "TS-04!A1 \"TS_-04\" — TSK/TSJ ใช้ตารางเดียวกัน",
+    "kind": "คิดจากตาราง",
+    "cfg": {
+      "model": "TSJ-04",
+      "axes": {
+        "D": "2",
+        "thread": "1/8”"
+      }
+    },
+    "expectPrice": 430
+  },
+  {
+    "name": "ช่องว่างในตาราง = ไม่รับผลิต ไม่ใช่ราคา 0 (D=19 มีแค่ 3/4\" กับ 1\")",
+    "source": "TS-04 แถว 44: คอลัมน์ C–F ว่าง เหลือแค่ G,H",
+    "kind": "กฎ",
+    "code": "TSK-04(S1)19x100",
+    "cfg": {
+      "model": "TSK-04",
+      "axes": {
+        "D": "19",
+        "thread": "1/8”"
+      },
+      "dims": {
+        "L1": 100
+      }
+    },
+    "expectStatus": "notManufacturable",
+    "show": true
+  },
+  {
+    "name": "2 element กับแกนสำเร็จ (S) ต้องถูกบล็อก",
+    "source": "TS-04!K11 \"รุ่นแกนสำเร็จ ทำ 2 element ไม่ได้\"",
+    "kind": "กฎ",
+    "cfg": {
+      "model": "TSK-04",
+      "axes": {
+        "D": "6S",
+        "thread": "1/8”"
+      },
+      "options": [
+        "element:2"
+      ]
+    },
+    "expectStatus": "notManufacturable"
+  },
+  {
+    "name": "หน้าแปลนนอกรายการ → ต้องขอราคา ไม่ใช่ error และไม่ใช่ราคา 0",
+    "source": "TW!L34 \"หน้าแปลนนอกเหนือจากนี้ให้ขอราคาจากผลิต 2\"",
+    "kind": "กฎ",
+    "cfg": {
+      "model": "TS-18",
+      "axes": {
+        "D": "6",
+        "sensor": "Type K/J",
+        "flange": "ANSI 150# 3\""
+      },
+      "dims": {
+        "L1": 100,
+        "L2": 50
+      }
+    },
+    "expectStatus": "quoteOnRequest",
+    "show": true
+  },
+  {
+    "name": "TS-18 สองมิติความยาวคนละ step (L1 ทีละ 100 · L2 ทีละ 10)",
+    "source": "TS-18!B15 (D=6 → 120/100mm) · C15 (D=6 → 25/10mm) · D25 = 880",
+    "kind": "คิดจากตาราง",
+    "code": "TSK-18 6-6x250+80",
+    "cfg": {
+      "model": "TS-18",
+      "axes": {
+        "D": "6",
+        "sensor": "Type K/J"
+      },
+      "dims": {
+        "L1": 250,
+        "L2": 80
+      }
+    },
+    "expectPrice": 1195,
+    "show": true
+  },
+  {
+    "name": "BH-03 Ceramic 300×80 @ 2000W — ค่ากำลังไฟ \"หายไป\" อย่างถูกต้อง",
+    "source": "BH!E8 ช่วง \"101 - ขึ้นไป\" = 65฿/in² · G8 เว้นว่าง (ช่วงอื่น G3:G7 = 10)",
+    "kind": "กฎ",
+    "code": "BH-03 300x80-220-2000W",
+    "cfg": {
+      "model": "BH-03",
+      "dims": {
+        "dia_mm": 300,
+        "width_mm": 80,
+        "watt": 2000
+      }
+    },
+    "expectPrice": 7605,
+    "show": true
+  },
+  {
+    "name": "BH ขนาดต่ำกว่าที่ทำได้ ต้องถูกบล็อก",
+    "source": "BH!H3 \"ขนาดเล็กสุดที่ทำได้ OD = 65mm\"",
+    "kind": "กฎ",
+    "code": "BH-01 50x40-220-300W",
+    "cfg": {
+      "model": "BH-01",
+      "dims": {
+        "dia_mm": 50,
+        "width_mm": 40
+      }
+    },
+    "expectStatus": "notManufacturable"
+  },
+  {
+    "name": "อ่านรหัสที่สั่งสายยาว 3 เมตร (ราคาสายมาจากชีต TS-21+22+25)",
+    "source": "TS-04!A7 ราคาตั้ง Standard คือ `6x100+1M` · TS-21+22+25!A26:B29 สายสแตนเลสถัก 80 บาท/เมตร",
+    "kind": "อ่านจากรหัส",
+    "code": "TSK-04(S2)6x100+3M",
+    "cfg": {
+      "model": "TSK-04",
+      "axes": {
+        "thread": "1/4”",
+        "D": "6"
+      },
+      "dims": {
+        "L1": 100,
+        "cable_m": 3
+      }
+    },
+    "expectPrice": 775,
+    "show": true
+  },
+  {
+    "name": "รหัสเกลียวมิล (M8) ต้องไม่ได้ราคาเงียบ ๆ",
+    "source": "TS-04!C9:H9 มีแต่เกลียวนิ้ว 1/8\"–1\" · ของจริงในฐานสินค้ามี (M8) 184 รหัส",
+    "kind": "อ่านจากรหัส",
+    "code": "TSJ-04(M8)5x150+3M-S000",
+    "cfg": {
+      "model": "TSK-04",
+      "axes": {
+        "D": "5"
+      },
+      "dims": {
+        "L1": 150,
+        "cable_m": 3
+      }
+    },
+    "expectStatus": "notManufacturable",
+    "show": true
+  },
+  {
+    "name": "รหัสหน้าแปลนนอกรายการ → ต้องขอราคา ไม่ใช่คิดราคาโดยไม่มีหน้าแปลน",
+    "source": "TW!L34 หน้าแปลนนอกเหนือจากนี้ให้ขอราคาจากผลิต 2",
+    "kind": "อ่านจากรหัส",
+    "code": "TSP-18(F5)6-6x100+50",
+    "cfg": {
+      "model": "TS-18",
+      "axes": {
+        "sensor": "PT100 Class B (TSP)",
+        "flange": "F5",
+        "D": "6"
+      },
+      "dims": {
+        "L1": 100,
+        "L2": 50
+      }
+    },
+    "expectStatus": "quoteOnRequest",
+    "show": true
+  },
+  {
+    "name": "TSK-14 6x200+150-U — รหัสย่อย -U อ่านจากตารางรหัสย่อย (ไม่มีผลกับราคา)",
+    "source": "TS-14!A10 \"ราคาตั้ง Standard TS_- 14 D x100-U\" + แถว U/TS-14 ในตารางรหัสย่อย",
+    "kind": "เฉลยจากชีต",
+    "code": "TSK-14 6x200+150-U",
+    "cfg": {
+      "model": "TS-14",
+      "axes": {
+        "sensor": "K",
+        "dia_group": "Ø6mm./12.7mm."
+      },
+      "dims": {
+        "L1": 200,
+        "L2": 150
+      },
+      "options": [
+        "sub:U"
+      ]
+    },
+    "expectPrice": 5030
+  },
+  {
+    "name": "TSK-06 แกน 6 เกลียว 1/2” ยาว 100 mm (ตรง Standard)",
+    "source": "TS-06!G31 = 890 (ราคาตั้ง Standard 6x100)",
+    "kind": "คิดจากตาราง",
+    "code": "TSK-06(S4)6x100",
+    "cfg": {
+      "model": "TSK-06",
+      "axes": {
+        "D": "6",
+        "thread": "1/2”"
+      },
+      "dims": {
+        "L1": 100
+      }
+    },
+    "expectPrice": 890,
+    "show": true
+  },
+  {
+    "name": "TSK-06 แกน 6 เกลียว 1/2” ยาว 300 mm",
+    "source": "TS-06!G31 = 890 · C31 = 120 (บวกเพิ่ม 100 mm ละ) → 890 + 2×120",
+    "kind": "คิดจากตาราง",
+    "code": "TSK-06(S4)6x300",
+    "cfg": {
+      "model": "TSK-06",
+      "axes": {
+        "D": "6",
+        "thread": "1/2”"
+      },
+      "dims": {
+        "L1": 300
+      }
+    },
+    "expectPrice": 1130,
+    "show": true
+  },
+  {
+    "name": "TSK-11 แกน 6 Type K/J (ตรง Standard)",
+    "source": "TS-11!C21 = 340",
+    "kind": "คิดจากตาราง",
+    "code": "TSK-11 6x100+1M",
+    "cfg": {
+      "model": "TSK-11",
+      "axes": {
+        "D": "6",
+        "sensor": "Type K/J"
+      },
+      "dims": {
+        "L1": 100,
+        "cable_m": 1
+      }
+    },
+    "expectPrice": 340
+  },
+  {
+    "name": "TST-11 แกน 6 — Type T ยืนบนราคาตั้งของ Type K/J",
+    "source": "TS-11!C21 = 340 + D21 = 60 (Type T บวกเพิ่มจาก Type K)",
+    "kind": "คิดจากตาราง",
+    "code": "TST-11 6x100+1M",
+    "cfg": {
+      "model": "TSK-11",
+      "axes": {
+        "D": "6",
+        "sensor": "Type K/J"
+      },
+      "dims": {
+        "L1": 100,
+        "cable_m": 1
+      },
+      "options": [
+        "sensor:T"
+      ]
+    },
+    "expectPrice": 400,
+    "show": true
+  },
+  {
+    "name": "TSPA-11 แกน 6 — Class A ต้องไม่ตกไปใช้ราคาของ Class B",
+    "source": "TS-11!G21 = 1,730 (Class A) ไม่ใช่ F21 = 1,230 (Class B)",
+    "kind": "คิดจากตาราง",
+    "code": "TSPA-11 6x100+1M",
+    "cfg": {
+      "model": "TSK-11",
+      "axes": {
+        "D": "6",
+        "sensor": "PT100 (Class A) (TSPA)"
+      },
+      "dims": {
+        "L1": 100,
+        "cable_m": 1
+      }
+    },
+    "expectPrice": 1730,
+    "show": true
+  },
+  {
+    "name": "TSP-08 แกน 6 เกลียว 1/2” (ตารางสามแกน)",
+    "source": "TS-08!L23 = 1,680 — หัวคอลัมน์ซ้อนสองแถว (L14 = 1/2” · L15 = TSP)",
+    "kind": "คิดจากตาราง",
+    "code": "TSP-08(S4)6x100",
+    "cfg": {
+      "model": "TSP-08",
+      "axes": {
+        "D": "6",
+        "thread": "1/2”",
+        "sensor": "TSP"
+      },
+      "dims": {
+        "L1": 100
+      }
+    },
+    "expectPrice": 1680,
+    "show": true
+  },
+  {
+    "name": "TSPA-08 แกน 6 เกลียว 1/2” — คนละคอลัมน์กับ TSP ทั้งที่เกลียวเดียวกัน",
+    "source": "TS-08!M23 = 2,180",
+    "kind": "คิดจากตาราง",
+    "code": "TSPA-08(S4)6x100",
+    "cfg": {
+      "model": "TSP-08",
+      "axes": {
+        "D": "6",
+        "thread": "1/2”",
+        "sensor": "TSPA"
+      },
+      "dims": {
+        "L1": 100
+      }
+    },
+    "expectPrice": 2180,
+    "show": true
+  },
+  {
+    "name": "TSZ-08 แกน 6 เกลียว 1/2”",
+    "source": "TS-08!N23 = 2,430",
+    "kind": "คิดจากตาราง",
+    "code": "TSZ-08(S4)6x100",
+    "cfg": {
+      "model": "TSP-08",
+      "axes": {
+        "D": "6",
+        "thread": "1/2”",
+        "sensor": "TSZ"
+      },
+      "dims": {
+        "L1": 100
+      }
+    },
+    "expectPrice": 2430
+  },
+  {
+    "name": "TSP-10 แกน 6 เกลียว 1/4”",
+    "source": "TS-10!F20 = 1,535",
+    "kind": "คิดจากตาราง",
+    "code": "TSP-10(S2)6x100+1M",
+    "cfg": {
+      "model": "TSP-10",
+      "axes": {
+        "D": "6",
+        "thread": "1/4”",
+        "sensor": "TSP"
+      },
+      "dims": {
+        "L1": 100,
+        "cable_m": 1
+      }
+    },
+    "expectPrice": 1535,
+    "show": true
+  },
+  {
+    "name": "TSK-12 แกน 3 (มีด้ามจับ)",
+    "source": "TS-12,13!E12 = 660",
+    "kind": "คิดจากตาราง",
+    "code": "TSK-12 3x100+1M",
+    "cfg": {
+      "model": "TSK-12",
+      "axes": {
+        "D": "3",
+        "sensor": "Type K/J"
+      },
+      "dims": {
+        "L1": 100,
+        "cable_m": 1
+      }
+    },
+    "expectPrice": 660
+  },
+  {
+    "name": "TSZ-12 แกน 6 — ชีตเรียกคอลัมน์ว่า \"PT1000\" เฉย ๆ ไม่มี (TSZ) กำกับ",
+    "source": "TSP-12!E19 = 2,235",
+    "kind": "คิดจากตาราง",
+    "code": "TSZ-12 6x100+1M",
+    "cfg": {
+      "model": "TSP-12",
+      "axes": {
+        "D": "6",
+        "sensor": "PT1000"
+      },
+      "dims": {
+        "L1": 100,
+        "cable_m": 1
+      }
+    },
+    "expectPrice": 2235,
+    "show": true
+  },
+  {
+    "name": "TSK-01 เกลียว M6 — รหัสเขียนแค่ M6 ตารางเขียน M6x1.0",
+    "source": "TS-01+TS-01-0!B11 = 160",
+    "kind": "คิดจากตาราง",
+    "code": "TSK-01(M6)4.8+1M",
+    "cfg": {
+      "model": "TSK-01",
+      "axes": {
+        "sensor": "TSK/TSJ",
+        "thread": "M6x1.0"
+      },
+      "dims": {
+        "cable_m": 1
+      }
+    },
+    "expectPrice": 160,
+    "show": true
+  },
+  {
+    "name": "TSPA-01 เกลียว 5/16”",
+    "source": "TS-01+TS-01-0!F14 = 1,430 — ไม่มีรหัสประกอบให้ เพราะรหัสจริงของตระกูลนี้เขียนเกลียวเป็นมิล (M6/M8/M10) ยังไม่เคยเห็นตัวที่เขียนเกลียวนิ้วมา",
+    "kind": "คิดจากตาราง",
+    "cfg": {
+      "model": "TSK-01",
+      "axes": {
+        "sensor": "TSPA",
+        "thread": "5/16”"
+      },
+      "dims": {
+        "cable_m": 1
+      }
+    },
+    "expectPrice": 1430
+  },
+  {
+    "name": "TSK-01-0 เกลียว M4 — ตารางที่สองของชีตเดียวกัน",
+    "source": "TS-01+TS-01-0!B33 = 170 (คนละตารางกับ TS-01 ซึ่ง M4 ไม่มีเลย)",
+    "kind": "คิดจากตาราง",
+    "code": "TSK-01-0(M4)+1M",
+    "cfg": {
+      "model": "TSK-01-0",
+      "axes": {
+        "sensor": "TSK/TSJ",
+        "thread": "M4"
+      },
+      "dims": {
+        "cable_m": 1
+      }
+    },
+    "expectPrice": 170,
+    "show": true
+  }
+]

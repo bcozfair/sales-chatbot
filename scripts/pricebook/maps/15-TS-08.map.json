@@ -1,0 +1,118 @@
+{
+  "file": "ราคาTC อัพเดต (13-05-69).xlsx",
+  "sheet": "TS-08",
+  "code": "TSP-08",
+  "label": "RTD TS-08 (เกลียว + หัวกระโหลก)",
+  "aliases": ["TSPA-08", "TSZ-08", "TS-08"],
+  "standard": { "L1": 100 },
+  "base": {
+    "kind": "matrix",
+    "axes": ["D", "thread", "sensor"],
+    "rowHeaderCol": "A",
+    "rows": [16, 41],
+    "colHeaderRow": [14, 15],
+    "cols": [
+      "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N",
+      "O", "P", "Q", "R", "S", "T"
+    ]
+  },
+  "adders": [
+    {
+      "id": "len_l1",
+      "label": "ความยาวแกน L1",
+      "order": 20,
+      "kind": "perUnit",
+      "dim": "L1",
+      "step": 100,
+      "round": "ceil",
+      "unit": "mm",
+      "byAxis": "D",
+      "ratesFrom": { "col": "B", "keyCol": "A", "rows": [16, 41] },
+      "source": "TS-08!B13 'บวกเพิ่ม 100 mm ละ'"
+    },
+    {
+      "id": "element_2",
+      "label": "2 element",
+      "order": 35,
+      "kind": "flat",
+      "when": { "option": "element:2" },
+      "byAxis": "D",
+      "ratesFrom": { "col": "U", "keyCol": "A", "rows": [16, 41] },
+      "source": "TS-08!U13 '2 element บวกเพิ่ม' — ชีตเว้นช่องของแกนเล็กไว้ ⇒ ขนาดที่ทำไม่ได้ถูกบล็อกด้วยข้อห้ามข้างล่างให้ข้อความอ่านรู้เรื่อง"
+    },
+    {
+      "id": "coat_teflon",
+      "label": "หุ้มเทปล่อน",
+      "order": 40,
+      "kind": "perUnit",
+      "when": { "option": "coat:teflon" },
+      "dim": "teflon_mm",
+      "over": 0,
+      "step": 100,
+      "round": "ceil",
+      "unit": "mm",
+      "byAxis": "D",
+      "ratesFrom": { "col": "V", "keyCol": "A", "rows": [16, 41] },
+      "source": "TS-08!V13 'หุ้มเทปล่อน เพิ่ม 100มม. ละ'"
+    },
+    {
+      "id": "head_blacklite_s",
+      "label": "หัวกระโหลก Blacklite เล็ก",
+      "order": 50,
+      "kind": "flat",
+      "when": { "option": "head:blacklite_s" },
+      "amountFrom": "R9",
+      "source": "TS-08!N9:R9 'ราคาหัวกระโหลก · Blacklite เล็ก'"
+    },
+    {
+      "id": "head_alu_l",
+      "label": "หัวกระโหลก อลูมิเนียม ใหญ่",
+      "order": 50,
+      "kind": "flat",
+      "when": { "option": "head:alu_l" },
+      "amountFrom": "R10",
+      "source": "TS-08!N10:R10"
+    },
+    {
+      "id": "head_blacklite_l",
+      "label": "หัวกระโหลก Blacklite ใหญ่",
+      "order": 50,
+      "kind": "flat",
+      "when": { "option": "head:blacklite_l" },
+      "amountFrom": "R11",
+      "source": "TS-08!N11:R11"
+    },
+    {
+      "id": "bend_l",
+      "label": "หัก L ดัดงอ",
+      "order": 55,
+      "kind": "flat",
+      "when": { "option": "bend:L" },
+      "amount": 100,
+      "source": "TS-08!C10 'สำหรับรุ่นหัก L ดัดงอ บวกเพิ่ม 100 บาท'"
+    },
+    {
+      "id": "bend_square",
+      "label": "หักฉาก (เชื่อมฉาก)",
+      "order": 55,
+      "kind": "flat",
+      "when": { "option": "bend:square" },
+      "amount": 200,
+      "source": "TS-08!C10 'แบบฉาก (เชื่อมฉาก) บวกเพิ่ม 200 บาท'"
+    }
+  ],
+  "constraints": [
+    {
+      "id": "ELEM2_MIN_DIA",
+      "when": {
+        "all": [
+          { "option": "element:2" },
+          { "axis": "D", "in": ["3.2", "3.2A", "4", "4A", "4.8", "4.8A", "5"] }
+        ]
+      },
+      "level": "block",
+      "message": "2 element ทำได้ตั้งแต่แกน 6 mm ขึ้นไป",
+      "source": "TS-08!U13 — ชีตเว้นช่องของแกนที่เล็กกว่า 6 mm ไว้"
+    }
+  ]
+}
