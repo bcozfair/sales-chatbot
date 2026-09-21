@@ -620,7 +620,7 @@ export const PriceApprovals: React.FC = () => {
                           ไม่อนุมัติ
                         </Button>
                         {/* เพิ่ม/ลบสินค้า หรือเปลี่ยนลูกค้า — งานของฟอร์มเต็ม ไม่ใช่ของตารางตัวเลขข้างบน
-                            ส่งกลับเข้าฟอร์มแล้วส่งคำขอใหม่ (ใบเดิมถูกยกเลิกหลังใบใหม่สำเร็จ) */}
+                            ส่งกลับเข้าฟอร์มแล้วส่งคำขอใหม่ (ร่างเดิมถูกทิ้งหลังใบใหม่สำเร็จ) */}
                         <Button variant="neutral" tone="soft" icon={Pencil} busy={busy} disabled={unsaved} onClick={() => void editInForm(req)}>
                           เปิดในฟอร์ม
                         </Button>

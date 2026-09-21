@@ -2078,8 +2078,9 @@ export const QuoteRequest: React.FC = () => {
   //  sessionStorage ไม่ใช่ query string เพราะมันเป็นรายการสินค้าทั้งใบ ไม่ใช่ id ตัวเดียว
   //  และมันเป็นของชั่วคราวของแท็บนั้น ไม่ควรติดไปกับลิงก์ที่ใครก๊อปส่งต่อ
   //
-  //  **ใบเดิมยังไม่ถูกยกเลิกตอนนี้** — มันจะถูกยกเลิกก็ต่อเมื่อคำขอใหม่ถูกสร้างสำเร็จแล้ว
+  //  **ร่างเดิมยังไม่ถูกแตะตอนนี้** — มันจะถูกทิ้งก็ต่อเมื่อใบใหม่ถูกสร้างสำเร็จแล้ว
   //  (`replaces_request_id`) ไม่งั้นคนที่กดแก้แล้วปิดจอไปจะเหลือมือเปล่า
+  //  ทิ้งทั้งแถว ไม่ใช่มาร์ก `cancelled` — "แก้แล้วส่งใหม่" คือการแก้ทับร่างเดิม ไม่ใช่การยกเลิก
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -2841,7 +2842,10 @@ export const QuoteRequest: React.FC = () => {
           // ถ้าหน้าจอยังคิดว่ากำลังออกใบอยู่ แทนที่จะสร้างคำขอค้างไว้โดยไม่มีใครรู้ว่ามี
           request_approval: needsApproval,
           approval_note: needsApproval ? approvalNote.trim() || null : null,
-          replaces_request_id: needsApproval ? replacesRequestId : null,
+          // **ส่งทุกกรณี ไม่ใช่เฉพาะตอนยังต้องขออนุมัติ** (แก้ 2026-09-21) — คนที่ถูกตีกลับ
+          // แล้วแก้ราคาขึ้นจนไม่ติดขั้นต่ำ จะออกใบได้เลยโดยไม่มีคำขอใหม่ ถ้าไม่ส่ง id เดิมไปด้วย
+          // ร่างของคำขอที่ถูกตีกลับจะค้างอยู่ในคิว "ไม่อนุมัติ" ตลอดไป โดยไม่มีปุ่มไหนปิดมันได้
+          replaces_request_id: replacesRequestId,
         }),
       });
       if (!res.ok) throw new Error(await readError(res, needsApproval ? 'ส่งขออนุมัติไม่สำเร็จ' : 'ออกใบเสนอราคาไม่สำเร็จ'));
@@ -2849,12 +2853,14 @@ export const QuoteRequest: React.FC = () => {
       const webId = String(data.web_user_id ?? webUserId);
       setWebUserId(webId);
       const created = (data.quotes ?? []) as DraftQuote[];
+      // ร่างของคำขอเดิมถูกล้างไปแล้วฝั่ง server ⇒ ถือว่าใช้ไปแล้ว ไม่ว่าจะจบทางไหน
+      // (ถ้ายังถือไว้ แล้วคนกดส่งซ้ำ id นี้จะชี้คำขอที่ไม่มีแถวเหลืออยู่แล้ว)
+      setReplacesRequestId(null);
 
       // ── ส่งขออนุมัติ: ร่างถูกบันทึกแล้วแต่ **ห้ามยิง confirm ต่อ** ────────────
       //  ยิงไปก็ได้ 422 เพราะด่านตรวจอ่านคำอนุมัติจากแถวของใบ ซึ่งยังเป็น pending อยู่
       if (data.approval) {
         setApprovalSent({ request_id: String(data.approval.request_id), count: created.length });
-        setReplacesRequestId(null);
         return;
       }
 

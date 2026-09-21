@@ -1445,14 +1445,13 @@ export async function handleEvent(
 
           const revisedCustomerName = appendReviseFrom(quote.customer_name, quote.quotation_no);
 
-          try {
-            await pool.query(
-              "UPDATE quotations SET status = 'cancelled' WHERE user_id = $1 AND status = ANY($2)",
-              [userId, ['pending_company', 'pending_contact', 'draft']]
-            );
-          } catch (err) {
-            console.error("Error cancelling pending quotations:", err);
-          }
+          // ร่างที่ค้างอยู่ของเซลส์คนนี้ถูกเก็บกวาดโดย insertDraftQuotations ข้างล่าง ซึ่ง **DELETE**
+          // ด้วยขอบเขตเดียวกัน (`user_id` + สามสถานะเดียวกัน) ในทรานแซกชันเดียวกับ INSERT
+          // เคยมี `UPDATE … SET status = 'cancelled'` ยืนอยู่ตรงนี้ **ถอดออก 2026-09-21** เพราะมัน
+          // ทำให้ตัวเก็บกวาดข้างล่างหาแถวไม่เจอ (ไม่ใช่ `draft` แล้ว) ⇒ ทุกครั้งที่เซลส์กดแก้ใบ
+          // จะเหลือแถว "ยกเลิก" ที่ไม่มีเลขที่ค้างในประวัติหนึ่งแถว ทั้งที่ไม่มีใครกดยกเลิกอะไรเลย
+          // (`price_approval IS NULL` ที่ตัวเก็บกวาดมีเพิ่ม ไม่เปลี่ยนผลของเส้นนี้ — ใบจาก LINE
+          //  ไม่มีคำขออนุมัติราคาผูกอยู่เลยสักใบ คอลัมน์นั้นเป็น NULL เสมอ)
 
           // insert ด้วย revExpandedItems จาก validateQuotationItems ด้านบน — gate นั้น expand สินค้าพ่วงให้แล้ว
           // (ใบเก่าอาจไม่เคยผ่าน expand — กฎคู่สินค้าหลัก-เสริม ต้องพ่วงให้ครบตอนคัดลอกมาแก้)
