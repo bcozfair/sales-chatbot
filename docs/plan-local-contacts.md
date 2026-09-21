@@ -466,7 +466,11 @@ LINE คือเซลส์ ไม่ใช่แอดมิน · ทั้�
 
 1. **ช่อง `page.odoocontacts` คนละช่องกับ `quote.manage_contacts` โดยตั้งใจ** — ตัวแรกคือ
    "ใครดูกองงานค้างของทั้งร้านได้" ตัวหลังคือ "ใครเพิ่มคนได้ตอนออกใบ" ⇒ ด่านของหน้านี้จึงติดที่
-   **สองเส้นใน `routes/localContacts.ts` (`GET /` · `GET /export` · `GET /count`) ไม่ใช่ที่จุด mount**
+   **สามเส้นของหน้านี้ (`/list` · `/export` · `/count`) ติดด่านที่สองแยกจากอีก 3 เส้นที่หน้าขอใบใช้**
+   ด่านทั้งสองชั้นอยู่ที่ `index.ts` เพราะด่าน `diag:role-permissions` ข้อ 12 **อ่านซอร์สของ `index.ts` มาเทียบ
+   ไม่ได้อ่านไฟล์ router** · รายการจึงต้องอยู่ที่ `/list` ไม่ใช่ `/`: `app.use` ระบุ path ได้
+   แต่ `/` คือ path เดียวกับจุด mount ⇒ แยกไม่ได้ ด่านจะกลายเป็นคร่อมทุกเส้น
+   **ส่วนที่ต้องห้ามคือการเอา `page.odoocontacts` ไปซ้อนที่จุด mount**
    — ถ้าเอาไปซ้อนที่จุด mount มันจะกลายเป็น AND คร่อมทั้ง 6 เส้น ⇒ วันที่เจ้าของปิดหน้านี้ให้ subadmin
    เขาจะเพิ่มผู้ติดต่อตอนออกใบไม่ได้ไปด้วย โดยไม่มีอะไรบอก
 2. **ค่าตัวกรองชื่อ `not_matched` ไม่ใช่ `pending`** — สองคำนี้ต่างกัน: `not_matched` = ยังไม่มีใน
@@ -749,7 +753,7 @@ merge เข้า branch `dev` 2026-09-21**
 | **I1** ✅ dev | migration + Arm 3 + watermark + audit | ตารางว่าง ⇒ view ให้ผลเดิมทุกแถวทุกคอลัมน์ | `diag:local-contacts` ข้อ 1–3 · `diag:migrations` · `diag:customer-search` (ก่อน–หลัง) · `diag:credit-hold` · `diag:data-directory` |
 | **I2** ✅ dev | repo + service + 5 endpoint + reconcile ท้าย sync | ยังไม่มี UI เรียก · reconcile กับตารางว่าง = no-op | `npx tsc --noEmit` · `diag:local-contacts` ข้อ 4–8 |
 | **I3** ✅ dev | ปุ่ม + กล่องในหน้าขอใบเสนอราคา (เพิ่ม · แก้ · ลบ) | **← ฟีเจอร์ใช้ได้จริงครั้งแรก** | `lint` · `build` · `diag:lc-ui` · `diag:local-contacts` · `diag:role-permissions` · `diag:web-quote` |
-| **I4** ✅ dev | หน้ารายการงานค้าง + badge + ปุ่มดาวน์โหลด + ป้าย 🔴 | หน้าใหม่ ไม่แตะของเดิม | `tsc` · `lint` · `build` · `diag:role-permissions` · `diag:local-contacts` · วัดที่ 390/1280px |
+| **I4** ✅ dev | หน้ารายการงานค้าง + badge + ปุ่มดาวน์โหลด + ป้าย 🔴 | หน้าใหม่ ไม่แตะของเดิม | `tsc` · `lint` · `build` · **`diag:oc-ui` (ใหม่)** · `diag:lc-ui` · `diag:role-permissions` · `diag:local-contacts` |
 | **I5** | ธง `new_contact` → คิวแก้มือ + ตัวเลขพร้อม/ไม่พร้อมในเมนูส่งออก | ใบเก่าไม่มีธง ⇒ พฤติกรรมเดิมทุกใบ | `diag:confirm-race` · `diag:odoo-export` **ก่อนและหลัง** · `diag:web-quote` ข้อ 8 |
 
 **ด่านใหม่ `npm run diag:local-contacts` ต้องพิสูจน์อย่างน้อย 9 ข้อ**

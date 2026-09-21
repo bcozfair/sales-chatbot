@@ -243,7 +243,18 @@ app.use('/api/admin/pricing', adminAuthMiddleware, requireCapability('page.prici
 // คือ admin · approver · subadmin (เจ้าของเคาะ 2026-09-17 — ใน LINE คือเซลส์ จึงไม่เปิดให้เพิ่ม)
 // ถอนโมดูลออก = ลบ 2 บรรทัดนี้ + 1 ช่องใน capabilities.ts + 1 บรรทัดใน syncService.ts
 // + ไฟล์ของโมดูล (routes/localContacts.ts · services/localContacts.ts · db/localContactsRepo.ts)
-app.use('/api/admin/webquote/contacts', adminAuthMiddleware, requireCapability('quote.manage_contacts'), localContactsRouter);
+app.use('/api/admin/webquote/contacts', adminAuthMiddleware, requireCapability('quote.manage_contacts'));
+// ด่านชั้นที่สอง — คร่อมเฉพาะ 3 เส้นที่ "หน้ารายการงานค้าง" ใช้ (ก้อน I4)
+//  **อย่ายุบเข้าไปรวมกับบรรทัดบน** — ช่องข้างบนคือ "ใครเพิ่มผู้ติดต่อได้ตอนออกใบ"
+//  ช่องนี้คือ "ใครดูกองงานค้างของทั้งร้านได้" ⇒ เจ้าของปิดหน้านี้ให้ใครได้ โดยไม่พราก
+//  ความสามารถเพิ่มผู้ติดต่อตอนทำใบไปด้วย · ต้องมาก่อนบรรทัด mount router ไม่งั้น router จบงานไปก่อนแล้ว
+app.use(
+  ['/api/admin/webquote/contacts/list',
+    '/api/admin/webquote/contacts/export',
+    '/api/admin/webquote/contacts/count'],
+  requireCapability('page.odoocontacts'),
+);
+app.use('/api/admin/webquote/contacts', localContactsRouter);
 
 // Serve admin portal dashboard
 app.get('/admin', (req: any, res: any) => {

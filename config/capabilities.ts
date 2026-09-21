@@ -427,7 +427,7 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     modes: SWITCH,
     // เจ้าของเคาะ 2026-09-17 (§9 ข้อ 2): admin · approver · subadmin — ตรงกับ quote.manage_contacts
     defaults: switchFor('allow', 'allow', 'allow', 'deny'),
-    enforcedAt: 'GET /api/admin/webquote/contacts · /export — ด่านที่สองใน routes/localContacts.ts ซ้อนกับ quote.manage_contacts ที่จุด mount',
+    enforcedAt: 'app.use([/api/admin/webquote/contacts/{list,export,count}]) — ด่านชั้นที่สอง ซ้อนกับ quote.manage_contacts ที่คร่อมทั้งโมดูล',
   },
   {
     key: 'page.blacklist',

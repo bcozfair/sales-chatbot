@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import express from 'express';
 import ExcelJS from 'exceljs';
 import { Parser } from 'json2csv';
-import { requireCapability, type AdminRequest } from '../config/auth.js';
+import type { AdminRequest } from '../config/auth.js';
 import {
   createLocalContact, updateLocalContactById, deleteLocalContactById, getLocalContactForEdit,
   listContacts, toExportRows, EXPORT_HEADERS, LocalContactError,
@@ -21,12 +21,17 @@ import type { LocalContactFilter } from '../db/localContactsRepo.js';
  * (admin · approver · subadmin ตามที่เจ้าของเคาะ 2026-09-17 ข้อ 1) ⇒ ไม่มีทางที่เส้นใดเส้นหนึ่ง
  * จะหลุดออกไปโดยไม่มีด่าน
  *
- * **สองเส้นของหน้ารายการมีด่านซ้อนอีกชั้น** (ก้อน I4) — `GET /` กับ `GET /export` ติด
- * `requireCapability('page.odoocontacts')` เพิ่มที่ตัว route ในไฟล์นี้ **ไม่ใช่ที่จุด mount**
- * เพราะสองช่องตอบคนละคำถาม: `quote.manage_contacts` = "ใครเพิ่มคนได้ตอนออกใบ" ·
- * `page.odoocontacts` = "ใครดูกองงานค้างของทั้งร้านได้"
- * ⏳ **ถ้าเอาไปซ้อนที่จุด mount จะกลายเป็น AND คร่อมทั้ง 5 เส้น** ⇒ วันที่เจ้าของปิดหน้า
- * รายการให้ subadmin จากหน้าเมทริกซ์สิทธิ์ เขาจะเพิ่มผู้ติดต่อตอนออกใบไม่ได้ไปด้วย โดยไม่มีอะไรบอก
+ * **สองเส้นของหน้ารายการมีด่านซ้อนอีกชั้น** (ก้อน I4) — สามเส้นที่เฉพาะหน้านั้นเรียก
+ * (`/list` · `/export` · `/count`) ติด `page.odoocontacts` เพิ่ม — **ด่านอยู่ที่ index.ts ทั้งสองชั้น**
+ * เพราะด่าน `diag:role-permissions` ข้อ 12 อ่านซอร์สของ `index.ts` มาเทียบ ไม่ได้อ่านไฟล์นี้
+ *
+ * ทำไมต้องแยกเส้นรายการไปไว้ที่ `/list` แทนที่จะอยู่ที่ `/` ตามธรรมชาติ: ด่านที่คร่อม
+ * เฉพาะบางเส้นต้องระบุเป็น path ใน `app.use` แต่ `/` คือ path เดียวกับจุด mount ⇒ ระบุแยกไม่ได้
+ * ด่านจะกลายเป็นคร่อมทุกเส้น รวมทั้งเส้นที่หน้าขอใบใช้เพิ่มผู้ติดต่อ
+ *
+ * ⚠️ **สองช่องตอบคนละคำถาม อย่ายุบเป็นช่องเดียว** — `quote.manage_contacts` = "ใครเพิ่มคนได้
+ *    ตอนออกใบ" · `page.odoocontacts` = "ใครดูกองงานค้างของทั้งร้านได้" · รวมกันเมื่อไหร่
+ *    วันที่เจ้าของปิดหน้านี้ให้ subadmin เขาจะเพิ่มผู้ติดต่อตอนออกใบไม่ได้ไปด้วย โดยไม่มีอะไรบอก
  *
  * ทำไมเป็นช่องกลุ่ม `quote.` ไม่ใช่ `page.odoocontacts`: ด่าน `diag:role-permissions` ข้อ 12
  * บังคับว่า **ทุกช่องกลุ่ม `page` ต้องมีเมนูของตัวเองใน AdminApp.tsx** — หน้าจอมาที่ก้อน I4
@@ -109,7 +114,7 @@ localContactsRouter.delete('/:id', async (req: Request, res: Response) => {
   }
 });
 
-localContactsRouter.get('/', requireCapability('page.odoocontacts'), async (req: Request, res: Response) => {
+localContactsRouter.get('/list', async (req: Request, res: Response) => {
   try {
     res.json(await listContacts({
       filter: filterOf(req),
@@ -118,7 +123,7 @@ localContactsRouter.get('/', requireCapability('page.odoocontacts'), async (req:
       offset: Number(req.query.offset),
     }));
   } catch (err) {
-    sendError(res, 'GET /api/admin/webquote/contacts', err);
+    sendError(res, 'GET /api/admin/webquote/contacts/list', err);
   }
 });
 
@@ -126,7 +131,7 @@ localContactsRouter.get('/', requireCapability('page.odoocontacts'), async (req:
  * ไฟล์รายชื่อให้แอดมินเอาไปคีย์ใน Odoo — **ตัวส่งงานจริงของโมดูลนี้** (§5.3)
  * ค่าตั้งต้นคือเฉพาะที่ยังไม่เข้า Odoo (ส่งออกทั้งหมดได้ด้วย `filter=all`)
  */
-localContactsRouter.get('/export', requireCapability('page.odoocontacts'), async (req: Request, res: Response) => {
+localContactsRouter.get('/export', async (req: Request, res: Response) => {
   try {
     const format = str(req.query.format) === 'csv' ? 'csv' : 'xlsx';
     const { items } = await listContacts({
@@ -173,7 +178,7 @@ localContactsRouter.get('/export', requireCapability('page.odoocontacts'), async
  *
  * ⚠️ ต้องประกาศก่อน `/:id` ด้วยเหตุผลเดียวกับ `/export`
  */
-localContactsRouter.get('/count', requireCapability('page.odoocontacts'), async (_req: Request, res: Response) => {
+localContactsRouter.get('/count', async (_req: Request, res: Response) => {
   try {
     res.json({ pending: await countPendingLocalContacts() });
   } catch (err) {

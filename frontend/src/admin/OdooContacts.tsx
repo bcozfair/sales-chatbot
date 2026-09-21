@@ -111,7 +111,7 @@ export const OdooContacts: React.FC = () => {
         offset: String((page - 1) * size),
       });
       if (q.trim()) params.set('q', q.trim());
-      const res = await fetch(`/api/admin/webquote/contacts?${params}`, { headers: authHeaders });
+      const res = await fetch(`/api/admin/webquote/contacts/list?${params}`, { headers: authHeaders });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
       setRows(data.items ?? []);
