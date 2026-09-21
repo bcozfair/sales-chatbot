@@ -1156,6 +1156,102 @@ interface PreviewArtifacts {
   byCompany: Partial<Record<'PM' | 'THT', { items: any[]; snaps: any[]; terms: DeliveryTerms }>>;
 }
 
+/** ก้อน "คู่สัญญาของใบ" ที่ทั้ง `/party` และ `/preview` คืน — รูปเดียวกันเป๊ะเพราะมาจากที่เดียวกัน */
+export type WebQuoteParty = WebQuotePreviewResult['customer'];
+
+/**
+ * ── บริษัท + ผู้ติดต่อ + เครดิต ของใบ ────────────────────────────────────────────
+ *
+ * แยกออกมาเป็นฟังก์ชันของตัวเองเพราะหน้าจอต้องเห็นข้อมูลชุดนี้ **ตั้งแต่เลือกผู้ติดต่อเสร็จ**
+ * ซึ่งเกิดก่อนจะมีรายการสินค้าสักบรรทัด ⇒ `/preview` ตอบแทนไม่ได้ (มันบังคับว่าต้องมี items
+ * เพราะทั้งฟังก์ชันคือการตรวจกฎของรายการ) ก่อนหน้านี้หน้าจอจึงขึ้น "—" ที่ รหัสลูกค้า ·
+ * เลขผู้เสียภาษี · ที่อยู่ · เครดิต จนกว่าจะพิมพ์สินค้าเข้าไป ทั้งที่ข้อมูลพร้อมอยู่แล้ว
+ * (เจ้าของรายงาน 2026-09-21)
+ *
+ * ⚠️ **ห้ามประกอบก้อนนี้ซ้ำที่อื่น** — สองเส้นต้องเรียกตัวนี้ตัวเดียว ไม่งั้นวันหนึ่งเครดิต/ที่อยู่
+ *    ที่เห็นก่อนใส่ของกับหลังใส่ของจะไม่ตรงกัน ซึ่งเป็นอาการที่ไม่มีอะไรฟ้องเลย
+ * ⚠️ ด่านสิทธิ์ของการตั้งทับเครดิตอยู่ในนี้ด้วย ด้วยเหตุผลเดียวกับที่ `/preview` มี — จอที่ยอม
+ *    ให้ตั้งทับแล้วปุ่มยืนยันตอบ 403 คือจอที่โกหก
+ */
+async function resolveQuoteParty(params: {
+  customerId: unknown;
+  contactId: unknown;
+  paymentTermsOverride?: unknown;
+  role?: Role | null;
+}): Promise<{
+  contact: any;
+  customer: any;
+  contactId: number;
+  resolvedCustomerId: number;
+  paymentTermsOverride: string | null;
+  customerPaymentTerms: string;
+  effectivePaymentTerms: string;
+  block: WebQuoteParty;
+}> {
+  const customerIdIn = Number(params.customerId);
+  const contactId = Number(params.contactId);
+  if (!Number.isFinite(customerIdIn) || customerIdIn <= 0) {
+    throw new WebQuoteError('BAD_REQUEST', 'ต้องระบุบริษัท (customer_id) เป็นตัวเลข', 400);
+  }
+  if (!Number.isFinite(contactId) || contactId <= 0) {
+    throw new WebQuoteError('BAD_REQUEST', 'ต้องระบุผู้ติดต่อ (contact_id) เป็นตัวเลข', 400);
+  }
+
+  const contact = await getContactById(contactId);
+  if (!contact) throw new WebQuoteError('BAD_REQUEST', `ไม่พบผู้ติดต่อ id=${contactId}`, 400);
+  // กติกาเดียวกับ createDraft — ผูกตามบริษัทของผู้ติดต่อที่เลือกจริง ไม่ใช่ที่กดใน dropdown
+  const resolvedCustomerId = Number(contact.customer_id ?? customerIdIn);
+  const customer = await getCustomerById(resolvedCustomerId);
+  if (!customer) throw new WebQuoteError('BAD_REQUEST', `ไม่พบบริษัท id=${resolvedCustomerId}`, 400);
+
+  // ตรวจค่าที่ตั้งทับด้วยตัวตรวจชุดเดียวกับ createDraft — จอที่รับค่าที่ /drafts จะปฏิเสธ คือจอที่โกหก
+  // เครดิตที่ใช้จริงในรอบนี้ = ค่าที่ตั้งทับ ถ้าไม่มีจึงตกมาที่ของลูกค้า
+  const paymentTermsOverride = parsePaymentTermsOverride(params.paymentTermsOverride);
+  if (params.role) await assertMayOverridePaymentTerms(params.role, paymentTermsOverride);
+  const customerPaymentTerms = String(customer.customer_payment_terms || '');
+  const effectivePaymentTerms = paymentTermsOverride ?? customerPaymentTerms;
+
+  const { hasCreditTerms } = await import('./shippingFee.js');
+
+  return {
+    contact,
+    customer,
+    contactId,
+    resolvedCustomerId,
+    paymentTermsOverride,
+    customerPaymentTerms,
+    effectivePaymentTerms,
+    block: {
+      customer_id: resolvedCustomerId,
+      contact_id: contactId,
+      display_name: String(customer.display_name || ''),
+      reference: String(customer.reference || ''),
+      tax_id: String(customer.tax_id || ''),
+      payment_terms: effectivePaymentTerms,
+      customer_payment_terms: customerPaymentTerms,
+      payment_terms_overridden: paymentTermsOverride !== null,
+      has_credit_terms: hasCreditTerms(effectivePaymentTerms),
+      contact_name: String(contact.name || ''),
+      contact_phone: String(contact.phone || contact.mobile || ''),
+      contact_email: String(contact.email || ''),
+      address: buildThaiAddress(contact),
+    },
+  };
+}
+
+/**
+ * ทางเข้าสาธารณะของก้อนคู่สัญญา — ใช้โดย `GET /api/admin/webquote/party` ที่หน้าจอเรียก
+ * ทันทีที่เลือกบริษัท/ผู้ติดต่อครบ โดยยังไม่มีสินค้าในใบ
+ */
+export async function getQuoteParty(params: {
+  customerId: unknown;
+  contactId: unknown;
+  paymentTermsOverride?: unknown;
+  role?: Role | null;
+}): Promise<WebQuoteParty> {
+  return (await resolveQuoteParty(params)).block;
+}
+
 /** ทางเข้าสาธารณะ — คืนเฉพาะสิ่งที่หน้าจอต้องใช้ */
 export async function previewDraft(params: WebQuotePreviewParams): Promise<WebQuotePreviewResult> {
   return (await previewDraftInternal(params)).result;
@@ -1179,22 +1275,16 @@ async function previewDraftInternal(
   // โหมดกฎของคนที่กำลังดู — ไม่ส่ง role มา = null ⇒ กติกาเดิมของทั้งระบบ (ดู violationMode)
   const ruleModes: ViolationModeMap | null = params.role ? await ruleModesOf(params.role) : null;
 
-  const contact = await getContactById(contactId);
-  if (!contact) throw new WebQuoteError('BAD_REQUEST', `ไม่พบผู้ติดต่อ id=${contactId}`, 400);
-  // กติกาเดียวกับ createDraft — ผูกตามบริษัทของผู้ติดต่อที่เลือกจริง ไม่ใช่ที่กดใน dropdown
-  const resolvedCustomerId = Number(contact.customer_id ?? customerIdIn);
-  const customer = await getCustomerById(resolvedCustomerId);
-  if (!customer) throw new WebQuoteError('BAD_REQUEST', `ไม่พบบริษัท id=${resolvedCustomerId}`, 400);
-
-  // ตรวจค่าที่ตั้งทับด้วยตัวตรวจชุดเดียวกับ createDraft — พรีวิวที่รับค่าที่ /drafts จะปฏิเสธ
-  // คือพรีวิวที่โกหก · เครดิตที่ใช้จริงในรอบนี้ = ค่าที่ตั้งทับ ถ้าไม่มีจึงตกมาที่ของลูกค้า
-  const paymentTermsOverride = parsePaymentTermsOverride(params.paymentTermsOverride);
-  // ...รวมถึงด่านสิทธิ์ด้วย ด้วยเหตุผลเดียวกัน — พรีวิวที่ยอมให้ตั้งทับแล้วปุ่มยืนยันตอบ 403
-  // คือพรีวิวที่โกหก (ผู้เรียกที่ไม่ส่ง role มายังได้พฤติกรรมเดิมทุกประการ)
-  if (params.role) await assertMayOverridePaymentTerms(params.role, paymentTermsOverride);
+  // บริษัท/ผู้ติดต่อ/เครดิต ทั้งก้อน รวมด่านสิทธิ์ของการตั้งทับ — ตัวเดียวกับที่ `/party` ใช้
+  // (ตัวตรวจ id ซ้ำข้างบนอีกชั้นไม่เสียหาย ข้อความเดียวกันทั้งคู่)
+  const party = await resolveQuoteParty({
+    customerId: customerIdIn,
+    contactId,
+    paymentTermsOverride: params.paymentTermsOverride,
+    role: params.role,
+  });
+  const { contact, customer, resolvedCustomerId, paymentTermsOverride, effectivePaymentTerms } = party;
   const deliveryOverrides = parseDeliveryOverrides(params.delivery);
-  const customerPaymentTerms = String(customer.customer_payment_terms || '');
-  const effectivePaymentTerms = paymentTermsOverride ?? customerPaymentTerms;
 
   const {
     isShippingFeeItem, loadShippingFeeConfig, buildShippingFeeSnapshot,
@@ -1367,21 +1457,7 @@ async function previewDraftInternal(
   const grandTotal = round2(quotes.reduce((sum, q) => sum + q.subtotal, 0));
 
   const result: WebQuotePreviewResult = {
-    customer: {
-      customer_id: resolvedCustomerId,
-      contact_id: contactId,
-      display_name: String(customer.display_name || ''),
-      reference: String(customer.reference || ''),
-      tax_id: String(customer.tax_id || ''),
-      payment_terms: effectivePaymentTerms,
-      customer_payment_terms: customerPaymentTerms,
-      payment_terms_overridden: paymentTermsOverride !== null,
-      has_credit_terms: hasCreditTerms(effectivePaymentTerms),
-      contact_name: String(contact.name || ''),
-      contact_phone: String(contact.phone || contact.mobile || ''),
-      contact_email: String(contact.email || ''),
-      address: buildThaiAddress(contact),
-    },
+    customer: party.block,
     quotes,
     delivery_types: DELIVERY_TYPES.map((t) => ({ key: t.key, label: t.label })),
     goods_total: goodsTotal,

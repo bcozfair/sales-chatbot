@@ -4,7 +4,7 @@ import ExcelJS from 'exceljs';
 import { Parser } from 'json2csv';
 import type { AdminRequest } from '../config/auth.js';
 import {
-  createLocalContact, updateLocalContactById, deleteLocalContactById,
+  createLocalContact, updateLocalContactById, deleteLocalContactById, getLocalContactForEdit,
   listContacts, toExportRows, EXPORT_HEADERS, LocalContactError,
 } from '../services/localContacts.js';
 
@@ -139,5 +139,17 @@ localContactsRouter.get('/export', async (req: Request, res: Response) => {
     res.send(Buffer.from(await workbook.xlsx.writeBuffer()));
   } catch (err) {
     sendError(res, 'GET /api/admin/webquote/contacts/export', err);
+  }
+});
+
+/**
+ * แถวเดียวสำหรับกล่องแก้ไข — **ต้องประกาศหลัง `/export`** ไม่งั้น `/:id` กลืนเส้นนั้นไป
+ * (express จับคู่ตามลำดับที่ประกาศ)
+ */
+localContactsRouter.get('/:id', async (req: Request, res: Response) => {
+  try {
+    res.json({ contact: await getLocalContactForEdit(contactIdOf(req)) });
+  } catch (err) {
+    sendError(res, 'GET /api/admin/webquote/contacts/:id', err);
   }
 });

@@ -213,6 +213,24 @@ export async function createLocalContact(
   });
 }
 
+/**
+ * อ่านแถวเดียวเพื่อเติมลงกล่อง "แก้ไขผู้ติดต่อ" (2026-09-21)
+ *
+ * ต้องมีเส้นของตัวเองเพราะ `/api/customer/:id/contacts` ที่หน้าใบใช้อยู่คืนแค่ ชื่อ/เบอร์/อีเมล
+ * — ไม่มี `job_position` ⇒ เปิดกล่องแก้ไขจากรายการนั้นตรง ๆ แล้วตำแหน่งงานจะว่างทุกครั้ง
+ * แล้วถูกบันทึกทับเป็นว่างโดยที่คนแก้ไม่ได้ตั้งใจ
+ *
+ * `quote_count` ติดมาด้วยเพื่อให้หน้าจอ **บอกล่วงหน้า** ว่าแก้ชื่อ/ลบไม่ได้ แทนที่จะปล่อยให้
+ * กดแล้วไปเจอ 409 — กติกาตัวจริงยังอยู่ที่ updateLocalContactById/deleteLocalContactById เหมือนเดิม
+ */
+export async function getLocalContactForEdit(
+  contactId: number
+): Promise<LocalContactRecord & { quote_count: number }> {
+  const row = await getLocalContactById(contactId);
+  if (!row) throw new LocalContactError('NOT_FOUND', `ไม่พบผู้ติดต่อ id=${contactId}`, 404);
+  return { ...row, quote_count: await countQuotationsByContactId(contactId) };
+}
+
 export async function updateLocalContactById(
   contactId: number,
   body: LocalContactInput

@@ -134,6 +134,7 @@ import {
   listSalespersonsForWeb,
   listPaymentTermOptions,
   proposeFromText,
+  getQuoteParty,
   createDraft as createWebQuoteDraft,
   previewDraft as previewWebQuoteDraft,
   previewQuotePdf as previewWebQuotePdf,
@@ -2643,6 +2644,33 @@ app.post('/api/admin/webquote/propose', adminAuthMiddleware, requireCapability('
  * กดสร้างไปแล้ว · ไม่รับ `sp_user_id` โดยตั้งใจ เพราะพรีวิวไม่ต้องมีตัวตนผู้ออกใบ
  * และการ resolve ตัวตนจะไปเขียนแถวพร็อกซีลง salesperson (ดูหัวข้อ previewDraft)
  */
+/**
+ * บริษัท + ผู้ติดต่อ + เครดิต + ที่อยู่ ของใบ — **ก่อน** ที่จะมีสินค้าในใบสักบรรทัด
+ *
+ * มีเพราะ `/preview` บังคับว่าต้องมี items (ทั้งฟังก์ชันคือการตรวจกฎของรายการ) ⇒ หัวใบจึงขึ้น
+ * "—" ที่ รหัสลูกค้า · เลขผู้เสียภาษี · ที่อยู่ · เครดิต จนกว่าจะพิมพ์สินค้าเข้าไป ทั้งที่ข้อมูล
+ * พร้อมอยู่แล้วตั้งแต่เลือกผู้ติดต่อเสร็จ (เจ้าของรายงาน 2026-09-21)
+ *
+ * คืนก้อน `customer` **ตัวเดียวกับที่ `/preview` คืน** จาก `resolveQuoteParty()` ตัวเดียวกัน
+ * ⇒ หน้าจอวาดที่เดิมได้โดยไม่ต้องรู้ว่าค่ามาจากเส้นไหน และสองเส้นเพี้ยนจากกันไม่ได้
+ */
+app.get('/api/admin/webquote/party', adminAuthMiddleware, requireCapability('quote.create'), async (req: any, res: any) => {
+  try {
+    res.json({
+      customer: await getQuoteParty({
+        role: req.admin.role,
+        customerId: req.query?.customer_id,
+        contactId: req.query?.contact_id,
+        // ค่าที่ตั้งทับต้องมาด้วย ไม่งั้น has_credit_terms ของก้อนนี้จะตอบจากเครดิตของลูกค้า
+        // ทั้งที่ใบกำลังใช้ค่าอื่น — คนละคำตอบกับที่ /preview จะให้ในอีกไม่กี่วินาทีถัดมา
+        paymentTermsOverride: req.query?.payment_terms_override,
+      }),
+    });
+  } catch (err: any) {
+    sendWebQuoteError(res, 'GET /api/admin/webquote/party', err);
+  }
+});
+
 app.post('/api/admin/webquote/preview', adminAuthMiddleware, requireCapability('quote.create'), express.json({ limit: '2mb' }), async (req: any, res: any) => {
   try {
     res.json(await previewWebQuoteDraft({
