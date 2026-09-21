@@ -42,7 +42,7 @@ import { Button } from './Button';
 import { ComboBox, type ComboOption } from './PersonComboBox';
 import { ConfirmIssueModal } from './ConfirmIssueModal';
 import { describeApiError } from './apiError';
-import { AddContactModal } from './AddContactModal';
+import { LocalContactModal, DeleteContactModal, isLocalContactId } from './LocalContactModal';
 import {
   AlertCircle,
   AlertTriangle,
@@ -59,6 +59,7 @@ import {
   Link2,
   Loader2,
   MessageSquarePlus,
+  Pencil,
   Plus,
   RotateCcw,
   Search,
@@ -1195,6 +1196,14 @@ interface DocCtx {
   onPickContact: (id: number) => void;
   /** เปิดกล่อง "เพิ่มผู้ติดต่อใหม่" พร้อมชื่อที่พิมพ์ค้างไว้ในช่องค้น (ว่างได้) */
   onAddContact: (prefill: string) => void;
+  /**
+   * แก้ไข/ลบ "คนที่เราเพิ่มเอง" — `null` เมื่อคนที่เลือกอยู่เป็นของ Odoo หรือยังไม่ได้เลือกใคร
+   *
+   * เป็น callback ที่เป็น null ได้ ไม่ใช่ boolean คู่กับ callback อีกตัว — เอกสารจะได้ไม่ต้อง
+   * ถือกติกา "ใคร local ใคร Odoo" ของตัวเอง (ตัวตัดสินอยู่ที่ `isLocalContactId` ที่เดียว)
+   */
+  onEditContact: (() => void) | null;
+  onDeleteContact: (() => void) | null;
   paymentTerms: string | null;
   paymentTermOpts: string[];
   setPaymentTerms: (v: string | null) => void;
@@ -1363,6 +1372,35 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
                 )}
               />
             </span>
+            {/* แก้/ลบ เฉพาะคนที่เราเพิ่มเอง — ผู้ติดต่อของ Odoo ต้องไปแก้ที่ Odoo (เจ้าของเคาะ
+                2026-09-21) · ไอคอนล้วนเพราะช่องนี้มีที่ให้ใช้แค่ 320px และหัวใบต้องอ่านเหมือน
+                เอกสาร ไม่ใช่แถบเครื่องมือ */}
+            {(ctx.onEditContact || ctx.onDeleteContact) && (
+              <span className="flex shrink-0 items-center gap-0.5 mt-1">
+                {ctx.onEditContact && (
+                  <button
+                    type="button"
+                    onClick={ctx.onEditContact}
+                    title="แก้ไขผู้ติดต่อที่เพิ่มเอง"
+                    aria-label="แก้ไขผู้ติดต่อที่เพิ่มเอง"
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-[var(--brand-fg)] hover:bg-slate-100 transition-colors"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                {ctx.onDeleteContact && (
+                  <button
+                    type="button"
+                    onClick={ctx.onDeleteContact}
+                    title="ลบผู้ติดต่อที่เพิ่มเอง"
+                    aria-label="ลบผู้ติดต่อที่เพิ่มเอง"
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </span>
+            )}
           </div>
           <DocField label="โทรศัพท์">{cust?.contact_phone || ctx.contactOpt?.phone || '—'}</DocField>
           <DocField label="อีเมล">{cust?.contact_email || '—'}</DocField>
@@ -1927,6 +1965,12 @@ export const QuoteRequest: React.FC = () => {
    * พร้อมกันเสมอคือสองตัวที่วันหนึ่งจะไม่ตรงกัน (เปิดกล่องแต่ชื่อเป็นของรอบก่อน)
    */
   const [addContactFor, setAddContactFor] = useState<string | null>(null);
+  /** `contact_id` ที่กำลังแก้อยู่ — `null` = ไม่ได้เปิดกล่องแก้ไข */
+  const [editContactId, setEditContactId] = useState<number | null>(null);
+  /** คนที่กำลังจะลบ — เก็บชื่อมาด้วย เพราะรายชื่อถูกดึงใหม่หลังลบ แล้วชื่อจะหายไปจากที่เดิม */
+  const [deleteContact, setDeleteContact] = useState<{ id: number; name: string } | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // ── ส่วนที่ 2 ──
   const [webUserId, setWebUserId] = useState('');
@@ -2104,6 +2148,44 @@ export const QuoteRequest: React.FC = () => {
     return () => { cancelled = true; };
   }, [customerId]);
 
+  /**
+   * หัวใบ (รหัสลูกค้า · เลขผู้เสียภาษี · ที่อยู่ · เครดิตของลูกค้า) ต้องขึ้น **ตั้งแต่เลือก
+   * ผู้ติดต่อเสร็จ** ไม่ใช่รอจนมีสินค้าในใบ
+   *
+   * `/preview` ตอบก้อนนี้แทนไม่ได้เพราะมันบังคับว่าต้องมี items (ทั้งฟังก์ชันคือการตรวจกฎของ
+   * รายการ) ⇒ ก่อนหน้านี้ช่องพวกนี้ขึ้น "—" จนกว่าจะพิมพ์สินค้าเข้าไป ทั้งที่ข้อมูลพร้อมอยู่แล้ว
+   * (เจ้าของรายงาน 2026-09-21)
+   *
+   * ⚠️ `/party` คืนก้อน `customer` **รูปเดียวกับ `/preview` เป๊ะ** เพราะฝั่ง server ประกอบจาก
+   *    ฟังก์ชันตัวเดียวกัน ⇒ พอพรีวิวมาถึง ตัวเลขไม่กระพริบและไม่มีทางขัดกันเอง
+   * ⚠️ ค่าเครดิตที่ตั้งทับอยู่ในลิสต์ของ effect ด้วย — `has_credit_terms` ของก้อนนี้คิดจาก
+   *    "ค่าที่ใบจะใช้จริง" ไม่ใช่ของลูกค้าเสมอไป (กติกาเดียวกับที่ /preview ใช้)
+   */
+  const [party, setParty] = useState<PreviewResult['customer'] | null>(null);
+  useEffect(() => {
+    if (customerId === null || contactId === null) {
+      setParty(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const qs = new URLSearchParams({
+          customer_id: String(customerId),
+          contact_id: String(contactId),
+        });
+        if (paymentTerms !== null) qs.set('payment_terms_override', paymentTerms);
+        const res = await fetch(`/api/admin/webquote/party?${qs.toString()}`, { headers: authHeaders });
+        const data = res.ok ? await res.json() : null;
+        if (!cancelled) setParty(data?.customer ?? null);
+      } catch {
+        // อ่านไม่ได้ = หัวใบกลับไปเป็น "—" เหมือนเดิม ไม่ใช่ค้างค่าของผู้ติดต่อคนก่อน
+        if (!cancelled) setParty(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [customerId, contactId, paymentTerms, authHeaders]);
+
   // ค้นบริษัทเพิ่ม — หน่วง 300ms เท่ากับช่องค้นสินค้า ไม่งั้นยิงคิวรีทุกตัวอักษรที่พิมพ์
   useEffect(() => {
     const q = customerQuery.trim();
@@ -2167,6 +2249,55 @@ export const QuoteRequest: React.FC = () => {
     },
     [customerId],
   );
+
+  /** ดึงรายชื่อผู้ติดต่อของบริษัทที่เลือกอยู่ใหม่ — ใช้ร่วมกันหลังแก้ไขและหลังลบ */
+  const reloadContacts = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/customer/${customerId}/contacts`);
+      const data = res.ok ? await res.json() : [];
+      if (Array.isArray(data)) setContacts(data as ContactRow[]);
+    } catch {
+      /* ดึงใหม่ไม่ได้ = ช่องยังโชว์ค่าเดิมไปก่อน ซึ่งไม่กระทบใบที่จะออก (ชื่อบนใบมาจาก server) */
+    }
+  }, [customerId]);
+
+  /** แก้ไขสำเร็จ — ชื่อ/เบอร์ในช่องต้องเปลี่ยนตาม และคนที่เลือกไว้ต้องยังเป็นคนเดิม */
+  const onContactSaved = useCallback(
+    async (savedId: number) => {
+      setEditContactId(null);
+      await reloadContacts();
+      setContactId(savedId);
+    },
+    [reloadContacts],
+  );
+
+  /**
+   * ลบจริง — ด่านทั้งสองข้อ (เข้า Odoo แล้ว / มีใบอ้างอยู่) อยู่ฝั่ง server ที่เดียว
+   * ตรงนี้แค่เอาคำตอบของมันมาแสดง แล้วปล่อยช่องผู้ติดต่อให้ว่างถ้าลบคนที่เลือกอยู่
+   */
+  const confirmDeleteContact = useCallback(async () => {
+    if (!deleteContact) return;
+    const gone = deleteContact.id;
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch(`/api/admin/webquote/contacts/${gone}`, {
+        method: 'DELETE',
+        headers: authHeaders,
+      });
+      if (!res.ok) {
+        setDeleteError(await readError(res, 'ลบผู้ติดต่อไม่สำเร็จ'));
+        return;
+      }
+      setDeleteContact(null);
+      setContactId((cur) => (cur === gone ? null : cur));
+      await reloadContacts();
+    } catch {
+      setDeleteError('ติดต่อเซิร์ฟเวอร์ไม่ได้ — ลองใหม่อีกครั้ง');
+    } finally {
+      setDeleteBusy(false);
+    }
+  }, [deleteContact, authHeaders, reloadContacts]);
 
   // ── ส่วนที่ 1: วางข้อความ → ร่าง ──
   const propose = async () => {
@@ -2892,7 +3023,8 @@ export const QuoteRequest: React.FC = () => {
 
   /** ทุกอย่างที่เอกสารต้องใช้เพื่อเป็นฟอร์ม — ก้อนเดียว ส่งให้ทุกใบใช้ร่วมกัน */
   const docCtx: DocCtx = {
-    customer: preview?.customer ?? null,
+    // พรีวิวมาแล้วใช้ของพรีวิว (ก้อนเดียวกัน แต่สดกว่าเพราะคิดพร้อมกับรายการ) ไม่มีก็ใช้ /party
+    customer: preview?.customer ?? party,
     identity,
     svcCfg,
     matched: matched.byRow,
@@ -2920,6 +3052,14 @@ export const QuoteRequest: React.FC = () => {
     contactOpts,
     onPickContact: setContactId,
     onAddContact: openAddContact,
+    onEditContact: isLocalContactId(contactId) ? () => setEditContactId(contactId) : null,
+    onDeleteContact:
+      isLocalContactId(contactId) && contactOpt
+        ? () => {
+            setDeleteError(null);
+            setDeleteContact({ id: contactId, name: contactOpt.name });
+          }
+        : null,
     paymentTerms,
     paymentTermOpts,
     setPaymentTerms,
@@ -3358,7 +3498,7 @@ export const QuoteRequest: React.FC = () => {
           `customerOpt` ต้องมีค่าเสมอตรงนี้ เพราะช่องผู้ติดต่อ disabled อยู่จนกว่าจะเลือกบริษัท
           — เช็กอีกชั้นไว้เพราะ state สองตัวนี้ไม่ได้ผูกกันด้วยชนิดข้อมูล */}
       {addContactFor !== null && customerId !== null && customerOpt && (
-        <AddContactModal
+        <LocalContactModal
           companyId={customerId}
           companyName={customerOpt.name}
           companyRef={customerOpt.row.reference ?? null}
@@ -3366,6 +3506,30 @@ export const QuoteRequest: React.FC = () => {
           authHeaders={authHeaders}
           onClose={() => setAddContactFor(null)}
           onPicked={onContactAdded}
+        />
+      )}
+
+      {/* แก้ไข/ลบ คนที่เราเพิ่มเอง — เปิดจากไอคอนข้างช่อง "ผู้ติดต่อ" (เจ้าของเคาะ 2026-09-21) */}
+      {editContactId !== null && customerId !== null && customerOpt && (
+        <LocalContactModal
+          editId={editContactId}
+          companyId={customerId}
+          companyName={customerOpt.name}
+          companyRef={customerOpt.row.reference ?? null}
+          authHeaders={authHeaders}
+          onClose={() => setEditContactId(null)}
+          onPicked={onContactSaved}
+        />
+      )}
+
+      {deleteContact && (
+        <DeleteContactModal
+          contactName={deleteContact.name}
+          companyName={customerOpt?.name ?? ''}
+          busy={deleteBusy}
+          error={deleteError}
+          onCancel={() => setDeleteContact(null)}
+          onConfirm={confirmDeleteContact}
         />
       )}
 
