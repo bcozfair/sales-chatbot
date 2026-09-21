@@ -109,7 +109,7 @@ npm run logworker                                          # worker เขีย
 ```
 
 `npm test` เป็น stub (`exit 1`) โดยตั้งใจ — **ด่านตรวจของโปรเจคนี้คือ typecheck + `scripts/diag/*`**
-(วัด 2026-09-21: 62 รายการใน `scripts/diag/` · 45 npm script `diag:*`) ดูรายการเต็มใน `package.json`
+(วัด 2026-09-21: 65 รายการใน `scripts/diag/` · 46 npm script `diag:*`) ดูรายการเต็มใน `package.json`
 และดูว่าตัวไหนเป็น gate ใน `AGENTS.md` ข้อ 6
 
 ---
@@ -434,6 +434,7 @@ chatbot/
 │   ├── schema.sql        # schema เต็ม (ตั้ง DB ใหม่จากศูนย์ได้จริง — วิธีตรวจอยู่หัวไฟล์)
 │   └── changes/          # migration ทีละไฟล์ `YYYY-MM-DD_NN_*.sql`
 ├── scripts/              # sync/ · diag/ · dev/ (seed ทดสอบ — เครื่อง dev เท่านั้น) · logworker/
+│                         # · pricebook/ (Excel ราคา → pricebook/book.json + แม่แบบ .xlsx + map รายชีต)
 │                         # · runMigration · dbDump/dbRestore · backfill* · evalCustomerSearch
 ├── data/sale_sigs/       # ลายเซ็น — ชื่อไฟล์ต้องเป็น {salesperson_id}.png
 ├── frontend/             # Admin SPA (มี package.json/tsconfig/eslint ของตัวเอง)
@@ -490,7 +491,7 @@ chatbot/
 - **`docs/plan-quote-price-approval.md`** — คิวอนุมัติราคาต่ำกว่าขั้นต่ำ + role `approver`
 - **`docs/plan-web-quote-logging.md`** — ประวัตของหน้าเว็บใน `messages` (`web_*` + `meta`) และวิธีวัด `chosen_rank`
 - **`docs/plan-product-block-rules.md`** — กฎบล็อกสินค้า
-- **`docs/plan-pricing-subcodes.md`** — พิมพ์รหัสสินค้าสั่งทำแล้วได้ราคา + ตารางรหัสย่อยที่แอดมินตั้งราคา/กฎเองได้ (เฟส A+B ทำแล้ว · **อยู่ในแอดมินจริงแล้วเป็นโมดูลที่ถอดออกได้** — ดู `services/pricingLab/README.md` · เฟส C–D ยังเป็นแบบที่เสนอ)
+- **`docs/plan-pricing-subcodes.md`** — พิมพ์รหัสสินค้าสั่งทำแล้วได้ราคา + ตารางรหัสย่อยที่แอดมินตั้งราคา/กฎเองได้ (เฟส A–C ทำแล้ว · **อยู่ในแอดมินจริงแล้วเป็นโมดูลที่ถอดออกได้** — ดู `services/pricingLab/README.md` · สมุดราคาครอบ 14 รุ่น / 11 ชีต = 80.1% ของรหัสจริง · เฟส D ยังเป็นแบบที่เสนอ)
 - **`docs/plan-logging-audit-compliance.md`** — ระบบ log / audit / ข้อกำหนดตามกฎหมาย
 - **`docs/plan-user-roles-auth.md`** — สิทธิ์ผู้ใช้และการยืนยันตัวตน
 - **`docs/plan-role-permissions.md`** — เมทริกซ์สิทธิ์ต่อ role ที่ตั้งจากหน้าจอได้ + role `salesperson` + ตัวตนบนใบที่ออกจากเว็บ
