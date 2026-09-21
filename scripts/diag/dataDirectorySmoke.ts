@@ -59,6 +59,19 @@ async function main() {
   const [searched] = await timed(() => getProductDirectory({ limit: 10, q: 'Klemsan' }));
   ok('ค้นหาข้ามช่องได้', searched.items.length > 0, `${searched.total} แถว`);
 
+  // ตัวกรอง "ซีรีส์" มาแทน "กลุ่มสินค้า" (เจ้าของสั่ง 2026-09-21) — สองข้อนี้คู่กันเสมอ:
+  // ถ้าเหลือแต่ dropdown แต่ช่องค้นหาไม่รู้จักซีรีส์ คนที่จำชื่อซีรีส์ได้จะพิมพ์แล้วไม่เจอ
+  const topSeries = (await getProductFacets()).series
+    .reduce((a, b) => (b.n > a.n ? b : a), { value: '', n: 0 });
+  const [bySeries] = await timed(() => getProductDirectory({ limit: 20, series: topSeries.value }));
+  ok('ตัวกรองซีรีส์เทียบตรงตัว ไม่ใช่คำค้นคลุม',
+    bySeries.total > 0 && bySeries.items.every((p: any) => p.series === topSeries.value),
+    `${topSeries.value} · ${bySeries.total.toLocaleString()} แถว`);
+
+  const [qSeries] = await timed(() => getProductDirectory({ limit: 5, q: topSeries.value }));
+  ok('ช่องค้นหาหาจากซีรีส์ได้ด้วย', qSeries.total > 0,
+    `พิมพ์ "${topSeries.value}" ได้ ${qSeries.total.toLocaleString()} แถว`);
+
   // ── 2. กฎบล็อกต้องตรงกับ engine ตัวจริง ──────────────────────
   section('2) กฎบล็อก — ต้องตรงกับ engine ที่ใช้ตอนออกใบจริง');
   const blockRules = await loadProductBlockRules();
@@ -79,8 +92,8 @@ async function main() {
 
   const facets = await getProductFacets();
   ok('ตัวเลือก dropdown มาจากค่าที่มีจริง',
-    facets.productions.length > 0 && facets.groups.length > 0,
-    `แหล่งผลิต ${facets.productions.length} · กลุ่ม ${facets.groups.length} · แบรนด์ ${facets.brands.length}`);
+    facets.productions.length > 0 && facets.series.length > 0,
+    `แหล่งผลิต ${facets.productions.length} · ซีรีส์ ${facets.series.length} · แบรนด์ ${facets.brands.length}`);
 
   // ── 3. ลูกค้า: สองมุมมอง ─────────────────────────────────────
   section('3) หน้าลูกค้า — มุมมองบริษัท / ผู้ติดต่อ');

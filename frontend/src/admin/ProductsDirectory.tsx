@@ -28,6 +28,15 @@ import { errMsg, formatNumber, formatDateTime, tdCls, numCls, downloadCsv } from
  *   ทั้งสองช่องเป็น 0 ทั้ง 51,665 แถว (gateway ยังไม่ส่งมา) ⇒ ขึ้นจอแล้วอ่านว่า
  *   "ไม่มีของเข้า" ซึ่งไม่จริง · เหตุผลเดียวกับที่ `product_category` ไม่ได้เป็นตัวกรอง
  *   (FinishGoods 51,664 / Service 1 — ตัวเลือกที่กรองแล้วได้ทุกแถวคือตัวเลือกที่ไม่ควรมี)
+ *
+ * ทำไมตัวกรองเป็น "ซีรีส์" ไม่ใช่ "กลุ่มสินค้า" (เจ้าของสั่ง 2026-09-21 · วัดวันเดียวกัน):
+ *   `product_group` มี 20 ค่า และ **35,269 จาก 51,665 แถว (68%) กองอยู่ใน `Inst 1` ค่าเดียว**
+ *   ⇒ กรองแล้วยังเหลือสามหมื่นกว่าแถว คือตัวกรองที่กดแล้วไม่ได้อะไร
+ *   `series` มี 859 ค่า เป็นรหัสที่เซลส์เรียกกันจริง (TSP 9,853 · TSK 9,078 · LP 3,279)
+ *   และเป็นช่องเดียวกับที่ `product_block_rules` ใช้ตั้ง scope ⇒ ตรงกับวิธีที่คนคิดถึงสินค้าอยู่แล้ว
+ *   คอลัมน์ "กลุ่ม / หมวดย่อย" ยังอยู่ในตารางและยังเรียงได้ — ที่ถอดออกคือ dropdown เท่านั้น
+ *   ช่องค้นหาครอบ `series` มาตั้งแต่แรก (repo) — 2026-09-21 แค่เขียนชื่อมันลงใน placeholder
+ *   ให้คนรู้ว่าพิมพ์ "TSP" ตรง ๆ ได้ · gate: `npm run diag:data-directory`
  */
 
 interface ProductRules {
@@ -65,7 +74,7 @@ interface Summary {
 }
 
 interface Facets {
-  groups: { value: string; n: number }[];
+  series: { value: string; n: number }[];
   brands: { value: string; n: number }[];
   productions: { value: string; n: number }[];
 }
@@ -137,14 +146,14 @@ export const ProductsDirectory: React.FC = () => {
   const [rows, setRows] = useState<ProductRow[]>([]);
   const [total, setTotal] = useState(0);
   const [summary, setSummary] = useState<Summary | null>(null);
-  const [facets, setFacets] = useState<Facets>({ groups: [], brands: [], productions: [] });
+  const [facets, setFacets] = useState<Facets>({ series: [], brands: [], productions: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<ProductRow | null>(null);
   const [exporting, setExporting] = useState(false);
 
   const [q, setQ] = useState('');
-  const [group, setGroup] = useState('');
+  const [series, setSeries] = useState('');
   const [brand, setBrand] = useState('');
   const [production, setProduction] = useState('');
   const [stock, setStock] = useState('');
@@ -161,7 +170,7 @@ export const ProductsDirectory: React.FC = () => {
   const params = useMemo(() => {
     const p = new URLSearchParams();
     if (q.trim()) p.set('q', q.trim());
-    if (group) p.set('group', group);
+    if (series) p.set('series', series);
     if (brand) p.set('brand', brand);
     if (production) p.set('production', production);
     if (stock) p.set('stock', stock);
@@ -169,9 +178,9 @@ export const ProductsDirectory: React.FC = () => {
     p.set('sort', sort);
     p.set('dir', dir);
     return p;
-  }, [q, group, brand, production, stock, flag, sort, dir]);
+  }, [q, series, brand, production, stock, flag, sort, dir]);
 
-  const activeCount = [q.trim(), group, brand, production, stock, flag, rule].filter(Boolean).length;
+  const activeCount = [q.trim(), series, brand, production, stock, flag, rule].filter(Boolean).length;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -230,7 +239,7 @@ export const ProductsDirectory: React.FC = () => {
   }, [rows, rule]);
 
   const clearAll = () => {
-    setQ(''); setGroup(''); setBrand(''); setProduction('');
+    setQ(''); setSeries(''); setBrand(''); setProduction('');
     setStock(''); setFlag(''); setRule(''); setPage(1);
   };
 
@@ -284,10 +293,10 @@ export const ProductsDirectory: React.FC = () => {
       <DataFilterBar
         activeCount={activeCount}
         onClear={clearAll}
-        search={<DataSearch value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="ค้นหา รหัส / ชื่อ / รุ่น / แบรนด์" />}
+        search={<DataSearch value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="ค้นหา รหัส / ชื่อ / รุ่น / แบรนด์ / ซีรีส์" />}
         primary={<FilterCombo label="กฎที่ติดอยู่" value={rule} options={RULE_OPTIONS} onChange={(v) => { setRule(v); setPage(1); }} />}
         rest={<>
-          <FilterCombo label="กลุ่มสินค้า" value={group} options={opt(facets.groups)} onChange={(v) => { setGroup(v); setPage(1); }} />
+          <FilterCombo label="ซีรีส์" value={series} options={opt(facets.series)} onChange={(v) => { setSeries(v); setPage(1); }} />
           <FilterCombo label="แบรนด์" value={brand} options={opt(facets.brands)} onChange={(v) => { setBrand(v); setPage(1); }} />
           <FilterCombo label="แหล่งผลิต" value={production} options={opt(facets.productions)} onChange={(v) => { setProduction(v); setPage(1); }} />
           <FilterCombo label="สต็อก" value={stock} options={STOCK_OPTIONS} onChange={(v) => { setStock(v); setPage(1); }} />

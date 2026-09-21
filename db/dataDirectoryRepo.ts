@@ -59,7 +59,7 @@ export interface ProductDirectoryRow {
 
 export interface ProductDirectoryFilter {
   q?: string;
-  group?: string;
+  series?: string;
   brand?: string;
   production?: string;
   /** 'has' มีของพร้อมขาย · 'none' ไม่มี · 'resv' มีของแต่ถูกจองบางส่วน */
@@ -99,7 +99,7 @@ function productWhere(f: ProductDirectoryFilter): { sql: string; params: any[] }
     where.push(`(p.internal_reference ILIKE $${i} OR p.name ILIKE $${i} OR p.model ILIKE $${i}
                  OR p.brand ILIKE $${i} OR p.series ILIKE $${i})`);
   }
-  if (f.group) { params.push(f.group); where.push(`p.product_group = $${params.length}`); }
+  if (f.series) { params.push(f.series); where.push(`p.series = $${params.length}`); }
   if (f.brand) { params.push(f.brand); where.push(`p.brand = $${params.length}`); }
   if (f.production) { params.push(f.production); where.push(`p.production = $${params.length}`); }
 
@@ -149,7 +149,7 @@ export async function listProducts(
 
 /** ตัวเลือกของ dropdown — มาจากค่าที่มีอยู่จริงในตาราง ไม่ใช่รายการที่พิมพ์ไว้ในโค้ด */
 export async function getProductFacets(): Promise<{
-  groups: { value: string; n: number }[];
+  series: { value: string; n: number }[];
   brands: { value: string; n: number }[];
   productions: { value: string; n: number }[];
 }> {
@@ -160,11 +160,11 @@ export async function getProductFacets(): Promise<{
           WHERE ${col} IS NOT NULL AND TRIM(${col}) <> ''
           GROUP BY 1 ORDER BY 1`,
       );
-    const [g, b, pr] = await Promise.all([q('product_group'), q('brand'), q('production')]);
-    return { groups: g.rows, brands: b.rows, productions: pr.rows };
+    const [se, b, pr] = await Promise.all([q('series'), q('brand'), q('production')]);
+    return { series: se.rows, brands: b.rows, productions: pr.rows };
   } catch (err) {
     logErr('getProductFacets', err);
-    return { groups: [], brands: [], productions: [] };
+    return { series: [], brands: [], productions: [] };
   }
 }
 

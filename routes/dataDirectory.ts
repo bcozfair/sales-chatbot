@@ -35,7 +35,7 @@ dataDirectoryRouter.get('/products', async (req: Request, res: Response) => {
   try {
     const { items, total } = await getProductDirectory({
       q: str(req.query.q),
-      group: str(req.query.group),
+      series: str(req.query.series),
       brand: str(req.query.brand),
       production: str(req.query.production),
       stock: str(req.query.stock),
@@ -141,7 +141,7 @@ function sendCsv(res: Response, filename: string, fields: { label: string; value
 dataDirectoryRouter.get('/products/export', async (req: Request, res: Response) => {
   try {
     const base = {
-      q: str(req.query.q), group: str(req.query.group), brand: str(req.query.brand),
+      q: str(req.query.q), series: str(req.query.series), brand: str(req.query.brand),
       production: str(req.query.production), stock: str(req.query.stock), flag: str(req.query.flag),
       sort: str(req.query.sort), dir: str(req.query.dir),
     };
