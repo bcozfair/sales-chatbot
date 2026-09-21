@@ -1,7 +1,7 @@
 import { pool, withTransaction, type DbExecutor } from '../config/db.js';
 // type-only โดยตั้งใจ — เหตุผลอยู่ที่หัวข้อ "ชั้นเดียวกันนี้ตั้งค่าต่อ role ได้แล้ว" ข้างล่าง
 import type { PermissionMode } from '../config/capabilities.js';
-import { getCustomerByDisplayName, getCustomerById, getFirstContact, getCompanyAddressRows, getContactById } from '../db/repositories.js';
+import { getCustomerByDisplayName, getCustomerById, getFirstContact, getCompanyAddressRows, getContactById, resolveCustomerSalesTeam } from '../db/repositories.js';
 import {
   findCustomerCandidates,
   findContactCandidates,
@@ -467,8 +467,10 @@ export async function confirmQuotationAtomic(
 ): Promise<ConfirmResult> {
   return withTransaction(async (client) => {
     // 1) ล็อกแถว — ผู้กดยืนยันพร้อมกันคนที่ 2 จะรอตรงนี้จนคนแรก COMMIT แล้วจึงเห็น status ล่าสุด
+    // contact_id/customer_id อ่านจากแถวในฐานใต้ล็อก ไม่ใช่จาก enrichedQuote — ไฟล์ export ก็ join
+    // ด้วยสองคอลัมน์นี้ ค่าที่ตรึงจึงต้องมาจากที่เดียวกัน ไม่งั้นค่าที่ตรึงกับค่าที่ join ได้ต่างกันเอง
     const cur = await client.query(
-      `SELECT id, status, quotation_no FROM quotations WHERE id = $1 FOR UPDATE`,
+      `SELECT id, status, quotation_no, contact_id, customer_id FROM quotations WHERE id = $1 FOR UPDATE`,
       [quoteId]
     );
     if (cur.rowCount === 0) return { outcome: 'not_found' as const };
@@ -478,6 +480,18 @@ export async function confirmQuotationAtomic(
     if (row.status === 'confirmed') {
       return { outcome: 'already_confirmed' as const, quotationNo: row.quotation_no || '-' };
     }
+
+    // 1.5) ตรึงทีมขายของผู้ติดต่อ — ช่อง Sales Team (คอลัมน์ I) ของไฟล์นำเข้า Odoo
+    //      ต้องอยู่ในทรานแซกชันเดียวกับการออกเลข ไม่ใช่หลังจากนั้น: ใบที่ยืนยันสำเร็จแต่ตรึงไม่สำเร็จ
+    //      จะได้ NULL แล้วเงียบ ๆ ตกไปใช้ join สด ซึ่งคือปัญหาที่เฟส H ตั้งใจปิด (plan §5.7)
+    //      ⇒ resolveCustomerSalesTeam ปล่อยให้ error ทะลุ = ROLLBACK ทั้งการยืนยัน ไม่ใช่ตรึงไม่ครบ
+    //
+    //      ⚠️ อยู่ "ก่อน" allocateQuotationNo โดยตั้งใจ — bumpCounter ถือ row lock ของ
+    //      quotation_counters (คีย์เดียวต่อเดือนต่อบริษัท = จุดที่ทุกการยืนยันในเดือนนั้นมาต่อคิวกัน)
+    //      ไปจน COMMIT ถ้าวางไว้หลังจากนั้น การอ่าน customers_data_view ที่ช้าจะลากคิวของทุกคนไปด้วย
+    //      วัดแล้วบนเครื่อง dev 2026-09-18: ปกติ 1.6 ms · กรณีเลวร้าย (ตารางถูกล็อกค้าง) ชน
+    //      statement_timeout ของ pool ที่ 15 วิ แล้ว rollback ทั้งใบ — ตอนนั้นต้องไม่มีใครติดอยู่ข้างหลัง
+    const customerSalesTeam = await resolveCustomerSalesTeam(row.contact_id, row.customer_id, client);
 
     // 2) จองเลข (ใช้เลขเดิมถ้ามีอยู่แล้ว เพื่อไม่เผาเลขซ้ำ) — created_at ยึดของ enrichedQuote (วันที่ร่าง)
     const quotationNo = row.quotation_no
@@ -513,11 +527,12 @@ export async function confirmQuotationAtomic(
               delivery_terms = $3::jsonb,
               print_snapshot = $4::jsonb,
               odoo_manual_review = $5::jsonb,
+              customer_sales_team = COALESCE(customer_sales_team, $6),
               updated_at = NOW()
         WHERE id = $2 AND status <> 'confirmed' AND status <> 'cancelled'
       RETURNING quotation_no`,
       [quotationNo, quoteId, JSON.stringify(deliveryTerms), JSON.stringify(printSnapshot),
-       odooManualReview ? JSON.stringify(odooManualReview) : null]
+       odooManualReview ? JSON.stringify(odooManualReview) : null, customerSalesTeam]
     );
     if (upd.rowCount === 0) {
       // มี FOR UPDATE แล้วยังโดน 0 แถว = มีทางเขียน status ที่เรายังไม่รู้ ให้ rollback ทั้งชุด

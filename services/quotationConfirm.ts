@@ -38,6 +38,29 @@ import {
 } from './quotationService.js';
 import { parseWebUserId } from './webIdentity.js';
 import { isCustomerInfoIncomplete } from '../utils/flexTemplates.js';
+
+/**
+ * ข้อความที่แอดมินเห็นบนจอเมื่อ `confirmQuotationAtomic` โยน error (เจ้าของเลือกแบบนี้ 2026-09-18)
+ *
+ * error ที่มาถึงตรงนี้เป็นข้อความดิบของไดรเวอร์ฐานข้อมูล เช่น `Query read timeout` ซึ่งบอกคนอ่าน
+ * ไม่ได้สักอย่างว่าเกิดอะไรและต้องทำอะไรต่อ — ทั้งที่คำตอบมีแค่ "กดยืนยันอีกครั้ง"
+ *
+ * **ทั้งก้อนอยู่ในทรานแซกชันเดียว ⇒ ล้มแล้วใบยังเป็นร่าง ยังไม่มีเลขที่ใบ ตัวนับไม่ขยับ**
+ * (วัดจริง 2026-09-18: ล็อก customers_data_view ค้างไว้แล้วกดยืนยัน → ล้มที่ 15 วิ · ใบยัง draft ·
+ *  counter ยัง 0 · กดใหม่ได้เลขปกติ) ประโยคนี้จึงพูดได้เต็มปากว่ายังไม่ได้ออกเลขที่ใบ
+ *
+ * ข้อความดิบต่อท้ายในวงเล็บ เพื่อให้แอดมินส่งต่อให้คนดูแลระบบได้โดยไม่ต้องไปงม log —
+ * ตัดเหลือบรรทัดเดียวและไม่เกิน 160 ตัวอักษร เพราะกล่องแดงบนจอเป็นตัวหนังสือขนาดเล็ก
+ * และ error ของ Postgres บางตัวยาวหลายบรรทัด (log ยังเก็บของเต็มไว้ครบด้วย console.error ข้างบน)
+ *
+ * ⚠️ ใช้เฉพาะกับ error ของ **ขั้นออกเลข** เท่านั้น — ขั้นอื่นที่ล้มหลังใบออกไปแล้วห้ามใช้ประโยคนี้
+ */
+export function confirmFailureMessage(err: unknown): string {
+  const raw = String((err as any)?.message ?? err ?? '').replace(/\s+/g, ' ').trim();
+  const shown = raw.length > 160 ? `${raw.slice(0, 160)}…` : raw;
+  const base = 'ระบบขัดข้องชั่วคราว ยังไม่ได้ออกเลขที่ใบ กรุณากดยืนยันอีกครั้ง';
+  return shown ? `${base} (${shown})` : base;
+}
 import { buildPdfLink } from '../utils/quotationLink.js';
 import { getAppUrl } from '../config/appUrl.js';
 
@@ -141,7 +164,7 @@ export async function confirmQuotationById(params: {
     confirmResult = await confirmQuotationAtomic(quoteId, quote);
   } catch (updateError: any) {
     console.error('Confirm quotation error:', updateError);
-    return { ok: false, status: 500, error: updateError.message };
+    return { ok: false, status: 500, error: confirmFailureMessage(updateError) };
   }
 
   if (confirmResult.outcome === 'not_found') {

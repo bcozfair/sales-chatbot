@@ -15,13 +15,15 @@
 //            การแยกบริษัท: ไฟล์มีเฉพาะใบของบริษัทที่เลือก ใบที่เลขไม่ขึ้นต้น QP/QT ไม่ลงไฟล์
 //            และชื่อภาษีเป็นค่าของบริษัทนั้น (QP กับ QT ต่างกันแค่เว้นวรรค แต่ต่างกันจริง)
 //            ส่วนต่างของยอดรวมหลังยุบส่วนลด 2 ชั้นเหลือช่องเดียว · หมายเหตุการรับประกัน
-//            ช่อง Sales Team (I) = ทีมขายของผู้ติดต่อจาก customers_data_view ไม่ใช่สังกัดของเซลล์
+//            ช่อง Sales Team (I) = ค่าที่ตรึงไว้ในใบตอนยืนยัน (เฟส H) ถ้ายังไม่มีจึงถอยไป join
+//            customers_data_view สด — ทั้งสองทางต้องไม่ใช่สังกัดของเซลล์ผู้ออกใบ
 //            ช่อง employee_quotation_id (J) = ชื่อจริงของเซลล์จากตาราง salesperson + สังกัดห้อยท้าย
 //  ให้รันซ้ำทุกครั้งที่แตะ services/odooSaleOrderExport.ts หรือ endpoint export
 // ─────────────────────────────────────────────────────────────────────────────
 import { pool } from '../../config/db.js';
 import {
   ODOO_EXPORT_SALES_TEAM_JOIN,
+  ODOO_EXPORT_SALES_TEAM_COL,
   ODOO_EXPORT_RAW_NAME_JOINS,
   getOdooSalespersonNameVocabulary,
   listSalespeopleFromOrders,
@@ -104,10 +106,12 @@ const filterParams = status ? [status, limit] : [limit];
 const limitParam = status ? '$2' : '$1';
 const { rows: quotes } = await pool.query<OdooExportQuotationRow & {
   quotation_no: string; total_sum: string; customer_id: number | null; contact_id: number | null;
+  frozen_sales_team: string | null;
 }>(
   `SELECT q.quotation_no, q.total_sum, q.created_at, q.updated_at, q.customer_details, q.item_details, q.employee_details,
           q.customer_id, q.contact_id, q.delivery_terms,
-          s.name AS salesperson_name, cust.sales_team AS customer_sales_team,
+          s.name AS salesperson_name, ${ODOO_EXPORT_SALES_TEAM_COL} AS customer_sales_team,
+          q.customer_sales_team AS frozen_sales_team,
           s.employee_quotation_id AS salesperson_employee_quotation_id,
           ${ODOO_EXPORT_RAW_NAME_COLS}
      FROM quotations q
@@ -194,12 +198,29 @@ if (contactIds.length > 0) {
     if (!teamByContact.has(r.contact_id)) teamByContact.set(r.contact_id, team);
   }
 }
-/** ทีมขายที่ช่อง I ควรได้ — ใบที่ยังไม่ผูกผู้ติดต่อต้องเป็นเซลล์ว่าง ไม่ใช่สังกัดของเซลล์ */
-const expectedSalesTeam = (q: { customer_id: number | null; contact_id: number | null }): string => {
+/** ทีมขายที่ join สดจาก customers_data_view จะให้ ณ ตอนนี้ (ทางถอยของใบที่ยังไม่มีค่าตรึง) */
+const liveSalesTeam = (q: { customer_id: number | null; contact_id: number | null }): string => {
   const cid = Number(q.contact_id);
   if (!Number.isInteger(cid) || cid <= 0) return '';
   return teamByPair.get(`${q.customer_id}:${cid}`) ?? teamByContact.get(cid) ?? '';
 };
+
+/** ค่าที่ตรึงไว้ในใบตอนยืนยัน (เฟส H) — '' = ใบนี้ยังไม่มีค่าตรึง (ยืนยันก่อนเฟส H หรือผู้ติดต่อไม่มีทีม) */
+const frozenSalesTeam = (q: { frozen_sales_team: string | null }): string => {
+  const t = String(q.frozen_sales_team ?? '').trim();
+  return t === '-' ? '' : t;
+};
+
+/**
+ * ทีมขายที่ช่อง I ควรได้ — **ค่าที่ตรึงไว้ก่อน แล้วค่อยถอยไปใช้ค่าสด** ตามลำดับของ
+ * ODOO_EXPORT_SALES_TEAM_COL · ใบที่ยังไม่ผูกผู้ติดต่อต้องเป็นเซลล์ว่าง ไม่ใช่สังกัดของเซลล์
+ *
+ * ก่อนเฟส H ข้อนี้เทียบกับค่าสดอย่างเดียว — ที่ต้องเปลี่ยนเพราะพอใบเริ่มมีค่าตรึง ค่าสดกับค่าในไฟล์
+ * จะต่างกันได้โดยชอบ (นั่นคือทั้งหมดที่เฟส H ทำ) ถ้าไม่แก้ ด่านจะเริ่มล้มทั้งที่โค้ดถูก
+ */
+const expectedSalesTeam = (
+  q: { customer_id: number | null; contact_id: number | null; frozen_sales_team: string | null }
+): string => frozenSalesTeam(q) || liveSalesTeam(q);
 
 // ตัวเทียบอิสระของช่อง B–E: อ่านชื่อดิบจากตารางหลักตรง ๆ ไม่ผ่าน ODOO_EXPORT_RAW_NAME_JOINS ที่ export ใช้
 // customers มาก่อน sale_orders ตาม 2 arm ของ customers_data_view และฝั่ง sale_orders เอาใบล่าสุด
@@ -269,6 +290,11 @@ let spellingMismatch = 0;
 let badSalesTeam = 0;
 let emptySalesTeam = 0;
 let noContactId = 0;
+// เฟส H: ใบที่มีค่าตรึงแล้ว / ในนั้นกี่ใบที่ค่าตรึงต่างจากค่าสด (= ใบที่พิสูจน์ว่าการตรึงมีผลจริง)
+// และกี่ใบที่ช่อง I ไม่ได้ใช้ค่าตรึงทั้งที่มีอยู่ (ข้อนี้ห้ามเกิน 0 — แปลว่า COALESCE หลุด)
+let frozenQuotes = 0;
+let frozenDiffersFromLive = 0;
+let frozenIgnored = 0;
 let badEmpQuotationId = 0;
 let emptyEmpQuotationId = 0;
 // ชื่อที่มีช่องว่างหัว/ท้ายต้องไปถึงไฟล์แบบครบตัวอักษร ไม่โดน trim ระหว่างทาง
@@ -383,12 +409,23 @@ for (const quote of quotesWithItems) {
   }
   if (!first.employee_quotation_id) emptyEmpQuotationId++;
 
-  // I: Sales Team ต้องเป็นทีมขายของผู้ติดต่อใน customers_data_view (join ด้วย contact_id)
+  // I: Sales Team ต้องเป็น "ค่าที่ตรึงไว้ในใบ ถ้าไม่มีจึงเป็นทีมขายของผู้ติดต่อใน customers_data_view"
   // ไม่ใช่สังกัดของเซลล์ (salesperson.branch) — ใบที่ผู้ติดต่อไม่มีทีมขายต้องได้เซลล์ว่าง
   const wantSalesTeam = expectedSalesTeam(quote);
+  const frozen = frozenSalesTeam(quote);
+  const live = liveSalesTeam(quote);
+  if (frozen) {
+    frozenQuotes++;
+    if (frozen !== live) frozenDiffersFromLive++;
+    // ข้อที่เฟส H มีอยู่เพื่อสิ่งนี้: ค่าตรึงต้องชนะค่าสดเสมอ ไม่ใช่แค่ "ตรงกันโดยบังเอิญ"
+    if (first.sales_team !== frozen) {
+      frozenIgnored++;
+      console.log(`   ✗ ${quote.quotation_no}: ช่อง I ไม่ได้ใช้ค่าที่ตรึงไว้ (ได้ "${first.sales_team}" ตรึงไว้ "${frozen}" ค่าสด "${live}")`);
+    }
+  }
   if (first.sales_team !== wantSalesTeam) {
     badSalesTeam++;
-    console.log(`   ✗ ${quote.quotation_no}: Sales Team ไม่ตรง customers_data_view (ได้ "${first.sales_team}" คาด "${wantSalesTeam}" contact_id=${quote.contact_id})`);
+    console.log(`   ✗ ${quote.quotation_no}: Sales Team ไม่ตรงค่าที่ควรได้ (ได้ "${first.sales_team}" คาด "${wantSalesTeam}" ตรึงไว้ "${frozen}" ค่าสด "${live}" contact_id=${quote.contact_id})`);
   }
   if (!first.sales_team) emptySalesTeam++;
   if (!(Number(quote.contact_id) > 0)) noContactId++;
@@ -459,8 +496,16 @@ for (const entry of await listSalespeopleFromOrders()) {
 }
 ok('ชื่อใน dropdown ลงทะเบียน ต่อสังกัดแล้วตรงกับ customers.salesperson', rosterMismatch === 0,
   rosterMismatch ? `(พลาด ${rosterMismatch} ชื่อ: ${rosterBad.join(' , ')})` : `(ตรวจ ${rosterChecked} ชื่อ)`);
-ok('Sales Team (I) ตรงกับ customers_data_view ของ contact_id นั้น', badSalesTeam === 0,
+ok('Sales Team (I) = ค่าที่ตรึงไว้ในใบ ถ้าไม่มีจึงถอยไปใช้ customers_data_view สด', badSalesTeam === 0,
   badSalesTeam ? `(พลาด ${badSalesTeam} ใบ)` : `(ตรวจ ${quotesWithItems.length} ใบ)`);
+ok('ใบที่ตรึงทีมขายไว้แล้ว ช่อง I ใช้ค่าตรึง ไม่ใช่ค่าสด', frozenIgnored === 0,
+  frozenIgnored
+    ? `(หลุด ${frozenIgnored} ใบ)`
+    : `(ตรึงแล้ว ${frozenQuotes} ใบ · ในนั้น ${frozenDiffersFromLive} ใบค่าตรึงต่างจากค่าสดจริง)`);
+if (frozenQuotes > 0 && frozenDiffersFromLive === 0) {
+  console.log('   ℹ️  ทุกใบที่ตรึงไว้ยังมีค่าสดเท่ากันพอดี — ข้อนี้จึงยังไม่ได้พิสูจน์ว่าการตรึงมีผล' +
+    ' (ต้องมีใบที่ผู้ติดต่อหายจาก customers_data_view แล้ว เช่นที่ scripts/dev/seedPhaseH.ts สร้างให้)');
+}
 if (emptySalesTeam > 0) {
   console.log(`   ℹ️  ${emptySalesTeam} ใบได้ Sales Team เป็นเซลล์ว่าง` +
     (noContactId > 0 ? ` (ในนั้น ${noContactId} ใบยังไม่ผูก contact_id)` : '') +

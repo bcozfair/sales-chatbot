@@ -41,6 +41,7 @@ import { QuoteIssuerProfile, type QuoteIssuerIdentity } from './QuoteIssuerProfi
 import { Button } from './Button';
 import { ComboBox, type ComboOption } from './PersonComboBox';
 import { ConfirmIssueModal } from './ConfirmIssueModal';
+import { describeApiError } from './apiError';
 import {
   AlertCircle,
   AlertTriangle,
@@ -2039,10 +2040,19 @@ export const QuoteRequest: React.FC = () => {
     return () => { cancelled = true; };
   }, []);
 
-  /** อ่าน error ที่ backend ส่งมาเป็นข้อความจริง ไม่ใช่ "HTTP 400" ลอย ๆ */
+  /**
+   * อ่าน error ที่ backend ส่งมาเป็นข้อความจริง ไม่ใช่ "HTTP 400" ลอย ๆ
+   *
+   * 422 ส่ง `violations` มาพร้อมประโยคไทยครบในก้อนเดียวกันอยู่แล้ว (ชุดเดียวกับที่กล่องแดง
+   * ของผลตรวจใช้) แต่ `error` ของมันเป็นรหัสดิบ `VALIDATION_ERROR` ⇒ ถ้าอ่านแค่ `error`
+   * คนกดจะเห็นคำว่า VALIDATION_ERROR ลอย ๆ โดยไม่รู้ว่าติดกฎข้อไหน (เจ้าของสั่งแก้ 2026-09-18)
+   * ⇒ มี violations เมื่อไหร่ให้ใช้ประโยคของมันเสมอ · ไม่มีจึงค่อยตกไปใช้ `error` เหมือนเดิม
+   *
+   * ขึ้นบรรทัดใหม่ได้เพราะกล่องที่แสดงผลตั้ง `whitespace-pre-wrap` ไว้แล้ว
+   */
   const readError = async (res: Response, fallback: string) => {
     const body = await res.json().catch(() => ({}));
-    return String(body?.error || fallback);
+    return describeApiError(body, fallback);
   };
 
   // โหลดผู้ติดต่อทุกครั้งที่บริษัทเปลี่ยน — endpoint เดิมของ LIFF ใช้ได้ตรง ๆ (§0.3)

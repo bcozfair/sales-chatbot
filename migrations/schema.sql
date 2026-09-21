@@ -321,6 +321,58 @@ CREATE TABLE public.sale_orders (
 
 
 --
+-- Name: local_contacts; Type: TABLE; Schema: public; Owner: -
+-- ผู้ติดต่อที่แอดมินเพิ่มเองจากหน้าเว็บ (ยังไม่มีใน Odoo) — sync ไม่แตะตารางนี้
+--
+-- ⚠️ ต้องอยู่ "ก่อน" customers_data_build เสมอ — view นั้นอ้างตารางนี้ใน Arm 3
+--    สลับลำดับเมื่อไหร่ การตั้ง DB ใหม่จากศูนย์จะล้มทันทีที่สร้าง view
+-- ⚠️ trigger audit ของตารางนี้อยู่ใน migrations/changes/2026-09-18_04_local_contacts.sql
+--    ไม่ได้อยู่ในไฟล์นี้ — เหมือนอีก 11 ตารางที่มี audit trigger ซึ่งระบบ audit ทั้งชุด
+--    (audit_logs / audit_stmt) ยังไม่เคยถูกยุบเข้า schema.sql
+--
+
+-- contact_id ของ Odoo วิ่งอยู่แถว 1.03 ล้าน (วัด 2026-09-17: max = 1,032,141)
+-- ตั้งต้นที่ 900 ล้านเพื่อกันชนโดยไม่ต้องประสานกับใคร และยังห่างเพดาน int4 (2,147,483,647) อีกเท่าตัว
+-- ⚠️ ห้ามใช้ 0 หรือเลขติดลบ — 0 ถูกจองให้ "แถวบริษัทที่ไม่มีผู้ติดต่อ" (3,852 แถว ทุกแถวไม่มีชื่อ)
+--    และทุกจุดที่ถามหาผู้ติดต่อกรอง contact_id > 0 เพื่อตัดแถวเหล่านั้นทิ้ง
+CREATE SEQUENCE IF NOT EXISTS public.local_contact_id_seq START WITH 900000001;
+
+CREATE TABLE IF NOT EXISTS public.local_contacts (
+  contact_id    integer     PRIMARY KEY DEFAULT nextval('public.local_contact_id_seq'),
+  company_id    integer     NOT NULL,   -- ต้องมีจริงใน customers_data_view (ตรวจฝั่ง server ไม่ใช่ FK
+                                        -- เพราะ view ถูก DROP/สร้างใหม่ทุกรอบ refresh)
+  contact_name  text        NOT NULL,   -- trim แล้วตั้งแต่ตอนบันทึก
+  job_position  text,                   -- ปลายทาง = ไฟล์ export ให้แอดมินคีย์ใน Odoo
+  contact_phone text,
+  contact_email text,
+  -- ⚠️ ไม่มีคอลัมน์ทีมขายที่นี่โดยตั้งใจ — ทีมขายสืบทอดจากบริษัทตอนอ่าน ไม่เก็บซ้ำ
+  --    (เจ้าของเคาะ 2026-09-17: สืบทอดอย่างเดียว ไม่มีช่องบนจอ ว่างก็ปล่อยว่าง)
+  created_by    integer,                -- admin_users.id · ไม่มี FK (ลบแอดมินแล้วหลักฐานต้องอยู่)
+  created_at    timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+  -- ── สามคอลัมน์นี้ "ระบบเขียน" เท่านั้น ไม่มี endpoint ให้คนกด ──
+  odoo_matched_at         timestamptz,
+  odoo_matched_contact_id integer,
+  odoo_matched_by         text,
+
+  CONSTRAINT local_contacts_name_not_blank CHECK (btrim(contact_name) <> ''),
+  CONSTRAINT local_contacts_id_range CHECK (contact_id >= 900000000),
+  CONSTRAINT local_contacts_matched_by_check CHECK (
+    odoo_matched_by IS NULL OR odoo_matched_by IN ('contact_sync', 'imported_order'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_local_contacts_company ON public.local_contacts (company_id);
+CREATE INDEX IF NOT EXISTS idx_local_contacts_pending
+  ON public.local_contacts (created_at) WHERE odoo_matched_at IS NULL;
+
+-- ชื่อซ้ำในบริษัทเดียวกันต้องกันที่ฐาน ไม่ใช่แค่ที่ endpoint
+-- (เทียบแบบ btrim ให้ตรงกับเกณฑ์ dedupe ของ CTE local_taken ในนิยาม view ข้างล่างเป๊ะ)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_local_contacts_company_name
+  ON public.local_contacts (company_id, btrim(contact_name));
+
+
+--
 -- Name: clean_text; Type: FUNCTION; Schema: public; Owner: -
 -- trim + แปลง 'null'/'' เป็น NULL จริง (ใช้โดย customers_data_view)
 --
@@ -461,6 +513,66 @@ base AS (
   ) comp ON true
   WHERE NOT EXISTS (SELECT 1 FROM public.customers c3 WHERE c3.contact_id = s.contact_id)
 ),
+-- ── แถวตัวแทนของบริษัทที่มีผู้ติดต่อ local (ค่าระดับบริษัทยืมจากแถวนี้) ──
+-- เขียนเป็น DISTINCT ON ครั้งเดียว ไม่ใช่ LATERAL ... LIMIT 1 ต่อแถว:
+-- base ถูกอ้าง 6 ที่ ⇒ Postgres materialize มัน ⇒ LATERAL จะกลายเป็น seq scan 82,721 แถว
+-- **ต่อผู้ติดต่อ local หนึ่งคน** ส่วนรูปนี้สแกนรอบเดียวแล้ว hash join
+local_anchor AS (
+  SELECT DISTINCT ON (b.company_id) b.*
+    FROM base b
+   WHERE b.company_id IN (SELECT company_id FROM public.local_contacts)
+   ORDER BY b.company_id, b.contact_id
+),
+-- ── ทีมขาย: สืบทอดจาก "บริษัท" ไม่ใช่จากแถวตัวแทนดื้อ ๆ (เจ้าของเคาะ 2026-09-17) ──
+-- หยิบค่าแรกที่ไม่ว่างเรียงตาม contact_id = กติกาเดียวกับ CTE comp ของคอลัมน์อื่น
+-- วัด 2026-09-17: 663 จาก 53,490 บริษัท (1.2%) แถวตัวแทนมีทีมขายว่างทั้งที่พี่น้องมีค่า
+--   ⇒ ถ้าใช้ค่าของแถวตัวแทนตรง ๆ ผู้ติดต่อใหม่ของ 663 บริษัทนี้จะได้ทีมขายว่างโดยไม่จำเป็น
+--   · 320 บริษัท (0.6%) มีมากกว่าหนึ่งทีม ⇒ หยิบของ contact_id น้อยสุดที่ไม่ว่าง ให้ผลคงที่
+-- ⚠️ บริษัทที่ไม่มีทีมขายเลย (59.1%) จะได้ NULL — ปล่อย NULL ไว้อย่างนั้น ไม่ต้องหาค่ามาเติม
+-- ⚠️ ห้ามย้าย sales_team เข้า CTE comp เพื่อ "ให้เหมือนกัน" — comp มีคอมเมนต์กำกับว่าทีมขาย
+--    ไม่ใช่คุณสมบัติของบริษัท (ผู้ติดต่อคนละคนอาจคนละทีม) การสืบทอดนี้ใช้ได้เฉพาะกับคนใหม่
+--    ที่ไม่มีประวัติเท่านั้น ส่วนคนเดิมที่ Odoo ระบุทีมมาแล้ว ห้ามไปทับ
+local_team AS (
+  SELECT b.company_id,
+         (array_remove(array_agg(b.sales_team ORDER BY b.contact_id), NULL))[1] AS sales_team
+    FROM base b
+   WHERE b.company_id IN (SELECT company_id FROM public.local_contacts)
+   GROUP BY b.company_id
+),
+-- ── ผู้ติดต่อที่ Odoo สร้างให้แล้ว (ชื่อตรงกัน) — แถว local ต้องหลบให้ ──
+-- anti-join แทน NOT EXISTS ต่อแถว ด้วยเหตุผลเดียวกับ local_anchor
+-- นี่คือ "สัญญาณ A" ของ §6: แถวไหนหลบแล้ว = Odoo มีตัวจริงแล้ว
+local_taken AS (
+  SELECT DISTINCT l.contact_id
+    FROM public.local_contacts l
+    JOIN base b3 ON b3.company_id = l.company_id
+                AND btrim(b3.contact_name) = btrim(l.contact_name)
+),
+-- ── Arm 3: ผู้ติดต่อที่แอดมินเพิ่มเองจากหน้าเว็บ (ยังไม่มีใน Odoo) ──
+-- ลำดับคอลัมน์ต้องตรงกับ base เป๊ะ — UNION ALL จับคู่ตามตำแหน่ง ไม่ใช่ตามชื่อ
+local_rows AS (
+  SELECT
+    l.company_id, l.contact_id, 'local'::text AS source,
+    a.customer_name, a.customer_reference, a.customer_tax_id, a.customer_payment_terms,
+    a.customer_sale_area, a.salesperson,
+    t.sales_team,                       -- ← ค่าระดับบริษัท ไม่ใช่ a.sales_team ของแถวตัวแทน
+    a.customer_type, a.phone, a.mobile, a.email,
+    public.clean_text(l.contact_name)  AS contact_name,
+    public.clean_text(l.contact_phone) AS contact_mobile,
+    public.clean_text(l.contact_phone) AS contact_phone,
+    public.clean_text(l.contact_email) AS contact_email,
+    a.invoice_street, a.invoice_district, a.invoice_sub_district, a.invoice_state, a.invoice_zip
+  FROM public.local_contacts l
+  JOIN local_anchor a ON a.company_id = l.company_id
+  JOIN local_team   t ON t.company_id = l.company_id
+  WHERE l.contact_id NOT IN (SELECT contact_id FROM local_taken)
+),
+-- ⚠️ แถว local ต้องผ่าน SELECT ท้ายตัวเดียวกับคนอื่น ไม่ใช่ UNION ALL ต่อท้ายทั้ง view —
+--    SELECT ท้ายคือที่ที่ COALESCE(b.customer_sale_area, comp.customer_sale_area) และคู่แฝด
+--    (invoice_district / invoice_sub_district) ทำงาน ถ้าไม่ผ่านตรงนี้ ผู้ติดต่อใหม่จะมีที่อยู่
+--    ไม่ครบทั้งที่คนอื่นในบริษัทเดียวกันครบ · และ last_order_at ก็มาจาก join ชุดนั้น
+--    ⇒ ผู้ติดต่อใหม่ของลูกค้าที่ติดเครดิตค้างจะ **หลุดด่าน** ถ้าไม่ผ่าน
+all_rows AS (SELECT * FROM base UNION ALL SELECT * FROM local_rows),
 comp AS (
   -- company-level propagation: หยิบค่าที่ไม่ null ของ contact_id น้อยสุดในบริษัท
   -- (สาขา = คนละ company_id จึงไม่ปนสาขา · ORDER BY contact_id = ตัวที่ทำให้ผลคงที่)
@@ -587,7 +699,7 @@ SELECT
   CASE WHEN COALESCE(ent_last.c, own_credit.c, false)
        THEN GREATEST(own_last.d, ent_last.d)
   END                                                            AS last_order_at
-FROM base b
+FROM all_rows b
 LEFT JOIN comp       ON comp.company_id       = b.company_id
 LEFT JOIN own_last   ON own_last.company_id   = b.company_id
 LEFT JOIN own_credit ON own_credit.company_id = b.company_id
@@ -908,6 +1020,10 @@ CREATE TABLE public.quotations (
     -- เพราะคีย์ของกฎเป็น `type|model` ไม่มีตัวเลข ถ้าใช้คีย์เป็นตัวปลด อนุมัติ ฿100 = อนุมัติ ฿10 ด้วย
     -- NULL = ไม่มีคำขอ (ใบจาก LINE ทุกใบ ⇒ ราคาขั้นต่ำบล็อกเหมือนเดิม)
     price_approval jsonb,
+    -- ทีมขายของผู้ติดต่อ "ณ เวลาที่ยืนยันใบ" — ช่อง Sales Team (คอลัมน์ I) ของไฟล์นำเข้า Odoo
+    -- NULL = ใบที่ยืนยันก่อนเฟส H ⇒ export ตกกลับไป join customers_data_view สดแบบเดิม
+    -- ตรึงที่นี่เพราะผู้ติดต่อหายจาก view ได้ทีหลัง แล้วช่อง I จะว่างเงียบ ๆ (plan §5.7)
+    customer_sales_team text,
     CONSTRAINT quotations_delivery_days_override_check CHECK (
         (delivery_days_override IS NULL)
         OR ((delivery_days_override >= 0) AND (delivery_days_override <= 3650))

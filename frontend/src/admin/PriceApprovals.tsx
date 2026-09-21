@@ -24,6 +24,7 @@ import { Modal } from './Modal';
 import { EmptyState, ErrorBox, SkeletonRows, TableCard } from './logs/ui';
 import { APPROVAL_RELOAD_KEY, type ApprovalReloadPayload } from './QuoteRequest';
 import { TAB_SLUG } from './navHash';
+import { describeApiError } from './apiError';
 
 type ApprovalStatus = 'pending' | 'approved' | 'rejected';
 
@@ -311,9 +312,14 @@ export const PriceApprovals: React.FC = () => {
       const data = await act(req, 'approve');
       setIssued((data.issued ?? []) as { quotation_no: string; pdf_link: string }[]);
       // ใบหนึ่งในชุดออกไม่ได้ ไม่ใช่เหตุให้เงียบ — คนอนุมัติต้องรู้ว่าเหลือใบค้างอยู่
-      const failed = (data.failed ?? []) as { quote_id: string; error: string }[];
+      // แต่ละใบส่ง violations มาด้วย ⇒ ใช้ประโยคไทยของกฎที่ติด ไม่ใช่รหัส "VALIDATION_ERROR"
+      // (describeApiError ตัวเดียวกับหน้า "ขอใบเสนอราคา" — เจ้าของสั่งแก้ 2026-09-18)
+      const failed = (data.failed ?? []) as { quote_id: string; error: string; violations?: unknown }[];
       if (failed.length > 0) {
-        setError(`อนุมัติแล้ว แต่ออกใบไม่สำเร็จ ${failed.length} ใบ: ${failed.map((f) => f.error).join(' · ')}`);
+        // ต่อด้วย " · " ไม่ใช่ขึ้นบรรทัดใหม่ — ErrorBox ของหน้านี้ไม่ได้ตั้ง whitespace-pre-wrap
+        // (ต่างจากกล่องแดงของหน้า "ขอใบเสนอราคา") การขึ้นบรรทัดจะถูกยุบเป็นช่องว่างเฉย ๆ
+        const detail = failed.map((f) => describeApiError(f, 'ออกใบไม่สำเร็จ')).join(' · ');
+        setError(`อนุมัติแล้ว แต่ออกใบไม่สำเร็จ ${failed.length} ใบ: ${detail}`);
       }
       await load();
     } catch (e) {
