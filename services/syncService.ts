@@ -4,6 +4,7 @@ import { refreshCustomerDataView } from '../scripts/sync/refreshCustomerDirector
 import { clockNow, fmtDur, serr, slog, swarn, vlog } from '../scripts/sync/syncLog.js';
 import { clearCustomerSearchCache, reloadCustomerSearchCache } from './customerService.js';
 import { reconcileQuotationOdooLinks } from './quotationOdooLink.js';
+import { reconcileLocalContactOdooLinks } from './localContacts.js';
 import { thaiDateParts } from '../utils/thaiTime.js';
 
 // ============================================================
@@ -308,6 +309,11 @@ export function startSync(
       // มาร์กใบเสนอราคาที่โผล่ใน sale_orders แล้ว (สถานะ "นำเข้า Odoo แล้ว" ของหน้าประวัติใบเสนอราคา)
       // ต้องอยู่หลัง sync saleorders ของรอบนี้ — อ่านจากตารางที่เพิ่งอัปเดต ไม่ใช่ของรอบก่อน
       await reconcileQuotationOdooLinks();
+      // "ผู้ติดต่อที่แอดมินเพิ่มเอง เข้า Odoo แล้วหรือยัง" — ระบบตอบเอง ไม่มีปุ่มให้คนติ๊ก
+      // ต้องอยู่ **หลัง** สองตัวบน: สัญญาณ A เทียบกับ customers_data_view ที่เพิ่ง rebuild
+      // และสัญญาณ B อ่าน odoo_imported_at ที่ reconcileQuotationOdooLinks() เพิ่งเขียน
+      // (ตารางว่าง = no-op · ห้าม throw เหมือนกัน — docs/plan-local-contacts.md §6.1)
+      await reconcileLocalContactOdooLinks();
 
       // บรรทัดปิดรอบ: อ่านบรรทัดเดียวต้องรู้ว่าครบไหม พังตัวไหน และข้อมูลลูกค้าใช้ได้ไหม
       const parts = [`สำเร็จ ${okCount}/${list.length}`];

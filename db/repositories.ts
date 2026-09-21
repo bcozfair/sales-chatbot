@@ -150,10 +150,18 @@ const CONTACT_VIEW_COLS =
    COALESCE(contact_phone, phone) AS phone, COALESCE(contact_email, email) AS email,
    invoice_street, invoice_district, invoice_sub_district, invoice_state, invoice_zip`;
 
+// สามตัวข้างล่างรับ `executor` ได้ (ค่าเริ่มต้น = pool ⇒ ผู้เรียกเดิมทั้งหมดไม่ขยับสักบรรทัด)
+// เพราะด่าน `diag:local-contacts` ต้องพิสูจน์ว่า **ผู้ติดต่อที่แอดมินเพิ่งเพิ่มโผล่ในฟังก์ชันจริง
+// เหล่านี้ทันที** โดยที่ทุกอย่างอยู่ใน transaction ที่ ROLLBACK ทิ้งเสมอ — ถ้าฟังก์ชันผูก pool
+// ตายตัว ด่านจะต้องคัดลอก SQL ไปเทียบเอง ซึ่งแปลว่าทดสอบสำเนา ไม่ใช่ของจริง
+
 /** ผู้ติดต่อทั้งหมดของบริษัท */
-export async function getContactsByCustomerId(customerId: number | string): Promise<any[]> {
+export async function getContactsByCustomerId(
+  customerId: number | string,
+  executor: DbExecutor = pool
+): Promise<any[]> {
   try {
-    const { rows } = await pool.query(
+    const { rows } = await executor.query(
       `SELECT ${CONTACT_VIEW_COLS} FROM customers_data_view
        WHERE company_id = $1 AND contact_id > 0
        ORDER BY contact_id`, [customerId]);
@@ -178,9 +186,12 @@ export async function getContactsByCustomerId(customerId: number | string): Prom
  *    preferAnchorCompany ใน services/customerService.ts — ห้ามย้ายเงื่อนไขนั้นลงมาที่ SQL นี้
  *    เพราะมันต้องดูคะแนนความตรงของชื่อที่เซลส์พิมพ์ ซึ่งคำนวณฝั่ง Node หลัง Fuse.js
  */
-export async function getRelatedContactsByCustomerId(customerId: number | string): Promise<any[]> {
+export async function getRelatedContactsByCustomerId(
+  customerId: number | string,
+  executor: DbExecutor = pool
+): Promise<any[]> {
   try {
-    const { rows } = await pool.query(
+    const { rows } = await executor.query(
       `WITH me AS (
          SELECT ${companyKeysSql('m')}
            FROM customers_data_view m
@@ -196,9 +207,12 @@ export async function getRelatedContactsByCustomerId(customerId: number | string
 }
 
 /** ผู้ติดต่อรายตัวจาก id */
-export async function getContactById(contactId: number | string): Promise<any | null> {
+export async function getContactById(
+  contactId: number | string,
+  executor: DbExecutor = pool
+): Promise<any | null> {
   try {
-    const { rows } = await pool.query(
+    const { rows } = await executor.query(
       `SELECT ${CONTACT_VIEW_COLS}, company_id AS customer_id FROM customers_data_view
        WHERE contact_id = $1 LIMIT 1`, [contactId]);
     return rows[0] || null;

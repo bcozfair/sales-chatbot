@@ -72,6 +72,9 @@ const TODAY: Record<Capability, [admin: PermissionMode, approver: PermissionMode
   'quote.export_odoo':            ['allow', 'allow', 'allow'],
   'quote.unmark_export':          ['allow', 'allow', 'allow'],
   'quote.payment_terms_override': ['allow', 'allow', 'allow'],
+  // ความสามารถใหม่ของโมดูล "เพิ่มผู้ติดต่อเอง" — ไม่มีใครเสียสิทธิ์ที่เคยมี เพราะก่อนหน้านี้
+  // ไม่มีใครเพิ่มผู้ติดต่อได้เลยสักคน (เจ้าของเคาะ 2026-09-17: หน้าเว็บเท่านั้น ไม่เปิดให้ LINE)
+  'quote.manage_contacts':        ['allow', 'allow', 'allow'],
   'quote.act_as_any_salesperson': ['allow', 'allow', 'allow'],
   'approval.decide':              ['allow', 'allow', 'deny'],
   'users.set_issuer_identity':    ['allow', 'deny', 'deny'],
