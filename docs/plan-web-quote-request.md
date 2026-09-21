@@ -1503,7 +1503,10 @@ COALESCE(q.customer_sales_team, st.sales_team)   -- ← ที่จุดปร
 > `tsc --noEmit` · `diag:web-quote` 133/133 · `diag:role-permissions` 46/46 · `diag:odoo-export`
 > · `diag:customer-search` · `diag:credit-hold` · `diag:data-directory`
 > · **ยังไม่มี UI เรียกสักเส้น** ⇒ ขึ้น prod เดี่ยวได้โดยไม่มีใครเห็นอะไรเปลี่ยน
-> · **ที่ยังไม่เริ่ม: I3–I5** (ปุ่มในหน้าขอใบเสนอราคา · หน้ารายการงานค้าง + badge + ป้าย 🔴 ·
+> · **ก้อน I3 เสร็จบนเครื่อง dev 2026-09-21** — ปุ่มในหน้าขอใบเสนอราคา + กล่องเพิ่มผู้ติดต่อ
+> ⇒ **ฟีเจอร์ใช้งานได้จริงครั้งแรก** · ด่าน: `lint` · `build` · `diag:web-quote` 133/133
+> · `diag:lc-ui` (ใหม่ — เปิดหน้าจริงแล้วกดจริง ผ่านทั้ง 1280px และ 390px)
+> · **ที่ยังไม่เริ่ม: I4–I5** (หน้ารายการงานค้าง + badge + ไฟล์ export + ป้าย 🔴 ·
 > ธง `new_contact` เข้าคิวแก้มือ)
 >
 > **เฟส D = 🟨** — โค้ดครบและ push ขึ้น `dev` แล้ว (`services/webQuoteService.ts` · 4 route ·
