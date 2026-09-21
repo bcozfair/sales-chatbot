@@ -34,6 +34,7 @@ import pg from 'pg';
 import { pool } from '../../config/db.js';
 import {
   ensureDirectoryRow, listLocalContacts, markMatchedByContactSync, markMatchedByImportedOrder,
+  getLocalContactById,
 } from '../../db/localContactsRepo.js';
 import {
   getContactsByCustomerId, getContactById, getRelatedContactsByCustomerId,
@@ -304,6 +305,34 @@ async function serviceContract(): Promise<void> {
       ok('แก้ชื่อ/เบอร์แล้วแถวใน customers_data_view เดินตามทันที');
     } else {
       bad('แก้แล้วแถวใน view ไม่ตาม', `name=${after?.name} phone=${after?.phone}`);
+    }
+
+    // ── PUT ที่ไม่ส่งช่องมา ต้อง "ไม่แตะ" ไม่ใช่ "ล้างทิ้ง" ──────────────────
+    //
+    //  เคสจริง 2026-09-21: สคริปต์กู้เบอร์ส่ง PUT มาแค่ { contact_name, contact_phone }
+    //  แล้ว **ตำแหน่งงานกับอีเมลของผู้ติดต่อจริงหายไปทั้งคู่โดยไม่มีอะไรฟ้อง** — ไฟล์ export
+    //  ที่ร้านเปิดดูจึงมีสองช่องว่าง ซึ่งดูเหมือนบั๊กของไฟล์ทั้งที่ต้นเหตุอยู่ที่ตรงนี้
+    //  ⇒ ข้อนี้ล็อกสัญญาไว้ทั้งสองทิศ: ไม่ส่ง = คงเดิม · ส่งค่าว่าง = ล้างจริง
+    await updateLocalContactById(createdId, {
+      contact_name: renamed, job_position: 'ฝ่ายจัดซื้อ', contact_email: 'diag@example.com',
+    });
+    await updateLocalContactById(createdId, { contact_name: renamed, contact_phone: '02-333-4444' });
+    const keep = await getLocalContactById(createdId);
+    if (keep?.job_position === 'ฝ่ายจัดซื้อ' && keep?.contact_email === 'diag@example.com'
+        && keep?.contact_phone === '02-333-4444') {
+      ok('PUT ที่ไม่ส่งตำแหน่ง/อีเมลมา ไม่ล้างค่าเดิมทิ้ง');
+    } else {
+      bad('PUT ที่ไม่ส่งช่องมา ไปล้างค่าเดิมทิ้ง',
+        `ตำแหน่ง=${keep?.job_position} อีเมล=${keep?.contact_email} โทร=${keep?.contact_phone}`);
+    }
+
+    await updateLocalContactById(createdId, { contact_name: renamed, job_position: '' });
+    const cleared = await getLocalContactById(createdId);
+    if (cleared?.job_position === null && cleared?.contact_email === 'diag@example.com') {
+      ok('  แต่ส่งค่าว่างมา = ล้างช่องนั้นจริง (และไม่ไปแตะช่องอื่น)');
+    } else {
+      bad('  ส่งค่าว่างแล้วไม่ได้ล้าง หรือไปล้างช่องอื่นด้วย',
+        `ตำแหน่ง=${cleared?.job_position} อีเมล=${cleared?.contact_email}`);
     }
 
     await deleteLocalContactById(createdId);

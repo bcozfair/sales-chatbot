@@ -256,14 +256,27 @@ export async function updateLocalContactById(
     }
   }
 
+  /**
+   * ⚠️ **ช่องที่ไม่ได้ส่งมา = ไม่แตะ · ช่องที่ส่งมาเป็นค่าว่าง = ล้างจริง**
+   *
+   * เดิมทุกช่องถูกเขียนทับเสมอ ⇒ PUT ที่ส่งมาแค่ชื่อกับเบอร์ **ล้างตำแหน่งกับอีเมลทิ้งเงียบ ๆ**
+   * โดยไม่มีอะไรฟ้อง — เกิดจริงกับข้อมูลของร้าน 2026-09-21 (สคริปต์กู้เบอร์ส่งมาสองช่อง
+   * แล้วอีกสองช่องหาย) · กล่องแก้ไขบนหน้าจอส่งมาครบทั้งสี่ช่องเสมอ พฤติกรรมฝั่งจอจึงไม่เปลี่ยนแม้แต่นิด
+   *
+   * ตัวเทียบ: `'x' in body` — ดูว่า "มีคีย์นี้ไหม" ไม่ใช่ "ค่าว่างไหม"
+   * เพราะสองอย่างนี้สั่งคนละอย่างกัน และหน้าจอต้องลบค่าทิ้งได้จริง
+   */
+  const sent = (key: keyof LocalContactInput): boolean =>
+    Object.prototype.hasOwnProperty.call(body, key);
+
   return withTransaction(async (client) => {
     const row = await updateLocalContact(
       contactId,
       {
         contact_name: nameChanged ? input.contact_name : undefined,
-        job_position: input.job_position,
-        contact_phone: input.contact_phone,
-        contact_email: input.contact_email,
+        job_position: sent('job_position') ? input.job_position : undefined,
+        contact_phone: sent('contact_phone') ? input.contact_phone : undefined,
+        contact_email: sent('contact_email') ? input.contact_email : undefined,
       },
       client
     );
