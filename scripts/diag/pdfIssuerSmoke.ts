@@ -14,6 +14,8 @@
 //   4. ไม่มีลายเซ็นแอดมิน → ช่องขวาไม่มีรูป และ **ห้ามถอยไปใช้ลายเซ็นเซลส์**
 //   5. updateQuotationCustomerSnapshot ต้องไม่กิน 3 คีย์ทิ้ง (กับดัก §2.6)
 //   5b. การเลือกเบอร์ให้อัตโนมัติ — 1 ชื่อ = 1 เบอร์ ที่มาจากใบล่าสุด ไม่ใช่ที่ใช้บ่อยสุด
+//   5c. รายงาน (ไม่ fail) salesperson.employee_quotation_id ที่ตรง/ไม่ตรงรายชื่อ Odoo — เฟส
+//       "เซลส์ออกใบเอง" (§13 ของ docs/plan-role-permissions.md) ทำให้ช่อง J มาจากค่านี้มากขึ้น
 //   6. ใบ LINE ต้องไม่มีคีย์ issuer_* ใน employee_details เลย (ไม่ใช่มีแล้วเป็น null)
 //   7. แถวพร็อกซี web:% ต้องไม่โผล่ในทางที่ "ลิสต์คน" ทุกทาง (§2.3b)
 //
@@ -224,6 +226,24 @@ const makers = await listOdooQuotationMakers();
   ok('5b-7. ทุกเคสนั้นระบบเลือก "เบอร์ในใบล่าสุด" ไม่ใช่ "เบอร์ที่ใช้บ่อยสุด"',
      wrong.length === 0,
      wrong.length ? `พลาด: ${wrong.map((r: any) => r.name).join(', ')}` : `ตรวจแล้ว ${proof.length} ชื่อ`);
+}
+
+// ── 5c. §13.7 ข้อ 6/7: salesperson.employee_quotation_id เทียบกับรายชื่อ 79 ชื่อ (2026-09-22) ──
+//  ไม่ได้อยู่ในสเปกของ §13.6 ตรง ๆ แต่จำเป็นเพราะเฟสนี้เปิดช่อง "เซลส์ออกใบเอง" ⇒ ช่อง J
+//  ของไฟล์ export จะเริ่มมาจาก salesperson.employee_quotation_id ของแถวจริงมากขึ้น (ไม่ใช่แค่
+//  ของแอดมินเหมือนก่อนหน้านี้) — รายงานว่ากี่แถวตรง/ไม่ตรงกับรายชื่อที่ Odoo รู้จักจริง
+//  ไม่ fail ด่าน (ค่าที่พิมพ์เองได้ตามที่ Salespersons.tsx อนุญาต) แค่รายงานให้เห็นสภาพข้อมูลจริง
+{
+  const makerNameSet = new Set(makers.map(m => m.name));
+  const { rows: spRows } = await pool.query(`
+    SELECT DISTINCT employee_quotation_id
+      FROM salesperson
+     WHERE employee_quotation_id IS NOT NULL AND btrim(employee_quotation_id) <> ''
+       AND user_id NOT LIKE 'web:%'
+  `);
+  const total = spRows.length;
+  const matched = spRows.filter((r: any) => makerNameSet.has(r.employee_quotation_id)).length;
+  console.log(`  5c. salesperson.employee_quotation_id ทั้งหมด ${total} ชื่อ (distinct) — ตรงกับรายชื่อ Odoo ${matched} · ไม่ตรง ${total - matched}`);
 }
 
 // ── 5 / 6 / 7. ต้องแตะ DB จริง ────────────────────────────────────────────────
