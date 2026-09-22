@@ -18,6 +18,8 @@
 //       "เซลส์ออกใบเอง" (§13 ของ docs/plan-role-permissions.md) ทำให้ช่อง J มาจากค่านี้มากขึ้น
 //   6. ใบ LINE ต้องไม่มีคีย์ issuer_* ใน employee_details เลย (ไม่ใช่มีแล้วเป็น null)
 //   7. แถวพร็อกซี web:% ต้องไม่โผล่ในทางที่ "ลิสต์คน" ทุกทาง (§2.3b)
+//   13. §13.6 ข้อ 13 ของ docs/plan-role-permissions.md — setAdminQuotationMaker() (ที่ PUT
+//       /api/admin/users/:id/quotation-maker ใหม่เรียก) ต้องเขียนชื่อ+เบอร์คู่กันเสมอ
 //
 //  ⚠️ เคส 5–7 สร้างแอดมิน/เซลส์/ใบชั่วคราวของตัวเองแล้วลบทิ้งเสมอ (finally)
 //     ไม่แตะแถวของคนจริงแม้แต่แถวเดียว
@@ -32,6 +34,7 @@ import {
 } from '../../services/webIdentity.js';
 import { updateQuotationCustomerSnapshot } from '../../services/quotationService.js';
 import { listSalespersonsForAdmin, findDuplicateEmployeeCodeNames } from '../../db/repositories.js';
+import { setAdminQuotationMaker } from '../../services/webIdentity.js';
 
 let failures = 0;
 const ok = (label: string, cond: boolean, extra = '') => {
@@ -318,6 +321,21 @@ try {
   ok('7d. ตัวเลขบนการ์ดแดชบอร์ดตรงกับจำนวนแถวในหน้าจัดการพนักงาน',
      statRows[0].shown === adminList.length && statRows[0].total > statRows[0].shown,
      `การ์ด ${statRows[0].shown} · ทั้งตาราง ${statRows[0].total}`);
+
+  // ── §13.6 ข้อ 13: เบอร์เดินคู่ชื่อเสมอ — setAdminQuotationMaker() คือ path เดียวที่
+  //    PUT /api/admin/users/:id/quotation-maker (ใหม่ 2026-09-22) เรียกใช้ (ทำท้ายสุด
+  //    หลังใช้ tmpAdminId ในเคสอื่นครบแล้ว เพื่อไม่ให้ไปกวน 5a ที่เทียบกับ `maker.name` เดิม)
+  const otherMaker = makers.find(m => m.name !== maker.name && m.phone !== null) ?? makers.find(m => m.name !== maker.name);
+  if (otherMaker) {
+    const saved = await setAdminQuotationMaker(tmpAdminId as number, otherMaker.name);
+    ok('13. setAdminQuotationMaker เขียนชื่อ+เบอร์คู่กันในคำสั่งเดียว',
+      saved.employee_quotation_id === otherMaker.name && saved.employee_quotation_phone === otherMaker.phone,
+      JSON.stringify(saved));
+    const { rows: dbRow } = await pool.query(
+      'SELECT employee_quotation_id, employee_quotation_phone FROM admin_users WHERE id = $1', [tmpAdminId]);
+    ok('13b. ค่าที่เขียนลง DB ตรงกับที่ setAdminQuotationMaker คืนมา',
+      dbRow[0]?.employee_quotation_id === otherMaker.name && dbRow[0]?.employee_quotation_phone === otherMaker.phone);
+  }
 } finally {
   // เก็บกวาดเสมอ แม้เคสข้างบนจะพัง — ห้ามทิ้งแถวปลอมไว้ในตารางจริง
   if (tmpQuoteIds.length) await pool.query(`DELETE FROM quotations WHERE id = ANY($1)`, [tmpQuoteIds]).catch(() => {});
