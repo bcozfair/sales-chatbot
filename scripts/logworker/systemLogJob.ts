@@ -27,6 +27,15 @@ const MAX_BUFFER        = 5_000;   // เกินแล้วทิ้งขอ
 const FIRST_RUN_LOOKBACK_MIN = 15;
 /** รอเท่านี้ก่อน spawn ใหม่เมื่อ docker logs ตาย (คอนเทนเนอร์ restart ระหว่าง deploy) */
 const RESPAWN_DELAY_MS = 5_000;
+/**
+ * บรรทัดที่ถูกพักไว้รอ stack trace ต้องถูกปล่อยเองเมื่อเงียบเกินเท่านี้
+ *
+ * เดิมมันถูกปล่อยก็ต่อเมื่อ "บรรทัดแม่ตัวถัดไปของสตรีมเดียวกัน" มาถึง ⇒ error ล่าสุดของระบบ
+ * ค้างอยู่ใน memory เสมอจนกว่าจะมี error ตัวถัดไป ซึ่งคือตอนที่คนเปิดหน้าบันทึกระบบมาดูพอดี
+ * (2026-09-21: บรรทัด 17:07:48.899 ค้างข้ามคืนเพราะตัวถัดไปถูกด่านกันซ้ำตีตกไปทั้งหมด)
+ * ต้องยาวกว่าระยะที่ stack trace ของบรรทัดเดียวกันตามมา (วัดจริง < 1 ms) อยู่หลายเท่า
+ */
+const HOLD_IDLE_MS = 1_500;
 
 interface Pending {
   createdAt: Date;
@@ -53,6 +62,8 @@ const buffer: Row[] = [];
 let dropped = 0;
 let flushing = false;
 let stopped = false;
+/** ตัวปล่อยบรรทัดที่พักไว้นานเกินของแต่ละคอนเทนเนอร์ — ตัวจับเวลา flush เรียกให้ทุกครั้ง */
+const idleReleasers: (() => void)[] = [];
 /** stdio ของเราคือ ['ignore','pipe','pipe'] ⇒ ไม่มี stdin แต่มี stdout/stderr ที่อ่านได้แน่นอน */
 type LogsChild = ChildProcessByStdio<null, Readable, Readable>;
 const children = new Set<LogsChild>();
@@ -143,32 +154,49 @@ async function flushOnce(): Promise<void> {
  *
  * เรื่อง "ไม่ซ้ำ ไม่ขาด" ทำสองชั้น:
  *   1. --since <checkpoint>  ให้ docker คัดให้ก่อน (ถูกและเร็ว)
- *   2. เทียบ ts > cursor อีกครั้งฝั่งเรา เพราะ --since ของ docker เป็นแบบ "ตั้งแต่" (inclusive)
- *      และเวลาระดับนาโนวินาทีทำให้บรรทัดต่างกันมี ts ชนกันแทบเป็นไปไม่ได้
+ *   2. เทียบ ts > "ตัวชี้ของสตรีมนั้น" อีกครั้งฝั่งเรา เพราะ --since ของ docker เป็นแบบ "ตั้งแต่"
+ *      (inclusive) และเวลาระดับนาโนวินาทีทำให้บรรทัดต่างกันมี ts ชนกันแทบเป็นไปไม่ได้
  */
 async function followContainer(container: string): Promise<void> {
   const job = `system_log:${container}`;
-  let cursor = await getCursor(job);
-  if (!cursor) {
-    cursor = new Date(Date.now() - FIRST_RUN_LOOKBACK_MIN * 60_000);
-    log(`${container}: ไม่มี checkpoint — เริ่มจาก ${FIRST_RUN_LOOKBACK_MIN} นาทีที่แล้ว`);
-  }
+  const saved = await getCursor(job);
+  const cursor = saved ?? new Date(Date.now() - FIRST_RUN_LOOKBACK_MIN * 60_000);
+  if (!saved) log(`${container}: ไม่มี checkpoint — เริ่มจาก ${FIRST_RUN_LOOKBACK_MIN} นาทีที่แล้ว`);
+
+  // "อ่านถึงไหนแล้ว" ต้องแยกต่อสตรีม — stdout กับ stderr มาคนละท่อ ลำดับที่อ่านเจอไม่การันตี
+  // เคยใช้ตัวเดียวร่วมกัน: แอปพิมพ์ console.log แล้ว console.error ติดกัน (ห่างกัน 36 µs) ถ้าอ่าน
+  // ฝั่ง stdout ก่อน ตัวชี้ก็เลยไปแล้ว บรรทัด stderr ที่ตามมาถูกตีเป็นของซ้ำแล้วทิ้ง
+  // (วัด 2026-09-22: บรรทัด error 8 จาก 12 หายจาก system_logs ทั้งที่อยู่ครบใน docker logs
+  //  และเมื่อ stdout นำไปแล้วมันไม่กลับมาเอง — การเก็บ error หยุดยาว 15 ชม. จนกว่าจะ restart)
+  // ต้องอยู่นอก spawnOnce เพื่อให้ค่าข้าม respawn ได้ ไม่งั้นสตรีมที่นำอยู่จะถูกดึงถอยไปอ่านซ้ำ
+  const seen: Record<'stdout' | 'stderr', Date> = { stdout: cursor, stderr: cursor };
+  /** จุดที่ปลอดภัยสำหรับ --since คือตัวที่ "ช้ากว่า" ของสองสตรีม — เร็วกว่านั้นจะข้ามของที่ยังไม่ได้อ่าน */
+  const resumeFrom = (): Date => (seen.stdout < seen.stderr ? seen.stdout : seen.stderr);
+
+  // บรรทัดค้างแยกต่อสตรีม เพราะ stack trace ของ stderr ต้องไม่ไปต่อท้ายบรรทัดของ stdout
+  // อยู่นอก spawnOnce เพื่อให้ตัวจับเวลาปล่อยของค้างเข้าถึงได้ และไม่หายไปตอน respawn
+  const held: Record<'stdout' | 'stderr', Pending | null> = { stdout: null, stderr: null };
+  const releaseIdle = (): void => {
+    const deadline = Date.now() - HOLD_IDLE_MS;
+    for (const s of ['stdout', 'stderr'] as const) {
+      const h = held[s];
+      if (h && h.createdAt.getTime() < deadline) { push(h); held[s] = null; }
+    }
+  };
+  idleReleasers.push(releaseIdle);
 
   const spawnOnce = (): void => {
     if (stopped) return;
-    const since = cursor!.toISOString();
+    const since = resumeFrom().toISOString();
     const child = spawn('docker',
       ['logs', '--timestamps', '--follow', '--since', since, container],
       { stdio: ['ignore', 'pipe', 'pipe'] });
     children.add(child);
 
-    // แต่ละสตรีมมี "บรรทัดค้าง" ของตัวเอง เพราะ stack trace ของ stderr ต้องไม่ไปต่อท้ายบรรทัด stdout
-    const held: Record<'stdout' | 'stderr', Pending | null> = { stdout: null, stderr: null };
-
     const handle = (stream: 'stdout' | 'stderr') => (line: string) => {
       const t = splitTimestamp(line);
       if (!t) return;
-      if (cursor && t.ts <= cursor) return;             // ชั้นที่ 2 ของการกันซ้ำ
+      if (t.ts <= seen[stream]) return;                 // ชั้นที่ 2 ของการกันซ้ำ (ต่อสตรีม)
 
       if (isContinuation(t.text)) {
         const h = held[stream];
@@ -183,7 +211,7 @@ async function followContainer(container: string): Promise<void> {
         createdAt: t.ts, container, stream,
         entry: parseEntry(t.text, stream), stack: [],
       };
-      if (!cursor || t.ts > cursor) cursor = t.ts;
+      seen[stream] = t.ts;
     };
 
     readline.createInterface({ input: child.stdout }).on('line', handle('stdout'));
@@ -218,7 +246,10 @@ export async function startSystemLogJob(): Promise<void> {
       await markError(`system_log:${c}`, err);
     }
   }
-  flushTimer = setInterval(() => { void flushOnce(); }, FLUSH_INTERVAL_MS);
+  flushTimer = setInterval(() => {
+    for (const release of idleReleasers) release();
+    void flushOnce();
+  }, FLUSH_INTERVAL_MS);
 }
 
 /** ปิดให้เรียบร้อย: หยุด docker logs ก่อน แล้วค่อยเขียนของที่ค้างให้หมด */
