@@ -1,0 +1,32 @@
+{
+  "file": "ราคาTC อัพเดต (13-05-69).xlsx",
+  "sheet": "TS-01+TS-01-0",
+  "code": "TSK-01-0",
+  "label": "Thermocouple / RTD TS-01-0 (เกลียวมิลสั้น M4–M10)",
+  "aliases": ["TSJ-01-0", "TST-01-0", "TSP-01-0", "TSPA-01-0", "TSZ-01-0", "TS-01-0"],
+  "standard": { "cable_m": 1 },
+  "base": {
+    "kind": "matrix",
+    "axes": ["sensor", "thread"],
+    "rowHeaderCol": "A",
+    "rows": [33, 37],
+    "colHeaderRow": 32,
+    "cols": ["B", "C", "D", "E", "F"]
+  },
+  "adders": [
+    {
+      "id": "cable_over_1m",
+      "label": "ราคาสายส่วนที่ยาวเกิน 1 เมตร (ต้องเลือกชนิดสายก่อน)",
+      "order": 45,
+      "kind": "perUnit",
+      "dim": "cable_m",
+      "step": 1,
+      "round": "ceil",
+      "unit": " m",
+      "byAxis": "cable",
+      "ratesFrom": { "sheet": "TS-21+22+25", "col": "B", "keyCol": "A", "rows": [26, 29] },
+      "source": "TS-01+TS-01-0!A39 'สายยาวกว่า 1 M บวกเพิ่มตามราคาสาย' + TS-21+22+25!A26:B29 — เหตุผลที่ไม่ตั้งชนิดสายเริ่มต้นเหมือนกับ TS-01 (ชีตเขียนไว้ต่างกันรายหัววัด)"
+    }
+  ],
+  "constraints": []
+}

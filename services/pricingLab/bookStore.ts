@@ -4,7 +4,7 @@
 //  โมดูล "คิดราคาสินค้า" — ถอดออกได้ทั้งก้อน ดู services/pricingLab/README.md
 //
 //  **สมุดราคาคือราคาจริงของบริษัททั้งเล่ม** (`pricebook/book.json` แปลงมาจากไฟล์ Excel
-//  ด้วย prototypes/pricing/importer.ts) จึงถูก git-ignore ไว้เหมือน prototypes/pricing/book.json
+//  ด้วย `npm run pricebook:import`) จึงถูก git-ignore ไว้ทั้งโฟลเดอร์
 //  ⇒ `git pull` บนเซิร์ฟเวอร์ **ไม่ได้ไฟล์นี้ไปด้วย** ต้องคัดลอกขึ้นไปเอง (ดู README ของโมดูล)
 //
 //  ⚠️ สามที่ที่ห้ามวางไฟล์นี้เด็ดขาด — ทั้งสามที่ถูกเสิร์ฟออกเว็บโดยไม่มีการตรวจสิทธิ์:
@@ -20,7 +20,8 @@ import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { PriceBook, SubCode } from './types.js';
 
-const BOOK_PATH = join(process.cwd(), 'pricebook', 'book.json');
+/** ที่เดียวที่สมุดราคาอยู่ — `scripts/pricebook/importer.ts` เขียนที่นี่ตรง ๆ ไม่มีสำเนาที่สอง */
+export const BOOK_PATH = join(process.cwd(), 'pricebook', 'book.json');
 
 let cached: { book: PriceBook; mtimeMs: number } | undefined;
 
@@ -69,8 +70,8 @@ export function bookStatus(): BookStatus {
       ok: false,
       path: BOOK_PATH,
       message:
-        'ยังไม่มีสมุดราคาในเครื่องนี้ — ต้องสร้างด้วย prototypes/pricing/importer.ts ' +
-        'แล้วคัดลอก book.json มาไว้ที่ pricebook/book.json (ห้ามวางใน public/ หรือ data/)',
+        'ยังไม่มีสมุดราคาในเครื่องนี้ — สร้างด้วย npm run pricebook:import ' +
+        '(ตัวนำเข้าเขียนลง pricebook/book.json ให้เอง — ห้ามย้ายไป public/ หรือ data/)',
     };
   }
   return { ok: true, path: BOOK_PATH, models: Object.keys(book.models).length, version: book.version };

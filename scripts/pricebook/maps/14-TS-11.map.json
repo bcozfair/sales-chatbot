@@ -1,0 +1,128 @@
+{
+  "file": "ราคาTC อัพเดต (13-05-69).xlsx",
+  "sheet": "TS-11",
+  "code": "TSK-11",
+  "label": "Thermocouple / RTD TS-11 (ไม่มีเกลียว)",
+  "aliases": ["TSJ-11", "TSP-11", "TSPA-11", "TS-11"],
+  "standard": { "L1": 100, "cable_m": 1 },
+  "base": {
+    "kind": "matrix",
+    "axes": ["D", "sensor"],
+    "rowHeaderCol": "A",
+    "rows": [11, 29],
+    "colHeaderRow": 10,
+    "cols": ["C", "F", "G"]
+  },
+  "adders": [
+    {
+      "id": "len_l1",
+      "label": "ความยาวแกน L1",
+      "order": 20,
+      "kind": "perUnit",
+      "dim": "L1",
+      "step": 100,
+      "round": "ceil",
+      "unit": "mm",
+      "byAxis": "D",
+      "ratesFrom": { "col": "B", "keyCol": "A", "rows": [11, 29] },
+      "source": "TS-11!B10 'บวกเพิ่ม 100 mm ละ'"
+    },
+    {
+      "id": "sensor_t",
+      "label": "Type T (บวกเพิ่มจาก Type K/J)",
+      "order": 30,
+      "kind": "flat",
+      "when": { "option": "sensor:T" },
+      "byAxis": "D",
+      "ratesFrom": { "col": "D", "keyCol": "A", "rows": [11, 29] },
+      "source": "TS-11!D10 'Type T บวกเพิ่มจาก Type K'"
+    },
+    {
+      "id": "sensor_ntc",
+      "label": "NTC / PTC (บวกเพิ่มจาก Type K/J)",
+      "order": 30,
+      "kind": "flat",
+      "when": { "option": "sensor:NTC" },
+      "byAxis": "D",
+      "ratesFrom": { "col": "E", "keyCol": "A", "rows": [11, 29] },
+      "source": "TS-11!E10 'NTC / PTC บวกเพิ่มจาก Type K'"
+    },
+    {
+      "id": "sensor_pt1000",
+      "label": "PT1000 (บวกเพิ่มจาก PT100)",
+      "order": 30,
+      "kind": "flat",
+      "when": { "option": "sensor:PT1000" },
+      "byAxis": "D",
+      "ratesFrom": { "col": "H", "keyCol": "A", "rows": [11, 29] },
+      "source": "TS-11!H10 'PT 1000 บวกเพิ่มจาก PT100' — ⚠️ ชีตไม่ได้บอกว่าบวกจาก PT100 คลาสไหน ทั้งที่ชีตเดียวกันมีสองคลาส ตัวอ่านรหัสยืนบน Class B (TSP) แล้วติดป้ายว่า 'ตีความเอง'"
+    },
+    {
+      "id": "cable_over_1m",
+      "label": "ราคาสายส่วนที่ยาวเกิน 1 เมตร (ต้องเลือกชนิดสายก่อน)",
+      "order": 45,
+      "kind": "perUnit",
+      "dim": "cable_m",
+      "step": 1,
+      "round": "ceil",
+      "unit": " m",
+      "byAxis": "cable",
+      "ratesFrom": { "sheet": "TS-21+22+25", "col": "B", "keyCol": "A", "rows": [26, 29] },
+      "source": "TS-21+22+25!A26:B29 + A44 'สายType ไหน ให้เอาราคาสายType นั้นมาบวกเพิ่มกรณีเกิน 1 เมตร' — ⚠️ ชีตนี้เป็นชีตรวม Type K/J กับ RTD และ **ไม่มีค่าเริ่มต้นของชนิดสาย** (TS-12,13!A39 เขียนว่า PT100/PT1000 = เทปล่อน ส่วน TSP-12!B30 เขียนว่า PVC — ขัดกันเองในไฟล์เดียวกัน) ⇒ ไม่ตั้งค่าเริ่มต้นให้ ปล่อยให้ตอบว่าไม่มีราคาจนกว่าจะเลือก ดีกว่าเดาแล้วได้ราคาที่หน้าตาเหมือนถูก"
+    },
+    {
+      "id": "coat_teflon",
+      "label": "หุ้มเทปล่อน",
+      "order": 40,
+      "kind": "perUnit",
+      "when": { "option": "coat:teflon" },
+      "dim": "teflon_mm",
+      "over": 0,
+      "step": 100,
+      "round": "ceil",
+      "unit": "mm",
+      "byAxis": "D",
+      "ratesFrom": { "col": "K", "keyCol": "A", "rows": [11, 29] },
+      "source": "TS-11!K9 'หุ้มเทปล่อน เพิ่ม 100มม. ละ' — ช่องที่เป็น '-' คือขนาดที่หุ้มไม่ได้"
+    },
+    {
+      "id": "bend_l",
+      "label": "หัก L ดัดงอ",
+      "order": 55,
+      "kind": "flat",
+      "when": { "option": "bend:L" },
+      "amount": 100,
+      "source": "TS-11!C6 'สำหรับรุ่นหัก L ดัดงอ บวกเพิ่ม 100 บาท'"
+    },
+    {
+      "id": "bend_square",
+      "label": "หักฉาก (เชื่อมฉาก)",
+      "order": 55,
+      "kind": "flat",
+      "when": { "option": "bend:square" },
+      "amount": 200,
+      "source": "TS-11!C6 'แบบฉาก (เชื่อมฉาก) บวกเพิ่ม 200 บาท'"
+    }
+  ],
+  "constraints": [
+    {
+      "id": "ELEM2_MIN_DIA",
+      "when": {
+        "all": [
+          { "option": "element:2" },
+          { "axis": "D", "in": ["2", "3", "3A", "3.2", "3.2A", "4", "4A", "4.8", "4.8A", "5"] }
+        ]
+      },
+      "level": "block",
+      "message": "2 element ทำได้ตั้งแต่แกน 6 mm ขึ้นไป",
+      "source": "TS-11!I11 · J11"
+    },
+    {
+      "id": "ELEM2_ASK_PRODUCTION",
+      "when": { "option": "element:2" },
+      "level": "quoteOnRequest",
+      "message": "2 element — ชีตเขียนว่า 'ใช้ราคาสาย X2' (RTD บวก 750 อีก) แต่ไม่ได้เขียนเป็นตัวเลขต่อขนาด ⇒ ปรึกษาผลิต 2 ก่อนยืนยันราคา",
+      "source": "TS-11!I11 'กรณีออกสาย 2 element ให้ใช้ราคาสาย X2' · J11 '... X2 + 750'"
+    }
+  ]
+}

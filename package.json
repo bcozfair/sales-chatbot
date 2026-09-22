@@ -57,7 +57,13 @@
     "diag:web-quote": "tsx scripts/diag/webQuoteSmoke.ts",
     "diag:price-approval": "tsx scripts/diag/priceApprovalSmoke.ts",
     "diag:role-permissions": "tsx scripts/diag/rolePermissions.ts",
-    "diag:pricing": "tsx scripts/diag/pricingLab.ts && tsx prototypes/pricing/golden.ts && tsx prototypes/pricing/roundtrip.ts",
+    "diag:pricing": "tsx scripts/diag/pricingLab.ts && tsx scripts/diag/pricingGolden.ts && tsx scripts/diag/pricingRoundtrip.ts && tsx scripts/diag/pricingImport.ts",
+    "diag:pricing-import": "tsx scripts/diag/pricingImport.ts",
+    "diag:pb-ui": "tsx scripts/diag/pricebookUiProbe.ts",
+    "diag:pricing-coverage": "tsx scripts/diag/pricingCoverage.ts",
+    "pricebook:import": "tsx scripts/pricebook/importer.ts",
+    "pricebook:xlsx": "tsx scripts/pricebook/xlsx.ts",
+    "pricebook:calc": "tsx scripts/pricebook/cli.ts",
     "diag:web-decision": "tsx scripts/diag/webDecisionParity.ts",
     "diag:local-contacts": "tsx scripts/diag/localContactsSmoke.ts",
     "diag:sp-dedupe": "tsx scripts/diag/salespersonDedupeSmoke.ts",
@@ -70,7 +76,8 @@
     "backfill:audit-actor": "tsx scripts/logworker/backfillActor.ts",
     "test": "echo \"Error: no test specified\" && exit 1",
     "diag:lc-ui": "tsx scripts/diag/lcUiProbe.ts",
-    "diag:oc-ui": "tsx scripts/diag/odooContactsUiProbe.ts"
+    "diag:oc-ui": "tsx scripts/diag/odooContactsUiProbe.ts",
+    "diag:dead-classes": "tsx scripts/diag/deadClasses.ts"
   },
   "dependencies": {
     "@line/bot-sdk": "^11.0.0",

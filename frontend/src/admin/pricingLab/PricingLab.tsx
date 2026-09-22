@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Calculator, CircleDollarSign, AlertTriangle, Info, Plus, Tag } from 'lucide-react';
+import { Calculator, CircleDollarSign, AlertTriangle, Download, Info, Plus, Tag, Undo2, Upload } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { PageHeader } from '../PageHeader';
 import { Button } from '../Button';
 import { TableCard, TableScroll, EmptyState, ErrorBox } from '../logs/ui';
-import { errMsg } from '../logs/format';
+import { errMsg, formatDateTime } from '../logs/format';
 import { SubCodeModal } from './SubCodeModal';
+import { BookImportModal } from './BookImportModal';
 import { EFFECT_TH, type Overview, type ParsedCode, type PriceOutcome, type SubCode } from './types';
 
 /**
@@ -51,6 +52,9 @@ export const PricingLab: React.FC = () => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [adding, setAdding] = useState<{ subCode: string; editing?: SubCode } | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [rollingBack, setRollingBack] = useState(false);
 
   const loadOverview = useCallback(async () => {
     try {
@@ -80,6 +84,57 @@ export const PricingLab: React.FC = () => {
       setBusy(false);
     }
   }, [jsonHeaders]);
+
+  /**
+   * ดาวน์โหลดแม่แบบ — ต้องผ่าน `fetch` + blob ไม่ใช่ `<a href>` เพราะเส้นนี้อยู่หลัง
+   * `adminAuthMiddleware` และเบราว์เซอร์ไม่แนบ Authorization ให้กับลิงก์ธรรมดา
+   * (ลิงก์ที่ "ดาวน์โหลดได้โดยไม่ต้องล็อกอิน" คือสิ่งที่ทั้งโมดูลนี้มีไว้เพื่อกัน)
+   */
+  const downloadTemplate = useCallback(async () => {
+    setDownloading(true);
+    setError('');
+    try {
+      const res = await fetch('/api/admin/pricing/template', { headers: authHeaders });
+      if (!res.ok) throw new Error((await res.json())?.error ?? 'ดาวน์โหลดไม่สำเร็จ');
+      const blob = await res.blob();
+      // ชื่อไฟล์ภาษาไทยมากับ Content-Disposition (RFC 5987) — ถอดออกมาใช้ ไม่ใช่ตั้งชื่อเอง
+      const cd = res.headers.get('Content-Disposition') ?? '';
+      const star = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = star ? decodeURIComponent(star[1]) : 'pricebook.xlsx';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: unknown) {
+      setError(errMsg(e));
+    } finally {
+      setDownloading(false);
+    }
+  }, [authHeaders]);
+
+  /** ย้อนไปเล่มก่อนหน้า — ถามก่อนเสมอ เพราะราคาทั้งระบบขยับทันทีที่กด */
+  const rollback = useCallback(async () => {
+    const backup = overview?.shelf?.backups[0];
+    if (!backup) return;
+    const when = backup.at ? formatDateTime(backup.at) : backup.name;
+    if (!window.confirm(`ย้อนสมุดราคากลับไปเล่มของ ${when} ?\nราคาที่ระบบคิดจะเปลี่ยนทันที (เล่มที่ใช้อยู่ตอนนี้จะถูกเก็บไว้ให้ย้อนกลับมาได้)`)) return;
+    setRollingBack(true);
+    setError('');
+    try {
+      const res = await fetch('/api/admin/pricing/rollback', {
+        method: 'POST', headers: jsonHeaders, body: JSON.stringify({ name: backup.name }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body?.error ?? 'ย้อนกลับไม่สำเร็จ');
+      await loadOverview();
+      if (result) await quote(code);
+    } catch (e: unknown) {
+      setError(errMsg(e));
+    } finally {
+      setRollingBack(false);
+    }
+  }, [overview, jsonHeaders, loadOverview, result, quote, code]);
 
   // โหลดครั้งแรก — หุ้ม setTimeout ตามท่าของทั้งแอป (eslint ปฏิเสธ setState ตรง ๆ ใน useEffect)
   useEffect(() => {
@@ -131,10 +186,73 @@ export const PricingLab: React.FC = () => {
             ? `สมุดราคา ${overview.book.models} รุ่น · ${overview.version ?? ''} · ยังไม่ต่อกับใบเสนอราคา`
             : 'พิมพ์รหัสสินค้าแล้วได้ราคาพร้อมที่มาของทุกบาท'
         }
-      />
+      >
+        {/* จอแคบใช้คำสั้น — แถบบนเป็นที่ร่วมกับชื่อหน้า สองปุ่มคำเต็มเบียดจนชื่อหน้าเหลือตัวเดียว
+            (ไม่ใช้ปุ่มไอคอนล้วน เพราะ ↓ กับ ↑ สองตัวติดกันแยกไม่ออกว่าอันไหนเข้าอันไหนออก) */}
+        <Button icon={Download} busy={downloading} onClick={() => void downloadTemplate()}>
+          <span className="sm:hidden">แม่แบบ</span>
+          <span className="hidden sm:inline">ดาวน์โหลดแม่แบบราคา</span>
+        </Button>
+        <Button variant="primary" icon={Upload} onClick={() => setImporting(true)}>
+          <span className="sm:hidden">อัปโหลด</span>
+          <span className="hidden sm:inline">อัปโหลดราคาใหม่</span>
+        </Button>
+      </PageHeader>
 
       {bookMissing && <ErrorBox message={overview.book.message ?? 'ยังไม่มีสมุดราคาในเครื่องนี้'} />}
       {error && <ErrorBox message={error} onRetry={() => void quote(code)} />}
+
+      {/* ── สมุดราคาที่ระบบใช้อยู่ ───────────────────────────────────────
+          มีเพราะเจ้าของเคาะว่า "ไฟล์ที่อัปผ่านจอเป็นตัวจริง" (2026-09-21)
+          ⇒ ต้องตอบได้ตลอดเวลาว่าราคาที่ระบบคิดอยู่มาจากไฟล์ไหน ใครอัป เมื่อไหร่
+          และต้องมีทางถอย เพราะไม่มี CLI ให้ใครไปรันซ้ำบนเซิร์ฟเวอร์อีกแล้ว */}
+      {overview?.shelf && (
+        <div className="bg-card border border-slate-200 rounded-2xl overflow-hidden">
+          <div className="px-5 py-3 border-b border-slate-200">
+            <h3 className="text-sm font-bold text-slate-900">สมุดราคาที่ระบบใช้อยู่</h3>
+            <p className="text-[11px] text-slate-500 mt-0.5">ราคาทุกบาทบนหน้านี้คิดจากเล่มนี้</p>
+          </div>
+          <div className="px-5 py-3.5 flex gap-4 items-start flex-wrap">
+            <div className="flex gap-6 flex-wrap flex-1 min-w-[220px]">
+              <Fact k="รุ่นที่มีราคา" v={`${overview.book.models ?? 0}`} sub={`รุ่น / ${overview.shelf.sheets} ชีต`} />
+              <Fact k="ช่องราคา" v={overview.shelf.cells.toLocaleString('th-TH')} sub="ช่อง" />
+              <Fact
+                k="แก้ล่าสุด"
+                v={overview.shelf.edited ? formatDateTime(overview.shelf.edited.at) : (overview.version ?? '—')}
+                sub={overview.shelf.edited?.by ? `· ${overview.shelf.edited.by}` : 'จากไฟล์ Excel ต้นทาง'}
+              />
+              {overview.shelf.edited?.note && (
+                <Fact k="จากไฟล์" v="" sub={overview.shelf.edited.note} mono />
+              )}
+            </div>
+            <div className="flex flex-col gap-1.5 items-end">
+              <Button
+                icon={Undo2}
+                busy={rollingBack}
+                disabled={overview.shelf.backups.length === 0}
+                onClick={() => void rollback()}
+              >
+                ย้อนไปเล่มก่อนหน้า
+              </Button>
+              <span className="text-[11px] text-slate-400">
+                {overview.shelf.backups.length === 0
+                  ? 'ยังไม่มีเล่มเก่าให้ย้อน'
+                  : `เก็บย้อนหลังไว้ ${overview.shelf.keep} เล่ม (มีอยู่ ${overview.shelf.backups.length})`}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {importing && (
+        <BookImportModal
+          authHeaders={authHeaders}
+          onClose={(saved) => {
+            setImporting(false);
+            if (saved) { void loadOverview(); if (result) void quote(code); }
+          }}
+        />
+      )}
 
       {/* ── 1. พิมพ์รหัส ───────────────────────────────────────────────── */}
       <div className="bg-card border border-slate-200 rounded-2xl px-5 py-4">
@@ -387,3 +505,14 @@ export const PricingLab: React.FC = () => {
     </div>
   );
 };
+
+/** ช่องข้อเท็จจริงหนึ่งช่องบนการ์ดสมุดราคา — ประกาศนอกคอมโพเนนต์ (eslint: static-components) */
+const Fact: React.FC<{ k: string; v: string; sub?: string; mono?: boolean }> = ({ k, v, sub, mono }) => (
+  <div>
+    <span className="block text-[10.5px] font-bold uppercase tracking-wide text-slate-400 mb-0.5">{k}</span>
+    <span className="block text-[15px] font-bold text-slate-900">
+      {v}
+      {sub && <small className={`ml-1 text-[11.5px] font-normal text-slate-500 ${mono ? 'font-mono' : ''}`}>{sub}</small>}
+    </span>
+  </div>
+);

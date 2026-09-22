@@ -1,0 +1,101 @@
+{
+  "file": "ราคาTC อัพเดต (13-05-69).xlsx",
+  "sheet": "TS-10",
+  "code": "TSP-10",
+  "label": "RTD TS-10 (เกลียว + ออกสาย)",
+  "aliases": ["TSPA-10", "TSZ-10", "TS-10"],
+  "standard": { "L1": 100, "cable_m": 1 },
+  "base": {
+    "kind": "matrix",
+    "axes": ["D", "thread", "sensor"],
+    "rowHeaderCol": "A",
+    "rows": [13, 34],
+    "colHeaderRow": [11, 12],
+    "cols": [
+      "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N",
+      "O", "P", "Q", "R", "S", "T"
+    ]
+  },
+  "adders": [
+    {
+      "id": "len_l1",
+      "label": "ความยาวแกน L1",
+      "order": 20,
+      "kind": "perUnit",
+      "dim": "L1",
+      "step": 100,
+      "round": "ceil",
+      "unit": "mm",
+      "byAxis": "D",
+      "ratesFrom": { "col": "B", "keyCol": "A", "rows": [13, 34] },
+      "source": "TS-10!B10 'บวกเพิ่ม 100 mm ละ'"
+    },
+    {
+      "id": "cable_over_1m",
+      "label": "ราคาสายส่วนที่ยาวเกิน 1 เมตร (ต้องเลือกชนิดสายก่อน)",
+      "order": 45,
+      "kind": "perUnit",
+      "dim": "cable_m",
+      "step": 1,
+      "round": "ceil",
+      "unit": " m",
+      "byAxis": "cable",
+      "ratesFrom": { "sheet": "TS-21+22+25", "col": "B", "keyCol": "A", "rows": [26, 29] },
+      "source": "TS-21+22+25!A26:B29 + A44 — ⚠️ ไม่ตั้งชนิดสายเริ่มต้นให้ เพราะไฟล์เดียวกันเขียนขัดกันเอง (TS-12,13!A39 = เทปล่อน · TSP-12!B30 = PVC) ⇒ ตอบว่ายังไม่มีราคาจนกว่าจะเลือก"
+    },
+    {
+      "id": "coat_teflon",
+      "label": "หุ้มเทปล่อน",
+      "order": 40,
+      "kind": "perUnit",
+      "when": { "option": "coat:teflon" },
+      "dim": "teflon_mm",
+      "over": 0,
+      "step": 100,
+      "round": "ceil",
+      "unit": "mm",
+      "byAxis": "D",
+      "ratesFrom": { "col": "V", "keyCol": "A", "rows": [13, 34] },
+      "source": "TS-10!V10 'หุ้มเทปล่อน เพิ่ม 100มม. ละ'"
+    },
+    {
+      "id": "bend_l",
+      "label": "หัก L ดัดงอ",
+      "order": 55,
+      "kind": "flat",
+      "when": { "option": "bend:L" },
+      "amount": 100,
+      "source": "TS-10!C7 'สำหรับรุ่นหัก L ดัดงอ บวกเพิ่ม 100 บาท'"
+    },
+    {
+      "id": "bend_square",
+      "label": "หักฉาก (เชื่อมฉาก)",
+      "order": 55,
+      "kind": "flat",
+      "when": { "option": "bend:square" },
+      "amount": 200,
+      "source": "TS-10!C7 'แบบฉาก (เชื่อมฉาก) บวกเพิ่ม 200 บาท'"
+    }
+  ],
+  "constraints": [
+    {
+      "id": "ELEM2_MIN_DIA",
+      "when": {
+        "all": [
+          { "option": "element:2" },
+          { "axis": "D", "in": ["3.2", "3.2A", "4", "4A", "4.8", "4.8A", "5"] }
+        ]
+      },
+      "level": "block",
+      "message": "2 element ทำได้ตั้งแต่แกน 6 mm ขึ้นไป",
+      "source": "TS-10!U13 'ตั้งแต่แกน 6 mm ขึ้นไป'"
+    },
+    {
+      "id": "ELEM2_ASK_PRODUCTION",
+      "when": { "option": "element:2" },
+      "level": "quoteOnRequest",
+      "message": "2 element — ชีตเขียนว่า 'ใช้ราคาสาย X2 + 750' ไม่ได้เขียนเป็นตัวเลขต่อขนาด ⇒ ปรึกษาผลิต 2 ก่อนยืนยันราคา",
+      "source": "TS-10!U13 'กรณีออกสาย 2 element ให้ใช้ราคาสาย X2 + 750 * ตั้งแต่แกน 6 mm ขึ้นไป'"
+    }
+  ]
+}

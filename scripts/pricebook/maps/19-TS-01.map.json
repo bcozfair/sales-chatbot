@@ -1,0 +1,32 @@
+{
+  "file": "ราคาTC อัพเดต (13-05-69).xlsx",
+  "sheet": "TS-01+TS-01-0",
+  "code": "TSK-01",
+  "label": "Thermocouple / RTD TS-01 (หัวเกลียวสั้น)",
+  "aliases": ["TSJ-01", "TST-01", "TSP-01", "TSPA-01", "TSZ-01", "TS-01"],
+  "standard": { "dia_mm": 4.8, "cable_m": 1 },
+  "base": {
+    "kind": "matrix",
+    "axes": ["sensor", "thread"],
+    "rowHeaderCol": "A",
+    "rows": [11, 15],
+    "colHeaderRow": 10,
+    "cols": ["B", "C", "D", "E", "F"]
+  },
+  "adders": [
+    {
+      "id": "cable_over_1m",
+      "label": "ราคาสายส่วนที่ยาวเกิน 1 เมตร (ต้องเลือกชนิดสายก่อน)",
+      "order": 45,
+      "kind": "perUnit",
+      "dim": "cable_m",
+      "step": 1,
+      "round": "ceil",
+      "unit": " m",
+      "byAxis": "cable",
+      "ratesFrom": { "sheet": "TS-21+22+25", "col": "B", "keyCol": "A", "rows": [26, 29] },
+      "source": "TS-01+TS-01-0!A17 'สายยาวกว่า 1 M บวกเพิ่มตามราคาสาย' + TS-21+22+25!A26:B29 — ⚠️ คอลัมน์ G ของชีตนี้เขียน 'ชนิดสาย รุ่นเริ่มต้น' **ต่างกันรายหัววัด** (TSK/TSJ = ถักสแตนเลส · TST = เทปล่อน · TSP/TSPA/TSZ = PVC) แต่ `axisDefaults` ตั้งได้ค่าเดียวต่อรุ่น ⇒ ไม่ตั้งให้ ปล่อยให้เลือกเอง ดีกว่าตั้งค่าที่ถูกแค่กับหัววัดบางชนิด"
+    }
+  ],
+  "constraints": []
+}

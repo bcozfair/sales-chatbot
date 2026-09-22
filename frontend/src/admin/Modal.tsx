@@ -30,10 +30,21 @@ interface Props {
   onClose?: () => void;
   /** แถบปุ่มท้ายกล่อง — ไม่ส่ง = กล่องนี้เอาปุ่มไว้ในเนื้อเอง (เช่นฟอร์มที่มีปุ่ม submit ของตัวเอง) */
   footer?: React.ReactNode;
-  /** `md` = กล่องคำถามสั้น ๆ · `lg` = กล่องที่มีรายการให้อ่านก่อนตัดสินใจ */
-  size?: 'md' | 'lg';
+  /**
+   * `md` = กล่องคำถามสั้น ๆ · `lg` = กล่องที่มีรายการให้อ่านก่อนตัดสินใจ
+   * `xl` = กล่องที่มี **ตาราง** ให้อ่านก่อนตัดสินใจ (เพิ่ม 2026-09-21 ตอนทำจอตรวจสมุดราคา)
+   *   — ห้าเสาของตารางส่วนต่างที่ `lg` (512px) ทำให้คอลัมน์ "ส่วนต่าง" ตกขอบ
+   */
+  size?: 'md' | 'lg' | 'xl';
   children: React.ReactNode;
 }
+
+/** ความกว้างของกล่องตามขนาด — ที่เดียวที่รู้ว่าแต่ละขนาดกว้างเท่าไหร่ */
+const WIDTH: Record<'md' | 'lg' | 'xl', string> = {
+  md: 'max-w-md',
+  lg: 'max-w-lg',
+  xl: 'max-w-3xl',
+};
 
 /** สีของกรอบไอคอน — คลาสของ Tailwind ทั้งคู่ ⇒ สลับตามธีมให้เองโดยไม่มี hex ใน .tsx */
 const TONE: Record<ModalTone, string> = {
@@ -57,7 +68,7 @@ export const Modal: React.FC<Props> = ({
       <div
         role="dialog"
         aria-modal="true"
-        className={`w-full ${size === 'lg' ? 'max-w-lg' : 'max-w-md'} max-h-[90vh] flex flex-col bg-card rounded-2xl shadow-2xl border border-slate-200 overflow-hidden`}
+        className={`w-full ${WIDTH[size]} max-h-[90vh] flex flex-col bg-card rounded-2xl shadow-2xl border border-slate-200 overflow-hidden`}
       >
         <div className="flex items-center gap-3 px-5 py-4 border-b border-slate-200 shrink-0">
           <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${TONE[tone]}`}>

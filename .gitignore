@@ -55,15 +55,16 @@ data/eval/extraction_baseline.json
 data/eval/extraction_llm_cache.json
 data/eval/extraction_result_*.json
 
-# สมุดราคาที่แปลงจากไฟล์ Excel — เป็นราคาจริงของบริษัท ไม่ควรออกนอกเครื่อง
-# (เหตุผลเดียวกับที่ mockup/ ถูก ignore) · สร้างใหม่ได้ด้วย importer.ts
-prototypes/pricing/book.json
-
-# สมุดราคาที่โมดูล services/pricingLab/ อ่านตอนรัน — ไฟล์เดียวกัน คนละที่อยู่
+# สมุดราคาที่แปลงมาจากไฟล์ Excel (`npm run pricebook:import` เขียนลงที่นี่ที่เดียว)
+# เป็นราคาจริงของบริษัททั้งเล่ม ⇒ ไม่ควรออกนอกเครื่อง เหตุผลเดียวกับที่ mockup/ ถูก ignore
 # อยู่นอก public/ และนอก data/ โดยตั้งใจ เพราะสองโฟลเดอร์นั้นถูก express.static เสิร์ฟ
 # ออกเว็บ **โดยไม่มีการตรวจสิทธิ์** ⇒ วางไว้ที่นั่นเมื่อไหร่ ใครก็โหลดราคาทั้งเล่มได้
 # ขึ้นเซิร์ฟเวอร์ด้วยการคัดลอกไฟล์ ไม่ใช่ด้วย git pull (ดู services/pricingLab/README.md)
-pricebook/
+#
+# ⚠️ **ต้องมี `/` นำเสมอ** — `pricebook/` เฉย ๆ แมตช์โฟลเดอร์ชื่อนี้ **ทุกชั้นของต้นไม้**
+# ซึ่งกิน `scripts/pricebook/` (เครื่องมือกับไฟล์ map ที่ต้อง commit) ไปทั้งโฟลเดอร์โดยไม่มีอะไรฟ้อง
+# (เกิดจริง 2026-09-21 ตอนย้ายเครื่องมือออกจาก prototypes/ — แมป 8 ไฟล์หายจาก `git add -A` เงียบ ๆ)
+/pricebook/
 
 # ไฟล์ Excel ราคาต้นทาง — ห้ามขึ้นเซิร์ฟเวอร์เด็ดขาด ด้วยเหตุผลข้อบน (/data ไม่มี auth)
 data/*.xlsx
