@@ -77,7 +77,39 @@ services:
       - sig_sale:/app/data/sale_sigs     # รูปลายเซ็นที่อัปโหลด (คงอยู่ข้าม rebuild)
       - sig_admin:/app/data/admin_sigs
 
-  # HTTPS/subdomain จัดการผ่าน Cloudflare + reverse proxy กลางของ IT → โปรเจคนี้ไม่รัน reverse proxy เอง
+  # ทางเข้าสาธารณะของระบบ — `https://salechatbot.primus-iot.com` คือปลายทางที่ LINE ยิง webhook มา
+  # ไม่มี reverse proxy ของ IT อยู่ในเส้นนี้ (ของเดิมเขียนไว้ว่ามี — ไม่จริงตั้งแต่ 2026-09-02)
+  #
+  # ⚠️ ห้ามใส่ `network_mode: host` เลียนแบบ primus-chat — ingress rule ของ tunnel ตัวนี้ชี้ไปที่
+  #    **`http://app:3011`** ซึ่งเป็นชื่อบน network ของ compose ไม่ใช่ `127.0.0.1` ของ host
+  #    (rule อยู่บน Cloudflare dashboard ฝั่ง remote ไม่ได้อยู่ในไฟล์นี้ — `--token` ดึงมาให้เอง)
+  #    ย้ายไป host mode เมื่อไหร่ `app` จะ resolve ไม่ได้ ⇒ โดเมนขึ้น DNS ปกติแต่ตอบ 502 ตลอด
+  #    โดยไม่มี error ให้เห็นสักบรรทัด (primus-chat เจอเคสกลับด้านกันมาแล้ว)
+  #
+  # ⚠️ ห้ามถอด `--protocol http2` — UDP/QUIC ออกจากเครื่องนี้ไม่ได้ cloudflared ตรวจเองตอน boot
+  #    แล้วรายงาน `UDP Connectivity region1/region2 = FAIL · TCP = PASS` (วัด 2026-09-02)
+  #    ถอดแล้วมันจะไปลอง QUIC ก่อนทุกครั้งแล้วค่อยถอยมา http2 = ต่อช้าลงทุกรอบโดยไม่ได้อะไร
+  #
+  # ไม่ผูก `depends_on: app` โดยตั้งใจ — tunnel ต้องอยู่ต่อระหว่าง app restart ตอน deploy
+  # ไม่งั้นทางเข้าหายไปด้วยทั้งที่ไม่จำเป็น (ระหว่างนั้นโดเมนตอบ 502 แล้วกลับมาเองเมื่อ app ขึ้น)
+  # ⇒ `docker compose up -d --build` ปกติจะ **ไม่** แตะ container ตัวนี้ถ้านิยามไม่เปลี่ยน
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: cf-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --protocol http2 run
+    # ของเดิมรันด้วย `docker run` มือเปล่า ไม่มีเพดาน log — โตมา 20 วันโดยไม่มีใครดู
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    environment:
+      # token ของ tunnel ตัวนี้เท่านั้น (คนละตัวกับ primus-chat / primus-ot — สลับแล้วโดเมนสลับกัน)
+      # ⚠️ ของเดิมฝัง token ไว้ใน args ของ `docker run` ⇒ ใครรัน `docker inspect` / `ps` บนเครื่องนี้
+      #    ก็อ่านได้หมด และมันมีอยู่ที่เดียวในโลกคือ args ของ container ที่รันอยู่ + Cloudflare dashboard
+      #    (ลบ container ทิ้งเมื่อไหร่ = ต้องไปออก token ใหม่) ⇒ ย้ายมาอยู่ใน .env ที่ backup ได้
+      TUNNEL_TOKEN: ${CF_TUNNEL_TOKEN:?ยังไม่ได้ตั้ง CF_TUNNEL_TOKEN ใน .env — ดู DEPLOY.md หัวข้อ "ทางเข้าสาธารณะ (Cloudflare Tunnel)"}
 
 volumes:
   pgdata:

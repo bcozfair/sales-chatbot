@@ -100,9 +100,11 @@ curl -I http://127.0.0.1:${APP_PORT:-3011}/        # ควรได้ HTTP 200
 
 ---
 
-## ส่วนที่ 3 — แจ้ง IT
-บอก IT: **subdomain ที่ต้องการ** (เช่น `bot.company.com`) + **พอร์ต** ที่ตั้งใน `APP_PORT` (ผูกไว้ที่ `127.0.0.1`)
-IT จะตั้ง reverse proxy + HTTPS ให้ชี้ subdomain → พอร์ตนั้น
+## ส่วนที่ 3 — โดเมนสาธารณะ
+ปัจจุบัน (ตั้งแต่ 2026-09-02) ทางเข้าคือ **Cloudflare Tunnel ที่รันเป็น container ในสแต็กนี้เอง**
+ไม่ใช่ reverse proxy ของ IT — ดูหัวข้อ **ทางเข้าสาธารณะ (Cloudflare Tunnel)** ข้างล่าง
+(ถ้าตั้งระบบใหม่ที่อื่นแล้วจะใช้ reverse proxy ของ IT แทน: บอก IT ว่าต้องการ subdomain อะไร
+\+ พอร์ตที่ตั้งใน `APP_PORT` ซึ่งผูกไว้ที่ `127.0.0.1`)
 
 > **🔴 ได้ subdomain มาแล้วต้องเติม `APP_URL` ใน `.env` ทันที แล้ว `docker compose up -d --force-recreate app`**
 > ลิงก์ PDF ที่บอทส่งเข้าแชทประกอบขึ้นจากค่านี้ · **ถ้า `APP_URL` ว่าง แอปจะเดาจาก Host header ของ
@@ -118,6 +120,60 @@ IT จะตั้ง reverse proxy + HTTPS ให้ชี้ subdomain → พ
 >   `npm run diag:app-url` (อ่านอย่างเดียว รันบน prod ได้)
 
 > ถ้า IT บอกว่า proxy ของเขาอยู่ใน docker network (ไม่ใช่ host) อาจต้องปรับ `docker-compose.yml` ให้ join network ของเขาแทนการ publish port — แจ้งผมได้ เดี๋ยวปรับให้
+
+---
+
+## ทางเข้าสาธารณะ (Cloudflare Tunnel)
+
+โดเมน `https://salechatbot.primus-iot.com` → **cloudflared** (service `tunnel`, container `cf-tunnel`)
+→ `http://app:3011` บน network ของ compose · LINE ยิง webhook มาที่เส้นนี้เส้นเดียว
+
+**ค่าอยู่ 2 ที่ และไม่ได้อยู่ในรีโปทั้งคู่:**
+
+| อะไร | อยู่ไหน | แก้ยังไง |
+| --- | --- | --- |
+| token | `CF_TUNNEL_TOKEN` ใน `.env` (นอก git) | Cloudflare Zero Trust → Networks → Tunnels → Configure |
+| ingress rule (โดเมน → `http://app:3011`) | **Cloudflare dashboard** ฝั่ง remote | แก้บน dashboard · `--token` ดึงมาให้เองตอน start |
+
+**กับดัก 2 ข้อที่แก้แล้วพังเงียบ**
+
+1. **ห้ามใส่ `network_mode: host`** (เลียนแบบ `primus-chat` ไม่ได้) — ingress ชี้ที่ชื่อ `app`
+   บน network ของ compose ไม่ใช่ `127.0.0.1` ของ host · ย้ายไป host mode = โดเมนขึ้น DNS ปกติ
+   แต่ตอบ 502 ตลอดโดยไม่มี error ให้เห็น
+2. **ห้ามถอด `--protocol http2`** — UDP/QUIC ออกจากเครื่องนี้ไม่ได้ (cloudflared ตรวจเองตอน boot:
+   `UDP Connectivity region1/region2 = FAIL · TCP = PASS`)
+
+**ย้ายจาก `docker run` มือเปล่ามาเป็น compose (ทำครั้งเดียว — ยังไม่ได้ทำบน server)**
+
+container เดิมสร้างด้วย `docker run` จึงไม่มี label ของ compose ⇒ ชื่อ `cf-tunnel` จะชนกัน
+ต้องลบตัวเก่าก่อน **ซึ่งทำให้ webhook ขาดช่วง ~10 วินาที → ทำนอกเวลาที่เซลส์ใช้งาน**
+
+```bash
+cd ~/salechatbot/chatbot
+grep -c '^CF_TUNNEL_TOKEN=' .env        # ต้องได้ 1 ก่อน ไม่งั้น compose จะไม่ยอมขึ้น
+docker compose config --quiet           # ตรวจไฟล์ก่อน ไม่มี output = ผ่าน
+
+docker rm -f cf-tunnel                  # ◀ ตรงนี้คือช่วงที่โดเมนล่ม
+docker compose up -d tunnel
+```
+
+**ตรวจว่ากลับมาแล้วจริง**
+
+```bash
+docker compose logs --tail 20 tunnel | grep -E "Registered tunnel connection|ERR"
+curl -4 -s -o /dev/null -w '%{http_code}\n' https://salechatbot.primus-iot.com/   # ต้องได้ 200
+```
+
+ระบบนี้**ไม่มี** `/health` หรือ `/healthz` (เคยเขียนไว้ในคู่มือแล้วได้ 404 ตลอด) — ใช้ `/` ซึ่งเป็น
+หน้าแอดมิน ตอบ 200 ทั้งผ่าน tunnel และที่ `127.0.0.1:3011` · เทียบสองเส้นนี้แยกได้ว่าปัญหาอยู่
+ที่ tunnel (เส้นนอกพัง เส้นในดี) หรือที่แอปเอง (พังทั้งคู่)
+
+`curl` **ต้องมี `-4`** — เครื่องนี้ออก IPv6 ไม่ได้ ถ้าไม่ใส่จะค้างแล้วสรุปผิดว่า tunnel ยังไม่ขึ้น
+· ถอยกลับได้ทุกเมื่อด้วย `docker rm -f cf-tunnel` แล้วรัน `docker run` แบบเดิม (token อยู่ใน `.env` แล้ว)
+
+**ระหว่าง deploy ปกติ tunnel ไม่ถูกแตะ** — `docker compose up -d --build` จะ recreate เฉพาะ `app`
+(ตั้งใจไม่ผูก `depends_on` ไว้) ⇒ โดเมนตอบ 502 ระหว่าง app ขึ้นใหม่ แล้วกลับมาเองโดยไม่ต้องทำอะไร
+⚠️ ต่างจาก `docker compose down` ซึ่งหลังย้ายแล้วจะดับ tunnel ไปด้วย (เดิมมันรอด)
 
 ---
 
