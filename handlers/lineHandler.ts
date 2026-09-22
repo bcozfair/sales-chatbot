@@ -316,7 +316,7 @@ export async function handleEvent(
           });
         }
         const flexMsg = createBranchSelectionFlex('', userId);
-        return lineClient.replyMessage({
+        return await lineClient.replyMessage({
           replyToken: event.replyToken,
           messages: [
             { type: 'text', text: 'สวัสดีครับ คุณยังไม่ได้ลงทะเบียนผู้ใช้งานในระบบ เพื่อความปลอดภัย กรุณาลงทะเบียนผ่านลิงก์ด้านล่างก่อนเริ่มต้นใช้งานครับ 🙏' },
@@ -338,7 +338,7 @@ export async function handleEvent(
         const sub = params.get('sub');
         if (sub === 'quotation') {
           await updateSalespersonByUserId(userId, { status: 'edit_quote_number' });
-          return lineClient.replyMessage({
+          return await lineClient.replyMessage({
             replyToken: event.replyToken,
             messages: [{ 
               type: 'text', 
@@ -358,7 +358,7 @@ export async function handleEvent(
           else if (field === 'salesperson_id') label = 'รหัสพนักงาน';
           
           await updateSalespersonByUserId(userId, { status: `edit_field:salesperson:${field}` });
-          return lineClient.replyMessage({
+          return await lineClient.replyMessage({
             replyToken: event.replyToken,
             messages: [{
               type: 'text',
@@ -444,7 +444,7 @@ export async function handleEvent(
             console.error("Error logging cancel postback:", err);
           }
         }
-        return lineClient.replyMessage({
+        return await lineClient.replyMessage({
           replyToken: event.replyToken,
           messages: replyMessages.slice(0, 5)
         });
@@ -469,7 +469,7 @@ export async function handleEvent(
           console.error("Error logging cancel_pending postback:", err);
         }
 
-        return lineClient.replyMessage({
+        return await lineClient.replyMessage({
           replyToken: event.replyToken,
           messages: [{ type: 'text', text: '❌ ยกเลิกการออกใบเสนอราคาเรียบร้อยแล้ว' }]
         });
@@ -629,7 +629,7 @@ export async function handleEvent(
           }
         }
         const finalMessages = replyMessages.slice(0, 5);
-        return lineClient.replyMessage({
+        return await lineClient.replyMessage({
           replyToken: event.replyToken,
           messages: finalMessages
         });
@@ -638,7 +638,7 @@ export async function handleEvent(
       if (action === 'select_company') {
         const custId = params.get('custId');
         if (!custId) {
-          return lineClient.replyMessage({
+          return await lineClient.replyMessage({
             replyToken: event.replyToken,
             messages: [{ type: 'text', text: '❌ ข้อมูลไม่ถูกต้องหรือเซสชันหมดอายุ' }]
           });
@@ -658,7 +658,7 @@ export async function handleEvent(
         }
 
         if (pendingQuotes.length === 0) {
-          return lineClient.replyMessage({
+          return await lineClient.replyMessage({
             replyToken: event.replyToken,
             messages: [{ type: 'text', text: '❌ เซสชันหมดอายุหรือไม่มีใบเสนอราคาที่กำลังดำเนินการ' }]
           });
@@ -681,7 +681,7 @@ export async function handleEvent(
         }
 
         if (!customer) {
-          return lineClient.replyMessage({
+          return await lineClient.replyMessage({
             replyToken: event.replyToken,
             messages: [{ type: 'text', text: `❌ ไม่พบข้อมูลบริษัทในระบบ` }]
           });
@@ -705,7 +705,7 @@ export async function handleEvent(
 
         if (result.success) {
           const summary = await getQuotationSummaryMessage(result.quotes);
-          return lineClient.replyMessage({
+          return await lineClient.replyMessage({
             replyToken: event.replyToken,
             messages: summary.messages as any
           });
@@ -719,7 +719,7 @@ export async function handleEvent(
               messages[0].quickReply = result.quickReply;
             }
           }
-          return lineClient.replyMessage({
+          return await lineClient.replyMessage({
             replyToken: event.replyToken,
             messages: messages
           });
@@ -743,14 +743,14 @@ export async function handleEvent(
         }
 
         if (pendingQuotes.length === 0) {
-          return lineClient.replyMessage({
+          return await lineClient.replyMessage({
             replyToken: event.replyToken,
             messages: [{ type: 'text', text: '❌ เซสชันหมดอายุหรือไม่มีใบเสนอราคาที่กำลังดำเนินการ' }]
           });
         }
 
         if (!contactId) {
-          return lineClient.replyMessage({
+          return await lineClient.replyMessage({
             replyToken: event.replyToken,
             messages: [{ type: 'text', text: '❌ ข้อมูลผู้ติดต่อไม่ถูกต้อง' }]
           });
@@ -771,7 +771,7 @@ export async function handleEvent(
         }
 
         if (!dbContact) {
-          return lineClient.replyMessage({
+          return await lineClient.replyMessage({
             replyToken: event.replyToken,
             messages: [{ type: 'text', text: '❌ ไม่พบข้อมูลผู้ติดต่อในระบบ' }]
           });
@@ -816,7 +816,7 @@ export async function handleEvent(
             blockText = buildViolationText([systemErrorViolation()]);
           }
           if (blockText) {
-            return lineClient.replyMessage({
+            return await lineClient.replyMessage({
               replyToken: event.replyToken,
               messages: [{ type: 'text', text: blockText }]
             });
@@ -832,7 +832,7 @@ export async function handleEvent(
         }
 
         if (updatedQuotes.length === 0) {
-          return lineClient.replyMessage({
+          return await lineClient.replyMessage({
             replyToken: event.replyToken,
             messages: [{ type: 'text', text: '❌ ไม่สามารถอัปเดตข้อมูลใบเสนอราคาได้' }]
           });
@@ -840,7 +840,7 @@ export async function handleEvent(
 
         // Generate summary and confirm/cancel options
         const summary = await getQuotationSummaryMessage(updatedQuotes);
-        return lineClient.replyMessage({
+        return await lineClient.replyMessage({
           replyToken: event.replyToken,
           messages: summary.messages as any
         });
@@ -894,26 +894,26 @@ export async function handleEvent(
           });
         } catch (err) {
           console.error('[select_product] transaction error:', err);
-          return lineClient.replyMessage({
+          return await lineClient.replyMessage({
             replyToken: event.replyToken,
             messages: [{ type: 'text', text: '❌ เกิดข้อผิดพลาด รบกวนลองใหม่อีกครั้งครับ' }]
           });
         }
 
         if (outcome === 'no_pending') {
-          return lineClient.replyMessage({
+          return await lineClient.replyMessage({
             replyToken: event.replyToken,
             messages: [{ type: 'text', text: '❌ เซสชันหมดอายุหรือไม่มีรายการที่รอเลือกรุ่น รบกวนพิมพ์คำสั่งเสนอราคาใหม่อีกครั้งครับ' }]
           });
         }
         if (outcome === 'invalid') {
-          return lineClient.replyMessage({
+          return await lineClient.replyMessage({
             replyToken: event.replyToken,
             messages: [{ type: 'text', text: '❌ ตัวเลือกไม่ถูกต้องหรือหมดอายุ รบกวนลองใหม่อีกครั้งครับ' }]
           });
         }
         if (outcome === 'next') {
-          return lineClient.replyMessage({
+          return await lineClient.replyMessage({
             replyToken: event.replyToken,
             messages: buildProductSelectionMessages(slots[nextIdx], nextIdx, userId) as any
           });
@@ -932,17 +932,17 @@ export async function handleEvent(
 
         if (result.success) {
           const summary = await getQuotationSummaryMessage(result.quotes);
-          return lineClient.replyMessage({
+          return await lineClient.replyMessage({
             replyToken: event.replyToken,
             messages: summary.messages as any
           });
         }
         if (result.type === 'flex') {
-          return lineClient.replyMessage({ replyToken: event.replyToken, messages: [result] });
+          return await lineClient.replyMessage({ replyToken: event.replyToken, messages: [result] });
         }
         const productMsgs: any[] = [{ type: 'text', text: result.text }];
         if (result.quickReply) productMsgs[0].quickReply = result.quickReply;
-        return lineClient.replyMessage({ replyToken: event.replyToken, messages: productMsgs });
+        return await lineClient.replyMessage({ replyToken: event.replyToken, messages: productMsgs });
       }
       return;
     }
@@ -989,7 +989,7 @@ export async function handleEvent(
               } catch (dbErr) {
                 console.error("Error logging saved draft message:", dbErr);
               }
-              return lineClient.replyMessage({
+              return await lineClient.replyMessage({
                 replyToken: replyToken,
                 messages: summary.messages as any
               });
@@ -998,7 +998,7 @@ export async function handleEvent(
             console.error("Error processing saved draft trigger:", err);
           }
 
-          return lineClient.replyMessage({
+          return await lineClient.replyMessage({
             replyToken: replyToken,
             messages: [{ type: 'text', text: '❌ ไม่พบร่างใบเสนอราคาที่บันทึกไว้ (อาจถูกยืนยันหรือยกเลิกไปแล้ว) รบกวนเริ่มรายการใหม่อีกครั้งครับ' }]
           });
@@ -1043,7 +1043,7 @@ export async function handleEvent(
               } catch (dbErr) {
                 console.error("Error logging draft cart message:", dbErr);
               }
-              return lineClient.replyMessage({
+              return await lineClient.replyMessage({
                 replyToken: replyToken,
                 messages: summary.messages as any
               });
@@ -1052,7 +1052,7 @@ export async function handleEvent(
             console.error("Error processing draft cart trigger:", err);
           }
 
-          return lineClient.replyMessage({
+          return await lineClient.replyMessage({
             replyToken: replyToken,
             messages: [{ type: 'text', text: '❌ ไม่พบร่างใบเสนอราคาที่บันทึกไว้ (อาจถูกยืนยันหรือยกเลิกไปแล้ว) รบกวนเริ่มรายการใหม่อีกครั้งครับ' }]
           });
@@ -1142,7 +1142,7 @@ export async function handleEvent(
 
             const finalMessages = messages.slice(0, 5);
 
-            return lineClient.replyMessage({
+            return await lineClient.replyMessage({
               replyToken: replyToken,
               messages: finalMessages
             });
@@ -1181,7 +1181,7 @@ export async function handleEvent(
               if (sp.phone) msg += `\n📞 เบอร์โทร: ${sp.phone}`;
             }
 
-            return lineClient.replyMessage({
+            return await lineClient.replyMessage({
               replyToken: replyToken,
               messages: [{ type: 'text', text: msg }]
             });
@@ -1197,7 +1197,7 @@ export async function handleEvent(
           const quoteIds = match[1];
           const count = parseInt(match[2]);
           const flexMsg = createCartConfirmationFlex(quoteIds, count, userId);
-          return lineClient.replyMessage({
+          return await lineClient.replyMessage({
             replyToken: replyToken,
             messages: [flexMsg as any]
           });
@@ -1239,13 +1239,13 @@ export async function handleEvent(
                 }
               });
             }
-            return lineClient.replyMessage({
+            return await lineClient.replyMessage({
               replyToken: replyToken,
               messages: messages.slice(0, 5)
             });
           }
 
-          return lineClient.replyMessage({
+          return await lineClient.replyMessage({
             replyToken: replyToken,
             messages: [{ type: 'text', text: `❌ ไม่พบใบเสนอราคาเลขที่: ${quotationNos.join(', ')}` }]
           });
@@ -1278,13 +1278,13 @@ export async function handleEvent(
             } catch (logErr) {
               console.error('Error logging quotation-edit turn:', logErr);
             }
-            return lineClient.replyMessage({
+            return await lineClient.replyMessage({
               replyToken: replyToken,
               messages: res.messages
             });
           } catch (err) {
             console.error('Error handling quotation-edit request:', err);
-            return lineClient.replyMessage({
+            return await lineClient.replyMessage({
               replyToken: replyToken,
               messages: [{ type: 'text', text: '⚠️ ขออภัยครับ ระบบแก้ไขใบเสนอราคาขัดข้องชั่วคราว รบกวนลองใหม่อีกครั้งครับ' }]
             });
@@ -1298,7 +1298,7 @@ export async function handleEvent(
           trimmedContent.replace(/\s/g, '').length > 6 &&
           !['แก้ไขข้อมูล', 'เมนูแก้ไข'].includes(trimmedContent)
         ) {
-          return lineClient.replyMessage({
+          return await lineClient.replyMessage({
             replyToken: replyToken,
             messages: [
               { type: 'text', text: 'ต้องการแก้ไขใบเสนอราคาใบไหนครับ?\nรบกวนพิมพ์พร้อมเลขที่ใบ เช่น "แก้ไข QP-260705001"\nหรือกดปุ่มเพื่อเลือกเมนูด้านล่างครับ 👇' },
@@ -1312,7 +1312,7 @@ export async function handleEvent(
 
       if (['แก้ไข', '/edit', 'edit', 'แก้ไขข้อมูล', 'เมนูแก้ไข'].includes(cleanText)) {
         const flexMsg = createEditMenuFlex(userId);
-        return lineClient.replyMessage({
+        return await lineClient.replyMessage({
           replyToken: replyToken,
           messages: [flexMsg as any]
         });
@@ -1327,7 +1327,7 @@ export async function handleEvent(
         
         if (val.toLowerCase() === 'ยกเลิก' || val === 'cancel') {
           await updateSalespersonByUserId(userId, { status: 'active' });
-          return lineClient.replyMessage({
+          return await lineClient.replyMessage({
             replyToken: replyToken,
             messages: [{ type: 'text', text: '❌ ยกเลิกการแก้ไขข้อมูลส่วนตัว' }]
           });
@@ -1342,7 +1342,7 @@ export async function handleEvent(
         const branches = getStaticBranches();
         const flexMsg = createSalespersonProfileFlex(updatedSp, branches || []);
         
-        return lineClient.replyMessage({
+        return await lineClient.replyMessage({
           replyToken: replyToken,
           messages: [
             { type: 'text', text: '✅ อัปเดตข้อมูลส่วนตัวสำเร็จเรียบร้อยครับ!' },
@@ -1356,7 +1356,7 @@ export async function handleEvent(
 
         if (val === 'ยกเลิก' || val === 'CANCEL') {
           await updateSalespersonByUserId(userId, { status: 'active' });
-          return lineClient.replyMessage({
+          return await lineClient.replyMessage({
             replyToken: replyToken,
             messages: [{ type: 'text', text: '❌ ยกเลิกการแก้ไขใบเสนอราคา' }]
           });
@@ -1371,7 +1371,7 @@ export async function handleEvent(
 
           // ยังเป็นคำสั่งแนวแก้ไข → แนะนำวิธีที่ถูกต้องพร้อมเมนู
           if (/^(แก้ไข|แก้|เปลี่ยน|ปรับ)/.test(trimmedContent)) {
-            return lineClient.replyMessage({
+            return await lineClient.replyMessage({
               replyToken: replyToken,
               messages: [
                 { type: 'text', text: 'หากต้องการแก้ไขใบเสนอราคา รบกวนพิมพ์พร้อมเลขที่ใบ เช่น "แก้ไข QP-260705001" หรือกดปุ่มด้านล่างครับ 👇' },
@@ -1399,7 +1399,7 @@ export async function handleEvent(
             quotes = await Promise.all(enrichPromises);
           } catch (quoteError) {
             console.error("Fetch quote error:", quoteError);
-            return lineClient.replyMessage({
+            return await lineClient.replyMessage({
               replyToken: replyToken,
               messages: [{ type: 'text', text: '❌ เกิดข้อผิดพลาดในการค้นหาข้อมูลใบเสนอราคา' }]
             });
@@ -1418,7 +1418,7 @@ export async function handleEvent(
           }
 
           if (!quote) {
-            return lineClient.replyMessage({
+            return await lineClient.replyMessage({
               replyToken: replyToken,
               messages: [{
                 type: 'text',
@@ -1435,7 +1435,7 @@ export async function handleEvent(
               stage: 'draft', customerId: quote.customer_id, contactId: quote.contact_id
             });
             if (revV.length > 0) {
-              return lineClient.replyMessage({
+              return await lineClient.replyMessage({
                 replyToken: replyToken,
                 messages: [{ type: 'text', text: buildViolationText(revV) }]
               });
@@ -1466,7 +1466,7 @@ export async function handleEvent(
           }
 
           if (!newQuote) {
-            return lineClient.replyMessage({
+            return await lineClient.replyMessage({
               replyToken: replyToken,
               messages: [{ type: 'text', text: '❌ ไม่สามารถคัดลอกข้อมูลใบเสนอราคาเพื่อแก้ไขได้' }]
             });
@@ -1475,7 +1475,7 @@ export async function handleEvent(
           await updateSalespersonByUserId(userId, { status: 'active' });
 
           const flexMsg = createRevisionFlex(quote.quotation_no, newQuote.id, userId);
-          return lineClient.replyMessage({
+          return await lineClient.replyMessage({
             replyToken: replyToken,
             messages: [flexMsg as any]
           });
@@ -1496,7 +1496,7 @@ export async function handleEvent(
 
       if (aiResult.intent === 'REGISTER') {
         const flexMsg = createBranchSelectionFlex('', userId);
-        return lineClient.replyMessage({
+        return await lineClient.replyMessage({
           replyToken: replyToken,
           messages: [
             { type: 'text', text: 'คุณสามารถลงทะเบียนหรือปรับปรุงข้อมูลพนักงานขายได้โดยตรงผ่านลิงก์นี้ครับ' },
