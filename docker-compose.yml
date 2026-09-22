@@ -95,7 +95,10 @@ services:
   # ⇒ `docker compose up -d --build` ปกติจะ **ไม่** แตะ container ตัวนี้ถ้านิยามไม่เปลี่ยน
   tunnel:
     image: cloudflare/cloudflared:latest
-    container_name: cf-tunnel
+    # ไม่ตั้ง `container_name` โดยตั้งใจ ⇒ ได้ชื่อ `primus-chatbot-tunnel-1` เข้าชุดกับ app-1/db-1
+    # เหตุผลที่ไม่ใช้ชื่อเดิม `cf-tunnel`: ตอนย้ายมา compose เราต้องการให้ตัวใหม่ขึ้นมา
+    # **คู่กับตัวเก่าก่อน** แล้วค่อยดับตัวเก่า (โดเมนจึงไม่ล่มสักวินาที) ซึ่งทำไม่ได้ถ้าชื่อชนกัน
+    # Cloudflare รองรับ connector หลายตัวต่อ tunnel เดียวโดยเจตนา (โหมด replica สำหรับ HA)
     restart: unless-stopped
     command: tunnel --no-autoupdate --protocol http2 run
     # ของเดิมรันด้วย `docker run` มือเปล่า ไม่มีเพดาน log — โตมา 20 วันโดยไม่มีใครดู

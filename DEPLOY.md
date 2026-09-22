@@ -125,8 +125,9 @@ curl -I http://127.0.0.1:${APP_PORT:-3011}/        # ควรได้ HTTP 200
 
 ## ทางเข้าสาธารณะ (Cloudflare Tunnel)
 
-โดเมน `https://salechatbot.primus-iot.com` → **cloudflared** (service `tunnel`, container `cf-tunnel`)
-→ `http://app:3011` บน network ของ compose · LINE ยิง webhook มาที่เส้นนี้เส้นเดียว
+โดเมน `https://salechatbot.primus-iot.com` → **cloudflared** (service `tunnel`, container
+`primus-chatbot-tunnel-1`) → `http://app:3011` บน network ของ compose · LINE ยิง webhook มาที่
+เส้นนี้เส้นเดียว
 
 **ค่าอยู่ 2 ที่ และไม่ได้อยู่ในรีโปทั้งคู่:**
 
@@ -143,25 +144,40 @@ curl -I http://127.0.0.1:${APP_PORT:-3011}/        # ควรได้ HTTP 200
 2. **ห้ามถอด `--protocol http2`** — UDP/QUIC ออกจากเครื่องนี้ไม่ได้ (cloudflared ตรวจเองตอน boot:
    `UDP Connectivity region1/region2 = FAIL · TCP = PASS`)
 
-**ย้ายจาก `docker run` มือเปล่ามาเป็น compose (ทำครั้งเดียว — ยังไม่ได้ทำบน server)**
+**ย้ายจาก `docker run` มือเปล่ามาเป็น compose (ทำแล้วบน server 2026-09-22 14:40 — ไม่มีช่วงล่ม)**
 
-container เดิมสร้างด้วย `docker run` จึงไม่มี label ของ compose ⇒ ชื่อ `cf-tunnel` จะชนกัน
-ต้องลบตัวเก่าก่อน **ซึ่งทำให้ webhook ขาดช่วง ~10 วินาที → ทำนอกเวลาที่เซลส์ใช้งาน**
+บันทึกไว้เป็นแบบสำหรับเครื่องอื่น และเพราะท่านี้ใช้ได้กับการเปลี่ยน tunnel ทุกครั้งในอนาคต
+
+**กุญแจคือ Cloudflare รองรับ connector หลายตัวต่อ tunnel เดียวโดยเจตนา** (โหมด replica สำหรับ HA)
+⇒ ไม่ต้องลบของเก่าก่อน ให้ตัวใหม่ขึ้นมา**คู่กัน** แล้วค่อยดับตัวเก่า โดเมนจึงไม่ขาดสักวินาที
+นี่คือเหตุผลที่ service `tunnel` **ไม่ตั้ง `container_name`** — ชื่อ `cf-tunnel` ของเดิมจะชนกันทันที
+ถ้าตั้ง · ปล่อยให้ compose ตั้งเองได้ `primus-chatbot-tunnel-1` เข้าชุดกับ `app-1` / `db-1`
 
 ```bash
 cd ~/salechatbot/chatbot
 grep -c '^CF_TUNNEL_TOKEN=' .env        # ต้องได้ 1 ก่อน ไม่งั้น compose จะไม่ยอมขึ้น
 docker compose config --quiet           # ตรวจไฟล์ก่อน ไม่มี output = ผ่าน
 
-docker rm -f cf-tunnel                  # ◀ ตรงนี้คือช่วงที่โดเมนล่ม
-docker compose up -d tunnel
+docker compose pull tunnel              # image เก่าค้างรุ่นตั้งแต่วันที่สร้างกล่อง (พบ 2026.8.3 ค้าง 20 วัน)
+docker compose up -d tunnel             # connector ตัวที่ 2 เข้ามาคู่กับตัวเก่า — ยังไม่แตะตัวเก่า
 ```
 
-**ตรวจว่ากลับมาแล้วจริง**
+**ตรวจก่อนดับตัวเก่า** — ต้องเห็น `Registered tunnel connection` ครบ **4 บรรทัด** (connIndex 0–3)
+และบรรทัด `Updated to new configuration` ที่โชว์ ingress rule ที่ดึงมาจาก dashboard
 
 ```bash
-docker compose logs --tail 20 tunnel | grep -E "Registered tunnel connection|ERR"
+docker compose logs tunnel | grep -E "Version |Registered tunnel connection|Updated to new configuration|ERR"
 curl -4 -s -o /dev/null -w '%{http_code}\n' https://salechatbot.primus-iot.com/   # ต้องได้ 200
+```
+
+**ดับตัวเก่าด้วย `stop` ไม่ใช่ `rm`** แล้วยิงซ้ำอีกรอบ — ถ้าพลาดสั่ง `docker start cf-tunnel`
+กลับมาได้ทันที · ค่อยลบทิ้งเมื่อมั่นใจ (เว้นไว้ข้ามคืนก็ได้ กล่องที่หยุดแล้วไม่กินทรัพยากร)
+
+```bash
+docker stop cf-tunnel
+for i in $(seq 8); do curl -4 -s -o /dev/null -w '%{http_code} %{time_total}s\n' \
+  https://salechatbot.primus-iot.com/; done            # ต้อง 200 ทุกครั้ง
+docker rm cf-tunnel                                    # เมื่อมั่นใจแล้วเท่านั้น
 ```
 
 ระบบนี้**ไม่มี** `/health` หรือ `/healthz` (เคยเขียนไว้ในคู่มือแล้วได้ 404 ตลอด) — ใช้ `/` ซึ่งเป็น
@@ -169,7 +185,7 @@ curl -4 -s -o /dev/null -w '%{http_code}\n' https://salechatbot.primus-iot.com/ 
 ที่ tunnel (เส้นนอกพัง เส้นในดี) หรือที่แอปเอง (พังทั้งคู่)
 
 `curl` **ต้องมี `-4`** — เครื่องนี้ออก IPv6 ไม่ได้ ถ้าไม่ใส่จะค้างแล้วสรุปผิดว่า tunnel ยังไม่ขึ้น
-· ถอยกลับได้ทุกเมื่อด้วย `docker rm -f cf-tunnel` แล้วรัน `docker run` แบบเดิม (token อยู่ใน `.env` แล้ว)
+· ถอยกลับได้ทุกเมื่อ เพราะ token อยู่ใน `.env` แล้ว ⇒ `docker compose up -d tunnel` ตัวใหม่ได้เสมอ
 
 **ระหว่าง deploy ปกติ tunnel ไม่ถูกแตะ** — `docker compose up -d --build` จะ recreate เฉพาะ `app`
 (ตั้งใจไม่ผูก `depends_on` ไว้) ⇒ โดเมนตอบ 502 ระหว่าง app ขึ้นใหม่ แล้วกลับมาเองโดยไม่ต้องทำอะไร

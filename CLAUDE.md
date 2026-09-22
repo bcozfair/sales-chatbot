@@ -69,6 +69,13 @@ push ซึ่งมีโควตารายเดือนและมีค
 แต่เป็นเพราะโชคของลำดับ ไม่ใช่เพราะมีด่านกันไว้
 · อัตราที่วัดได้ **8 จาก 128 webhook (6.3%) ใน 16 ชม.** — เป็นอาการของทางเข้า (Cloudflare
 Tunnel) ที่ทำ response หาย ไม่ใช่ของโค้ด และ **ไม่ได้แปลว่ามีข้อความไหนไม่ได้รับคำตอบ**
+**กลไกที่ทำให้ response หาย หาเจอแล้ว (2026-09-22)** — log ของ cloudflared ย้อนหลัง 20 วัน
+(2026-09-02→2026-09-22) มี request ตก **133 ครั้ง แยกเป็นสองกลุ่มที่คนละสาเหตุ**:
+**122 (92%)** = `Error shutting down control stream: context canceled` — Cloudflare edge ตัด
+connection ทิ้งขณะ request ยังวิ่งอยู่ (`Lost connection with the edge` 106 ครั้ง ≈ 5 ครั้ง/วัน
+ทีละ 4 connection ภายใน 2 วินาที) · **11 (8%)** = `connection refused` คือช่วงที่ app ไม่อยู่ตอน deploy
+⇒ **เราตอบสำเร็จแล้วแต่คำตอบไปไม่ถึง LINE** · การมี connector หลายตัว **ไม่ได้แก้ 122 ครั้งนี้**
+(request ที่วิ่งบน connection ที่กำลังตายยังไงก็ตาย) — ตัวที่แก้อาการคือด่านข้าม redelivery ข้างบน
 
 **`express.json()` แบบ global คือสิ่งที่ห้ามเติมตลอดกาล** — `line.middleware()` ที่ `POST /callback`
 ต้องได้ raw body ไปคำนวณ HMAC ของ `x-line-signature` ถ้ามีใคร parse ก่อน ลายเซ็นไม่ผ่าน =
