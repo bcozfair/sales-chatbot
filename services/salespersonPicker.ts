@@ -15,6 +15,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { pool, type DbExecutor } from '../config/db.js';
 import type { ActingSalesperson } from './webIdentity.js';
+import { saleSignatureUrl } from './webIdentity.js';
+import { getAdminSalespersonIds } from '../db/repositories.js';
 
 export interface PickedSalesperson extends ActingSalesperson {
   /** จำนวนแถวซ้ำที่ถูกยุบเข้าแถวนี้ (0 = ไม่มีซ้ำ) */
@@ -176,4 +178,61 @@ export async function dedupeActingSalespersons(
   const dupUserIds = rows.filter((sp) => (counts.get(groupKey(sp)) ?? 0) > 1).map((sp) => sp.user_id);
   const activity = dupUserIds.length > 0 ? await loadSalespersonActivity(dupUserIds, db) : new Map();
   return pickRepresentatives(rows, activity);
+}
+
+/**
+ * แถวเซลส์ "ตัวแทน" ของบัญชี role='salesperson' — ใช้ตอนเซลส์ล็อกอินเว็บออกใบของตัวเอง
+ * (§13.2 · §13.7 ข้อ 6 ของ docs/plan-role-permissions.md)
+ *
+ * ต่างจาก `dedupeActingSalespersons()` ตรงที่บัญชีเดียวต้องได้คำตอบ **เดียว** เสมอ (ไม่มี dropdown
+ * ให้เลือก) แม้บัญชีนั้นจะผูกไว้มากกว่าหนึ่งรหัส (เกิดขึ้นจริง — วัด 2026-09-18) ⇒ รวมทุกแถวของ
+ * ทุกรหัสที่ผูกไว้เป็นกลุ่มเดียว แล้วเลือกด้วยเกณฑ์เดียวกับ `pickRepresentatives()`
+ * (ใช้งานล่าสุด → ออกใบมากกว่า → มีลายเซ็น → user_id เรียงตัวอักษร)
+ *
+ * คืน `null` เมื่อบัญชีนี้ไม่ได้ผูกรหัสไว้เลย หรือรหัสที่ผูกไว้ไม่มีแถว `salesperson` ที่ active
+ * (ทั้งสองเคสคือ "ยังไม่พร้อมออกใบ" ตาม §13.5 — ผู้เรียกใช้ผลนี้ตัดสินด่านความพร้อม)
+ */
+export async function pickOwnActingSalesperson(
+  adminId: number,
+  db: DbExecutor = pool
+): Promise<PickedSalesperson | null> {
+  const codes = await getAdminSalespersonIds(adminId);
+  if (codes.length === 0) return null;
+
+  const { rows } = await db.query(
+    `SELECT user_id, name, salesperson_id, phone
+       FROM salesperson
+      WHERE status = 'active' AND user_id NOT LIKE 'web:%' AND salesperson_id = ANY($1::text[])
+      ORDER BY name ASC`,
+    [codes]
+  );
+  if (rows.length === 0) return null;
+
+  const candidates: ActingSalesperson[] = rows.map((r: any) => {
+    const sigUrl = saleSignatureUrl(r.salesperson_id);
+    return {
+      user_id: r.user_id,
+      name: r.name,
+      salesperson_id: r.salesperson_id ? String(r.salesperson_id) : null,
+      phone: r.phone ?? null,
+      has_sale_sig: sigUrl !== null,
+      sig_url: sigUrl,
+    };
+  });
+
+  const activity = await loadSalespersonActivity(candidates.map((c) => c.user_id), db);
+  // ยุบเป็นกลุ่มเดียวเสมอ (ไม่ตามรหัส/ชื่อแบบ groupKey) — ใส่ทุกแถวเข้า pickRepresentatives()
+  // ด้วย ActingSalesperson ที่ทำให้ groupKey เท่ากันหมด (ปลอม salesperson_id ให้ว่างแต่ชื่อเดียวกัน
+  // ไม่ได้ เพราะชื่ออาจต่างกันจริงถ้าสองรหัสเป็นคนละสาขา) ⇒ เรียก pickRepresentatives ต่อคีย์เดียว
+  // ด้วยการยัดทุกแถวเป็นกลุ่มเดียวกันตรง ๆ แทน
+  const picked = pickRepresentatives(
+    candidates.map((c) => ({ ...c, salesperson_id: '__own__', name: '__own__' })),
+    activity
+  );
+  const winner = picked[0];
+  if (!winner) return null;
+  // คืนค่าจริงของแถวที่ชนะ (ไม่ใช่ชื่อ/รหัสปลอมที่ยัดเข้าไปเพื่อยุบกลุ่ม)
+  const real = candidates.find((c) => c.user_id === winner.user_id);
+  if (!real) return null;
+  return { ...real, merged_count: candidates.length - 1, merged_user_ids: candidates.filter((c) => c.user_id !== real.user_id).map((c) => c.user_id), last_active_at: winner.last_active_at };
 }

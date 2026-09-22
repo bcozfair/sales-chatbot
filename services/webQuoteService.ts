@@ -131,17 +131,33 @@ export class WebQuoteError extends Error {
  *
  * ตรวจ "ตั้งชื่อผู้จัดทำแล้วหรือยัง" ที่นี่แทนที่จะปล่อยให้ ensureWebProxy โยน Error ดิบ
  * เพราะเป็นเคสที่ผู้ใช้แก้เองได้ (ไปตั้งชื่อในแถบโปรไฟล์) ⇒ ต้องได้ 400 พร้อมบอกวิธี ไม่ใช่ 500
+ *
+ * `role === 'salesperson'` เดินเส้น "เซลส์ออกใบเอง" (§13.2) — ไม่ต้องมี
+ * `admin_users.employee_quotation_id` (บัญชีเซลส์ไม่มีแนวคิดนี้ ดู §13.5) และ `ensureWebProxy`
+ * ก๊อปช่อง J จากแถวเซลส์เองแทนของแอดมิน ⚠️ **ผู้เรียกต้องเรียก `assertMayActAs()` มาก่อนแล้ว
+ * เสมอ** ฟังก์ชันนี้ไม่ตรวจสิทธิ์ซ้ำ (ไว้ใจว่า spUserId ผ่านด่านมาแล้ว)
  */
-export async function resolveWebUserId(adminId: number, spUserId: string): Promise<string> {
+export async function resolveWebUserId(adminId: number, spUserId: string, role?: Role): Promise<string> {
   const sp = String(spUserId ?? '').trim();
   if (sp === '') throw new WebQuoteError('BAD_REQUEST', 'ต้องระบุเซลส์ที่จะออกใบในนาม (sp_user_id)', 400);
+
+  if (role === 'salesperson') {
+    try {
+      return await ensureWebProxy({ id: adminId, employee_quotation_id: null }, sp, { selfIssue: true });
+    } catch (err: any) {
+      if (String(err?.message || '').includes('ไม่พบเซลส์')) {
+        throw new WebQuoteError('SALESPERSON_NOT_FOUND', `ไม่พบเซลส์ที่ใช้งานอยู่ (user_id=${sp})`, 400);
+      }
+      throw err;
+    }
+  }
 
   const profile = await getAdminIssuerProfile(adminId);
   if (!profile) throw new WebQuoteError('ADMIN_NOT_FOUND', `ไม่พบแอดมิน id=${adminId}`, 404);
   if (!profile.employee_quotation_id) {
     throw new WebQuoteError(
       'MAKER_NOT_SET',
-      'ยังไม่ได้ตั้งชื่อผู้เสนอราคา/ผู้จัดทำ — ตั้งค่าที่แถบโปรไฟล์ก่อนออกใบ',
+      'ยังไม่ได้ตั้งชื่อผู้เสนอราคา/ผู้จัดทำ — ตั้งค่าที่หน้าจัดการผู้ใช้งานระบบก่อนออกใบ',
       400
     );
   }
@@ -321,13 +337,17 @@ export interface ProposeResult {
  */
 export async function proposeFromText(params: {
   adminId: number;
+  /** role ของคนที่กำลังวางข้อความ — บังคับส่งเสมอ ใช้ตรวจว่าออกใบในนามรหัสนี้ได้ไหม (§13.2/§13.6 ข้อ 9) */
+  role: Role;
   spUserId: string;
   text: string;
 }): Promise<ProposeResult> {
   const text = String(params.text ?? '').trim();
   if (text === '') throw new WebQuoteError('BAD_REQUEST', 'ต้องมีข้อความที่จะสกัด (text)', 400);
 
-  const webUserId = await resolveWebUserId(params.adminId, params.spUserId);
+  // ออกใบในนามคนอื่นไม่ได้ ถ้าไม่มีสิทธิ์ — ก่อน resolveWebUserId เสมอ (มันเขียนแถวพร็อกซีแล้ว)
+  await assertMayActAs(params.adminId, params.role, params.spUserId);
+  const webUserId = await resolveWebUserId(params.adminId, params.spUserId, params.role);
 
   return runQueued(webUserId, async () => {
     const startedAt = Date.now();
@@ -478,9 +498,13 @@ async function assertMayOverridePaymentTerms(role: Role, override: string | null
  * ⚠️ ตอบ **403 พร้อมเหตุผล** ไม่ใช่ "เงียบ ๆ แก้ให้เป็นรหัสตัวเอง" — คนยิงต้องรู้ว่าทำไม่ได้
  *    ไม่ใช่เข้าใจว่าทำได้แล้ว (§13.2) · บัญชีที่ไม่ได้ผูกรหัสไว้เลยออกใบไม่ได้ทั้งหมด ซึ่งตรงกับ
  *    ด่าน "ความพร้อมของบัญชี" ใน §13.5
+ *
+ * ⚠️ **ต้องเรียกทุกเส้นที่รับ `sp_user_id` จาก client แล้วเอาไปใช้จริง** ไม่ใช่แค่ตอนสร้างร่าง
+ *    (§13.6 ข้อ 9) — `role` เป็น `undefined` ได้เฉพาะตอนผู้เรียกเก่าที่ไม่รู้จัก role เลย ซึ่งจะตกไป
+ *    ที่ด่านตรวจความเป็นเจ้าของเสมอ (ไม่มีทาง "any salesperson" แบบไม่รู้ role) — ปลอดภัยไว้ก่อน
  */
-async function assertMayActAs(adminId: number, role: Role, spUserId: any): Promise<void> {
-  if (await can(role, 'quote.act_as_any_salesperson')) return;
+async function assertMayActAs(adminId: number, role: Role | undefined, spUserId: any): Promise<void> {
+  if (role && (await can(role, 'quote.act_as_any_salesperson'))) return;
 
   const mine = await getAdminSalespersonIds(adminId);
   if (mine.length === 0) {
@@ -758,7 +782,7 @@ export async function createDraft(params: {
   await assertMayActAs(params.adminId, params.role, params.spUserId);
 
   const ruleModes = await ruleModesOf(params.role);
-  const webUserId = await resolveWebUserId(params.adminId, params.spUserId);
+  const webUserId = await resolveWebUserId(params.adminId, params.spUserId, params.role);
 
   return runQueued(webUserId, async () => {
     const startedAt = Date.now();
@@ -1537,6 +1561,13 @@ export async function previewQuotePdf(params: WebQuotePreviewParams & {
     throw new WebQuoteError('BAD_REQUEST', 'ต้องระบุใบที่จะพรีวิว (quote_company = PM หรือ THT)', 400);
   }
 
+  // ออกใบในนามคนอื่นไม่ได้ ถ้าไม่มีสิทธิ์ — แม้พรีวิวจะไม่เขียน DB แต่ก็ไม่ควรให้เห็นหน้าตา
+  // ใบที่ใช้ชื่อ/ลายเซ็นของรหัสอื่นที่ไม่มีสิทธิ์ออกในนาม (§13.6 ข้อ 9)
+  // ⚠️ เรียกแค่ตัวตรวจสิทธิ์ ไม่เรียก resolveWebUserId/ensureWebProxy — พรีวิวต้องไม่สร้างแถวพร็อกซี
+  if (params.spUserId) {
+    await assertMayActAs(params.adminId, params.role, params.spUserId);
+  }
+
   const { result, artifacts } = await previewDraftInternal(params);
   const art = artifacts.byCompany[company];
   if (!art || art.items.length === 0) {
@@ -1544,7 +1575,9 @@ export async function previewQuotePdf(params: WebQuotePreviewParams & {
   }
 
   const sp = params.spUserId ? await getSalespersonByUserId(String(params.spUserId)) : null;
-  const issuer = await getAdminIssuerProfile(params.adminId);
+  // role='salesperson': ไม่อ่านโปรไฟล์แอดมินเลย — ปล่อย issuer เป็น null ให้ PDF เดินเส้นเดิม
+  // ของใบ LINE (ช่องขวาเดินเส้นเดิมทุกบรรทัด = ชื่อ/ลายเซ็นเดียวกับช่องพนักงานขาย §13.2)
+  const issuer = params.role === 'salesperson' ? null : await getAdminIssuerProfile(params.adminId);
   const c = result.customer;
 
   // รูปร่างเดียวกับที่ enrichQuotationData() คืนให้ route /download-pdf — pdfGenerator อ่านจาก
@@ -1636,7 +1669,11 @@ export interface ReviseResult {
  */
 export async function reviseQuotation(params: {
   adminId: number;
-  /** ไม่ส่งมา = กติกาเดิม (กัน SYSTEM_ERROR อย่างเดียว) — ผู้เรียกเก่าทุกตัวได้ผลเท่าเดิม */
+  /**
+   * ไม่ส่งมา = กติกาเดิมของกฎ (กัน SYSTEM_ERROR อย่างเดียว) ผู้เรียกเก่าทุกตัวได้ผลเท่าเดิม
+   * ⚠️ **ด่านออกใบในนามคนอื่น (assertMayActAs) ยังบังคับใช้เสมอไม่ว่าจะส่ง role มาหรือไม่**
+   *    (§13.6 ข้อ 9) — ไม่ส่ง role มาจะตกไปที่ด่านที่เข้มที่สุด (ต้องเป็นรหัสของตัวเองเท่านั้น)
+   */
   role?: Role;
   spUserId: string;
   quotationNo: string;
@@ -1644,7 +1681,9 @@ export async function reviseQuotation(params: {
   const quoteNo = String(params.quotationNo ?? '').trim().toUpperCase();
   if (quoteNo === '') throw new WebQuoteError('BAD_REQUEST', 'ต้องระบุเลขที่ใบเสนอราคา (quotation_no)', 400);
 
-  const webUserId = await resolveWebUserId(params.adminId, params.spUserId);
+  // ออกใบ (revision) ในนามคนอื่นไม่ได้ ถ้าไม่มีสิทธิ์ — เส้นนี้เขียนร่างจริงลง DB (§13.6 ข้อ 9)
+  await assertMayActAs(params.adminId, params.role, params.spUserId);
+  const webUserId = await resolveWebUserId(params.adminId, params.spUserId, params.role);
 
   return runQueued(webUserId, async () => {
     const startedAt = Date.now();

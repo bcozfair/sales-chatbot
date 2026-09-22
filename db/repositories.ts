@@ -1621,6 +1621,29 @@ export async function getAdminSalespersonIds(adminUserId: number): Promise<strin
 }
 
 /**
+ * เขียนรหัสพนักงานขายทั้งหมดของบัญชีหนึ่งในคำสั่งเดียว — ลบทิ้งแล้วใส่ใหม่
+ * (แพทเทิร์นเดียวกับ `replaceRolePermissions`) docs/plan-role-permissions.md §13.7 ข้อ 6
+ *
+ * รับ `client` ของทรานแซกชันเดียวกับที่แก้ `admin_users.role` เสมอ ไม่เปิด overload ที่ใช้
+ * `pool` ตรง ๆ เพราะ "เปลี่ยน role เป็น salesperson" กับ "ผูกรหัส" ต้องเป็นอะตอมเดียวกัน —
+ * ไม่งั้นมีช่วงเวลาที่บัญชีเป็น salesperson แต่ยังไม่ผูกรหัสเลย
+ */
+export async function replaceAdminSalespersonIds(
+  client: DbExecutor,
+  adminUserId: number,
+  salespersonIds: string[]
+): Promise<void> {
+  await client.query('DELETE FROM admin_user_salespersons WHERE admin_user_id = $1', [adminUserId]);
+  if (salespersonIds.length === 0) return;
+  await client.query(
+    `INSERT INTO admin_user_salespersons (admin_user_id, salesperson_id)
+     SELECT $1::integer, t.code FROM UNNEST($2::varchar[]) AS t(code)
+     ON CONFLICT DO NOTHING`,
+    [adminUserId, salespersonIds]
+  );
+}
+
+/**
  * รหัสพนักงานขายของใบหนึ่งใบในภาษา SQL — **ต้องใช้กับ query ที่มี**
  * `FROM quotations q LEFT JOIN salesperson s ON q.user_id = s.user_id`
  *
