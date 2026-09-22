@@ -89,20 +89,28 @@ async function queryOdooQuotationMakers(): Promise<QuotationMaker[]> {
     await client.query(`SET LOCAL statement_timeout = '30s'`);
     // สแกน sale_orders รอบเดียวลง CTE แล้วค่อยแยกเป็น "รายชื่อ" กับ "เบอร์ที่เลือกให้"
     //
-    // LEFT JOIN ไม่ใช่ INNER — ชื่อที่ไม่มีเบอร์เลย (วัดแล้วมี 2 จาก 70) ต้องยังอยู่ในรายชื่อ
-    // ไม่งั้นแอดมินคนนั้นจะเลือกชื่อตัวเองไม่ได้เลยทั้งที่แผนบอกว่าบันทึกได้ (§2.5b)
+    // ⚠️ ไม่กรอง invoice_status = 'invoiced' อีกต่อไป (แก้ 2026-09-22 · §13 ของ
+    // docs/plan-role-permissions.md) — วัดจริงวันนั้น: กรองแบบเดิมได้ 72 ชื่อ ตัดชื่อที่ถูกต้อง
+    // ออกไป 7 ชื่อ (รวม "ดุลยภาพ ขันคำ" ที่เจ้าของยืนยันเป็นคนจริง) ⇒ ขยายเป็น 79 ชื่อ ยังกรอง
+    // แค่ employee_quotations ต้องไม่ว่างเหมือนเดิม
     //
-    // `n DESC, phone` เป็น tiebreak ที่ต้องมี ถึงวันนี้จะไม่มีเคสเสมอก็ตาม — ไม่มีมันแล้ว
-    // วันหนึ่งมีสองเบอร์ลงวันเดียวกัน คำตอบจะสลับไปมาระหว่างการรันโดยไม่มีอะไรบอก
+    // LEFT JOIN ไม่ใช่ INNER — ชื่อที่ไม่มีเบอร์เลยต้องยังอยู่ในรายชื่อ ไม่งั้นแอดมินคนนั้นจะเลือก
+    // ชื่อตัวเองไม่ได้เลยทั้งที่แผนบอกว่าบันทึกได้ (§2.5b)
+    //
+    // `(invoice_status = 'invoiced') DESC` เป็น tiebreak ใหม่ที่ต้องมาก่อนทุกตัว — ชื่อ 72 ตัวเดิม
+    // ต้องได้เบอร์เดียวกับก่อนแก้ทุกตัว (ใบที่ออกบิลแล้วชนะก่อนเสมอ) แล้วค่อยตกไปใช้ใบที่ยังไม่ออกบิล
+    // ถ้าชื่อนั้นไม่มีใบที่ออกบิลแล้วเลย (เช่น "ดุลยภาพ ขันคำ")
+    // `n DESC, phone` เป็น tiebreak ชั้นถัดไป ถึงวันนี้จะไม่มีเคสเสมอก็ตาม — ไม่มีมันแล้ววันหนึ่ง
+    // มีสองเบอร์ลงวันเดียวกัน คำตอบจะสลับไปมาระหว่างการรันโดยไม่มีอะไรบอก
     // (Postgres ไม่รับประกันลำดับของแถวที่เท่ากัน)
     const { rows } = await client.query(`
       WITH src AS (
         SELECT regexp_replace(btrim(employee_quotations), '\\s*\\([^)]*\\)\\s*$', '') AS name,
                NULLIF(btrim(COALESCE(employee_quotations_phone, '')), '')             AS phone,
-               order_date
+               order_date,
+               invoice_status
           FROM sale_orders
-         WHERE invoice_status = 'invoiced'
-           AND employee_quotations IS NOT NULL
+         WHERE employee_quotations IS NOT NULL
            AND btrim(employee_quotations) <> ''
       ),
       names AS (
@@ -110,11 +118,18 @@ async function queryOdooQuotationMakers(): Promise<QuotationMaker[]> {
       ),
       picked AS (
         SELECT DISTINCT ON (name) name, phone
-          FROM (SELECT name, phone, max(order_date) AS last_used, count(*) AS n
+          FROM (SELECT name, phone,
+                       bool_or(invoice_status = 'invoiced') AS invoiced,
+                       -- last_used เฉพาะใบที่ออกบิลแล้ว — ค่านี้เท่ากับ last_used ทั้งก้อนของ
+                       -- query เดิม (ตอนที่ src ยังกรอง invoiced อย่างเดียว) เป๊ะ ⇒ อันดับของ
+                       -- ชื่อ/เบอร์ที่มีใบออกบิลแล้วไม่ขยับแม้แต่ไบต์เดียว
+                       max(order_date) FILTER (WHERE invoice_status = 'invoiced') AS invoiced_last_used,
+                       max(order_date) AS last_used,
+                       count(*) AS n
                   FROM src
                  WHERE name <> '' AND phone IS NOT NULL
                  GROUP BY 1, 2) t
-         ORDER BY name, last_used DESC NULLS LAST, n DESC, phone
+         ORDER BY name, invoiced DESC, COALESCE(invoiced_last_used, last_used) DESC NULLS LAST, n DESC, phone
       )
       SELECT n.name, p.phone
         FROM names n
@@ -140,6 +155,8 @@ async function queryOdooQuotationMakers(): Promise<QuotationMaker[]> {
 
 /**
  * รายชื่อผู้จัดทำที่ Odoo รู้จักจริง (เรียงตามตัวอักษร) — วัดจริง 2026-09-07 ได้ 70 ชื่อ
+ * (กรอง invoice_status='invoiced' ตอนนั้น) · 2026-09-22 เลิกกรองสถานะออกบิลแล้วได้ 79 ชื่อ
+ * (§13 ของ docs/plan-role-permissions.md — 7 ชื่อที่หายไปก่อนหน้านี้เป็นชื่อที่ถูกต้องจริง)
  * อยู่นอกเส้นทางออกใบและ export ทั้งหมด ⇒ ช้าตรงนี้ไม่กระทบงานหลัก
  */
 export async function listOdooQuotationMakers(): Promise<QuotationMaker[]> {
@@ -369,10 +386,17 @@ export interface IssuerSnapshot {
  *
  * ⚠️ ต้อง snapshot ไม่ใช่คำนวณสดตอนเจน PDF เพราะ `pdfCacheKey()` แฮชทั้งแถว `quotations`
  *    ค่าที่อยู่นอกแถวเปลี่ยนแล้วคีย์ไม่ขยับ = cache จ่ายใบผิดตลอดไป (§2.6)
+ *
+ * ⚠️ **บัญชี role='salesperson' คืน null เสมอ แม้ `employee_quotation_id` จะมีค่า** — เส้นเซลส์
+ *    ออกใบเอง (§13.2) เดินเส้นเดิมของใบ LINE ทั้งเส้น ช่องขวาต้องเป็นชื่อ+ลายเซ็นของเซลส์เอง
+ *    จาก `sale_sigs` ไม่ใช่ของแอดมิน · เป็นด่านสำรองชั้นสอง (ชั้นแรกคือ role นี้ไม่มีทางมี
+ *    `employee_quotation_id` ถูกตั้งเลยเพราะไม่มี UI ไหนเขียนให้) กันไว้เผื่อมีคนตั้งค่าหลุดมา
  */
 export async function getIssuerSnapshot(userId: string | null | undefined): Promise<IssuerSnapshot | null> {
   const parsed = parseWebUserId(userId);
   if (!parsed) return null;
+  const { rows } = await pool.query(`SELECT role FROM admin_users WHERE id = $1`, [parsed.adminId]);
+  if (rows[0]?.role === 'salesperson') return null;
   const profile = await getAdminIssuerProfile(parsed.adminId);
   if (!profile || profile.employee_quotation_id === null) return null;
   return {
@@ -457,18 +481,32 @@ export interface WebProxyAdmin {
  * ⚠️ ตอน UPDATE **ห้ามแตะ `status`** — ช่องนั้นเป็น state machine ของบทสนทนา
  *    (`edit_*` / `custom_quote:*` / `pending_*`) ถ้าเขียนทับเป็น 'active' ทุกครั้งที่เปิดหน้า
  *    บทสนทนาที่ค้างกลางทางจะถูกรีเซ็ตเงียบ ๆ · ตั้งได้ครั้งเดียวคือตอน INSERT
- * ⚠️ **ห้ามก๊อป `employee_quotation_id` จากเซลส์** — ช่อง J ต้องเป็นชื่อแอดมิน
+ * ⚠️ **ห้ามก๊อป `employee_quotation_id` จากเซลส์ในโหมดปกติ** — ช่อง J ต้องเป็นชื่อแอดมิน
  *    ถ้าเผลอก๊อป Odoo จะบันทึกว่าเซลส์เป็นคนคีย์ใบเอง = ข้อมูลผู้จัดทำผิด
+ *    (ยกเว้น `selfIssue: true` — ดูหมายเหตุด้านล่าง ตั้งใจก๊อปในโหมดนั้นเท่านั้น)
  * ⚠️ **ไม่ก๊อป `branch`** — ปล่อย NULL ตามที่ §2.4 ของแผนตรวจแล้วว่าไม่มีใครใช้ในเส้นทางนี้
+ *
+ * @param opts.selfIssue เซลส์ (role='salesperson') ออกใบของตัวเอง ไม่ใช่แอดมินออกในนามเซลส์คนอื่น
+ *   (§13.2 ของ docs/plan-role-permissions.md) — สองจุดต่างจากโหมดปกติ:
+ *     1. ไม่ต้องมี `admin.employee_quotation_id` (บัญชีเซลส์ไม่มีแนวคิดนี้เลย — §13.5)
+ *     2. ช่อง J ของแถวพร็อกซี **ก๊อปจาก `salesperson.employee_quotation_id` ของเซลส์เอง**
+ *        เพื่อให้ใบที่ออกจากเว็บได้ชื่อผู้จัดทำเดียวกับใบที่เขาออกผ่าน LINE ทุกประการ
+ *        (`issuer_name` ของใบยังเป็น null เหมือนเดิม — getIssuerSnapshot() กันไว้อีกชั้น
+ *        ด้วยการเช็ค role ของแอดมินเจ้าของพร็อกซี ไม่ได้พึ่งพารามิเตอร์นี้ฝั่งเดียว)
  */
-export async function ensureWebProxy(admin: WebProxyAdmin, spUserId: string): Promise<string> {
+export async function ensureWebProxy(
+  admin: WebProxyAdmin,
+  spUserId: string,
+  opts?: { selfIssue?: boolean }
+): Promise<string> {
+  const selfIssue = opts?.selfIssue === true;
   const maker = admin.employee_quotation_id ? String(admin.employee_quotation_id).trim() : '';
-  if (maker === '') {
+  if (!selfIssue && maker === '') {
     throw new Error('แอดมินคนนี้ยังไม่ได้ตั้งชื่อผู้จัดทำ (admin_users.employee_quotation_id)');
   }
 
   const { rows: spRows } = await pool.query(
-    `SELECT user_id, name, phone, salesperson_id
+    `SELECT user_id, name, phone, salesperson_id, employee_quotation_id
        FROM salesperson
       WHERE user_id = $1 AND status = 'active' AND user_id NOT LIKE 'web:%'`,
     [spUserId]
@@ -477,6 +515,8 @@ export async function ensureWebProxy(admin: WebProxyAdmin, spUserId: string): Pr
   if (!sp) throw new Error(`ไม่พบเซลส์ที่ใช้งานอยู่ user_id=${spUserId}`);
 
   const webUserId = buildWebUserId(admin.id, sp.user_id);
+  // selfIssue: ช่อง J = ของเซลส์เอง (อาจเป็น NULL ถ้าแถวจริงของเขายังไม่มีชื่อผู้จัดทำ — ปกติ §13.5)
+  const employeeQuotationId = selfIssue ? (sp.employee_quotation_id ?? null) : maker;
 
   await pool.query(
     `INSERT INTO salesperson (user_id, name, status, phone, salesperson_id, employee_quotation_id)
@@ -487,7 +527,7 @@ export async function ensureWebProxy(admin: WebProxyAdmin, spUserId: string): Pr
             salesperson_id        = EXCLUDED.salesperson_id,
             employee_quotation_id = EXCLUDED.employee_quotation_id,
             updated_at            = CURRENT_TIMESTAMP`,
-    [webUserId, sp.name, sp.phone, sp.salesperson_id, maker]
+    [webUserId, sp.name, sp.phone, sp.salesperson_id, employeeQuotationId]
   );
 
   return webUserId;

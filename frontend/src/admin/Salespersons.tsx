@@ -96,6 +96,10 @@ export function Salespersons() {
   const [roster, setRoster] = useState<RosterEntry[]>([]);
   const [showNameSuggest, setShowNameSuggest] = useState(false);
 
+  // รายชื่อผู้จัดทำจาก Odoo (สำหรับช่อง employee_name — คนละรายชื่อกับ roster ข้างบน)
+  const [makers, setMakers] = useState<{ name: string; phone: string | null }[]>([]);
+  const [showMakerSuggest, setShowMakerSuggest] = useState(false);
+
   // Delete confirm
   const [deletingSp, setDeletingSp] = useState<Salesperson | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -150,6 +154,16 @@ export function Salespersons() {
       .catch(err => console.error('โหลดรายชื่อพนักงานไม่สำเร็จ:', err));
   }, []);
 
+  // รายชื่อผู้จัดทำจาก Odoo — endpoint เดียวกับที่ QuoteIssuerProfile.tsx/Users.tsx ใช้ (ไม่สร้างซ้ำ)
+  useEffect(() => {
+    if (!token) return;
+    fetch('/api/admin/webquote/makers', { headers: { Authorization: `Bearer ${token}` } })
+      .then(res => res.ok ? res.json() : { makers: [] })
+      .then((body: { makers?: { name: string; phone: string | null }[] }) =>
+        setMakers(Array.isArray(body.makers) ? body.makers : []))
+      .catch(err => console.error('โหลดรายชื่อผู้จัดทำไม่สำเร็จ:', err));
+  }, [token]);
+
   const showToast = (message: string, type: ToastType = 'success') => {
     setToast({ message, type });
     setTimeout(() => {
@@ -166,6 +180,7 @@ export function Salespersons() {
     setFormEmpQuotationId(sp.employee_quotation_id || '');
     setFormError(null);
     setShowNameSuggest(false);
+    setShowMakerSuggest(false);
   };
 
   // เลือกชื่อจากรายการ → เติมรหัส/เบอร์ให้อัตโนมัติ เหมือนหน้า LIFF
@@ -181,6 +196,17 @@ export function Salespersons() {
     if (!q) return true;
     return r.name.toLowerCase().includes(q) || (r.salesperson_id || '').toLowerCase().includes(q);
   }).slice(0, 50);
+
+  // employee_name เทียบตรงตัวกับรายชื่อจาก Odoo — ค้นหาได้ (combobox) แต่พิมพ์เองก็ยังบันทึกได้
+  // (free entry — เจตนาคนละอย่างกับ formName ข้างบนซึ่งเป็นชื่อในระบบเซลส์เอง)
+  const makerSuggestions = makers.filter(m => {
+    const q = formEmpQuotationId.trim().toLowerCase();
+    if (!q) return true;
+    return m.name.toLowerCase().includes(q);
+  }).slice(0, 50);
+  // เทียบตรงตัวแบบเดียวกับ isValidQuotationMaker() ฝั่ง server (webIdentity.ts) — ไม่ trim
+  // เพื่อให้คำเตือนสะท้อนของจริง (ชื่อที่มีช่องว่างท้ายจริงใน Odoo จะไม่ขึ้นเตือนถ้าพิมพ์ตรงเป๊ะ)
+  const makerIsUnknown = formEmpQuotationId !== '' && !makers.some(m => m.name === formEmpQuotationId);
 
   const handleDelete = async () => {
     if (!deletingSp) return;
@@ -792,14 +818,18 @@ export function Salespersons() {
                     <input
                       type="text"
                       value={formEmpQuotationId}
-                      onChange={(e) => setFormEmpQuotationId(e.target.value)}
-                      placeholder="เช่น นฤเบศร์ ทองดี"
+                      onChange={(e) => { setFormEmpQuotationId(e.target.value); setShowMakerSuggest(true); }}
+                      onFocus={() => setShowMakerSuggest(true)}
+                      onBlur={() => setTimeout(() => setShowMakerSuggest(false), 150)}
+                      placeholder="เช่น นฤเบศร์ ทองดี — แตะเพื่อเลือกจากรายชื่อ หรือพิมพ์เอง"
+                      autoComplete="off"
                       maxLength={255}
                       className="w-full h-9 pl-3 pr-9 bg-card border border-slate-200 focus:border-[var(--brand-fg)] rounded-xl text-sm text-slate-800 outline-none transition-all focus:ring-2 focus:ring-[var(--brand-fg)]/10"
                     />
                     {formEmpQuotationId && (
                       <button
                         type="button"
+                        onMouseDown={(e) => e.preventDefault()}
                         onClick={() => setFormEmpQuotationId('')}
                         title="ล้างค่า (บันทึกแล้วจะลบชื่อจริงออกจากระบบ)"
                         className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-red-600 transition-colors"
@@ -807,10 +837,35 @@ export function Salespersons() {
                         <X className="w-3.5 h-3.5" />
                       </button>
                     )}
+                    {showMakerSuggest && (
+                      <div className="absolute left-0 right-0 top-full mt-1 z-10 max-h-52 overflow-y-auto bg-card border border-slate-200 rounded-xl shadow-lg">
+                        {makerSuggestions.length === 0 ? (
+                          <div className="px-3 py-2.5 text-xs text-slate-400 italic">
+                            ไม่พบชื่อในรายชื่อจาก Odoo — พิมพ์เองได้ตามปกติ
+                          </div>
+                        ) : makerSuggestions.map((m) => (
+                          <button
+                            key={m.name}
+                            type="button"
+                            onMouseDown={(e) => { e.preventDefault(); setFormEmpQuotationId(m.name); setShowMakerSuggest(false); }}
+                            className="w-full text-left px-3 py-2 hover:bg-slate-50 border-b border-slate-100 last:border-b-0 transition-colors"
+                          >
+                            <span className="text-sm text-slate-800">{m.name}</span>
+                            <span className="ml-2 text-[11px] font-mono text-slate-400">{m.phone || 'ไม่มีเบอร์'}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
+                  {makerIsUnknown && (
+                    <p className="text-[10px] text-amber-600 leading-relaxed font-medium">
+                      ชื่อนี้ไม่มีในฐานข้อมูล Odoo — ไฟล์ export จะ import ไม่ผ่าน (ยังบันทึกได้ตามปกติ)
+                    </p>
+                  )}
                   <p className="text-[10px] text-slate-400 leading-relaxed">
                     ชื่อจริงของเซลล์ฝั่ง Odoo — ไฟล์ export จะเติมสังกัด (PM)/(THT) ให้เองตามเลขที่ใบ
-                    เว้นว่างไว้ได้ ช่องนี้ในไฟล์จะเป็นเซลล์ว่าง
+                    เว้นว่างไว้ได้ ช่องนี้ในไฟล์จะเป็นเซลล์ว่าง เลือกจากรายชื่อได้ หรือพิมพ์เองสำหรับ
+                    พนักงานที่ยังไม่มีชื่อใน Odoo
                   </p>
                 </div>
               </div>

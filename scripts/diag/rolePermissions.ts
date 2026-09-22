@@ -344,7 +344,9 @@ async function main() {
   const ROLE_ONLY = [
     'GET /api/admin/role-permissions',        // หน้าตั้งค่าสิทธิ์ จงใจไม่เอาตัวเองเข้าเมทริกซ์ (§4ข)
     'PUT /api/admin/role-permissions',
-    'PUT /api/admin/webquote/me',             // ตัวตนบนใบ — §13.3 ห้ามเปิดให้ salesperson
+    // PUT /api/admin/webquote/me ปิดถาวรแล้ว (§13.3/§13.6 ข้อ 12, 2026-09-22) — ตอบ 403 เสมอ
+    // ไม่ว่า role ไหน และเปลี่ยนจาก requireRole ล้วนมาเป็น requireCapability('quote.create')
+    // จึงหลุดออกจากรายการนี้ (ไม่ได้ตกไปอยู่ที่ NO_GUARD ด้วย เพราะมันมีด่านจริงแล้ว)
     'POST /api/admin/webquote/me/signature',
     'DELETE /api/admin/webquote/me/signature',
   ];

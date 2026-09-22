@@ -14,8 +14,12 @@
 //   4. ไม่มีลายเซ็นแอดมิน → ช่องขวาไม่มีรูป และ **ห้ามถอยไปใช้ลายเซ็นเซลส์**
 //   5. updateQuotationCustomerSnapshot ต้องไม่กิน 3 คีย์ทิ้ง (กับดัก §2.6)
 //   5b. การเลือกเบอร์ให้อัตโนมัติ — 1 ชื่อ = 1 เบอร์ ที่มาจากใบล่าสุด ไม่ใช่ที่ใช้บ่อยสุด
+//   5c. รายงาน (ไม่ fail) salesperson.employee_quotation_id ที่ตรง/ไม่ตรงรายชื่อ Odoo — เฟส
+//       "เซลส์ออกใบเอง" (§13 ของ docs/plan-role-permissions.md) ทำให้ช่อง J มาจากค่านี้มากขึ้น
 //   6. ใบ LINE ต้องไม่มีคีย์ issuer_* ใน employee_details เลย (ไม่ใช่มีแล้วเป็น null)
 //   7. แถวพร็อกซี web:% ต้องไม่โผล่ในทางที่ "ลิสต์คน" ทุกทาง (§2.3b)
+//   13. §13.6 ข้อ 13 ของ docs/plan-role-permissions.md — setAdminQuotationMaker() (ที่ PUT
+//       /api/admin/users/:id/quotation-maker ใหม่เรียก) ต้องเขียนชื่อ+เบอร์คู่กันเสมอ
 //
 //  ⚠️ เคส 5–7 สร้างแอดมิน/เซลส์/ใบชั่วคราวของตัวเองแล้วลบทิ้งเสมอ (finally)
 //     ไม่แตะแถวของคนจริงแม้แต่แถวเดียว
@@ -30,6 +34,7 @@ import {
 } from '../../services/webIdentity.js';
 import { updateQuotationCustomerSnapshot } from '../../services/quotationService.js';
 import { listSalespersonsForAdmin, findDuplicateEmployeeCodeNames } from '../../db/repositories.js';
+import { setAdminQuotationMaker } from '../../services/webIdentity.js';
 
 let failures = 0;
 const ok = (label: string, cond: boolean, extra = '') => {
@@ -226,6 +231,24 @@ const makers = await listOdooQuotationMakers();
      wrong.length ? `พลาด: ${wrong.map((r: any) => r.name).join(', ')}` : `ตรวจแล้ว ${proof.length} ชื่อ`);
 }
 
+// ── 5c. §13.7 ข้อ 6/7: salesperson.employee_quotation_id เทียบกับรายชื่อ 79 ชื่อ (2026-09-22) ──
+//  ไม่ได้อยู่ในสเปกของ §13.6 ตรง ๆ แต่จำเป็นเพราะเฟสนี้เปิดช่อง "เซลส์ออกใบเอง" ⇒ ช่อง J
+//  ของไฟล์ export จะเริ่มมาจาก salesperson.employee_quotation_id ของแถวจริงมากขึ้น (ไม่ใช่แค่
+//  ของแอดมินเหมือนก่อนหน้านี้) — รายงานว่ากี่แถวตรง/ไม่ตรงกับรายชื่อที่ Odoo รู้จักจริง
+//  ไม่ fail ด่าน (ค่าที่พิมพ์เองได้ตามที่ Salespersons.tsx อนุญาต) แค่รายงานให้เห็นสภาพข้อมูลจริง
+{
+  const makerNameSet = new Set(makers.map(m => m.name));
+  const { rows: spRows } = await pool.query(`
+    SELECT DISTINCT employee_quotation_id
+      FROM salesperson
+     WHERE employee_quotation_id IS NOT NULL AND btrim(employee_quotation_id) <> ''
+       AND user_id NOT LIKE 'web:%'
+  `);
+  const total = spRows.length;
+  const matched = spRows.filter((r: any) => makerNameSet.has(r.employee_quotation_id)).length;
+  console.log(`  5c. salesperson.employee_quotation_id ทั้งหมด ${total} ชื่อ (distinct) — ตรงกับรายชื่อ Odoo ${matched} · ไม่ตรง ${total - matched}`);
+}
+
 // ── 5 / 6 / 7. ต้องแตะ DB จริง ────────────────────────────────────────────────
 let tmpAdminId: number | null = null;
 let tmpProxyUserId: string | null = null;
@@ -298,6 +321,21 @@ try {
   ok('7d. ตัวเลขบนการ์ดแดชบอร์ดตรงกับจำนวนแถวในหน้าจัดการพนักงาน',
      statRows[0].shown === adminList.length && statRows[0].total > statRows[0].shown,
      `การ์ด ${statRows[0].shown} · ทั้งตาราง ${statRows[0].total}`);
+
+  // ── §13.6 ข้อ 13: เบอร์เดินคู่ชื่อเสมอ — setAdminQuotationMaker() คือ path เดียวที่
+  //    PUT /api/admin/users/:id/quotation-maker (ใหม่ 2026-09-22) เรียกใช้ (ทำท้ายสุด
+  //    หลังใช้ tmpAdminId ในเคสอื่นครบแล้ว เพื่อไม่ให้ไปกวน 5a ที่เทียบกับ `maker.name` เดิม)
+  const otherMaker = makers.find(m => m.name !== maker.name && m.phone !== null) ?? makers.find(m => m.name !== maker.name);
+  if (otherMaker) {
+    const saved = await setAdminQuotationMaker(tmpAdminId as number, otherMaker.name);
+    ok('13. setAdminQuotationMaker เขียนชื่อ+เบอร์คู่กันในคำสั่งเดียว',
+      saved.employee_quotation_id === otherMaker.name && saved.employee_quotation_phone === otherMaker.phone,
+      JSON.stringify(saved));
+    const { rows: dbRow } = await pool.query(
+      'SELECT employee_quotation_id, employee_quotation_phone FROM admin_users WHERE id = $1', [tmpAdminId]);
+    ok('13b. ค่าที่เขียนลง DB ตรงกับที่ setAdminQuotationMaker คืนมา',
+      dbRow[0]?.employee_quotation_id === otherMaker.name && dbRow[0]?.employee_quotation_phone === otherMaker.phone);
+  }
 } finally {
   // เก็บกวาดเสมอ แม้เคสข้างบนจะพัง — ห้ามทิ้งแถวปลอมไว้ในตารางจริง
   if (tmpQuoteIds.length) await pool.query(`DELETE FROM quotations WHERE id = ANY($1)`, [tmpQuoteIds]).catch(() => {});

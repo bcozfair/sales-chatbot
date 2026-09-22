@@ -125,10 +125,10 @@ const NAV_GROUPS: { key: string; label: string; icon: typeof LayoutDashboard; it
     label: 'งานใบเสนอราคา',
     icon: BriefcaseBusiness,
     items: [
-      { tab: 'quoterequest', label: 'ขอใบเสนอราคา', icon: FilePlus2, roles: ['admin', 'approver', 'subadmin'], cap: 'quote.create' },
+      { tab: 'quoterequest', label: 'ขอใบเสนอราคา', icon: FilePlus2, roles: ['admin', 'approver', 'subadmin', 'salesperson'], cap: 'quote.create' },
       // subadmin เห็นเมนูนี้ด้วย แต่เห็น "คำขอของตัวเอง" เท่านั้น — server เป็นคนกรอง ไม่ใช่หน้าจอ
-      { tab: 'approvals', label: 'อนุมัติราคา', icon: BadgeCheck, roles: ['admin', 'approver', 'subadmin'], cap: 'page.approvals' },
-      { tab: 'quotations', label: 'ประวัติใบเสนอราคา', icon: FileText, roles: ['admin', 'approver', 'subadmin'], cap: 'page.quotations' },
+      { tab: 'approvals', label: 'อนุมัติราคา', icon: BadgeCheck, roles: ['admin', 'approver', 'subadmin', 'salesperson'], cap: 'page.approvals' },
+      { tab: 'quotations', label: 'ประวัติใบเสนอราคา', icon: FileText, roles: ['admin', 'approver', 'subadmin', 'salesperson'], cap: 'page.quotations' },
       // เครื่องมือที่ใช้ตอนกำลังทำใบ ไม่ใช่ค่าที่ตั้งทิ้งไว้ให้ระบบใช้เอง จึงอยู่กลุ่มนี้ไม่ใช่ "เงื่อนไข & กฎ"
       // (เจ้าของเคาะ 2026-09-18) · ค่าเริ่มต้นคือ admin คนเดียว เพราะเป็นหน้าที่ยังไม่เคยมี
       // ไอคอนเคยเป็น `Calculator` แล้วเปลี่ยนเมื่อ 2026-09-19 เพราะ **เมนูในกลุ่มวาดไอคอนที่

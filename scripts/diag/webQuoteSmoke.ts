@@ -20,6 +20,12 @@
 //  9. ข้อมูลชุด "ใบจริง" ของขั้นใบร่าง (2026-09-17) — หมายเหตุรายบรรทัดที่แอดมินพิมพ์ ·
 //     ยอดท้ายใบ 5 ช่องที่ต้องตรงกับ `quotationDocumentTotals()` ตัวเดียวกับ PDF ·
 //     และ `previewQuotePdf()` ที่ต้องได้ไฟล์ PDF จริงโดย **ไม่เขียน DB และไม่ออกเลขที่ใบ**
+//  10. §13.6 ของ docs/plan-role-permissions.md ("ตัวตนบนใบที่ออกจากเว็บ") — เพิ่ม 2026-09-22:
+//     ข้อ 9  แอบอ้างไม่ได้ — บัญชีเซลส์ (role='salesperson') ยิง sp_user_id ของรหัสที่ไม่ได้ผูก
+//            เข้า propose/preview-pdf/drafts/revise ต้องได้ FORBIDDEN ทุกเส้น ก่อนแตะ DB เสมอ
+//     ข้อ 10 เซลส์ออกใบเอง (self-issue) — แถวพร็อกซีถือ employee_quotation_id ของเซลส์เอง (ไม่ใช่
+//            ของแอดมิน) และ getIssuerSnapshot() คืน null เสมอสำหรับบัญชีนี้ (ช่องขวาเดินเส้นเดิม)
+//     ข้อ 12 PUT /api/admin/webquote/me ปิดถาวรแล้ว — ต้อง 403 เสมอและคอลัมน์ไม่ขยับ
 //
 //  ⚠️ เขียนข้อมูลจริงลง DB (salesperson · admin_users · quotations ของ user ทดสอบ)
 //     แล้วลบทิ้งใน finally ทุกกรณี — user/แอดมินทดสอบเป็นค่าคงที่ที่ไม่ชนของจริง
@@ -48,6 +54,8 @@ import {
   resolveWebUserId,
   WebQuoteError,
 } from '../../services/webQuoteService.js';
+import { getIssuerSnapshot } from '../../services/webIdentity.js';
+import { pickOwnActingSalesperson } from '../../services/salespersonPicker.js';
 import { quotationDocumentTotals, round2 } from '../../utils/pricing.js';
 import jwt from 'jsonwebtoken';
 import { getJwtSecret } from '../../config/jwt.js';
@@ -201,7 +209,7 @@ async function case2() {
   const survivorId = seeded[0].id;
 
   const before = Number((await pool.query('SELECT COUNT(*)::int AS n FROM quotations WHERE user_id = $1', [webUserId])).rows[0].n);
-  const proposed = await proposeFromText({ adminId, spUserId: TEST_SP_USER, text: SAMPLE_TEXT });
+  const proposed = await proposeFromText({ adminId, role: 'admin', spUserId: TEST_SP_USER, text: SAMPLE_TEXT });
   const after = Number((await pool.query('SELECT COUNT(*)::int AS n FROM quotations WHERE user_id = $1', [webUserId])).rows[0].n);
 
   ok('ไม่มีใบใหม่ถูกเขียน', before === after, `ก่อน ${before} → หลัง ${after}`);
@@ -302,7 +310,7 @@ async function case4(quotationNo: string | null) {
     return;
   }
 
-  const revised = await reviseQuotation({ adminId, spUserId: TEST_SP_USER, quotationNo });
+  const revised = await reviseQuotation({ adminId, role: 'admin', spUserId: TEST_SP_USER, quotationNo });
   ok('ใบที่ยืนยันแล้ว → ได้ร่าง revision', !!revised.draft_quote_id, revised.draft_quote_id);
   ok('ร่างอ้างเลขที่ใบต้นทางถูกต้อง', revised.revise_from === quotationNo, revised.revise_from);
 
@@ -315,12 +323,12 @@ async function case4(quotationNo: string | null) {
 
   // ร่าง (ยังไม่มีเลขที่) ไม่มีทางถูกอ้างถึงได้เลย — ไม่มีเลขให้พิมพ์ ⇒ ต้องตอบ "ไม่พบ" ไม่ใช่ 500
   let code = '';
-  try { await reviseQuotation({ adminId, spUserId: TEST_SP_USER, quotationNo: 'QP-999999999' }); }
+  try { await reviseQuotation({ adminId, role: 'admin', spUserId: TEST_SP_USER, quotationNo: 'QP-999999999' }); }
   catch (e: any) { code = e instanceof WebQuoteError ? e.code : `(${e?.name}) ${e?.message}`; }
   ok('เลขที่ไม่มีในระบบ → QUOTATION_NOT_FOUND', code === 'QUOTATION_NOT_FOUND', code || '(ไม่ throw)');
 
   let blankCode = '';
-  try { await reviseQuotation({ adminId, spUserId: TEST_SP_USER, quotationNo: '  ' }); }
+  try { await reviseQuotation({ adminId, role: 'admin', spUserId: TEST_SP_USER, quotationNo: '  ' }); }
   catch (e: any) { blankCode = e instanceof WebQuoteError ? e.code : `(${e?.name}) ${e?.message}`; }
   ok('ไม่ส่งเลขที่ → BAD_REQUEST', blankCode === 'BAD_REQUEST', blankCode || '(ไม่ throw)');
 
@@ -920,7 +928,7 @@ ${BOLD}9) ข้อมูลใบจริงบนขั้นใบร่า�
   const before = await countQuotes();
   const seqBefore = await seqSum();
   const out = await previewQuotePdf({
-    adminId, spUserId: TEST_SP_USER, quoteCompany: q.quote_company,
+    adminId, role: 'admin', spUserId: TEST_SP_USER, quoteCompany: q.quote_company,
     customerId: cust.customerId, contactId: cust.contactId, items,
   });
   const after = await countQuotes();
@@ -961,13 +969,130 @@ ${BOLD}9) ข้อมูลใบจริงบนขั้นใบร่า�
   let rejected = '';
   try {
     await previewQuotePdf({
-      adminId, spUserId: TEST_SP_USER, quoteCompany: 'XX',
+      adminId, role: 'admin', spUserId: TEST_SP_USER, quoteCompany: 'XX',
       customerId: cust.customerId, contactId: cust.contactId, items,
     });
   } catch (e: any) {
     rejected = e instanceof WebQuoteError ? e.code : 'OTHER';
   }
   ok('  ระบุใบผิด (ไม่ใช่ PM/THT) ⇒ ปฏิเสธ 400', rejected === 'BAD_REQUEST', rejected);
+}
+
+/** ผลของ WebQuoteError เป็นชื่อโค้ด — error อื่นห่อไว้ให้ยังอ่านได้ว่าคืออะไร */
+function codeOf(e: any): string {
+  return e instanceof WebQuoteError ? e.code : `(${e?.constructor?.name}) ${e?.message}`;
+}
+
+/**
+ * ข้อ 10 — §13.6 ข้อ 9 ของ docs/plan-role-permissions.md: แอบอ้างไม่ได้
+ *
+ * บัญชี role='salesperson' ผูกกับรหัสเดียว (DIAGIMPA) แล้วยิง sp_user_id ของรหัสที่ไม่ได้ผูก
+ * (DIAGIMPB) เข้า 4 เส้นที่รับ sp_user_id จาก client ต้องได้ FORBIDDEN **ทุกเส้น** ก่อนแตะตรรกะ
+ * อื่นใด (createDraft ต้องไม่เขียนแถวลง DB แม้แต่แถวเดียว) · มีคู่ควบคุม 2 อย่าง: ใช้รหัสตัวเอง
+ * ต้องไม่โดนบล็อกที่ด่านนี้ และ role='admin' (มี quote.act_as_any_salesperson) ใช้รหัสไหนก็ได้
+ */
+async function case10() {
+  console.log(`\n${BOLD}10) แอบอ้างไม่ได้ — assertMayActAs ต้องคุม propose/preview-pdf/drafts/revise ทั้งหมด${RESET}`);
+  const SP_A = 'Udiagimp0000000000000000000000aa';
+  const SP_B = 'Udiagimp0000000000000000000000bb';
+  const CODE_A = 'DIAGIMPA', CODE_B = 'DIAGIMPB';
+  let impAdminId: number | null = null;
+
+  try {
+    await pool.query(
+      `INSERT INTO salesperson (user_id, name, status, phone, salesperson_id)
+       VALUES ($1, 'DIAG เซลส์ A (ลบอัตโนมัติ)', 'active', '080-000-0001', $2)
+       ON CONFLICT (user_id) DO UPDATE SET status = 'active'`, [SP_A, CODE_A]);
+    await pool.query(
+      `INSERT INTO salesperson (user_id, name, status, phone, salesperson_id)
+       VALUES ($1, 'DIAG เซลส์ B (ลบอัตโนมัติ)', 'active', '080-000-0002', $2)
+       ON CONFLICT (user_id) DO UPDATE SET status = 'active'`, [SP_B, CODE_B]);
+    const { rows } = await pool.query(
+      `INSERT INTO admin_users (username, password_hash, name, role)
+       VALUES ($1, 'x-diag-not-a-login', 'DIAG บัญชีเซลส์ผูกรหัส A (ลบอัตโนมัติ)', 'salesperson')
+       ON CONFLICT (username) DO UPDATE SET role = 'salesperson' RETURNING id`,
+      ['diag_impersonation_tmp']);
+    impAdminId = rows[0].id;
+    await pool.query('DELETE FROM admin_user_salespersons WHERE admin_user_id = $1', [impAdminId]);
+    await pool.query('INSERT INTO admin_user_salespersons (admin_user_id, salesperson_id) VALUES ($1, $2)', [impAdminId, CODE_A]);
+
+    const role = 'salesperson';
+    let c = codeOf(await proposeFromText({ adminId: impAdminId!, role, spUserId: SP_B, text: 'สวัสดี' }).catch((e) => e));
+    ok('propose: sp_user_id ของรหัสที่ไม่ได้ผูก → FORBIDDEN', c === 'FORBIDDEN', c);
+
+    let c2 = 'BUG'; // ยังไม่ throw = บั๊ก
+    try { await previewQuotePdf({ adminId: impAdminId!, role, spUserId: SP_B, quoteCompany: 'PM', customerId: 1, contactId: 1, items: [] }); }
+    catch (e: any) { c2 = codeOf(e); }
+    ok('preview-pdf: sp_user_id ของรหัสที่ไม่ได้ผูก → FORBIDDEN (ก่อน BAD_REQUEST ของ items ว่าง)', c2 === 'FORBIDDEN', c2);
+
+    const before = Number((await pool.query('SELECT COUNT(*)::int AS n FROM quotations WHERE user_id = $1', [`web:${impAdminId}:${SP_B}`])).rows[0].n);
+    let c3 = 'BUG';
+    try {
+      await createDraft({
+        adminId: impAdminId!, role, spUserId: SP_B,
+        customerId: 1, contactId: 1, items: [{ product_template_id: 1, quantity: 1 }],
+      });
+    } catch (e: any) { c3 = codeOf(e); }
+    const after = Number((await pool.query('SELECT COUNT(*)::int AS n FROM quotations WHERE user_id = $1', [`web:${impAdminId}:${SP_B}`])).rows[0].n);
+    ok('drafts: sp_user_id ของรหัสที่ไม่ได้ผูก → FORBIDDEN', c3 === 'FORBIDDEN', c3);
+    ok('drafts: ไม่มีแถวถูกเขียนตอนถูกบล็อก', before === after, `${before} → ${after}`);
+
+    let c4 = 'BUG';
+    try { await reviseQuotation({ adminId: impAdminId!, role, spUserId: SP_B, quotationNo: 'QP-0000001' }); }
+    catch (e: any) { c4 = codeOf(e); }
+    ok('revise: sp_user_id ของรหัสที่ไม่ได้ผูก → FORBIDDEN (ก่อน QUOTATION_NOT_FOUND)', c4 === 'FORBIDDEN', c4);
+
+    // ── ควบคุม ──
+    const cSelf = codeOf(await proposeFromText({ adminId: impAdminId!, role, spUserId: SP_A, text: 'สวัสดี' }).catch((e) => e));
+    ok('ควบคุม: ใช้รหัสของตัวเอง (A) ไม่โดน FORBIDDEN ที่ด่านนี้', cSelf !== 'FORBIDDEN', cSelf);
+    const cAdmin = codeOf(await proposeFromText({ adminId: impAdminId!, role: 'admin', spUserId: SP_B, text: 'สวัสดี' }).catch((e) => e));
+    ok('ควบคุม: role=admin (act_as_any_salesperson) ใช้รหัสไหนก็ไม่โดน FORBIDDEN ที่ด่านนี้', cAdmin !== 'FORBIDDEN', cAdmin);
+
+    // ── ข้อ 10 (ต่อ) — self-issue: แถวพร็อกซีถือชื่อของเซลส์เอง ไม่ใช่ของแอดมิน ──
+    const own = await pickOwnActingSalesperson(impAdminId!);
+    ok('pickOwnActingSalesperson เจอแถวของรหัสที่ผูกไว้ (A)', own?.user_id === SP_A, JSON.stringify(own));
+
+    await pool.query('UPDATE salesperson SET employee_quotation_id = $2 WHERE user_id = $1', [SP_A, 'DIAG ชื่อผู้จัดทำของเซลส์ A']);
+    const selfWebUserId = await resolveWebUserId(impAdminId!, SP_A, 'salesperson');
+    const proxyRow = (await pool.query('SELECT employee_quotation_id FROM salesperson WHERE user_id = $1', [selfWebUserId])).rows[0];
+    ok('self-issue: แถวพร็อกซีถือ employee_quotation_id ของเซลส์เอง',
+      proxyRow?.employee_quotation_id === 'DIAG ชื่อผู้จัดทำของเซลส์ A', JSON.stringify(proxyRow));
+
+    const snap = await getIssuerSnapshot(selfWebUserId);
+    ok('self-issue: getIssuerSnapshot คืน null เสมอ (ช่องขวาเดินเส้นเดิมของใบ LINE)', snap === null, JSON.stringify(snap));
+
+    // ป้องกันสองชั้น: แม้ตั้ง admin_users.employee_quotation_id ของบัญชีนี้หลุดมา ก็ยังต้องได้ null
+    await pool.query('UPDATE admin_users SET employee_quotation_id = $2 WHERE id = $1', [impAdminId, 'ชื่อหลุดมาโดยไม่ควร']);
+    const snap2 = await getIssuerSnapshot(selfWebUserId);
+    ok('self-issue: ด่านสำรอง (เช็ค role ที่ getIssuerSnapshot) กันไว้อีกชั้น', snap2 === null, JSON.stringify(snap2));
+
+    await pool.query('DELETE FROM quotations WHERE user_id = $1', [selfWebUserId]).catch(() => {});
+    await pool.query('DELETE FROM messages WHERE user_id = $1', [selfWebUserId]).catch(() => {});
+    await pool.query('DELETE FROM salesperson WHERE user_id = $1', [selfWebUserId]).catch(() => {});
+  } finally {
+    await pool.query('DELETE FROM quotations WHERE user_id = ANY($1)', [[`web:${impAdminId}:${SP_A}`, `web:${impAdminId}:${SP_B}`]]).catch(() => {});
+    await pool.query('DELETE FROM messages WHERE user_id = ANY($1)', [[`web:${impAdminId}:${SP_A}`, `web:${impAdminId}:${SP_B}`]]).catch(() => {});
+    await pool.query('DELETE FROM salesperson WHERE user_id = ANY($1)', [[SP_A, SP_B, `web:${impAdminId}:${SP_A}`, `web:${impAdminId}:${SP_B}`]]).catch(() => {});
+    if (impAdminId) {
+      await pool.query('DELETE FROM admin_user_salespersons WHERE admin_user_id = $1', [impAdminId]).catch(() => {});
+      await pool.query('DELETE FROM admin_users WHERE id = $1', [impAdminId]).catch(() => {});
+    }
+  }
+}
+
+/** ข้อ 11 — §13.6 ข้อ 12: `PUT /api/admin/webquote/me` ปิดถาวรแล้ว ต้อง 403 เสมอ และคอลัมน์ไม่ขยับ */
+async function case11() {
+  console.log(`\n${BOLD}11) PUT /api/admin/webquote/me ปิดถาวร — ต้อง 403 เสมอ${RESET}`);
+  const token = jwt.sign({ id: adminId, username: TEST_ADMIN_USERNAME, name: 'DIAG', role: 'admin' }, getJwtSecret(), { expiresIn: '5m' });
+  const before = (await pool.query('SELECT employee_quotation_id FROM admin_users WHERE id = $1', [adminId])).rows[0];
+  const res = await fetch(`${BASE}/api/admin/webquote/me`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ employee_quotation_id: 'ชื่อปลอมที่ไม่ควรตั้งได้' }),
+  });
+  const after = (await pool.query('SELECT employee_quotation_id FROM admin_users WHERE id = $1', [adminId])).rows[0];
+  ok('PUT /api/admin/webquote/me → 403 เสมอ (ย้ายไป /api/admin/users/:id/quotation-maker แล้ว)', res.status === 403, `HTTP ${res.status}`);
+  ok('คอลัมน์ employee_quotation_id ไม่ขยับ', before.employee_quotation_id === after.employee_quotation_id);
 }
 
 async function main() {
@@ -991,6 +1116,8 @@ async function main() {
     await case7();
     await case8();
     await case9();
+    await case10();
+    await case11();
   } finally {
     await teardown();
   }

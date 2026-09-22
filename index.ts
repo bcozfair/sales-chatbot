@@ -53,6 +53,8 @@ import {
   ownQuotesCondition,
   getRolePermissionRows,
   replaceRolePermissions,
+  getAdminSalespersonIds,
+  replaceAdminSalespersonIds,
 } from './db/repositories.js';
 import {
   quoteScopeOf, capsOf, capabilityDef, invalidateCapabilityCache,
@@ -129,6 +131,7 @@ import {
   deleteAdminSignature,
   parseWebUserId,
 } from './services/webIdentity.js';
+import { pickOwnActingSalesperson } from './services/salespersonPicker.js';
 import {
   WebQuoteError,
   listSalespersonsForWeb,
@@ -1790,10 +1793,23 @@ app.get('/api/admin/verify', adminAuthMiddleware, (req: any, res: any) => {
 
 const BCRYPT_COST = 10;
 const MIN_PASSWORD_LENGTH = 8;
-const VALID_ROLES: Role[] = ['admin', 'approver', 'subadmin', 'user'];
+// 'salesperson' เพิ่ม 2026-09-22 (§13.7 ข้อ 6 ของ docs/plan-role-permissions.md) — ก่อนหน้านี้
+// role นี้มีอยู่ในเมทริกซ์สิทธิ์และตัวเลือกของหน้า "จัดการผู้ใช้งานระบบ" แล้ว แต่ backend ปฏิเสธ
+// ทุกครั้งที่เลือกมันด้วย 400 (ช่องว่างที่ปิดทั้ง role นี้ตั้งแต่ P1–P3d — ไม่มีใครสร้างบัญชีได้เลย)
+const VALID_ROLES: Role[] = ['admin', 'approver', 'subadmin', 'salesperson', 'user'];
 
 /** คอลัมน์ที่ส่งออก API ได้ — ระบุชื่อชัดเจนเพื่อไม่ให้ password_hash หลุดออกไปโดยไม่ตั้งใจ */
-const USER_PUBLIC_COLUMNS = 'id, username, name, role, created_at, updated_at';
+const USER_PUBLIC_COLUMNS =
+  'id, username, name, role, employee_quotation_id, employee_quotation_phone, created_at, updated_at';
+
+/**
+ * รหัสพนักงานขายที่ผูกไว้ — แปะเข้ากับแถว `admin_users` ทุกที่ที่คืนผู้ใช้ให้หน้าจอ (§13.7 ข้อ 6)
+ * ว่าง = `ARRAY[]` ไม่ใช่ NULL เพื่อให้ frontend ไม่ต้องเช็ค null ก่อนวน
+ */
+const USER_SALESPERSON_IDS_SQL =
+  `COALESCE((SELECT array_agg(aus.salesperson_id ORDER BY aus.salesperson_id)
+               FROM admin_user_salespersons aus WHERE aus.admin_user_id = admin_users.id),
+            ARRAY[]::varchar[])`;
 
 /** คืนข้อความ error ถ้ารหัสผ่านไม่ผ่านเกณฑ์ คืน null ถ้าผ่าน */
 function validateNewPassword(value: unknown): string | null {
@@ -1873,7 +1889,8 @@ app.get('/api/admin/users', adminAuthMiddleware, requireCapability('page.users')
   console.log(">>> GET /api/admin/users received!");
   try {
     const result = await pool.query(
-      `SELECT ${USER_PUBLIC_COLUMNS} FROM admin_users ORDER BY role, username`
+      `SELECT ${USER_PUBLIC_COLUMNS}, ${USER_SALESPERSON_IDS_SQL} AS salesperson_ids
+         FROM admin_users ORDER BY role, username`
     );
     res.json(result.rows);
   } catch (err: any) {
@@ -1883,6 +1900,17 @@ app.get('/api/admin/users', adminAuthMiddleware, requireCapability('page.users')
 });
 
 // --- สร้างผู้ใช้ใหม่ (admin เท่านั้น) ---
+/** รายการรหัสพนักงานขายจาก body — trim + ตัดค่าว่างทิ้ง + ตัดซ้ำ (ไม่ตรวจว่ามีแถวจริงไหม ปล่อยให้ FK ตัดสิน) */
+function parseSalespersonIdsInput(raw: any): string[] {
+  if (!Array.isArray(raw)) return [];
+  const set = new Set<string>();
+  for (const v of raw) {
+    const s = typeof v === 'string' ? v.trim() : '';
+    if (s !== '') set.add(s);
+  }
+  return [...set];
+}
+
 app.post('/api/admin/users', adminAuthMiddleware, requireCapability('page.users'), express.json(), async (req: any, res: any) => {
   console.log(">>> POST /api/admin/users received!", req.body?.username);
   try {
@@ -1901,20 +1929,39 @@ app.post('/api/admin/users', adminAuthMiddleware, requireCapability('page.users'
       return res.status(400).json({ error: 'สิทธิ์ที่เลือกไม่ถูกต้อง' });
     }
 
+    // role='salesperson' ต้องผูกรหัสพนักงานขายอย่างน้อยหนึ่งรหัสตั้งแต่ตอนสร้าง ไม่งั้นบัญชีนี้
+    // ไม่มีทางรู้ว่าตัวเองคือเซลส์คนไหน (§13.7 ข้อ 6) — ไม่ใส่เป็น DB CHECK โดยตั้งใจ (เหตุผลในแผน)
+    const salespersonIds = parseSalespersonIdsInput(req.body?.salesperson_ids);
+    if (role === 'salesperson' && salespersonIds.length === 0) {
+      return res.status(400).json({ error: 'บัญชีพนักงานขายต้องผูกรหัสพนักงานขายอย่างน้อย 1 รหัส' });
+    }
+
     const passwordError = validateNewPassword(password);
     if (passwordError) {
       return res.status(400).json({ error: passwordError });
     }
 
     const passwordHash = await bcrypt.hash(password, BCRYPT_COST);
-    const result = await pool.query(
-      `INSERT INTO admin_users (username, password_hash, name, role)
-       VALUES ($1, $2, $3, $4)
-       RETURNING ${USER_PUBLIC_COLUMNS}`,
-      [trimmedUsername, passwordHash, trimmedName, role]
-    );
+    const created = await withTransaction(async (client) => {
+      const result = await client.query(
+        `INSERT INTO admin_users (username, password_hash, name, role)
+         VALUES ($1, $2, $3, $4)
+         RETURNING id`,
+        [trimmedUsername, passwordHash, trimmedName, role]
+      );
+      const newId = result.rows[0].id;
+      if (role === 'salesperson') {
+        await replaceAdminSalespersonIds(client, newId, salespersonIds);
+      }
+      const { rows } = await client.query(
+        `SELECT ${USER_PUBLIC_COLUMNS}, ${USER_SALESPERSON_IDS_SQL} AS salesperson_ids
+           FROM admin_users WHERE id = $1`,
+        [newId]
+      );
+      return rows[0];
+    });
 
-    res.status(201).json(result.rows[0]);
+    res.status(201).json(created);
   } catch (err: any) {
     // 23505 = unique_violation ของ admin_users_username_key
     if (err?.code === '23505') {
@@ -1944,6 +1991,13 @@ app.put('/api/admin/users/:id', adminAuthMiddleware, requireCapability('page.use
       return res.status(400).json({ error: 'สิทธิ์ที่เลือกไม่ถูกต้อง' });
     }
 
+    // role='salesperson' ต้องผูกรหัสพนักงานขายอย่างน้อยหนึ่งรหัสเสมอ (§13.7 ข้อ 6) — สลับ role
+    // ไป-กลับได้อิสระ (ไม่ใช่ DB CHECK) แต่ตอนอยู่ในโหมดนี้ต้องมีรหัสผูกไว้เสมอ
+    const salespersonIds = parseSalespersonIdsInput(req.body?.salesperson_ids);
+    if (role === 'salesperson' && salespersonIds.length === 0) {
+      return res.status(400).json({ error: 'บัญชีพนักงานขายต้องผูกรหัสพนักงานขายอย่างน้อย 1 รหัส' });
+    }
+
     // ลดสิทธิ์ตัวเองแล้วจะกู้คืนเองไม่ได้ (หน้าจัดการผู้ใช้เปิดให้เฉพาะ admin) — กันไว้ก่อน
     if (targetId === req.admin.id && role !== 'admin') {
       return res.status(400).json({ error: 'ไม่สามารถลดสิทธิ์ของตัวเองได้' });
@@ -1958,10 +2012,21 @@ app.put('/api/admin/users/:id', adminAuthMiddleware, requireCapability('page.use
         `UPDATE admin_users
          SET name = $1, role = $2, updated_at = CURRENT_TIMESTAMP
          WHERE id = $3
-         RETURNING ${USER_PUBLIC_COLUMNS}`,
+         RETURNING id`,
         [trimmedName, role, targetId]
       );
-      return result.rows[0] ?? null;
+      if (result.rows.length === 0) return null;
+
+      // ออกจาก role='salesperson' แล้ว = ล้างรหัสที่ผูกไว้ทิ้งด้วย ไม่งั้นบัญชีที่กลับไปเป็น
+      // admin/subadmin จะยังถือรหัสเก่าค้างอยู่ (ownQuotesCondition จะกรองใบผิดกลุ่มไปเงียบ ๆ)
+      await replaceAdminSalespersonIds(client, targetId, role === 'salesperson' ? salespersonIds : []);
+
+      const { rows } = await client.query(
+        `SELECT ${USER_PUBLIC_COLUMNS}, ${USER_SALESPERSON_IDS_SQL} AS salesperson_ids
+           FROM admin_users WHERE id = $1`,
+        [targetId]
+      );
+      return rows[0] ?? null;
     });
 
     if (updated === 'LAST_ADMIN') {
@@ -1977,6 +2042,58 @@ app.put('/api/admin/users/:id', adminAuthMiddleware, requireCapability('page.use
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
+
+/**
+ * ตั้งชื่อผู้เสนอราคาบนใบให้บัญชีอื่น — ย้ายมาจาก `PUT /api/admin/webquote/me` (§13.3/§13.4)
+ *
+ * ก่อน 2026-09-22 แอดมินตั้งชื่อผู้จัดทำของ **ตัวเอง** ได้จากหน้าขอใบเสนอราคาโดยตรง ซึ่งเป็นช่องที่
+ * ทำให้แอบอ้างเป็นคนอื่นได้ (ตั้งชื่อใหม่ก่อนออกใบแต่ละครั้ง) ⇒ ย้ายสิทธิ์มาไว้ที่นี่ทั้งหมด:
+ * คนตั้งต้องมี `page.users` (เปิดหน้านี้ได้) และ `users.set_issuer_identity` (สิทธิ์ตั้งชื่อ
+ * ให้ "บัญชีอื่น" โดยเฉพาะ — สองช่องแยกกันเพราะการเห็นหน้าจัดการผู้ใช้ไม่ได้แปลว่าควรตั้งตัวตน
+ * บนใบให้ใครก็ได้เสมอไป) · role='salesperson' ตั้งค่านี้ไม่ได้เลย เพราะช่องผู้เสนอราคาของเขา
+ * เดินเส้นเดิมของใบ LINE (ชื่อ+ลายเซ็นตัวเองจาก sale_sigs) ไม่ได้อ่านคอลัมน์นี้อยู่แล้ว (§13.2)
+ */
+app.put(
+  '/api/admin/users/:id/quotation-maker',
+  adminAuthMiddleware,
+  requireCapability('page.users'),
+  requireCapability('users.set_issuer_identity'),
+  express.json(),
+  async (req: any, res: any) => {
+    const targetId = Number(req.params.id);
+    try {
+      if (!Number.isInteger(targetId)) {
+        return res.status(400).json({ error: 'รหัสผู้ใช้ไม่ถูกต้อง' });
+      }
+      const raw = req.body?.employee_quotation_id;
+      if (typeof raw !== 'string' || raw.trim() === '') {
+        return res.status(400).json({ error: 'ต้องระบุชื่อผู้จัดทำ (employee_quotation_id)' });
+      }
+      const target = await pool.query('SELECT role FROM admin_users WHERE id = $1', [targetId]);
+      if (target.rows.length === 0) {
+        return res.status(404).json({ error: 'ไม่พบผู้ใช้ที่ต้องการแก้ไข' });
+      }
+      if (target.rows[0].role === 'salesperson') {
+        return res.status(400).json({ error: 'บัญชีพนักงานขายไม่ต้องตั้งชื่อผู้เสนอราคา — ใช้ชื่อและลายเซ็นของตัวเองเสมอ' });
+      }
+      if (!(await isValidQuotationMaker(raw))) {
+        return res.status(400).json({
+          error: 'ชื่อผู้จัดทำนี้ไม่มีอยู่ในรายชื่อจาก Odoo — เลือกจากรายการที่ระบบให้เท่านั้น',
+          hint: 'รายชื่ออัปเดตตามรอบ npm run sync:saleorders',
+        });
+      }
+      const saved = await setAdminQuotationMaker(targetId, raw);
+      res.json({
+        success: true,
+        employee_quotation_id: saved.employee_quotation_id,
+        employee_quotation_phone: saved.employee_quotation_phone,
+      });
+    } catch (err: any) {
+      console.error('PUT /api/admin/users/:id/quotation-maker error:', err);
+      res.status(500).json({ error: 'ไม่สามารถบันทึกชื่อผู้จัดทำได้' });
+    }
+  }
+);
 
 // --- ตั้งรหัสผ่านใหม่ให้ผู้ใช้คนอื่น (admin เท่านั้น ไม่ต้องรู้รหัสเดิม) ---
 app.put('/api/admin/users/:id/password', adminAuthMiddleware, requireCapability('page.users'), express.json(), async (req: any, res: any) => {
@@ -2503,15 +2620,42 @@ app.get('/api/admin/webquote/makers', adminAuthMiddleware, requireCapability('qu
 /**
  * โปรไฟล์ผู้เสนอราคาของแอดมินที่ล็อกอินอยู่
  *
- * `is_ready` ผูกกับ **ชื่ออย่างเดียว** — ยังไม่อัปลายเซ็นก็ออกใบได้ปกติ (เจ้าของเคาะ 2026-09-08)
- * ใบจะไม่มีลายเซ็นในช่องผู้เสนอราคา เท่ากับพฤติกรรมของเซลส์ที่ยังไม่มีลายเซ็นวันนี้เป๊ะ
- * ⇒ หน้าเว็บใช้ `has_signature === false` ขึ้นป้ายเตือนค้างไว้ แต่ห้ามใช้บล็อก
+ * `is_ready` แยกความหมายตาม role (§13.5): admin/approver/subadmin ผูกกับ **ชื่ออย่างเดียว** —
+ * ยังไม่อัปลายเซ็นก็ออกใบได้ปกติ (เจ้าของเคาะ 2026-09-08) ใบจะไม่มีลายเซ็นในช่องผู้เสนอราคา
+ * เท่ากับพฤติกรรมของเซลส์ที่ยังไม่มีลายเซ็นวันนี้เป๊ะ ⇒ หน้าเว็บใช้ `has_signature === false`
+ * ขึ้นป้ายเตือนค้างไว้ แต่ห้ามใช้บล็อก · **role='salesperson' ผูกกับ `own_salesperson` แทน**
+ * (ต้องผูกรหัสไว้ + รหัสนั้นมีแถว `salesperson` ที่ `status='active'`) — ไม่แตะ
+ * `employee_quotation_id` ของ `admin_users` เลย เพราะบัญชีนี้ไม่มีแนวคิดนั้น
  */
 app.get('/api/admin/webquote/me', adminAuthMiddleware, requireCapability('quote.create'), async (req: any, res: any) => {
   try {
     const admin = req.admin;
     const profile = await getAdminIssuerProfile(admin.id);
     const sig = await getAdminSignature(admin.id);
+
+    let isReady: boolean;
+    let ownSalesperson: any = null;
+    if (admin.role === 'salesperson') {
+      const own = await pickOwnActingSalesperson(admin.id);
+      isReady = own !== null;
+      ownSalesperson = own && {
+        user_id: own.user_id,
+        name: own.name,
+        salesperson_id: own.salesperson_id,
+        phone: own.phone,
+        has_sale_sig: own.has_sale_sig,
+        sig_url: own.sig_url,
+      };
+    } else {
+      isReady = (profile?.employee_quotation_id ?? null) !== null;
+    }
+
+    // ค่าที่แอดมินเลือก "ออกในนาม" ล่าสุด (§13.4) — เก็บใน DB แทน localStorage ตั้งแต่ 2026-09-22
+    // ผู้เรียก (frontend) ยังต้องเทียบกับรายชื่อที่โหลดได้จริงก่อนใช้เสมอ (เซลส์อาจถูกปิดไปแล้ว)
+    const { rows: actingRows } = await pool.query(
+      'SELECT acting_salesperson_id FROM admin_users WHERE id = $1', [admin.id]
+    );
+
     res.json({
       admin_id: admin.id,
       name: admin.name,
@@ -2520,7 +2664,9 @@ app.get('/api/admin/webquote/me', adminAuthMiddleware, requireCapability('quote.
       employee_quotation_phone: profile?.employee_quotation_phone ?? null,
       has_signature: sig.exists,
       signature_url: sig.url,
-      is_ready: (profile?.employee_quotation_id ?? null) !== null
+      is_ready: isReady,
+      acting_salesperson_id: actingRows[0]?.acting_salesperson_id ?? null,
+      own_salesperson: ownSalesperson,
     });
   } catch (err: any) {
     console.error('GET /api/admin/webquote/me error:', err);
@@ -2529,39 +2675,39 @@ app.get('/api/admin/webquote/me', adminAuthMiddleware, requireCapability('quote.
 });
 
 /**
- * ตั้งชื่อผู้จัดทำของตัวเอง — รับได้เฉพาะชื่อที่มีอยู่จริงในรายชื่อจาก Odoo
+ * ปิดเส้นทางนี้ถาวร — ย้ายไป `PUT /api/admin/users/:id/quotation-maker` แล้ว (§13.3/§13.6 ข้อ 12)
  *
- * ตรวจซ้ำฝั่ง server แม้ UI จะเป็น dropdown อยู่แล้ว เพราะชื่อนี้ถูกส่งเข้าไฟล์ export ตรง ๆ
- * (ช่อง J) — ปล่อยชื่อที่ Odoo ไม่รู้จักหลุดเข้าไป = ไฟล์ import ฝั่งโน้นพัง
- * แอดมินตั้งได้เฉพาะของตัวเอง (`req.admin.id`) ไม่มีทางตั้งให้คนอื่นผ่าน route นี้
- *
- * ⚠️ **รับแค่ชื่อ** — เบอร์ server หาเองจากชื่อนั้น (§2.5b) ถ้า client แนบ
- *    `employee_quotation_phone` มาด้วยจะถูก **เพิกเฉย** ไม่ใช่ตอบ error
- *    (ไม่มี field ให้กรอกเบอร์อยู่แล้ว การส่งมาจึงเป็นความเข้าใจผิดของ client ไม่ใช่การโจมตี)
+ * ก่อนหน้านี้แอดมินตั้งชื่อผู้จัดทำของ **ตัวเอง** ได้จากตรงนี้ ซึ่งเป็นช่องที่ทำให้แอบอ้างเป็น
+ * คนอื่นได้ (ตั้งชื่อใหม่ก่อนออกใบแต่ละครั้ง) — เหลือ route ไว้ตอบ 403 แทนการลบทิ้งเงียบ ๆ
+ * เพื่อให้ client เก่า (ถ้ามี) เห็นข้อความบอกทางไปที่ถูกต้อง แทนที่จะได้ 404 เดาไม่ออก
  */
-// ⚠️ ยังเป็น requireRole โดยตั้งใจ และ **ห้ามใส่ salesperson** — §13.3 ย้ายการตั้งชื่อผู้เสนอราคา
-// ไปเป็นของผู้ดูแลทั้งหมด (P3.5) การเปิดให้ตั้งชื่อเองคือช่องที่ทำให้แอบอ้างชื่อคนอื่นได้
-app.put('/api/admin/webquote/me', adminAuthMiddleware, requireRole('admin', 'approver', 'subadmin'), express.json(), async (req: any, res: any) => {
+app.put('/api/admin/webquote/me', adminAuthMiddleware, requireCapability('quote.create'), express.json(), async (_req: any, res: any) => {
+  res.status(403).json({
+    error: 'ตั้งชื่อผู้เสนอราคาของตัวเองจากหน้านี้ไม่ได้แล้ว — ชื่อผู้เสนอราคาตั้งที่หน้า "จัดการผู้ใช้งานระบบ" เท่านั้น',
+  });
+});
+
+/**
+ * จำเซลส์ที่แอดมิน "ออกในนาม" ล่าสุดไว้ที่ DB แทน localStorage (§13.4)
+ *
+ * เก็บ**รหัส**พนักงานขาย ไม่ใช่ `user_id` — ตรงกับที่ `admin_users.acting_salesperson_id`
+ * นิยามไว้ (คอลัมน์นี้มีอยู่แล้วตั้งแต่ P1) ไม่ใช่สิทธิ์และไม่มีผลย้อนหลังกับใบที่ออกไปแล้ว
+ * (ใบตรึง `employee_details` ไว้ตั้งแต่ยืนยัน) จึง guard ด้วย `quote.create` เดิมพอ ไม่ต้องมี
+ * capability ใหม่ · รับได้ทั้งชื่อ (`null` = ล้างค่า) และรหัสว่าง/มีค่า ไม่ตรวจว่ารหัสนั้นมีแถวจริง
+ * ไหม (เป็นแค่ความสะดวกของ UI ไม่ใช่ด่านสิทธิ์ — ผู้เรียกฝั่ง frontend เทียบกับรายชื่อจริงเองอยู่แล้ว)
+ */
+app.put('/api/admin/webquote/me/acting-salesperson', adminAuthMiddleware, requireCapability('quote.create'), express.json(), async (req: any, res: any) => {
   try {
-    const raw = req.body?.employee_quotation_id;
-    if (typeof raw !== 'string' || raw.trim() === '') {
-      return res.status(400).json({ error: 'ต้องระบุชื่อผู้จัดทำ (employee_quotation_id)' });
-    }
-    if (!(await isValidQuotationMaker(raw))) {
-      return res.status(400).json({
-        error: 'ชื่อผู้จัดทำนี้ไม่มีอยู่ในรายชื่อจาก Odoo — เลือกจากรายการที่ระบบให้เท่านั้น',
-        hint: 'รายชื่ออัปเดตตามรอบ npm run sync:saleorders'
-      });
-    }
-    const saved = await setAdminQuotationMaker(req.admin.id, raw);
-    res.json({
-      success: true,
-      employee_quotation_id: saved.employee_quotation_id,
-      employee_quotation_phone: saved.employee_quotation_phone
-    });
+    const raw = req.body?.salesperson_id;
+    const value = raw === null || raw === undefined ? null : String(raw).trim() || null;
+    await pool.query(
+      'UPDATE admin_users SET acting_salesperson_id = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1',
+      [req.admin.id, value]
+    );
+    res.json({ success: true, acting_salesperson_id: value });
   } catch (err: any) {
-    console.error('PUT /api/admin/webquote/me error:', err);
-    res.status(500).json({ error: 'ไม่สามารถบันทึกชื่อผู้จัดทำได้' });
+    console.error('PUT /api/admin/webquote/me/acting-salesperson error:', err);
+    res.status(500).json({ error: 'บันทึกไม่สำเร็จ' });
   }
 });
 
@@ -2659,6 +2805,7 @@ app.post('/api/admin/webquote/propose', adminAuthMiddleware, requireCapability('
   try {
     res.json(await proposeFromText({
       adminId: req.admin.id,
+      role: req.admin.role,
       spUserId: req.body?.sp_user_id,
       text: req.body?.text,
     }));
