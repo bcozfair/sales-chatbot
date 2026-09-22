@@ -308,6 +308,25 @@ app.post('/callback', line.middleware(lineConfig), (req: any, res: any) => {
     req.body.events.forEach((event: any) => {
       // key คิวด้วย userId เพื่อให้ event ของคนเดียวกันรันทีละตัว (groupId/anonymous เป็น fallback)
       const queueKey = event?.source?.userId || event?.source?.groupId || 'anonymous';
+
+      // LINE ส่ง event ซ้ำเมื่อรอบแรกไม่ได้ 200 (แอปล่มระหว่าง deploy / tunnel หลุด) โดยพก replyToken
+      // "เดิม" มาด้วย ซึ่งอายุเกิน 60 วิไปแล้วเสมอ ⇒ ตอบไม่ได้ทุกกรณี (push ห้ามใช้) การปล่อยเข้าคิว
+      // = เสีย LLM + สล็อตคิว แล้วจบด้วย 400 "Invalid reply token" สองครั้ง
+      // (วัด 2026-09-21→22: 8/8 ครั้งเป็นแบบนี้ · ตัวที่มาเร็วสุดยังอายุ 62.7 วิ = เกิน TTL อยู่ดี)
+      // และมันกันงานซ้ำด้วย: เคยเจอ action=confirm ของใบที่ยืนยันไปแล้ว ถูกส่งซ้ำมาให้ทำอีกรอบ
+      if (event?.deliveryContext?.isRedelivery === true) {
+        queueMetrics.droppedBeforeStart++;
+        const ageMs = typeof event.timestamp === 'number' ? receivedAt - event.timestamp : null;
+        console.warn(`[queue] ⚠️ LINE ส่งซ้ำ (isRedelivery) user=${queueKey} type=${event?.type} ` +
+          `เหตุการณ์เดิมเมื่อ ${ageMs === null ? '?' : Math.round(ageMs / 1000)} วิที่แล้ว — ข้าม ตอบไม่ได้ (token หมดอายุแล้ว)`);
+        recordWebhookProcessing({
+          requestId: reqId, lineUserId: queueKey, outcome: 'dropped',
+          waitedMs: 0, totalMs: Date.now() - receivedAt,
+          llmMs: 0, llmCalls: 0, ownMs: 0, llmPromptTokens: 0, llmCachedTokens: 0,
+        });
+        return;
+      }
+
       webhookQueue.push(queueKey, async () => {
         const { waited, remaining, expired } = replyBudget(receivedAt, Date.now());
         const who = `user=${queueKey} type=${event?.type}`;
