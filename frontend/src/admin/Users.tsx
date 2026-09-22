@@ -18,17 +18,29 @@ import {
 } from 'lucide-react';
 import { PageHeader } from './PageHeader';
 import { ROLE_ORDER, ROLE_LABEL, ROLE_DESCRIPTION } from './roles';
+import { PersonComboBox, type PersonOption } from './PersonComboBox';
 
 const BRAND = 'var(--brand-fg)';
 const MIN_PASSWORD_LENGTH = 8;
+
+/** role ที่ "ชื่อผู้เสนอราคาบนใบ" มีความหมาย — เซลส์/บัญชีทั่วไปเดินเส้นอื่น (§13.3/§13.5) */
+const ISSUER_IDENTITY_ROLES: Role[] = ['admin', 'approver', 'subadmin'];
 
 interface AdminUserRow {
   id: number;
   username: string;
   name: string;
   role: Role;
+  employee_quotation_id: string | null;
+  employee_quotation_phone: string | null;
+  salesperson_ids: string[];
   created_at: string;
   updated_at: string;
+}
+
+interface QuotationMaker {
+  name: string;
+  phone: string | null;
 }
 
 // ชื่อ/คำอธิบาย/ลำดับของ role อยู่ที่ roles.ts ที่เดียว — หน้านี้กับหน้า "สิทธิ์ตามบทบาท"
@@ -340,6 +352,66 @@ const RoleSelect: React.FC<{
   </div>
 );
 
+/** ช่อง "รหัสพนักงานขาย" แบบ chip/tag — พิมพ์แล้วกด Enter/comma เพื่อเพิ่ม (§13.7 ข้อ 6) */
+const SalespersonIdsField: React.FC<{
+  values: string[];
+  onChange: (values: string[]) => void;
+  disabled: boolean;
+}> = ({ values, onChange, disabled }) => {
+  const [draft, setDraft] = useState('');
+
+  const commit = () => {
+    const v = draft.trim();
+    setDraft('');
+    if (v === '' || values.includes(v)) return;
+    onChange([...values, v]);
+  };
+
+  return (
+    <div className="space-y-1">
+      <label htmlFor="user-sp-ids" className="block text-xs font-semibold text-slate-600">
+        รหัสพนักงานขายที่ผูกกับบัญชีนี้ <span className="text-red-500">*</span>
+      </label>
+      <div className={`flex flex-wrap gap-1.5 p-2 rounded-xl border border-slate-200 bg-card ${disabled ? 'opacity-50' : ''}`}>
+        {values.map((v) => (
+          <span
+            key={v}
+            className="inline-flex items-center gap-1 pl-2.5 pr-1.5 py-1 rounded-lg bg-[var(--brand)]/8 border border-[var(--brand-fg)]/20 text-[var(--brand-fg)] text-xs font-mono font-semibold"
+          >
+            {v}
+            {!disabled && (
+              <button
+                type="button"
+                onClick={() => onChange(values.filter((x) => x !== v))}
+                aria-label={`ลบรหัส ${v}`}
+                className="w-4 h-4 rounded-full flex items-center justify-center hover:bg-[var(--brand-fg)]/15"
+              >
+                <X className="w-2.5 h-2.5" />
+              </button>
+            )}
+          </span>
+        ))}
+        <input
+          id="user-sp-ids"
+          value={draft}
+          onChange={(e) => {
+            if (e.target.value.endsWith(',')) { setDraft(e.target.value.slice(0, -1)); commit(); return; }
+            setDraft(e.target.value);
+          }}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } }}
+          onBlur={commit}
+          disabled={disabled}
+          placeholder={values.length === 0 ? 'พิมพ์รหัสแล้วกด Enter เช่น 435' : 'เพิ่มรหัส...'}
+          className="flex-1 min-w-[8rem] bg-transparent text-sm text-slate-800 placeholder-slate-400 outline-none py-1"
+        />
+      </div>
+      <p className="text-[11px] text-slate-400 leading-relaxed">
+        บัญชีนี้จะเห็น/ออกใบในนามได้เฉพาะรหัสเหล่านี้ — คนหนึ่งคนมีได้หลายรหัส (เช่น หลายสาขา)
+      </p>
+    </div>
+  );
+};
+
 const UserFormModal: React.FC<{
   mode: FormMode;
   isSelf: boolean;
@@ -352,8 +424,24 @@ const UserFormModal: React.FC<{
   const [name, setName] = useState(isEdit ? mode.target.name : '');
   const [role, setRole] = useState<Role>(isEdit ? mode.target.role : 'user');
   const [password, setPassword] = useState('');
+  const [salespersonIds, setSalespersonIds] = useState<string[]>(isEdit ? mode.target.salesperson_ids : []);
+  const [quotationMaker, setQuotationMaker] = useState(isEdit ? mode.target.employee_quotation_id ?? '' : '');
+  const [makers, setMakers] = useState<QuotationMaker[]>([]);
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // รายชื่อผู้เสนอราคาจาก Odoo — โหลดเฉพาะตอนเปิดฟอร์ม role ที่ต้องใช้ช่องนี้ก็พอ
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    fetch('/api/admin/webquote/makers', { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : { makers: [] }))
+      .then((body) => { if (!cancelled) setMakers(Array.isArray(body.makers) ? body.makers : []); })
+      .catch(() => { /* โหลดไม่ได้ — ช่องยังใช้พิมพ์เองค้นหาไม่ได้ แต่ฟอร์มยังบันทึกได้ */ });
+    return () => { cancelled = true; };
+  }, [token]);
+
+  const makerOptions: PersonOption[] = makers.map((m) => ({ id: m.name, name: m.name, phone: m.phone }));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -373,6 +461,10 @@ const UserFormModal: React.FC<{
         return;
       }
     }
+    if (role === 'salesperson' && salespersonIds.length === 0) {
+      setError('บัญชีพนักงานขายต้องผูกรหัสพนักงานขายอย่างน้อย 1 รหัส');
+      return;
+    }
 
     setIsSubmitting(true);
     try {
@@ -385,12 +477,28 @@ const UserFormModal: React.FC<{
         },
         body: JSON.stringify(
           isEdit
-            ? { name: name.trim(), role }
-            : { username: username.trim(), password, name: name.trim(), role }
+            ? { name: name.trim(), role, salesperson_ids: salespersonIds }
+            : { username: username.trim(), password, name: name.trim(), role, salesperson_ids: salespersonIds }
         ),
       });
       const body = await resp.json();
       if (!resp.ok) throw new Error(body.error || `เซิร์ฟเวอร์ตอบรหัส ${resp.status}`);
+
+      // ชื่อผู้เสนอราคาเป็นคนละ endpoint (ต้องผ่าน isValidQuotationMaker + สิทธิ์ users.set_issuer_identity)
+      // — ยิงต่อเมื่อ role ใช้ช่องนี้จริงและมีการพิมพ์/เลือกชื่อไว้ ไม่ยิงถ้าว่าง (ว่าง = ไม่แตะค่าเดิม)
+      const targetId = isEdit ? mode.target.id : body.id;
+      const makerChanged = ISSUER_IDENTITY_ROLES.includes(role) && quotationMaker.trim() !== ''
+        && quotationMaker.trim() !== (isEdit ? mode.target.employee_quotation_id ?? '' : '');
+      if (makerChanged) {
+        const mResp = await fetch(`/api/admin/users/${targetId}/quotation-maker`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ employee_quotation_id: quotationMaker.trim() }),
+        });
+        const mBody = await mResp.json().catch(() => ({}));
+        if (!mResp.ok) throw new Error(mBody.error || 'บันทึกบัญชีสำเร็จ แต่ตั้งชื่อผู้เสนอราคาไม่สำเร็จ');
+      }
+
       onSaved(isEdit ? 'บันทึกข้อมูลผู้ใช้แล้ว' : 'เพิ่มผู้ใช้ใหม่แล้ว');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'บันทึกไม่สำเร็จ');
@@ -465,6 +573,30 @@ const UserFormModal: React.FC<{
           disabled={isSubmitting || isSelf}
           disabledHint={isSelf ? 'แก้ไขสิทธิ์ของบัญชีตัวเองไม่ได้ เพื่อไม่ให้ล็อกตัวเองออกจากระบบ' : undefined}
         />
+
+        {ISSUER_IDENTITY_ROLES.includes(role) && (
+          <div className="space-y-1">
+            <label className="block text-xs font-semibold text-slate-600">
+              ชื่อผู้เสนอราคาบนใบ (รายชื่อจาก Odoo)
+            </label>
+            <PersonComboBox
+              value={quotationMaker ? { id: quotationMaker, name: quotationMaker, phone: makers.find((m) => m.name === quotationMaker)?.phone ?? null } : null}
+              options={makerOptions}
+              onPick={(o) => setQuotationMaker(o.id)}
+              placeholder="เลือกชื่อผู้เสนอราคา"
+              emptyText="ไม่พบชื่อนี้ในรายการจาก Odoo"
+              ariaLabel="ชื่อผู้เสนอราคาบนใบ"
+              disabled={isSubmitting}
+            />
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              ชื่อนี้จะพิมพ์ลงช่องผู้เสนอราคาของใบและไฟล์ export — ว่างไว้ = ไม่แก้ค่าเดิม
+            </p>
+          </div>
+        )}
+
+        {role === 'salesperson' && (
+          <SalespersonIdsField values={salespersonIds} onChange={setSalespersonIds} disabled={isSubmitting} />
+        )}
 
         <SubmitRow onClose={onClose} isSubmitting={isSubmitting} label="บันทึก" />
       </form>
