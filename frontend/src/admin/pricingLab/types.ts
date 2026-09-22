@@ -85,6 +85,26 @@ export interface CensusItem {
   models: string[];
 }
 
+/** เล่มเก่าที่เก็บไว้ให้ย้อนกลับ — ชื่อไฟล์คือสิ่งเดียวที่ส่งกลับไปตอนกดย้อน */
+export interface BookBackup {
+  name: string;
+  at: string;
+  models: number;
+}
+
+/**
+ * การ์ด "สมุดราคาที่ระบบใช้อยู่" — ตอบว่าราคาที่ระบบคิดอยู่ตอนนี้มาจากไหน ใครอัป เมื่อไหร่
+ * `cells` เป็น **จำนวนช่อง** ไม่ใช่ราคา · `fingerprint` ใช้กันสองคนอัปทับกัน
+ */
+export interface BookShelf {
+  cells: number;
+  sheets: number;
+  edited: { at: string; by?: string; note?: string } | null;
+  fingerprint: string;
+  backups: BookBackup[];
+  keep: number;
+}
+
 export interface Overview {
   book: { ok: boolean; message?: string; models?: number; version?: string };
   version: string | null;
@@ -92,6 +112,48 @@ export interface Overview {
   subCodes: SubCode[];
   fromPriceFile: SubCode[];
   census: { measuredAt: string; totalCodes: number; items: CensusItem[] } | null;
+  shelf: BookShelf | null;
+}
+
+/** ปัญหาที่ตัวอ่านไฟล์เจอ — `error` = บันทึกไม่ได้ · `warn` = ข้ามแล้วบันทึกต่อได้ */
+export interface ImportIssue {
+  sheet: string;
+  row?: number;
+  level: 'error' | 'warn';
+  message: string;
+}
+
+/**
+ * หนึ่งแถวของตาราง "ตรวจก่อนบันทึก"
+ *
+ * `was === null` = เพิ่งมีราคาครั้งแรก · `now === null` = **ไม่รับผลิตแล้ว**
+ * ⚠️ `null` กับ `0` ห้ามแสดงเหมือนกัน — ราคา 0 คือ "ขายฟรี" ซึ่งไม่ใช่สิ่งที่ชีตตั้งใจจะบอก
+ */
+export interface DiffRow {
+  model: string;
+  what: string;
+  kind: 'cell' | 'band' | 'adder' | 'rate';
+  was: number | null;
+  now: number | null;
+}
+
+export interface DiffModel {
+  model: string;
+  label: string;
+  changed: number;
+  added: number;
+  removed: number;
+}
+
+export interface ImportPreview {
+  ok: boolean;
+  issues: ImportIssue[];
+  fingerprint: string;
+  summary?: { changed: number; added: number; removed: number; same: number };
+  models?: DiffModel[];
+  untouched?: string[];
+  rows?: DiffRow[];
+  totalRows?: number;
 }
 
 /** คำไทยของ "ผลกับราคา" — ต้องตรงกับ VOCAB.EFFECT_TH ฝั่ง backend (ชีต .xlsx ใช้คำชุดเดียวกัน) */
