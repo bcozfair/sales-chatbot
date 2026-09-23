@@ -125,14 +125,17 @@ const NAV_GROUPS: { key: string; label: string; icon: typeof LayoutDashboard; it
     label: 'งานใบเสนอราคา',
     icon: BriefcaseBusiness,
     items: [
-      // ⚠️ `salesperson` ไม่อยู่ใน `roles` ของเมนูไหนเลยโดยตั้งใจ — รายการนี้คือ **ค่าสำรอง**
-      // ตอนเรียก /me/capabilities ไม่สำเร็จ และค่าเริ่มต้นของเซลส์คือ `deny` ทุกช่อง
-      // (เจ้าของสั่ง 2026-09-23 · config/capabilities.ts) ⇒ ใส่ชื่อไว้ตรงนี้คือเปิดเมนูให้เขา
-      // เฉพาะตอนเน็ตสะดุด ซึ่งเป็นช่องโหว่ที่ไม่มีใครเจอตอนทดสอบ · ด่านข้อ 12 บังคับข้อนี้อยู่
-      { tab: 'quoterequest', label: 'ขอใบเสนอราคา', icon: FilePlus2, roles: ['admin', 'approver', 'subadmin'], cap: 'quote.create' },
+      // `roles` ของสามเมนูนี้มี `salesperson` ด้วย เพราะค่าเริ่มต้นของเซลส์ในสามช่องนี้เป็น
+      // `allow` (เจ้าของตั้งเอง 2026-09-23 · config/capabilities.ts) — รายการนี้คือ **ค่าสำรอง**
+      // ตอนเรียก /me/capabilities ไม่สำเร็จ ⇒ มันต้องไม่ใจกว้างกว่าค่าเริ่มต้น **และต้องไม่แคบ
+      // กว่าด้วยโดยไม่ได้ตั้งใจ** เพราะเน็ตสะดุดทีเมนูจะหายไปเฉย ๆ ซึ่งอ่านว่า "ระบบพัง"
+      // ⚠️ เมนูอื่นทั้งหมดต้องไม่มี `salesperson` — ด่านข้อ 12 บังคับข้อนี้อยู่
+      { tab: 'quoterequest', label: 'ขอใบเสนอราคา', icon: FilePlus2, roles: ['admin', 'approver', 'subadmin', 'salesperson'], cap: 'quote.create' },
       // subadmin เห็นเมนูนี้ด้วย แต่เห็น "คำขอของตัวเอง" เท่านั้น — server เป็นคนกรอง ไม่ใช่หน้าจอ
-      { tab: 'approvals', label: 'อนุมัติราคา', icon: BadgeCheck, roles: ['admin', 'approver', 'subadmin'], cap: 'page.approvals' },
-      { tab: 'quotations', label: 'ประวัติใบเสนอราคา', icon: FileText, roles: ['admin', 'approver', 'subadmin'], cap: 'page.quotations' },
+      // เซลส์ก็เห็น ทั้งที่ทะลุกฎเองไม่ได้ ⇒ เขาเห็นสถานะคำขอของตัวเอง ไม่ใช่ปุ่มตัดสิน
+      // (`approval.decide` ของเซลส์เป็น deny)
+      { tab: 'approvals', label: 'อนุมัติราคา', icon: BadgeCheck, roles: ['admin', 'approver', 'subadmin', 'salesperson'], cap: 'page.approvals' },
+      { tab: 'quotations', label: 'ประวัติใบเสนอราคา', icon: FileText, roles: ['admin', 'approver', 'subadmin', 'salesperson'], cap: 'page.quotations' },
       // เครื่องมือที่ใช้ตอนกำลังทำใบ ไม่ใช่ค่าที่ตั้งทิ้งไว้ให้ระบบใช้เอง จึงอยู่กลุ่มนี้ไม่ใช่ "เงื่อนไข & กฎ"
       // (เจ้าของเคาะ 2026-09-18) · ค่าเริ่มต้นคือ admin คนเดียว เพราะเป็นหน้าที่ยังไม่เคยมี
       // ไอคอนเคยเป็น `Calculator` แล้วเปลี่ยนเมื่อ 2026-09-19 เพราะ **เมนูในกลุ่มวาดไอคอนที่

@@ -102,6 +102,23 @@ const TODAY: Record<Capability, [admin: PermissionMode, approver: PermissionMode
   'page.traffic':                 ['allow', 'deny', 'deny'],
 };
 
+/**
+ * คอลัมน์ `salesperson` — **ช่องที่ไม่ได้อยู่ในนี้คือ `deny`**
+ *
+ * ที่มาไม่ใช่ข้อเสนอของใคร แต่เป็นค่าที่เจ้าของกดตั้งเองจากหน้า "สิทธิ์ตามบทบาท" เมื่อ
+ * 2026-09-23 แล้วสั่งให้ยึดเป็นค่าเริ่มต้น (ดู §14.5 ของ docs/plan-role-permissions.md)
+ *
+ * รายการสั้นแบบนี้ไม่ใช่ความขี้เกียจ — มันทำให้ "เซลส์เปิดอะไรได้บ้าง" อ่านจบในสี่บรรทัด
+ * และทำให้ความสามารถใหม่ที่เพิ่มเข้าแคตตาล็อกวันหลัง **ตกเป็น `deny` โดยอัตโนมัติ**
+ * ซึ่งเป็นฝั่งที่ปลอดภัยของการลืม
+ */
+const SALESPERSON_OPEN: Partial<Record<Capability, PermissionMode>> = {
+  'quote.create':    'allow',  // ขอใบเสนอราคา
+  'quote.revise':    'allow',  // แก้ใบเดิมแล้วออกใหม่
+  'page.quotations': 'allow',  // ประวัติใบเสนอราคา (quote.view_all = deny ⇒ เห็นเฉพาะใบของรหัสตัวเอง)
+  'page.approvals':  'allow',  // หน้าอนุมัติราคา (approval.decide = deny ⇒ ดูสถานะคำขอ ไม่ใช่ตัดสิน)
+};
+
 async function tableExists(name: string): Promise<boolean> {
   const { rows } = await pool.query('SELECT to_regclass($1) IS NOT NULL AS ok', [`public.${name}`]);
   return Boolean(rows[0]?.ok);
@@ -140,14 +157,18 @@ async function main() {
   ok('ทุกช่องของกลุ่มหน้าจอเป็นสวิตช์สองค่า (deny/allow) ไม่ใช่สามค่า',
     pageKeys.every(c => c.modes.length === 2), `${pageKeys.length} หน้า`);
 
-  // เจ้าของสั่ง 2026-09-23: ค่าเริ่มต้นของ `salesperson` ปิดหมดทุกช่อง แล้วไปเปิดเองจากหน้าจอ
-  // ⇒ ช่องที่เปิดให้เซลส์ต้องเป็น **แถวใน role_permissions** เท่านั้น ไม่ใช่ค่าในแคตตาล็อก
-  // ด่านนี้กันการเผลอเปิดจากโค้ด ซึ่งเงียบกว่าการเผลอกดบนจอมาก (เช่น copy-paste switchFor
-  // มาทั้งบรรทัดตอนเพิ่มความสามารถใหม่ แล้วเซลส์ได้สิทธิ์นั้นไปตั้งแต่วันแรกโดยไม่มีใครสั่ง)
-  const salesOpen = CAPABILITIES.filter(c => c.defaults.salesperson !== 'deny');
-  ok('ค่าเริ่มต้นของ salesperson เป็น deny ทุกช่อง ไม่มีข้อยกเว้น',
-    salesOpen.length === 0,
-    salesOpen.length ? salesOpen.map(c => `${c.key}=${c.defaults.salesperson}`).join(' · ') : `${keys.length} ช่อง`);
+  // เจ้าของตั้งคอลัมน์ salesperson เองจากหน้าจอแล้วสั่งให้ยึดเป็นค่าเริ่มต้น (2026-09-23 · §14.5)
+  // ⇒ คอลัมน์นี้ถูกตรึงทั้งคอลัมน์เหมือนที่ TODAY ตรึง admin/approver/subadmin ไว้
+  // ใครแก้โดยไม่ได้ตั้งใจ (เช่น copy-paste switchFor มาทั้งบรรทัดตอนเพิ่มความสามารถใหม่)
+  // ด่านจะล้มพร้อมบอกช่องที่ต่าง แทนที่จะกลายเป็นสิทธิ์ที่เซลส์ได้ไปโดยไม่มีใครสั่ง
+  const salesDrift = CAPABILITIES.filter(c => c.defaults.salesperson !== (SALESPERSON_OPEN[c.key] ?? 'deny'));
+  ok('คอลัมน์ salesperson ตรงกับที่เจ้าของตั้งไว้ทุกช่อง',
+    salesDrift.length === 0,
+    salesDrift.length
+      ? salesDrift.map(c => `${c.key}: ได้ ${c.defaults.salesperson} · ควรเป็น ${SALESPERSON_OPEN[c.key] ?? 'deny'}`).join(' · ')
+      : `เปิด ${Object.keys(SALESPERSON_OPEN).length} ช่อง · ปิด ${keys.length - Object.keys(SALESPERSON_OPEN).length} ช่อง`);
+  ok('  กฎทั้ง 6 ข้อเป็น deny ล้วน — เซลส์ทะลุกฎเองไม่ได้ และไม่มีทางขออนุมัติด้วย',
+    CAPABILITIES.filter(c => c.group === 'rule').every(c => c.defaults.salesperson === 'deny'));
 
   // ── 2. SYSTEM_ERROR ────────────────────────────────────────────────────────
   console.log(`\n${BOLD}2. SYSTEM_ERROR ไม่มีสวิตช์${RESET}`);
