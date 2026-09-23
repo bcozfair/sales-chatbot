@@ -17,6 +17,7 @@ import { loadBook, bookStatus, withSubCodes } from '../../services/pricingLab/bo
 import { AXIS_TH, DIM_TH } from '../../services/pricingLab/labels.js';
 import { parseProductCode, unknownParts } from '../../services/pricingLab/code.js';
 import { computePrice } from '../../services/pricingLab/engine.js';
+import type { Predicate } from '../../services/pricingLab/types.js';
 import { listSubCodes, upsertSubCode, deleteSubCode, clean } from '../../db/pricingLabRepo.js';
 import type { PriceBook } from '../../services/pricingLab/types.js';
 
@@ -74,15 +75,37 @@ async function main() {
   // ด่านนี้ทำให้ไฟล์ราคารอบใหม่ที่มีคีย์ใหม่ **ล้มที่นี่** ไม่ใช่ไปโผล่เป็นคำเครื่องบนหน้าจอ
   const axisKeys = new Set<string>();
   const dimKeys = new Set<string>();
+
+  /**
+   * คีย์ที่อยู่ **ในเงื่อนไข** ก็ขึ้นจอเหมือนกัน — บรรทัด "เมื่อ …" ของข้อจำกัดและของกฎ
+   * เคยหลุดมาแล้ว: `width_mm` โผล่เป็นคำเครื่องบนหน้าแก้ราคา เพราะมันมีที่เดียวคือใน
+   * `constraints[].when` ซึ่งด่านนี้ไม่เคยไล่เข้าไปดู (เจอจากภาพถ่ายหน้าจริง 2026-09-23)
+   */
+  const walk = (p: Predicate | undefined): void => {
+    if (!p) return;
+    if ('all' in p) { p.all.forEach(walk); return; }
+    if ('any' in p) { p.any.forEach(walk); return; }
+    if ('not' in p) { walk(p.not); return; }
+    if ('dim' in p) dimKeys.add(p.dim);
+    if ('axis' in p) axisKeys.add(p.axis);
+  };
+
   for (const m of Object.values(base.models)) {
     // BaseSpec เป็น union — มีช่อง `axes` เฉพาะแบบตาราง (matrix) ส่วนแบบ banded ใช้ `quantity`
     if ('axes' in m.base) for (const a of m.base.axes) axisKeys.add(a);
     if ('quantity' in m.base) dimKeys.add(m.base.quantity);
     for (const d of Object.keys(m.standard ?? {})) dimKeys.add(d);
+    for (const a of Object.keys(m.axisDefaults ?? {})) axisKeys.add(a);
+    for (const dd of m.derivedDims ?? []) {
+      dimKeys.add(dd.name);
+      for (const arg of dd.args) dimKeys.add(arg);
+    }
     for (const ad of m.adders ?? []) {
       if (ad.dim) dimKeys.add(ad.dim);
       if (ad.byAxis) axisKeys.add(ad.byAxis);
+      walk(ad.when);
     }
+    for (const c of m.constraints ?? []) walk(c.when);
   }
   const noAxis = [...axisKeys].filter((k) => !AXIS_TH[k]);
   const noDim = [...dimKeys].filter((k) => !DIM_TH[k]);

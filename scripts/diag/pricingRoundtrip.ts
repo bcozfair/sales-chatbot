@@ -146,32 +146,72 @@ try {
   // ── 5. จำลองการแก้ไฟล์แบบที่แอดมินจะทำจริง ────────────────────────────────
   //
   // เลขที่คาดหวังคำนวณด้วยมือจากตัวอย่างในชีต BH: พื้นที่ผิว 439 × 25 = 10,975
-  const bhCase: ProductConfig = { model: 'BH-01C', dims: { dia_mm: 600, width_mm: 150 }, options: ['conn:pl2'] };
+  const bhCase: ProductConfig = {
+    model: 'BH-01',
+    variant: 'C',
+    dims: { dia_mm: 600, width_mm: 150 },
+    options: ['conn:pl2']
+  };
   console.log('');
   console.log(`เดิม: ${computePrice(bhCase, book).unitPrice.toLocaleString()} บาท  (10,975 → +20% → +320)`);
 
+  const isBh01 = (r: CellValue[]) => String(r[0] ?? '') === 'BH-01';
+
   {
-    // ก) เปลี่ยนเปอร์เซ็นต์ 20 → 30
+    // ก) เปลี่ยนเปอร์เซ็นต์ของตัวเลือกท้ายรหัส 20 → 30
     const g = await readWorkbook(tmp);
-    const ok = editCell(g, SHEET_NAMES.adders, (r) => String(r[2] ?? '') === 'c_uplift', 'เปอร์เซ็นต์', 30);
+    const ok = editCell(g, SHEET_NAMES.variants, isBh01, 'บวกเพิ่มจากราคาตั้ง (%)', 30);
     const { book: edited } = sheetsToBook(g);
     const price = edited ? computePrice(bhCase, edited).unitPrice : -1;
-    check('แก้ % ในไฟล์ (20 → 30) แล้วราคาเปลี่ยนตาม', ok && price === 14587.5, `ได้ ${price.toLocaleString()} · คาด 14,587.5`);
+    check('แก้ % ของรุ่น C ในไฟล์ (20 → 30) แล้วราคาเปลี่ยนตาม', ok && price === 14587.5, `ได้ ${price.toLocaleString()} · คาด 14,587.5`);
   }
 
   {
-    // ข) ปิดกฎไว้โดยไม่ลบแถว
+    // ข) ใส่ 0 = "ไม่บวกเพิ่ม" — ของแถมฝั่ง C ยังคิดราคาของตัวเองอยู่ (320 ไม่ใช่ 160)
+    //    เจ้าของสั่งไว้ 2026-09-22: "บวกไม่บวกไปตั้งค่าที่ % ได้"
     const g = await readWorkbook(tmp);
-    const ok = editCell(g, SHEET_NAMES.adders, (r) => String(r[2] ?? '') === 'c_uplift', 'เปิดใช้', VOCAB.OFF);
+    const ok = editCell(g, SHEET_NAMES.variants, isBh01, 'บวกเพิ่มจากราคาตั้ง (%)', 0);
     const { book: edited } = sheetsToBook(g);
     const price = edited ? computePrice(bhCase, edited).unitPrice : -1;
-    const stillThere = edited?.models['BH-01C']?.adders.some((x) => x.id === 'c_uplift' && x.disabled);
-    check('ปิดกฎด้วยคำว่า "ปิดไว้" แล้วกฎไม่มีผลกับราคา', ok && price === 11295, `ได้ ${price.toLocaleString()} · คาด 11,295`);
-    check('กฎที่ปิดไว้ยังอยู่ในสมุดราคา (เปิดกลับมาใช้ได้)', stillThere === true);
+    check('ใส่ % เป็น 0 = ไม่บวกเพิ่ม แต่ของแถมฝั่ง C ยังคิดราคาของตัวเอง', ok && price === 11295, `ได้ ${price.toLocaleString()} · คาด 11,295`);
   }
 
   {
-    // ค) เพิ่มกฎใหม่ที่ไม่เคยมีในไฟล์ราคา — ส่วนลด 5% ที่คิดก่อนกฎอื่น
+    // ค) ปิดตัวเลือกทั้งอัน — ต่างจากใส่ 0 ตรงที่ของแถมกลับไปคิดราคารุ่นหลักด้วย (160)
+    const g = await readWorkbook(tmp);
+    const ok = editCell(g, SHEET_NAMES.variants, isBh01, 'เปิดใช้', VOCAB.OFF);
+    const { book: edited } = sheetsToBook(g);
+    const price = edited ? computePrice(bhCase, edited).unitPrice : -1;
+    const stillThere = edited?.models['BH-01']?.variant?.disabled === true;
+    check('ปิดตัวเลือกด้วยคำว่า "ปิดไว้" แล้วกลับไปคิดเป็นรุ่นหลักทั้งหมด', ok && price === 11135, `ได้ ${price.toLocaleString()} · คาด 11,135`);
+    check('ตัวเลือกที่ปิดไว้ยังอยู่ในสมุดราคา (เปิดกลับมาใช้ได้)', stillThere);
+  }
+
+  {
+    // ง) ลบแถวในชีตตัวเลือกทิ้ง = ไม่มีตัวเลือกนั้นแล้วจริง ๆ
+    //    "มีชีตแต่ไม่มีแถว" ต้องต่างจาก "ไม่มีชีต" ไม่งั้นลบแถวแล้วตัวเลือกไม่หาย
+    const g = await readWorkbook(tmp);
+    const sheet = g.find((x) => x.name === SHEET_NAMES.variants)!;
+    sheet.rows = sheet.rows.filter((r) => !isBh01(r));
+    const { book: edited } = sheetsToBook(g);
+    const price = edited ? computePrice(bhCase, edited).unitPrice : -1;
+    check('ลบแถวตัวเลือกในไฟล์ = ตัวเลือกหายไปจริง', edited?.models['BH-01']?.variant === undefined && price === 11135,
+      `ได้ ${price.toLocaleString()} · คาด 11,135`);
+  }
+
+  {
+    // จ) ตั้งราคาของแถมฝั่ง C ให้ต่างออกไป — ช่องเดียวคุมทุกรหัสที่ลงท้ายด้วย C
+    const g = await readWorkbook(tmp);
+    const ok = editCell(g, SHEET_NAMES.variants, isBh01, 'ราคาของแถมที่ต่างจากรุ่นหลัก',
+      'conn_pl2=400; term_10a=160; term_30a=300; nut=170');
+    const { book: edited } = sheetsToBook(g);
+    const price = edited ? computePrice(bhCase, edited).unitPrice : -1;
+    // 10,975 → +20% = 13,170 → +400 = 13,570
+    check('แก้ราคาของแถมฝั่ง C แล้วมีผลทันที', ok && price === 13570, `ได้ ${price.toLocaleString()} · คาด 13,570`);
+  }
+
+  {
+    // ฉ) เพิ่มกฎใหม่ที่ไม่เคยมีในไฟล์ราคา — ส่วนลด 5% ที่คิดก่อนกฎอื่น
     const g = await readWorkbook(tmp);
     const sheet = g.find((x) => x.name === SHEET_NAMES.adders)!;
     const header = sheet.rows.findIndex((r) => r.map((c) => String(c ?? '')).includes('รหัสกฎ'));
@@ -181,7 +221,7 @@ try {
       const i = cols.indexOf(label);
       if (i >= 0) newRow[i] = v;
     };
-    put('รหัสรุ่น', 'BH-01C');
+    put('รหัสรุ่น', 'BH-01');
     put('ลำดับ', 5);
     put('รหัสกฎ', 'promo_q4');
     put('ชื่อที่แสดง', 'ส่วนลดโปรโมชันไตรมาส 4');
@@ -196,14 +236,27 @@ try {
     const err = is2.filter((i) => i.level === 'error');
     // 10,975 − 5% = 10,426.25 → +20% = 12,511.50 → +320 = 12,831.50
     check('เพิ่มกฎใหม่ (ส่วนลด −5%) ในไฟล์แล้วมีผลทันที', price === 12831.5 && err.length === 0, `ได้ ${price.toLocaleString()} · คาด 12,831.5`);
-    const added = edited?.models['BH-01C']?.adders.find((x) => x.id === 'promo_q4');
+    const added = edited?.models['BH-01']?.adders.find((x) => x.id === 'promo_q4');
     check('กฎที่เพิ่มเองถูกทำเครื่องหมายว่า "ไม่ได้มาจากไฟล์ราคา"', added?.custom === true);
   }
 
   {
-    // ง) พิมพ์เงื่อนไขผิด — ต้องฟ้องว่าแถวไหน ไม่ใช่ล้มทั้งไฟล์เงียบ ๆ
+    // ช) ราคาของแถมฝั่ง C ที่ชี้ไปยังกฎที่ไม่มีอยู่ ต้องฟ้อง ไม่ใช่เงียบ
+    //    เงียบแปลว่าคนพิมพ์ชื่อกฎผิดแล้วคิดว่าตั้งราคาไปแล้ว ทั้งที่ไม่มีผลกับอะไรเลย
     const g = await readWorkbook(tmp);
-    editCell(g, SHEET_NAMES.adders, (r) => String(r[2] ?? '') === 'c_uplift', 'เงื่อนไข', 'ถ้าลูกค้าใจดี');
+    editCell(g, SHEET_NAMES.variants, isBh01, 'ราคาของแถมที่ต่างจากรุ่นหลัก', 'conn_pl_2=400');
+    const { issues: isv } = sheetsToBook(g);
+    const err = isv.filter((i) => i.level === 'error' && i.sheet === SHEET_NAMES.variants);
+    check('ตั้งราคาให้กฎที่ไม่มีอยู่ → ฟ้องพร้อมเลขแถว', err.length === 1 && err[0]!.row !== undefined,
+      err[0] ? `[${err[0].sheet} แถว ${err[0].row}]` : 'ไม่ฟ้องเลย');
+  }
+
+  {
+    // ซ) พิมพ์เงื่อนไขผิด — ต้องฟ้องว่าแถวไหน ไม่ใช่ล้มทั้งไฟล์เงียบ ๆ
+    const g = await readWorkbook(tmp);
+    // เลือกกฎที่ **ไม่ได้ถูกตั้งราคาฝั่ง C ไว้** เพื่อให้ error มีตัวเดียวจริง ๆ
+    // (กฎที่ถูกตั้งราคาไว้ พอตกไปจะทำให้ชีตตัวเลือกฟ้องตามมาอีกหนึ่ง ซึ่งก็ถูกของมัน)
+    editCell(g, SHEET_NAMES.adders, (r) => String(r[2] ?? '') === 'cable_silicone', 'เงื่อนไข', 'ถ้าลูกค้าใจดี');
     const { book: edited, issues: is3 } = sheetsToBook(g);
     const err = is3.filter((i) => i.level === 'error');
     check(

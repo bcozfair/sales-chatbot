@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Calculator, CircleDollarSign, AlertTriangle, Download, Info, Plus, Tag, Undo2, Upload } from 'lucide-react';
+import { Calculator, CircleDollarSign, AlertTriangle, Download, Info, Pencil, Plus, Tag, Undo2, Upload } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { PageHeader } from '../PageHeader';
 import { Button } from '../Button';
@@ -7,6 +7,7 @@ import { TableCard, TableScroll, EmptyState, ErrorBox } from '../logs/ui';
 import { errMsg, formatDateTime } from '../logs/format';
 import { SubCodeModal } from './SubCodeModal';
 import { BookImportModal } from './BookImportModal';
+import { ModelPriceEditor } from './ModelPriceEditor';
 import { EFFECT_TH, type Overview, type ParsedCode, type PriceOutcome, type SubCode } from './types';
 
 /**
@@ -55,6 +56,8 @@ export const PricingLab: React.FC = () => {
   const [importing, setImporting] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [rollingBack, setRollingBack] = useState(false);
+  /** รหัสรุ่นที่กำลังแก้ราคาอยู่ — หน้าแก้กินทั้งจอ ไม่ใช่กล่องซ้อน เพราะมันคือจอทำงาน ไม่ใช่คำถามสั้น ๆ */
+  const [editingModel, setEditingModel] = useState<string | null>(null);
 
   const loadOverview = useCallback(async () => {
     try {
@@ -176,6 +179,19 @@ export const PricingLab: React.FC = () => {
 
   const bookMissing = overview && !overview.book.ok;
 
+  if (editingModel) {
+    return (
+      <ModelPriceEditor
+        code={editingModel}
+        authHeaders={authHeaders}
+        onBack={(wasSaved) => {
+          setEditingModel(null);
+          if (wasSaved) { void loadOverview(); if (result) void quote(code); }
+        }}
+      />
+    );
+  }
+
   return (
     <div className="space-y-3.5">
       <PageHeader
@@ -242,6 +258,35 @@ export const PricingLab: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── รุ่นที่มีราคา + ทางเข้าหน้าแก้ราคา ──────────────────────────
+          เจ้าของสั่ง 2026-09-23: แก้ราคาจากหน้าจอได้ทีละรุ่น ไม่ต้องโหลด Excel ออกไปแก้
+          ⇒ ทางเข้าอยู่ตรงรายชื่อรุ่น ไม่ใช่เมนูแยก เพราะคนหาจาก "รุ่นไหน" ไม่ใช่จาก "ทำอะไร" */}
+      {(overview?.models.length ?? 0) > 0 && (
+        <TableCard title="รุ่นที่มีราคาในสมุด" hint="กดปุ่มแก้ราคาเพื่อแก้ตารางราคาและกฎของรุ่นนั้น">
+          <div className="px-4 py-3 flex flex-wrap gap-2">
+            {overview!.models.map((m) => (
+              <div key={m.code}
+                   className="flex items-center gap-2 rounded-xl border border-slate-200 bg-card px-3 py-1.5">
+                <span className="text-[12.5px] font-bold text-slate-900">{m.code}</span>
+                <span className="text-[11px] text-slate-400 max-w-[180px] truncate">{m.label}</span>
+                {m.aliases.length > 0 && (
+                  <span className="text-[10.5px] text-slate-400">+ {m.aliases.join(', ')}</span>
+                )}
+                <button
+                  type="button"
+                  aria-label={`แก้ราคารุ่น ${m.code}`}
+                  title={`แก้ราคารุ่น ${m.code}`}
+                  onClick={() => setEditingModel(m.code)}
+                  className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-[var(--brand-fg)]"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </TableCard>
       )}
 
       {importing && (

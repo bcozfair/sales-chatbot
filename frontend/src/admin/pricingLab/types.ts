@@ -175,3 +175,88 @@ export const EFFECT_HINT: Record<SubCodeEffect, string> = {
   perUnit: 'คิดตามส่วนที่เกินมาตรฐาน เช่น ความยาว',
   setAxis: 'ไม่ได้บวกเงิน แต่ไปเปลี่ยนตัวเลือกที่ใช้เปิดตารางราคา',
 };
+
+
+/* ── หน้า "แก้ราคาทีละรุ่น" ─────────────────────────────────────────────────
+   รูปร่างเดียวกับ `EditorView` ใน services/pricingLab/modelEditor.ts — ที่นั่นคือต้นฉบับ
+   แก้ที่นี่ที่เดียวไม่พอ ต้องแก้ทั้งคู่ (ไม่มี codegen และไม่ควรมี เพราะโมดูลนี้ถอดออกได้) */
+
+export type Predicate =
+  | { always: true }
+  | { axis: string; in: string[] }
+  | { axis: string; notIn: string[] }
+  | { option: string }
+  | { dim: string; gt?: number; gte?: number; lt?: number; lte?: number }
+  | { all: Predicate[] }
+  | { any: Predicate[] }
+  | { not: Predicate };
+
+export interface EditorBand {
+  min: number;
+  max: number | null;
+  kind: 'flat' | 'rate';
+  price: number | null;
+  label: string;
+}
+
+export interface EditorAdder {
+  id: string;
+  label: string;
+  order: number;
+  kind: 'flat' | 'percent' | 'perUnit';
+  kindTh: string;
+  when: Predicate | null;
+  whenTh: string;
+  amount: number | null;
+  percent: number | null;
+  rate: number | null;
+  dim: string | null;
+  dimTh: string | null;
+  over: number | null;
+  step: number | null;
+  times: number | null;
+  unit: string;
+  byAxis: string | null;
+  byAxisTh: string | null;
+  rates: { value: string; rate: number }[] | null;
+  disabled: boolean;
+  custom: boolean;
+  note: string;
+  source: string;
+}
+
+export interface EditorVariant {
+  suffix: string;
+  label: string;
+  percent?: number;
+  order?: number;
+  adderPrices?: Record<string, number>;
+  disabled?: boolean;
+  confirmed?: boolean;
+  source?: string;
+  note?: string;
+  custom?: boolean;
+  covers: string[];
+}
+
+export interface EditorView {
+  code: string;
+  label: string;
+  sheet: string;
+  aliases: string[];
+  standardTh: string;
+  base:
+    | { kind: 'banded'; quantity: string; quantityTh: string; unit: string; bands: EditorBand[] }
+    | { kind: 'matrix'; note: string }
+    | { kind: 'ref'; model: string };
+  variant: EditorVariant | null;
+  adders: EditorAdder[];
+  constraints: { id: string; level: string; levelTh: string; message: string; whenTh: string; disabled: boolean }[];
+  derived: { name: string; label: string; argsTh: string; consts: string }[];
+  vocab: {
+    options: { key: string; label: string }[];
+    dims: { key: string; label: string }[];
+    axes: { key: string; label: string }[];
+    kinds: { key: string; label: string }[];
+  };
+}

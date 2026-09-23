@@ -653,10 +653,31 @@ export function parseProductCode(input: string, book: PriceBook): ParsedCode {
   const c: Ctx = { book, model, cfg: { model: model.code }, parts: [], warnings: out.warnings };
   add(c, { text: normalized.slice(0, head[0].length), reads: `รุ่น ${model.code} — ${model.label}`, kind: 'model' });
 
-  // ตัวอักษรท้ายเลขรุ่นที่สมุดราคาไม่มีตารางของมัน (`TSK-11P` · `TSP-11L` · `TSK-01S`)
-  // **ห้ามกลืนทิ้ง** — มันถูกจับเข้าหัวรหัสไปแล้วโดยที่ไม่มีใครตั้งราคาให้ ⇒ ราคาที่ออกมา
-  // จะเป็นของรุ่นฐาน หน้าตาเหมือนถูกทุกประการ (`11P` 1,465 รหัส · `11L` 211 · `11LP` 112)
-  if (suffix !== '' && !model.code.toUpperCase().endsWith(suffix)) {
+  // ตัวอักษรท้ายเลขรุ่น สามทางที่ต่างกันคนละเรื่อง:
+  //   1. อยู่ในชื่อรุ่นอยู่แล้ว (`TS-01-0`)            ⇒ ไม่ต้องพูดถึง
+  //   2. เป็น "ตัวเลือกของรุ่นหลัก" ที่ตั้งราคาไว้แล้ว  ⇒ เปิดใช้แล้วบอกว่าคิดเพิ่มยังไง
+  //   3. ไม่มีใครตั้งค่าให้                            ⇒ **ห้ามกลืนทิ้ง**
+  // ข้อ 3 เคยกลืนข้อ 2 ไปด้วย: `BH-02C`/`BH-03C` (12 รหัสที่ขายจริง) ตกไปคิดเป็นรุ่นฐาน
+  // เปล่า ๆ ไม่บวก 20% แล้วคืนราคาหน้าตาปกติออกมา ไม่มีอะไรฟ้อง (เจอ 2026-09-22)
+  // ส่วนข้อ 3 ของจริงยังมีอยู่: `11P` 1,465 รหัส · `11L` 211 · `11LP` 112
+  const variant =
+    suffix !== '' && model.variant && !model.variant.disabled &&
+    suffix === model.variant.suffix.toUpperCase()
+      ? model.variant
+      : undefined;
+  if (variant) {
+    c.cfg.variant = variant.suffix;
+    const pct = variant.percent ?? 0;
+    const extra = Object.keys(variant.adderPrices ?? {}).length;
+    add(c, {
+      text: suffix,
+      reads:
+        `${variant.label} — ` +
+        (pct ? `บวกเพิ่มจากราคาตั้งอีก ${pct}%` : 'ไม่บวกเพิ่มจากราคาตั้ง') +
+        (extra ? ` · ของแถม ${extra} รายการคิดคนละราคากับรุ่นปกติ` : ''),
+      kind: 'model'
+    });
+  } else if (suffix !== '' && !model.code.toUpperCase().endsWith(suffix)) {
     add(c, {
       text: suffix,
       reads: `ตัวอักษรท้ายเลขรุ่น — สมุดราคามีแต่ตารางของ ${model.code} ยังไม่ได้ตั้งค่าว่า ${suffix} ต่างจากรุ่นฐานยังไง`,

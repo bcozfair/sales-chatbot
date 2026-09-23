@@ -3,14 +3,38 @@
   "sheet": "Sheet1",
   "code": "BH-03",
   "label": "Ceramic Band Heater",
-  "standard": { "watt": 100, "cable_cm": 30 },
+  "variant": {
+    "suffix": "C",
+    "label": "รุ่น C",
+    "percent": 20,
+    "order": 10,
+    "confirmed": false,
+    "source": "ยังไม่มีในชีต — ลอกรูปมาจากคอลัมน์ C ของ BH-01 (Sheet1!C1:C9)",
+    "note": "BH-03C มีขายจริง 1 รายการ (วัด 2026-09-22) แต่ชีตไม่เคยเขียนว่าคิดเพิ่มเท่าไหร่ — ตัวเลขชุดนี้ยังไม่ผ่านฝ่ายขาย ตั้ง percent เป็น 0 ถ้าไม่บวกเพิ่ม",
+    "adderPricesTimes": {
+      "conn_pl2": 2,
+      "term_10a": 2,
+      "term_30a": 2,
+      "nut": 2
+    }
+  },
+  "standard": {
+    "watt": 100,
+    "cable_cm": 30
+  },
   "derivedDims": [
     {
       "name": "area_in2",
       "label": "พื้นที่ผิว (ตารางนิ้ว)",
       "formula": "cylinderAreaIn2",
-      "args": ["dia_mm", "width_mm"],
-      "consts": { "pi": 3.14, "mm2PerIn2": 645 },
+      "args": [
+        "dia_mm",
+        "width_mm"
+      ],
+      "consts": {
+        "pi": 3.14,
+        "mm2PerIn2": 645
+      },
       "round": "ceil"
     }
   ],
@@ -19,7 +43,10 @@
     "quantity": "area_in2",
     "labelCol": "E",
     "priceCol": "F",
-    "rows": [3, 8]
+    "rows": [
+      3,
+      8
+    ]
   },
   "adders": [
     {
@@ -32,7 +59,10 @@
       "round": "ceil",
       "unit": "W",
       "rate": 10,
-      "when": { "dim": "area_in2", "lte": 100 },
+      "when": {
+        "dim": "area_in2",
+        "lte": 100
+      },
       "source": "Sheet1!G3:G7 — ช่วง 101 ขึ้นไป (G8) เว้นว่าง จึงไม่คิดค่ากำลังไฟ"
     },
     {
@@ -52,7 +82,9 @@
       "label": "Male Connector PL-2",
       "order": 30,
       "kind": "flat",
-      "when": { "option": "conn:pl2" },
+      "when": {
+        "option": "conn:pl2"
+      },
       "amountFrom": "F11"
     },
     {
@@ -60,7 +92,9 @@
       "label": "เต๋าเซรามิค (ตัวเล็ก) 10A",
       "order": 30,
       "kind": "flat",
-      "when": { "option": "term:10a" },
+      "when": {
+        "option": "term:10a"
+      },
       "amountFrom": "F12"
     },
     {
@@ -68,7 +102,9 @@
       "label": "เต๋าเซรามิค (ตัวเล็ก) 30A",
       "order": 30,
       "kind": "flat",
-      "when": { "option": "term:30a" },
+      "when": {
+        "option": "term:30a"
+      },
       "amountFrom": "F13"
     },
     {
@@ -76,7 +112,9 @@
       "label": "ออกน๊อต",
       "order": 30,
       "kind": "flat",
-      "when": { "option": "nut" },
+      "when": {
+        "option": "nut"
+      },
       "amountFrom": "F14"
     },
     {
@@ -84,7 +122,9 @@
       "label": "สาย Silicone",
       "order": 40,
       "kind": "perUnit",
-      "when": { "option": "cable:silicone" },
+      "when": {
+        "option": "cable:silicone"
+      },
       "dim": "cable_extra_m",
       "over": 0,
       "step": 1,
@@ -97,7 +137,9 @@
       "label": "สายถักสแตนเลส",
       "order": 40,
       "kind": "perUnit",
-      "when": { "option": "cable:ss_braid" },
+      "when": {
+        "option": "cable:ss_braid"
+      },
       "dim": "cable_extra_m",
       "over": 0,
       "step": 1,
@@ -110,7 +152,9 @@
       "label": "ท่อเฟ็กส์",
       "order": 40,
       "kind": "perUnit",
-      "when": { "option": "flex_tube" },
+      "when": {
+        "option": "flex_tube"
+      },
       "dim": "cable_extra_m",
       "over": 0,
       "step": 1,
@@ -122,14 +166,20 @@
   "constraints": [
     {
       "id": "MIN_OD",
-      "when": { "dim": "dia_mm", "lt": 65 },
+      "when": {
+        "dim": "dia_mm",
+        "lt": 65
+      },
       "level": "block",
       "message": "ขนาดเล็กสุดที่ทำได้ OD = 65 mm",
       "source": "Sheet1!H3"
     },
     {
       "id": "MIN_WIDTH",
-      "when": { "dim": "width_mm", "lt": 25 },
+      "when": {
+        "dim": "width_mm",
+        "lt": 25
+      },
       "level": "block",
       "message": "ความกว้างเล็กสุดที่ทำได้ 25 mm",
       "source": "Sheet1!H4"

@@ -19,7 +19,7 @@ import ExcelJS from 'exceljs';
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Adder, Band, Constraint, DerivedDim, PriceBook, PriceModel, SubCode } from '../../services/pricingLab/types.js';
+import type { Adder, Band, Constraint, DerivedDim, ModelVariant, PriceBook, PriceModel, SubCode } from '../../services/pricingLab/types.js';
 import { BOOK_PATH } from '../../services/pricingLab/bookStore.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -75,12 +75,27 @@ interface AdderSpec extends Omit<Adder, 'rates' | 'amount'> {
   amountFrom?: string;
 }
 
+/**
+ * "ตัวเลือกท้ายรหัส" ในไฟล์แมป — ราคาฝั่งตัวเลือกยังต้อง **ถอดจากชีต** ไม่ใช่พิมพ์เอง
+ * สองทางที่ชีตจริงเขียนไว้ และมีแค่สองทางโดยตั้งใจ:
+ *   `adderPricesFrom`  = ชีตมีคอลัมน์ของตัวเลือกนั้นอยู่จริง (BH-01 คอลัมน์ C) ⇒ อ่านเซลล์
+ *   `adderPricesTimes` = ชีตเขียนเป็น "คูณสอง" ไม่ได้เขียนตัวเลข ⇒ คูณจากราคาของรุ่นหลักเอง
+ * ห้ามมีทางที่สามที่แปลว่า "พิมพ์ตัวเลขลงแมป" เพราะวันที่ราคาในชีตขยับ แมปจะค้างอยู่เงียบ ๆ
+ */
+interface VariantSpec extends Omit<ModelVariant, 'adderPrices'> {
+  /** id ของกฎ → เซลล์ในชีตนี้ เช่น { "conn_pl2": "C12" } */
+  adderPricesFrom?: Record<string, string>;
+  /** id ของกฎ → ตัวคูณจากราคาของรุ่นหลัก เช่น { "conn_pl2": 2 } */
+  adderPricesTimes?: Record<string, number>;
+}
+
 interface SheetMap {
   file: string;
   sheet: string;
   code: string;
   label: string;
   aliases?: string[];
+  variant?: VariantSpec;
   standard: Record<string, number>;
   axisDefaults?: Record<string, string>;
   derivedDims?: DerivedDim[];
@@ -260,6 +275,30 @@ function importSheet(
     return a;
   });
 
+  // ── ตัวเลือกท้ายรหัส ──────────────────────────────────────────────────────
+  let variant: ModelVariant | undefined;
+  if (map.variant) {
+    const { adderPricesFrom, adderPricesTimes, ...rest } = map.variant;
+    const prices: Record<string, number> = {};
+    for (const [id, cell] of Object.entries(adderPricesFrom ?? {})) {
+      const m = cell.match(/^([A-Z]+)(\d+)$/);
+      if (!m) throw new Error(`${map.code} ตัวเลือก ${rest.suffix}: อ่านเซลล์ "${cell}" ไม่ออก`);
+      countNoise(Number(m[2]), m[1]!);
+      const v = cellMoney(ws, Number(m[2]), m[1]!);
+      // ช่องว่างในชีต = ไม่รับทำ ไม่ใช่ราคา 0 ⇒ ปล่อยให้ไม่มีค่า = คิดเท่ารุ่นหลัก
+      if (v !== undefined) prices[id] = v;
+    }
+    for (const [id, times] of Object.entries(adderPricesTimes ?? {})) {
+      const own = adders.find((a) => a.id === id);
+      const b = own?.amount ?? own?.rate;
+      if (b === undefined) {
+        throw new Error(`${map.code} ตัวเลือก ${rest.suffix}: กฎ "${id}" ไม่มีราคาของตัวเองให้คูณ`);
+      }
+      prices[id] = Math.round(b * times * 100) / 100;
+    }
+    variant = { ...rest, adderPrices: prices };
+  }
+
   const model: PriceModel & { importStats?: ImportReport } = {
     code: map.code,
     label: map.label,
@@ -271,6 +310,7 @@ function importSheet(
     base,
     adders,
     constraints: map.constraints,
+    variant,
     // ติดสถิติการนำเข้าไปกับสมุดราคาเลย เพราะหน้าเดโมนับเองจากคีย์ไม่ได้:
     // แถวที่ว่างทั้งแถว (เช่น D = "7TN" ของ TS-04) ไม่โผล่ในคีย์ของ cells สักตัว
     // นับจากคีย์จึงได้ช่องว่าง 46 ขณะที่ของจริงคือ 52 — ตัวเลขที่เอาไปให้คนดูต้องมาจากที่เดียว

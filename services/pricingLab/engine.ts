@@ -23,6 +23,7 @@ import type {
   Band,
   BreakdownLine,
   DerivedDim,
+  ModelVariant,
   Money,
   Predicate,
   PriceBook,
@@ -287,6 +288,48 @@ function subCodeAsAdder(sc: SubCode): Adder {
   };
 }
 
+// ── ตัวเลือกท้ายรหัส ─────────────────────────────────────────────────────────
+
+/**
+ * ตัวเลือกที่ใช้กับใบนี้ — ไม่มี / ปิดไว้ / ตัวอักษรไม่ตรง = คิดเป็นรุ่นหลักเปล่า ๆ
+ * เทียบแบบไม่สนตัวพิมพ์ เพราะรหัสที่เซลส์พิมพ์มามีทั้ง `BH-02C` และ `bh-02c`
+ */
+function pickVariant(model: PriceModel, suffix?: string): ModelVariant | undefined {
+  const v = model.variant;
+  if (!v || v.disabled || !suffix) return undefined;
+  return suffix.toUpperCase() === v.suffix.toUpperCase() ? v : undefined;
+}
+
+/**
+ * ราคาฝั่งตัวเลือก — ทับ **เฉพาะช่องราคา** ไม่แตะเงื่อนไข/ลำดับ/หน่วย
+ * ⇒ ของแถมที่ไม่ได้ระบุราคาไว้คิดเหมือนรุ่นหลักทุกบาทโดยไม่ต้องคัดลอกกฎมาทั้งชุด
+ */
+function withVariantPrice(a: Adder, v?: ModelVariant): Adder {
+  const p = v?.adderPrices?.[a.id];
+  if (p === undefined) return a;
+  if (a.kind === 'percent') return { ...a, percent: p };
+  if (a.kind === 'flat') return { ...a, amount: p };
+  return { ...a, rate: p };
+}
+
+/**
+ * เปอร์เซ็นต์ที่บวกเพิ่มถูกทำเป็น "กฎบวกเพิ่ม" ตัวหนึ่งแล้วเข้าคิวเดียวกับกฎอื่น
+ * **ตั้งใจให้เป็นทางเดียวกัน** เหมือนที่รหัสย่อยทำ — คิดแยกเมื่อไหร่ การปัดเศษกับลำดับ
+ * ของสองทางจะต่างกันวันหนึ่ง แล้วไม่มีใครรู้ว่าทางไหนถูก (ราคาห้ามคิดสองที่)
+ * percent = 0 ได้เงิน 0 แล้วถูกข้ามเองในลูปหลัก ⇒ ไม่ต้องมีเงื่อนไขพิเศษให้ "ไม่บวกเพิ่ม"
+ */
+function variantAdder(v: ModelVariant): Adder {
+  return {
+    id: 'variant:' + v.suffix,
+    label: `${v.label} — บวกเพิ่มจากราคาตั้ง`,
+    order: v.order ?? 10,
+    kind: 'percent',
+    percent: v.percent ?? 0,
+    source: v.source,
+    note: v.note
+  };
+}
+
 // ── ตัวหลัก ──────────────────────────────────────────────────────────────────
 
 export function resolveModel(book: PriceBook, code: string): PriceModel | undefined {
@@ -310,6 +353,8 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
       bookVersion: book.version
     };
   }
+
+  const variant = pickVariant(model, cfg.variant);
 
   // ค่าว่างใน cfg.axes แปลว่า "ไม่ได้ระบุ" ไม่ใช่ "เลือกค่าว่าง" ⇒ กรองทิ้งก่อนเติมค่าเริ่มต้น
   // ไม่งั้นช่อง "— ไม่มี —" บนหน้าจอจะลบค่ามาตรฐานของแกนนั้นไปเงียบ ๆ
@@ -373,7 +418,11 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
     const fromSubCodes = subCodes
       .filter((s) => s.effect === 'flat' || s.effect === 'percent' || s.effect === 'perUnit')
       .map(subCodeAsAdder);
-    const ordered = [...model.adders, ...fromSubCodes]
+    const ordered = [
+      ...model.adders.map((a) => withVariantPrice(a, variant)),
+      ...fromSubCodes,
+      ...(variant ? [variantAdder(variant)] : [])
+    ]
       .filter((a) => !a.disabled)
       .sort((x, y) => x.order - y.order);
     for (const a of ordered) {
@@ -395,6 +444,7 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
   return {
     status: blocked ? 'notManufacturable' : needsQuote ? 'quoteOnRequest' : 'priced',
     model: model.code,
+    variant: variant?.suffix,
     unitPrice: blocked ? 0 : running,
     breakdown,
     violations,
@@ -407,7 +457,7 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
 export function formatOutcome(o: PriceOutcome): string {
   const lines: string[] = [];
   const width = 62;
-  lines.push(`รุ่น ${o.model}   [สมุดราคา ${o.bookVersion}]`);
+  lines.push(`รุ่น ${o.model}${o.variant ? ` (ตัวเลือก ${o.variant})` : ''}   [สมุดราคา ${o.bookVersion}]`);
   lines.push('─'.repeat(width));
   for (const b of o.breakdown) {
     const amt = fmt(b.amount).padStart(11);
