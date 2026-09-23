@@ -43,7 +43,7 @@ import {
   blockingViolations,
   type Violation,
 } from '../../services/quotationService.js';
-import { odooManualBucketCondition, getOdooManualReviewCounts } from '../../db/repositories.js';
+import { odooManualBucketCondition, getOdooManualReviewCounts, getSalespersonCodesByIssuerName } from '../../db/repositories.js';
 import { decideCustomerSelection } from '../../services/customerService.js';
 import {
   proposeFromText,
@@ -54,7 +54,7 @@ import {
   resolveWebUserId,
   WebQuoteError,
 } from '../../services/webQuoteService.js';
-import { getIssuerSnapshot } from '../../services/webIdentity.js';
+import { getIssuerSnapshot, listQuotationMakersWithCodes } from '../../services/webIdentity.js';
 import { pickOwnActingSalesperson } from '../../services/salespersonPicker.js';
 import { quotationDocumentTotals, round2 } from '../../utils/pricing.js';
 import jwt from 'jsonwebtoken';
@@ -1095,6 +1095,86 @@ async function case11() {
   ok('คอลัมน์ employee_quotation_id ไม่ขยับ', before.employee_quotation_id === after.employee_quotation_id);
 }
 
+/**
+ * 12) ชื่อ → รหัสพนักงานขาย — ของหน้า "จัดการผู้ใช้งานระบบ" ที่ผูกรหัสให้จากชื่อที่เลือก (§13.3)
+ *
+ * ข้อที่สำคัญที่สุดคือ **แถวพร็อกซีต้องไม่หลุดเข้ามา** — แถว `web:<admin>:<sales>` ถือชื่อของ
+ * แอดมินที่กดออกใบ คู่กับรหัสของเซลส์ที่ถูกออกให้ ⇒ นับรวมเมื่อไหร่ ระบบจะผูกรหัสของเซลส์
+ * ให้บัญชีแอดมินโดยไม่มีอะไรฟ้อง ด่านนี้พิสูจน์จากข้อมูลจริงในฐาน ไม่ได้เขียนแถวทดสอบเพิ่ม
+ */
+async function case12() {
+  console.log(`\n${BOLD}12) ชื่อผู้เสนอราคา → รหัสพนักงานขาย (ผูกอัตโนมัติจากชื่อ)${RESET}`);
+
+  const map = await getSalespersonCodesByIssuerName();
+  ok('อ่านแผนที่ชื่อ→รหัสได้ไม่ว่างเปล่า', map.size > 0, `${map.size} ชื่อ`);
+
+  // ทุกชื่อในแผนที่ต้องมีรหัสอย่างน้อยหนึ่งตัว และไม่มีรหัสซ้ำในชื่อเดียว
+  const emptyNames = [...map.entries()].filter(([, codes]) => codes.length === 0).map(([n]) => n);
+  ok('ไม่มีชื่อไหนได้รหัสเปล่า', emptyNames.length === 0, emptyNames.slice(0, 3).join(' · '));
+  const dupes = [...map.entries()].filter(([, c]) => new Set(c).size !== c.length).map(([n]) => n);
+  ok('ไม่มีรหัสซ้ำในชื่อเดียวกัน', dupes.length === 0, dupes.slice(0, 3).join(' · '));
+
+  // คนที่ถือหลายรหัสต้องได้ครบ — เทียบกับความจริงในตาราง salesperson ตรง ๆ
+  const { rows: multi } = await pool.query(
+    `SELECT regexp_replace(btrim(employee_quotation_id), '\\s*\\([^)]*\\)\\s*$', '') AS name,
+            count(DISTINCT salesperson_id) AS n
+       FROM salesperson
+      WHERE user_id NOT LIKE 'web:%' AND status = 'active'
+        AND COALESCE(btrim(employee_quotation_id), '') <> ''
+      GROUP BY 1 HAVING count(DISTINCT salesperson_id) > 1`
+  );
+  if (multi.length === 0) {
+    ok('ไม่มีใครถือหลายรหัสในฐานตอนนี้ — ข้ามการเทียบ', true, 'ข้อมูลเปลี่ยนได้ ไม่ใช่ความผิดของโค้ด');
+  } else {
+    for (const r of multi) {
+      const got = map.get(String(r.name)) ?? [];
+      ok(`"${r.name}" ได้รหัสครบทุกอัน`, got.length === Number(r.n), `ได้ ${got.join(',') || '—'} (ควรได้ ${r.n} รหัส)`);
+    }
+  }
+
+  // ── กับดักตัวจริง: แถวพร็อกซีต้องไม่สร้างคู่ (ชื่อแอดมิน → รหัสเซลส์) ขึ้นมา ──
+  const { rows: proxyPairs } = await pool.query(
+    `SELECT DISTINCT regexp_replace(btrim(p.employee_quotation_id), '\\s*\\([^)]*\\)\\s*$', '') AS name,
+            p.salesperson_id AS code
+       FROM salesperson p
+      WHERE p.user_id LIKE 'web:%'
+        AND COALESCE(btrim(p.employee_quotation_id), '') <> ''
+        AND COALESCE(btrim(p.salesperson_id), '') <> ''
+        AND NOT EXISTS (
+              SELECT 1 FROM salesperson r
+               WHERE r.user_id NOT LIKE 'web:%'
+                 AND r.salesperson_id = p.salesperson_id
+                 AND regexp_replace(btrim(r.employee_quotation_id), '\\s*\\([^)]*\\)\\s*$', '')
+                     = regexp_replace(btrim(p.employee_quotation_id), '\\s*\\([^)]*\\)\\s*$', ''))`
+  );
+  const leaked = proxyPairs.filter((r: any) => (map.get(String(r.name)) ?? []).includes(String(r.code)));
+  ok(
+    'คู่ (ชื่อ→รหัส) ที่มีอยู่เฉพาะในแถวพร็อกซี ไม่หลุดเข้าแผนที่',
+    leaked.length === 0,
+    proxyPairs.length === 0 ? 'ไม่มีคู่แบบนี้ในฐานตอนนี้' : `ตรวจ ${proxyPairs.length} คู่ · หลุด ${leaked.length}`
+  );
+
+  // ── รายชื่อที่ส่งให้หน้าจอ ──
+  const makers = await listQuotationMakersWithCodes();
+  ok('รายชื่อผู้จัดทำยังครบเหมือนเดิม', makers.length > 0, `${makers.length} ชื่อ`);
+  ok('ทุกรายการมีช่อง salesperson_ids เสมอ (ไม่ใช่ undefined)',
+    makers.every(m => Array.isArray(m.salesperson_ids)));
+  const withCodes = makers.filter(m => m.salesperson_ids.length > 0);
+  ok('ชื่อที่มีรหัส ตรงกับแผนที่ทุกตัว',
+    withCodes.every(m => (map.get(m.name) ?? []).join(',') === m.salesperson_ids.join(',')),
+    `${withCodes.length} ชื่อที่เลือกเป็นบัญชีพนักงานขายได้`);
+
+  // ── เส้น HTTP ของหน้าจัดการผู้ใช้ ──
+  const token = jwt.sign({ id: adminId, username: TEST_ADMIN_USERNAME, name: 'DIAG', role: 'admin' }, getJwtSecret(), { expiresIn: '5m' });
+  const res = await fetch(`${BASE}/api/admin/users/quotation-makers`, { headers: { Authorization: `Bearer ${token}` } });
+  const body: any = await res.json().catch(() => ({}));
+  ok('GET /api/admin/users/quotation-makers → 200', res.status === 200, `HTTP ${res.status}`);
+  ok('ตอบกลับพ่วงรหัสพนักงานขายมาด้วย',
+    Array.isArray(body?.makers) && body.makers.length > 0 && body.makers.every((m: any) => Array.isArray(m.salesperson_ids)));
+  const noToken = await fetch(`${BASE}/api/admin/users/quotation-makers`);
+  ok('ไม่มีโทเคน → ไม่ผ่านประตู', noToken.status === 401 || noToken.status === 403, `HTTP ${noToken.status}`);
+}
+
 async function main() {
   console.log(`${BOLD}webQuoteSmoke — ด่านเฟส D${RESET} ${DIM}(${BASE})${RESET}`);
 
@@ -1118,6 +1198,7 @@ async function main() {
     await case9();
     await case10();
     await case11();
+    await case12();
   } finally {
     await teardown();
   }

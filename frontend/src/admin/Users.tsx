@@ -18,13 +18,38 @@ import {
 } from 'lucide-react';
 import { PageHeader } from './PageHeader';
 import { ROLE_ORDER, ROLE_LABEL, ROLE_DESCRIPTION } from './roles';
-import { PersonComboBox, type PersonOption } from './PersonComboBox';
+import { IssuerNameField, type IssuerNameOption } from './IssuerNameField';
 
 const BRAND = 'var(--brand-fg)';
 const MIN_PASSWORD_LENGTH = 8;
 
 /** role ที่ "ชื่อผู้เสนอราคาบนใบ" มีความหมาย — เซลส์/บัญชีทั่วไปเดินเส้นอื่น (§13.3/§13.5) */
 const ISSUER_IDENTITY_ROLES: Role[] = ['admin', 'approver', 'subadmin'];
+
+/**
+ * role ที่ช่อง "ชื่อ-นามสกุล" กางรายชื่อจาก Odoo ให้เลือก — `user` เป็นช่องพิมพ์ล้วน
+ * เพราะบัญชีกลุ่มนั้นตั้งชื่อเป็นสาขา ไม่ใช่ชื่อคน (วัด 2026-09-23: "สาขาปทุมธานี" ฯลฯ 4 บัญชี)
+ */
+const NAME_FROM_LIST_ROLES: Role[] = ['admin', 'approver', 'subadmin', 'salesperson'];
+
+/** คำอธิบายใต้ช่องชื่อ — ช่องเดียวทำงานคนละอย่างตาม role จึงต้องบอกให้ตรงว่าอันนี้ไปไหนต่อ */
+const NAME_HINT: Record<Role, string> = {
+  admin: 'ถ้าชื่อตรงกับรายชื่อจาก Odoo ระบบจะใช้เป็นชื่อผู้เสนอราคาบนใบให้ด้วย',
+  approver: 'ชื่อนี้จะพิมพ์ลงช่องผู้เสนอราคาของใบและไฟล์ export',
+  subadmin: 'ชื่อนี้จะพิมพ์ลงช่องผู้เสนอราคาของใบและไฟล์ export',
+  salesperson: 'รหัสพนักงานขายจะผูกให้อัตโนมัติจากชื่อที่เลือก',
+  user: 'ชื่อที่แสดงในระบบ — บัญชีนี้ไม่ออกใบจึงไม่ต้องมีชื่อบนใบ',
+};
+
+/** ส่วนต่อท้ายป้ายชื่อช่อง — บอกว่าช่องนี้ทำหน้าที่ที่สองอะไรอยู่ */
+const NAME_LABEL_SUFFIX: Partial<Record<Role, string>> = {
+  approver: 'ใช้เป็นชื่อผู้เสนอราคาบนใบด้วย',
+  subadmin: 'ใช้เป็นชื่อผู้เสนอราคาบนใบด้วย',
+  salesperson: 'เลือกจากพนักงานขายในระบบ',
+};
+
+/** รหัสผ่านตั้งต้นที่เติมให้ตอนเปิดกล่อง — เปิดบัญชีทีละหลายสิบใบจะได้ไม่ต้องพิมพ์ซ้ำ */
+const DEFAULT_PASSWORD = '@primus123';
 
 interface AdminUserRow {
   id: number;
@@ -36,11 +61,6 @@ interface AdminUserRow {
   salesperson_ids: string[];
   created_at: string;
   updated_at: string;
-}
-
-interface QuotationMaker {
-  name: string;
-  phone: string | null;
 }
 
 // ชื่อ/คำอธิบาย/ลำดับของ role อยู่ที่ roles.ts ที่เดียว — หน้านี้กับหน้า "สิทธิ์ตามบทบาท"
@@ -259,9 +279,11 @@ const ModalShell: React.FC<{
   icon: React.ReactNode;
   onClose: () => void;
   children: React.ReactNode;
-}> = ({ title, icon, onClose, children }) => (
+  /** กล่องฟอร์มผู้ใช้เป็นสองคอลัมน์ จึงกว้างกว่ากล่องยืนยัน/ตั้งรหัสผ่านที่เหลือ */
+  wide?: boolean;
+}> = ({ title, icon, onClose, children, wide }) => (
   <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-    <div className="w-full max-w-md bg-card rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+    <div className={`w-full ${wide ? 'max-w-2xl' : 'max-w-md'} max-h-[90vh] overflow-y-auto bg-card rounded-2xl shadow-2xl border border-slate-200`}>
       <div className="flex items-center gap-3 px-5 py-4 border-b border-slate-200">
         <div
           className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
@@ -325,11 +347,11 @@ const RoleSelect: React.FC<{
 }> = ({ value, onChange, disabled, disabledHint }) => (
   <div className="space-y-1">
     <label className="block text-xs font-semibold text-slate-600">สิทธิ์การใช้งาน</label>
-    <div className="grid grid-cols-1 gap-2">
+    <div className="grid grid-cols-1 gap-1.5">
       {ROLE_ORDER.map((role) => (
         <label
           key={role}
-          className={`flex items-start gap-2 p-2.5 rounded-xl border transition-colors ${
+          className={`flex items-start gap-2 px-2.5 py-2 rounded-xl border transition-colors ${
             value === role ? 'border-[var(--brand-fg)] bg-[var(--brand)]/5' : 'border-slate-200'
           } ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:bg-slate-50'}`}
         >
@@ -352,62 +374,35 @@ const RoleSelect: React.FC<{
   </div>
 );
 
-/** ช่อง "รหัสพนักงานขาย" แบบ chip/tag — พิมพ์แล้วกด Enter/comma เพื่อเพิ่ม (§13.7 ข้อ 6) */
-const SalespersonIdsField: React.FC<{
-  values: string[];
-  onChange: (values: string[]) => void;
-  disabled: boolean;
-}> = ({ values, onChange, disabled }) => {
-  const [draft, setDraft] = useState('');
-
-  const commit = () => {
-    const v = draft.trim();
-    setDraft('');
-    if (v === '' || values.includes(v)) return;
-    onChange([...values, v]);
-  };
-
-  return (
-    <div className="space-y-1">
-      <label htmlFor="user-sp-ids" className="block text-xs font-semibold text-slate-600">
-        รหัสพนักงานขายที่ผูกกับบัญชีนี้ <span className="text-red-500">*</span>
-      </label>
-      <div className={`flex flex-wrap gap-1.5 p-2 rounded-xl border border-slate-200 bg-card ${disabled ? 'opacity-50' : ''}`}>
-        {values.map((v) => (
-          <span
-            key={v}
-            className="inline-flex items-center gap-1 pl-2.5 pr-1.5 py-1 rounded-lg bg-[var(--brand)]/8 border border-[var(--brand-fg)]/20 text-[var(--brand-fg)] text-xs font-mono font-semibold"
-          >
-            {v}
-            {!disabled && (
-              <button
-                type="button"
-                onClick={() => onChange(values.filter((x) => x !== v))}
-                aria-label={`ลบรหัส ${v}`}
-                className="w-4 h-4 rounded-full flex items-center justify-center hover:bg-[var(--brand-fg)]/15"
-              >
-                <X className="w-2.5 h-2.5" />
-              </button>
-            )}
-          </span>
-        ))}
-        <input
-          id="user-sp-ids"
-          value={draft}
-          onChange={(e) => {
-            if (e.target.value.endsWith(',')) { setDraft(e.target.value.slice(0, -1)); commit(); return; }
-            setDraft(e.target.value);
-          }}
-          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } }}
-          onBlur={commit}
-          disabled={disabled}
-          placeholder={values.length === 0 ? 'พิมพ์รหัสแล้วกด Enter เช่น 435' : 'เพิ่มรหัส...'}
-          className="flex-1 min-w-[8rem] bg-transparent text-sm text-slate-800 placeholder-slate-400 outline-none py-1"
-        />
+/**
+ * รหัสพนักงานขายที่ระบบผูกให้จาก **ชื่อที่เลือก** — อ่านอย่างเดียว ไม่มีช่องให้พิมพ์
+ *
+ * ของเดิมให้พิมพ์รหัสทีละอันแล้วกด Enter ซึ่งพลาดได้ในแบบที่ไม่มีอะไรฟ้อง: คนที่ถือสองรหัส
+ * แล้วใส่ไปรหัสเดียว จะมองไม่เห็นใบของตัวเองอีกก้อนโดยไม่มีใครรู้ (คุณวิรุณ = 441 + 688)
+ * ⇒ ผูกจากชื่อแทน รหัสมาครบเองเสมอ และรหัสที่เพิ่มทีหลังก็ตามมาเองตอนเลือกชื่อใหม่
+ */
+const BoundSalespersonIds: React.FC<{ codes: string[]; unknownName: boolean }> = ({ codes, unknownName }) => {
+  if (unknownName) {
+    return (
+      <div className="flex items-start gap-2 bg-red-50 border border-red-200 p-2.5 rounded-xl text-red-700 text-[11px] leading-relaxed">
+        <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
+        <span>ชื่อนี้ไม่มีรหัสพนักงานขายในระบบ — บัญชีพนักงานขายต้องผูกรหัสอย่างน้อย 1 รหัส จึงบันทึกไม่ได้</span>
       </div>
-      <p className="text-[11px] text-slate-400 leading-relaxed">
-        บัญชีนี้จะเห็น/ออกใบในนามได้เฉพาะรหัสเหล่านี้ — คนหนึ่งคนมีได้หลายรหัส (เช่น หลายสาขา)
-      </p>
+    );
+  }
+  if (codes.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+      <span>ผูกรหัสพนักงานขายให้อัตโนมัติ:</span>
+      {codes.map((c) => (
+        <span
+          key={c}
+          className="inline-flex items-center px-2 py-0.5 rounded-lg bg-[var(--brand)]/8 border border-[var(--brand-fg)]/20 text-[var(--brand-fg)] font-mono font-semibold"
+        >
+          {c}
+        </span>
+      ))}
+      {codes.length > 1 && <span>— คนนี้มีหลายรหัส ผูกให้ครบทุกอัน</span>}
     </div>
   );
 };
@@ -421,27 +416,44 @@ const UserFormModal: React.FC<{
 }> = ({ mode, isSelf, token, onClose, onSaved }) => {
   const isEdit = mode.kind === 'edit';
   const [username, setUsername] = useState(isEdit ? mode.target.username : '');
-  const [name, setName] = useState(isEdit ? mode.target.name : '');
+  // ช่องชื่อเป็นช่องเดียวที่ถือทั้ง "ชื่อในระบบ" และ "ชื่อบนใบ" ⇒ ตอนแก้ไขให้ขึ้นชื่อบนใบก่อน
+  // ถ้ามี เพราะนั่นคือค่าที่มีผลกับเอกสารจริง ส่วนชื่อในระบบเป็นแค่สิ่งที่แสดงในตาราง
+  const [name, setName] = useState(
+    isEdit
+      ? (ISSUER_IDENTITY_ROLES.includes(mode.target.role)
+          ? (mode.target.employee_quotation_id ?? mode.target.name)
+          : mode.target.name)
+      : ''
+  );
   const [role, setRole] = useState<Role>(isEdit ? mode.target.role : 'user');
-  const [password, setPassword] = useState('');
-  const [salespersonIds, setSalespersonIds] = useState<string[]>(isEdit ? mode.target.salesperson_ids : []);
-  const [quotationMaker, setQuotationMaker] = useState(isEdit ? mode.target.employee_quotation_id ?? '' : '');
-  const [makers, setMakers] = useState<QuotationMaker[]>([]);
+  const [password, setPassword] = useState(isEdit ? '' : DEFAULT_PASSWORD);
+  const [makers, setMakers] = useState<IssuerNameOption[]>([]);
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // รายชื่อผู้เสนอราคาจาก Odoo — โหลดเฉพาะตอนเปิดฟอร์ม role ที่ต้องใช้ช่องนี้ก็พอ
+  // รายชื่อผู้จัดทำ + รหัสพนักงานขายของแต่ละชื่อ — เส้นของหน้านี้เอง (คร่อม page.users)
+  // ไม่ใช่เส้นของหน้าออกใบที่คร่อม quote.create ซึ่งเป็นคนละสิทธิ์กัน
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
-    fetch('/api/admin/webquote/makers', { headers: { Authorization: `Bearer ${token}` } })
+    fetch('/api/admin/users/quotation-makers', { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => (r.ok ? r.json() : { makers: [] }))
       .then((body) => { if (!cancelled) setMakers(Array.isArray(body.makers) ? body.makers : []); })
-      .catch(() => { /* โหลดไม่ได้ — ช่องยังใช้พิมพ์เองค้นหาไม่ได้ แต่ฟอร์มยังบันทึกได้ */ });
+      .catch(() => { /* โหลดไม่ได้ — ช่องยังพิมพ์เองได้ แค่ไม่มีรายการให้เลือก */ });
     return () => { cancelled = true; };
   }, [token]);
 
-  const makerOptions: PersonOption[] = makers.map((m) => ({ id: m.name, name: m.name, phone: m.phone }));
+  // ── ทุกอย่างที่ตามมาจากชื่อ คำนวณสด ไม่เก็บเป็น state ─────────────────────
+  // เก็บเป็น state เมื่อไหร่จะมีช่วงที่ "ชื่อเปลี่ยนแล้วแต่รหัสยังเป็นของชื่อเก่า" ซึ่งเป็น
+  // ความผิดพลาดที่มองไม่เห็นบนจอเลย
+  const trimmedName = name.trim();
+  const matchedMaker = makers.find((m) => m.name === trimmedName) ?? null;
+  const boundCodes = matchedMaker?.salesperson_ids ?? [];
+  const nameIsUnknown = trimmedName !== '' && makers.length > 0 && matchedMaker === null;
+  // รายการที่กางให้เลือก — role พนักงานขายเห็นเฉพาะชื่อที่มีรหัสจริง เลือกชื่ออื่นไปก็บันทึกไม่ได้
+  const nameOptions = role === 'salesperson'
+    ? makers.filter((m) => m.salesperson_ids.length > 0)
+    : makers;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -461,8 +473,8 @@ const UserFormModal: React.FC<{
         return;
       }
     }
-    if (role === 'salesperson' && salespersonIds.length === 0) {
-      setError('บัญชีพนักงานขายต้องผูกรหัสพนักงานขายอย่างน้อย 1 รหัส');
+    if (role === 'salesperson' && boundCodes.length === 0) {
+      setError('บัญชีพนักงานขายต้องเลือกชื่อที่มีรหัสพนักงานขายในระบบ — ชื่อที่เลือกไว้ยังไม่มีรหัส');
       return;
     }
 
@@ -477,23 +489,26 @@ const UserFormModal: React.FC<{
         },
         body: JSON.stringify(
           isEdit
-            ? { name: name.trim(), role, salesperson_ids: salespersonIds }
-            : { username: username.trim(), password, name: name.trim(), role, salesperson_ids: salespersonIds }
+            ? { name: trimmedName, role, salesperson_ids: boundCodes }
+            : { username: username.trim(), password, name: trimmedName, role, salesperson_ids: boundCodes }
         ),
       });
       const body = await resp.json();
       if (!resp.ok) throw new Error(body.error || `เซิร์ฟเวอร์ตอบรหัส ${resp.status}`);
 
-      // ชื่อผู้เสนอราคาเป็นคนละ endpoint (ต้องผ่าน isValidQuotationMaker + สิทธิ์ users.set_issuer_identity)
-      // — ยิงต่อเมื่อ role ใช้ช่องนี้จริงและมีการพิมพ์/เลือกชื่อไว้ ไม่ยิงถ้าว่าง (ว่าง = ไม่แตะค่าเดิม)
+      // ชื่อบนใบเป็นคนละ endpoint (คร่อมด้วย users.set_issuer_identity + ผ่าน isValidQuotationMaker)
+      // ⇒ ยิงต่อเมื่อชื่อที่เลือก **มีอยู่ในรายชื่อจาก Odoo จริง** เท่านั้น
+      // ชื่อที่พิมพ์เองซึ่งไม่อยู่ในรายชื่อจะถูก server ปฏิเสธด้วย 400 อยู่ดี — ยิงไปก็ได้แค่
+      // ข้อความ "บันทึกบัญชีสำเร็จ แต่ตั้งชื่อผู้เสนอราคาไม่สำเร็จ" ที่ทำให้คนงงว่าตกลงสำเร็จไหม
+      // บัญชีจึงถูกสร้างพร้อมชื่อในระบบ แล้วไปขึ้นการ์ด "ยังไม่ได้ตั้งชื่อผู้เสนอราคา" ตาม §13.5
       const targetId = isEdit ? mode.target.id : body.id;
-      const makerChanged = ISSUER_IDENTITY_ROLES.includes(role) && quotationMaker.trim() !== ''
-        && quotationMaker.trim() !== (isEdit ? mode.target.employee_quotation_id ?? '' : '');
+      const makerChanged = ISSUER_IDENTITY_ROLES.includes(role) && matchedMaker !== null
+        && trimmedName !== (isEdit ? mode.target.employee_quotation_id ?? '' : '');
       if (makerChanged) {
         const mResp = await fetch(`/api/admin/users/${targetId}/quotation-maker`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ employee_quotation_id: quotationMaker.trim() }),
+          body: JSON.stringify({ employee_quotation_id: trimmedName }),
         });
         const mBody = await mResp.json().catch(() => ({}));
         if (!mResp.ok) throw new Error(mBody.error || 'บันทึกบัญชีสำเร็จ แต่ตั้งชื่อผู้เสนอราคาไม่สำเร็จ');
@@ -511,94 +526,116 @@ const UserFormModal: React.FC<{
       title={isEdit ? 'แก้ไขผู้ใช้' : 'เพิ่มผู้ใช้ใหม่'}
       icon={<UsersIcon className="w-4 h-4" />}
       onClose={onClose}
+      wide
     >
-      <form onSubmit={handleSubmit} className="p-5 space-y-3">
-        {error && <ErrorBox message={error} />}
+      <form onSubmit={handleSubmit} className="p-5">
+        {error && <div className="mb-3"><ErrorBox message={error} /></div>}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div className="space-y-1">
-            <label htmlFor="user-username" className="block text-xs font-semibold text-slate-600">
-              ชื่อผู้ใช้งาน (Username)
-            </label>
-            <input
-              id="user-username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              // แก้ username ทีหลังไม่รองรับ เพราะเป็นตัวระบุที่ผูกกับการเข้าสู่ระบบ
-              disabled={isEdit || isSubmitting}
-              placeholder="เช่น somchai"
-              className={`${inputClass} font-mono`}
-            />
-            {isEdit && <p className="text-[11px] text-slate-400">แก้ไขภายหลังไม่ได้</p>}
+        {/*
+          สองคอลัมน์ตั้งแต่ sm ขึ้นไป — ข้อมูลบัญชีซ้าย สิทธิ์ขวา (เจ้าของเคาะลำดับนี้ 2026-09-23)
+          ต่ำกว่านั้นซ้อนเป็นคอลัมน์เดียวตามลำดับเดิม
+        */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
+
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <label htmlFor="user-username" className="block text-xs font-semibold text-slate-600">
+                ชื่อผู้ใช้งาน (Username)
+              </label>
+              <input
+                id="user-username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                // แก้ username ทีหลังไม่รองรับ เพราะเป็นตัวระบุที่ผูกกับการเข้าสู่ระบบ
+                disabled={isEdit || isSubmitting}
+                placeholder="เช่น THT0073"
+                className={`${inputClass} font-mono`}
+              />
+              <p className="text-[11px] text-slate-400">
+                {isEdit ? 'แก้ไขภายหลังไม่ได้' : 'ตั้งแล้วแก้ทีหลังไม่ได้ — ระบบไม่มีเส้นแก้ชื่อผู้ใช้งาน'}
+              </p>
+            </div>
+
+            {!isEdit && (
+              <div className="space-y-1">
+                <label htmlFor="user-password" className="block text-xs font-semibold text-slate-600">
+                  รหัสผ่านเริ่มต้น{' '}
+                  <span className="font-normal text-slate-400">— อย่างน้อย {MIN_PASSWORD_LENGTH} ตัวอักษร</span>
+                </label>
+                <input
+                  id="user-password"
+                  type="text"
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  disabled={isSubmitting}
+                  className={inputClass}
+                />
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  เติมค่าตั้งต้นให้แล้ว แก้ทับได้ — แจ้งให้เจ้าตัวเปลี่ยนเองหลังเข้าสู่ระบบ
+                </p>
+              </div>
+            )}
+
+            <div className="space-y-1">
+              <label htmlFor="user-name" className="block text-xs font-semibold text-slate-600">
+                ชื่อ-นามสกุล
+                {NAME_LABEL_SUFFIX[role] && (
+                  <span className="font-normal text-slate-400"> — {NAME_LABEL_SUFFIX[role]}</span>
+                )}
+              </label>
+
+              {NAME_FROM_LIST_ROLES.includes(role) ? (
+                <IssuerNameField
+                  id="user-name"
+                  value={name}
+                  onChange={setName}
+                  options={nameOptions}
+                  placeholder={role === 'salesperson' ? 'เลือกชื่อพนักงานขาย' : 'เลือกหรือพิมพ์ชื่อ'}
+                  showCodes={role === 'salesperson'}
+                  disabled={isSubmitting}
+                  ariaLabel="ชื่อ-นามสกุล"
+                />
+              ) : (
+                <input
+                  id="user-name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  disabled={isSubmitting}
+                  placeholder="เช่น สาขาปทุมธานี"
+                  className={inputClass}
+                />
+              )}
+
+              {role === 'salesperson' && (
+                <BoundSalespersonIds codes={boundCodes} unknownName={nameIsUnknown} />
+              )}
+
+              {ISSUER_IDENTITY_ROLES.includes(role) && nameIsUnknown && (
+                <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 p-2.5 rounded-xl text-amber-700 text-[11px] leading-relaxed">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
+                  <span>
+                    ชื่อนี้ไม่มีในรายชื่อจาก Odoo — บัญชีจะถูกสร้าง แต่ยังออกใบเสนอราคาไม่ได้
+                    จนกว่าจะเลือกชื่อที่ตรง
+                  </span>
+                </div>
+              )}
+
+              <p className="text-[11px] text-slate-400 leading-relaxed">{NAME_HINT[role]}</p>
+            </div>
           </div>
 
-          <div className="space-y-1">
-            <label htmlFor="user-name" className="block text-xs font-semibold text-slate-600">
-              ชื่อ-นามสกุล
-            </label>
-            <input
-              id="user-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              disabled={isSubmitting}
-              placeholder="เช่น สมชาย ใจดี"
-              className={inputClass}
-            />
-          </div>
+          <RoleSelect
+            value={role}
+            onChange={setRole}
+            disabled={isSubmitting || isSelf}
+            disabledHint={isSelf ? 'แก้ไขสิทธิ์ของบัญชีตัวเองไม่ได้ เพื่อไม่ให้ล็อกตัวเองออกจากระบบ' : undefined}
+          />
         </div>
 
-        {!isEdit && (
-          <div className="space-y-1">
-            <label htmlFor="user-password" className="block text-xs font-semibold text-slate-600">
-              รหัสผ่านเริ่มต้น{' '}
-              <span className="font-normal text-slate-400">
-                — อย่างน้อย {MIN_PASSWORD_LENGTH} ตัวอักษร แจ้งให้เจ้าตัวเปลี่ยนเองหลังเข้าสู่ระบบ
-              </span>
-            </label>
-            <input
-              id="user-password"
-              type="text"
-              autoComplete="new-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              disabled={isSubmitting}
-              className={inputClass}
-            />
-          </div>
-        )}
-
-        <RoleSelect
-          value={role}
-          onChange={setRole}
-          disabled={isSubmitting || isSelf}
-          disabledHint={isSelf ? 'แก้ไขสิทธิ์ของบัญชีตัวเองไม่ได้ เพื่อไม่ให้ล็อกตัวเองออกจากระบบ' : undefined}
-        />
-
-        {ISSUER_IDENTITY_ROLES.includes(role) && (
-          <div className="space-y-1">
-            <label className="block text-xs font-semibold text-slate-600">
-              ชื่อผู้เสนอราคาบนใบ (รายชื่อจาก Odoo)
-            </label>
-            <PersonComboBox
-              value={quotationMaker ? { id: quotationMaker, name: quotationMaker, phone: makers.find((m) => m.name === quotationMaker)?.phone ?? null } : null}
-              options={makerOptions}
-              onPick={(o) => setQuotationMaker(o.id)}
-              placeholder="เลือกชื่อผู้เสนอราคา"
-              emptyText="ไม่พบชื่อนี้ในรายการจาก Odoo"
-              ariaLabel="ชื่อผู้เสนอราคาบนใบ"
-              disabled={isSubmitting}
-            />
-            <p className="text-[11px] text-slate-400 leading-relaxed">
-              ชื่อนี้จะพิมพ์ลงช่องผู้เสนอราคาของใบและไฟล์ export — ว่างไว้ = ไม่แก้ค่าเดิม
-            </p>
-          </div>
-        )}
-
-        {role === 'salesperson' && (
-          <SalespersonIdsField values={salespersonIds} onChange={setSalespersonIds} disabled={isSubmitting} />
-        )}
-
-        <SubmitRow onClose={onClose} isSubmitting={isSubmitting} label="บันทึก" />
+        <div className="mt-4">
+          <SubmitRow onClose={onClose} isSubmitting={isSubmitting} label="บันทึก" />
+        </div>
       </form>
     </ModalShell>
   );

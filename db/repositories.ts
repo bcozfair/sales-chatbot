@@ -1644,6 +1644,36 @@ export async function replaceAdminSalespersonIds(
 }
 
 /**
+ * ชื่อผู้เสนอราคา → รหัสพนักงานขายทุกรหัสของคนนั้น
+ *
+ * หน้า "จัดการผู้ใช้งานระบบ" ใช้ตัวนี้แปลง **ชื่อที่แอดมินเลือก** เป็นรหัสที่จะผูกให้บัญชี
+ * ⇒ คนที่ถือหลายรหัสได้ครบทุกรหัสเองโดยไม่มีใครต้องจำ (วัด 2026-09-23: คุณวิรุณ = 441 + 688)
+ * ซึ่งเป็นเหตุผลที่ผูกด้วยชื่อแทนการพิมพ์รหัสทีละอัน — การพิมพ์มือลืมรหัสที่สองได้ การเลือกชื่อไม่ลืม
+ *
+ * ⚠️ **ต้องตัดแถวพร็อกซีของหน้าเว็บ (`user_id LIKE 'web:%'`) ทิ้งเสมอ** — แถวพวกนั้นถือ
+ * `employee_quotation_id` ของ *แอดมินที่กดออกใบ* คู่กับ `salesperson_id` ของ *เซลส์ที่ถูกออกให้*
+ * เอามารวมเมื่อไหร่จะได้แผนที่ที่ชี้ชื่อแอดมินไปหารหัสของเซลส์ แล้วผูกผิดคนเงียบ ๆ
+ *
+ * คีย์ normalize แบบเดียวกับ `queryOdooQuotationMakers()` เป๊ะ (btrim + ตัดวงเล็บท้ายชื่อ)
+ * ไม่งั้นชื่อจากสองที่จะไม่มีวันแมตช์กัน
+ */
+export async function getSalespersonCodesByIssuerName(): Promise<Map<string, string[]>> {
+  try {
+    const { rows } = await pool.query(
+      `SELECT regexp_replace(btrim(employee_quotation_id), '\\s*\\([^)]*\\)\\s*$', '') AS name,
+              array_agg(DISTINCT salesperson_id ORDER BY salesperson_id)                    AS codes
+         FROM salesperson
+        WHERE user_id NOT LIKE 'web:%'
+          AND status = 'active'
+          AND COALESCE(btrim(employee_quotation_id), '') <> ''
+          AND COALESCE(btrim(salesperson_id), '') <> ''
+        GROUP BY 1`
+    );
+    return new Map(rows.map((r: any) => [String(r.name), (r.codes as any[]).map(String)]));
+  } catch (err) { logErr('getSalespersonCodesByIssuerName', err); return new Map(); }
+}
+
+/**
  * รหัสพนักงานขายของใบหนึ่งใบในภาษา SQL — **ต้องใช้กับ query ที่มี**
  * `FROM quotations q LEFT JOIN salesperson s ON q.user_id = s.user_id`
  *

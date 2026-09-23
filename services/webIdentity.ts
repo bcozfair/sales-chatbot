@@ -27,6 +27,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { pool } from '../config/db.js';
+import { getSalespersonCodesByIssuerName } from '../db/repositories.js';
 import { invalidatePdfCache } from './pdfCache.js';
 
 /** นามสกุลไฟล์ลายเซ็นที่ระบบรองรับ — ชุดเดียวกับที่ GET /api/admin/salespersons ใช้ */
@@ -182,6 +183,29 @@ export async function listOdooQuotationMakers(): Promise<QuotationMaker[]> {
 
   makersCache = { makers: makersCache?.makers ?? [], loadedAt: makersCache?.loadedAt ?? 0, inflight };
   return await inflight;
+}
+
+/** ชื่อผู้จัดทำ 1 รายการ พ่วงรหัสพนักงานขายของคนนั้น (ว่าง = คนนี้ไม่ใช่พนักงานขาย) */
+export interface QuotationMakerWithCodes extends QuotationMaker {
+  salesperson_ids: string[];
+}
+
+/**
+ * รายชื่อผู้จัดทำ + รหัสพนักงานขายของแต่ละชื่อ — ของหน้า "จัดการผู้ใช้งานระบบ"
+ *
+ * หน้านั้นมีช่องชื่อ **ช่องเดียว** ที่ทำหน้าที่ต่างกันตาม role (§13.3): role ที่ออกใบในนามตัวเอง
+ * ใช้ชื่อไปหา *รหัส* ส่วน role ที่ออกใบแทนคนอื่นใช้ชื่อเป็น *ชื่อบนใบ* ⇒ ทั้งสองอย่างมาจาก
+ * รายการเดียวกัน จึงโหลดครั้งเดียวแล้วให้ client ตัดสินเอง ไม่ต้องยิงสองเส้น
+ *
+ * `salesperson_ids` ว่าง = ชื่อนี้ไม่มีแถวพนักงานขาย ⇒ เลือกเป็นบัญชี `salesperson` ไม่ได้
+ * (API ปฏิเสธอยู่แล้วตาม §13.7 ข้อ 6 — ค่านี้มีไว้ให้จอบอกล่วงหน้า ไม่ใช่ด่าน)
+ */
+export async function listQuotationMakersWithCodes(): Promise<QuotationMakerWithCodes[]> {
+  const [makers, codes] = await Promise.all([
+    listOdooQuotationMakers(),
+    getSalespersonCodesByIssuerName(),
+  ]);
+  return makers.map(m => ({ ...m, salesperson_ids: codes.get(m.name) ?? [] }));
 }
 
 /** ล้าง cache รายชื่อผู้จัดทำ — เรียกหลัง sync:saleorders ถ้าอยากเห็นชื่อใหม่ทันที */

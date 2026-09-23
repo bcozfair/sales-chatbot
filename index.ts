@@ -124,6 +124,7 @@ import { adminAuthMiddleware, requireRole, requireCapability, type Role, type Ad
 import {
   listOdooQuotationMakers,
   isValidQuotationMaker,
+  listQuotationMakersWithCodes,
   getAdminIssuerProfile,
   setAdminQuotationMaker,
   getAdminSignature,
@@ -1896,6 +1897,25 @@ app.get('/api/admin/users', adminAuthMiddleware, requireCapability('page.users')
   } catch (err: any) {
     console.error("GET /api/admin/users error:", err);
     res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+/**
+ * รายชื่อผู้จัดทำจาก Odoo + รหัสพนักงานขายของแต่ละชื่อ — ป้อนช่อง "ชื่อ-นามสกุล" ของหน้าจัดการผู้ใช้
+ *
+ * แยกจาก `GET /api/admin/webquote/makers` ที่คร่อมด้วย `quote.create` เพราะ **คนละหน้าคนละสิทธิ์**
+ * — คนที่จัดการผู้ใช้ได้ไม่จำเป็นต้องออกใบเสนอราคาได้ ก่อนหน้านี้หน้านี้ยืมเส้นของหน้าออกใบมาใช้
+ * ซึ่งบังเอิญผ่านเพราะ `admin` มีครบทุกช่อง ไม่ใช่เพราะมันถูก
+ *
+ * ⚠️ ต้องอยู่ **เหนือ** route ที่มี `:id` ของ prefix เดียวกันเสมอ ไม่งั้น `quotation-makers`
+ *    จะถูกอ่านเป็นรหัสผู้ใช้ (วันนี้ยังไม่มี `GET /api/admin/users/:id` แต่มีวันไหนก็พังทันที)
+ */
+app.get('/api/admin/users/quotation-makers', adminAuthMiddleware, requireCapability('page.users'), async (_req: any, res: any) => {
+  try {
+    res.json({ makers: await listQuotationMakersWithCodes() });
+  } catch (err: any) {
+    console.error('GET /api/admin/users/quotation-makers error:', err);
+    res.status(500).json({ error: 'ไม่สามารถดึงรายชื่อผู้จัดทำได้' });
   }
 });
 
