@@ -23,6 +23,8 @@ import { resolveDeliveryTerms, deliveryDisplayText } from "./utils/deliveryTerms
  * ฟอร์แมตชื่อคนที่จะขึ้นใต้เส้นลายเซ็น — กติกาเดียวกันทุกช่อง (§2.7 ข้อ 2)
  * ตัด `คุณ` นำหน้า → ลบ `(PM)`/`(THT)` เดิมกันซ้อน → ห้อยสังกัดตามค่ายของใบ
  * ชื่อว่าง = คืนสตริงว่าง (ผู้เรียกตัดสินเองว่าจะใส่ placeholder อะไร)
+ * ⚠️ ใบร่างของหน้าขอใบเสนอราคามีสำเนาที่ `signName()` ใน frontend/src/admin/QuoteRequest.tsx
+ *    แก้กติกาที่นี่ต้องแก้ที่นั่นด้วย ไม่งั้นชื่อบนจอกับบนไฟล์จะไม่ตรงกัน
  */
 export function formatPersonNameWithSuffix(rawName: string | null | undefined, isThemtech: boolean): string {
   const raw = rawName ? String(rawName).trim() : '';

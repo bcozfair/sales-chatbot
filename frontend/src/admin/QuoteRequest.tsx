@@ -833,6 +833,19 @@ const SumRow: React.FC<{ label: string; value: string; strong?: boolean; big?: b
   </div>
 );
 
+/**
+ * ชื่อใต้เส้นลายเซ็นในรูปเดียวกับบนกระดาษ — **สำเนาของ `formatPersonNameWithSuffix()` ใน
+ * pdfGenerator.ts** (หน้าแอดมิน import ฝั่ง backend ไม่ได้) แก้ที่ไหนต้องแก้อีกที่ให้ตรงกัน
+ * ตัด `คุณ` นำหน้า → ลบ `(PM)`/`(THT)` เดิมกันซ้อน → ห้อยค่ายของใบ
+ * `co = null` = ยังไม่ได้ตรวจ ยังไม่รู้ว่าใบเป็นค่ายไหน ⇒ ไม่ห้อย ดีกว่าห้อยผิดค่าย
+ */
+function signName(rawName: string | null | undefined, co: 'PM' | 'THT' | null): string | null {
+  const raw = rawName ? String(rawName).trim() : '';
+  if (raw === '') return null;
+  const clean = raw.replace(/^(คุณ)\s*/, '').replace(/\s*\((PM|THT)\)$/gi, '');
+  return co ? `${clean} (${co})` : clean;
+}
+
 const SignCell: React.FC<{ role: string; name: string | null; phone?: string | null; sig?: string | null }> = ({
   role, name, phone, sig,
 }) => (
@@ -1795,13 +1808,13 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
         <SignCell role="ลูกค้า (ผู้มีอำนาจ)" name="ลงนาม / วันที่" />
         <SignCell
           role="พนักงานขาย"
-          name={ctx.identity?.salesperson?.name ?? null}
+          name={signName(ctx.identity?.salesperson?.name, q ? g.co : null)}
           phone={ctx.identity?.salesperson?.phone}
           sig={ctx.identity?.salesperson?.sig_url}
         />
         <SignCell
           role="ผู้เสนอราคา"
-          name={ctx.identity?.issuer.name ?? null}
+          name={signName(ctx.identity?.issuer.name, q ? g.co : null)}
           phone={ctx.identity?.issuer.phone}
           sig={ctx.identity?.issuer.sig_url}
         />
