@@ -1235,9 +1235,6 @@ interface DocCtx {
   canAddService: boolean;
   serviceHint: string;
   justAdded: string | null;
-  // ── พรีวิว PDF ──
-  onPdf: (co: 'PM' | 'THT') => void;
-  pdfBusy: 'PM' | 'THT' | null;
 }
 
 const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
@@ -1831,32 +1828,6 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
           phone={ctx.identity?.issuer.phone}
           sig={ctx.identity?.issuer.sig_url}
         />
-      </div>
-
-      {/* ── ท้ายการ์ด: ชื่อใบ · ส่วนลดที่หักไปแล้วจริง · ปุ่มดูไฟล์จริง ──
-          ช่อง "ส่วนลด" บนกระดาษพิมพ์ 0.00 เสมอตามแบบฟอร์มของบริษัท ⇒ ยอดที่หักไปจริงต้องมีที่อยู่
-          ของมันเองบนจอ ไม่งั้นไม่มีใครตอบลูกค้าได้ว่าลดไปเท่าไหร่ (ดู utils/pricing.ts) */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 border-t border-slate-200">
-        <span className="text-[11px] text-slate-400">{q ? q.company_label : 'ยังไม่ได้แยกใบ'}</span>
-        {t && (
-          <span className="text-[11px] text-slate-400">
-            ส่วนลดที่หักไปแล้วในใบนี้{' '}
-            <span className="font-semibold text-red-700 tabular-nums">฿{money2(t.discount_total)}</span>
-          </span>
-        )}
-        <div className="ml-auto">
-          <Button
-            variant="neutral"
-            tone="soft"
-            icon={FileText}
-            busy={ctx.pdfBusy === g.co}
-            disabled={!q}
-            title={q ? undefined : 'ต้องตรวจก่อน ระบบจึงรู้ว่าใบนี้เป็นของบริษัทไหน'}
-            onClick={() => q && ctx.onPdf(q.quote_company)}
-          >
-            พรีวิว PDF ของใบนี้
-          </Button>
-        </div>
       </div>
     </div>
   );
@@ -3122,8 +3093,6 @@ export const QuoteRequest: React.FC = () => {
           ? 'มีบรรทัดค่าบริการแล้ว 1 บรรทัด — แก้ชื่อและราคาได้ที่แถวนั้น ลบก่อนจึงเพิ่มใหม่ได้'
           : `ค่าบริการมีได้บรรทัดเดียว และอยู่ในใบ Primus (PM) เสมอ (สินค้าระบบ ${svcCfg.internal_reference})`,
     justAdded,
-    onPdf: (co) => void openPdfPreview(co),
-    pdfBusy,
   };
 
   return (
@@ -3484,6 +3453,23 @@ export const QuoteRequest: React.FC = () => {
                 {!canIssue && (
                   <span className="text-[11px] text-amber-700 max-w-[320px]">{issueBlockedBecause()}</span>
                 )}
+                {/* พรีวิว PDF อยู่แถวเดียวกับปุ่มยืนยัน (เจ้าของสั่ง 2026-09-23 · เดิมเป็นแถวท้ายการ์ดของแต่ละใบ)
+                    ⇒ ติดขอบล่างจอตามไปด้วย · ใบแยกสองบริษัท = ปุ่มละใบ ติดชื่อบริษัทกำกับ
+                    ยังไม่ตรวจ = ยังไม่รู้ว่าใบเป็นของบริษัทไหน ⇒ ปุ่มจางพร้อมบอกเหตุผล */}
+                {groups.map((g) => (
+                  <Button
+                    key={g.co}
+                    variant="neutral"
+                    tone="soft"
+                    icon={FileText}
+                    busy={pdfBusy === g.co}
+                    disabled={!g.quote}
+                    title={g.quote ? `พรีวิว PDF ของใบ ${g.label}` : 'ต้องตรวจก่อน ระบบจึงรู้ว่าใบนี้เป็นของบริษัทไหน'}
+                    onClick={() => g.quote && void openPdfPreview(g.quote.quote_company)}
+                  >
+                    {groups.length > 1 ? `พรีวิว PDF ${g.co}` : 'พรีวิว PDF'}
+                  </Button>
+                ))}
                 <Button variant="danger" tone="soft" icon={Ban} disabled={confirming} onClick={resetAll}>
                   ยกเลิก
                 </Button>
