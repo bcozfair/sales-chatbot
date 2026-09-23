@@ -16,7 +16,21 @@ const hasDeepSeekKey = !!process.env.DEEPSEEK_API_KEY;
  *
  * 20 วิมาจากของที่วัดจริง (scripts/diag/extractionReliability.ts, 150 call):
  * p50 1,787ms · p95 2,554ms · max 3,000ms ⇒ เผื่อไว้ราว 8 เท่าของ p95 แล้ว
- * worst case ต่อ 1 การเรียกจึงลดจาก 1,800 วิ เหลือ 40 วิ
+ *
+ * ⚠️ **`timeout` ของ SDK ไม่ครอบคลุมช่วงดาวน์โหลด body — มันนับถึงแค่ตอนได้ response header**
+ * วัดเองกับ SDK/Node ตัวจริงในกล่องจริง 2026-09-23 (openai 6.38.0 · Node 22.23.2):
+ *   · เซิร์ฟเวอร์เงียบไม่ตอบเลย         → ตัดที่ 40.5 วิ ถูกต้องตามที่ตั้ง (20 วิ × 2 ครั้ง)
+ *   · เซิร์ฟเวอร์ตอบ header แล้วส่ง body ช้า 45 วิ → **สำเร็จที่ 45 วิ ไม่ตัดเลย**
+ * ⇒ พอ DeepSeek เริ่มตอบแล้วพ่นคำตอบช้า การเรียก 1 ครั้งวิ่งได้ไม่จำกัดเวลา
+ *   เกิดจริง 2026-09-23 14:34: 1 call กิน **93 วินาที แล้วสำเร็จ** (ไม่ใช่ error) งบ 48 วิหมดไปก่อน
+ *   เซลส์จึงไม่ได้คำตอบเลย · ลายเซ็นในตาราง api_logs คือ `llm_ms=0 llm_calls=0 own_ms=48000`
+ *   (ศูนย์เพราะตอนพิมพ์บรรทัดสรุป call ยังไม่กลับมา ไม่ใช่เพราะไม่ได้เรียก) · เกิดแบบนี้
+ *   **3 ครั้งใน 44 วัน จาก 6,644 งาน** (19 ส.ค. · 15 ก.ย. · 23 ก.ย.) ทุกครั้งเซลส์เงียบสนิท
+ *
+ * ตัวที่ครอบได้จริงคือ `signal` ซึ่งคุมทั้ง request รวมช่วง body (วัดแล้ว: ตัดที่ 20.0 วิเป๊ะ)
+ * จึงบังคับ `AbortSignal.timeout(LLM_HARD_CAP_MS)` ให้ทุกการเรียกใน createChatCompletion
+ * ⇒ **ห้ามถอดออกแล้วหวังพึ่ง `timeout` ตัวเดียว** มันกันได้แค่ครึ่งเดียวของกรณีที่เกิดจริง
+ * · gate: `npm run diag:llm-timeout` (จำลองทั้งสองแบบด้วยเซิร์ฟเวอร์ในเครื่อง ไม่ยิงเน็ตจริง)
  */
 export const openai = new OpenAI({
   apiKey: process.env.DEEPSEEK_API_KEY || process.env.OPENAI_API_KEY,
@@ -24,6 +38,16 @@ export const openai = new OpenAI({
   timeout: 20_000,
   maxRetries: 1,   // default 2 (= ยิงรวม 3 ครั้ง) → เหลือยิงรวม 2 ครั้ง
 });
+
+/**
+ * เพดานแข็งต่อ "1 การเรียก createChatCompletion" นับรวม retry ภายในของ SDK และช่วงโหลด body
+ *
+ * 20 วิเท่ากับ `timeout` ข้างบนโดยตั้งใจ — ไม่ได้ตั้งเป็น 40 (= 20 × 2 ครั้ง) เพราะงบของทั้งงาน
+ * มีแค่ 48 วิ ถ้าปล่อยให้ attempt เดียวกิน 40 วิ จะเหลือ 8 วิซึ่งชนเงื่อนไข "งบเหลือ < 8 วิ
+ * ให้ข้าม attempt ถัดไป" ใน quoteExtraction พอดี ⇒ ไม่มีโอกาสลองใหม่เลย
+ * ตัดที่ 20 วิแล้วเหลือ ~28 วิ ซึ่งพอสำหรับลองใหม่อีกรอบ (ปกติใช้ 2.5 วิ) = โอกาสได้คำตอบจริง
+ */
+export const LLM_HARD_CAP_MS = 20_000;
 
 // โมเดลกลางของระบบ — ใช้ deepseek-v4-flash
 // (deepseek-chat / deepseek-reasoner จะถูก deprecate 2026/07/24 — v4-flash คือตัวแทนถาวร)
@@ -47,6 +71,11 @@ export const LLM_MODEL = 'deepseek-v4-flash';
 export async function createChatCompletion(params: Record<string, any>): Promise<any> {
   const timing = llmTimingStore.getStore();
   const t0 = timing ? Date.now() : 0;
+  // `signal` ไม่ใช่ field ของ body — ต้องแยกออกไปเป็น request option ไม่งั้น SDK ส่งขึ้นไปกับ JSON
+  const { signal: callerSignal, ...body } = params;
+  // เพดานแข็งของเราเอง + ธงยกเลิกของผู้เรียก (ถ้ามี) — ตัวไหนมาก่อนตัดก่อน
+  const capSignal = AbortSignal.timeout(LLM_HARD_CAP_MS);
+  const signal = callerSignal ? AbortSignal.any([callerSignal, capSignal]) : capSignal;
   // เปิดช่วง busy ตอนเป็น call แรกที่ยังค้างอยู่ — call ที่ซ้อนเข้ามาระหว่างช่วงนี้ไม่เปิดช่วงใหม่
   // ⇒ เวลาที่ทับกันถูกนับครั้งเดียว (ดูเหตุผลที่ฟิลด์ busyMs)
   if (timing && timing.inFlight++ === 0) timing.busyStart = t0;
@@ -55,8 +84,8 @@ export async function createChatCompletion(params: Record<string, any>): Promise
       model: LLM_MODEL,
       thinking: { type: 'disabled' },
       temperature: 0,
-      ...params,
-    } as any);
+      ...body,
+    } as any, { signal });
     // G#2 — นับ token เฉพาะครั้งที่สำเร็จ ครั้งที่พังไม่มี usage ให้อ่านอยู่แล้ว
     // อ่าน prompt_cache_hit_tokens ก่อน (ฟิลด์ของ DeepSeek) แล้วค่อยตกไป
     // prompt_tokens_details.cached_tokens ซึ่งเป็นชื่อฝั่ง OpenAI — เผื่อวันที่สลับ baseURL กลับ
@@ -68,6 +97,12 @@ export async function createChatCompletion(params: Record<string, any>): Promise
     return res;
   } catch (err) {
     if (timing) timing.errors++;
+    // บรรทัดนี้คือตัวที่ใช้วัดว่าเพดานทำงานกี่ครั้งจริง — ต้องแยกออกจาก error อื่นให้ชัด
+    // ไม่งั้นมันจะไปปนกับ `[extraction] attempt N ล้มเหลว` ซึ่งรวมทุกสาเหตุไว้ด้วยกัน
+    // นับด้วย: docker logs primus-chatbot-app-1 | grep -c '\[llm\] ⏱️'
+    if (capSignal.aborted) {
+      console.warn(`[llm] ⏱️ ตัดที่เพดาน ${LLM_HARD_CAP_MS}ms — ปลายทางตอบช้าเกินงบ (ผู้เรียกจะลองใหม่ถ้างบเหลือพอ)`);
+    }
     throw err;
   } finally {
     // นับทั้งครั้งที่สำเร็จและครั้งที่พัง — ครั้งที่พังคือครั้งที่กินเวลานานที่สุด (timeout 20 วิ + retry)
