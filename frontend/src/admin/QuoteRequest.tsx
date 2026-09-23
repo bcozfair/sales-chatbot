@@ -3454,7 +3454,8 @@ export const QuoteRequest: React.FC = () => {
                   <span className="text-[11px] text-amber-700 max-w-[320px]">{issueBlockedBecause()}</span>
                 )}
                 {/* พรีวิว PDF อยู่แถวเดียวกับปุ่มยืนยัน (เจ้าของสั่ง 2026-09-23 · เดิมเป็นแถวท้ายการ์ดของแต่ละใบ)
-                    ⇒ ติดขอบล่างจอตามไปด้วย · ใบแยกสองบริษัท = ปุ่มละใบ ติดชื่อบริษัทกำกับ
+                    ⇒ ติดขอบล่างจอตามไปด้วย · ใบแยกสองบริษัท = ปุ่มละใบ เรียง PM → THT ตามลำดับใบบนจอ
+                    ชื่อปุ่มเป็น "พรีวิว PDF" เสมอ (เจ้าของสั่ง) ชื่อบริษัทอยู่ใน title ตอนชี้
                     ยังไม่ตรวจ = ยังไม่รู้ว่าใบเป็นของบริษัทไหน ⇒ ปุ่มจางพร้อมบอกเหตุผล */}
                 {groups.map((g) => (
                   <Button
@@ -3467,7 +3468,7 @@ export const QuoteRequest: React.FC = () => {
                     title={g.quote ? `พรีวิว PDF ของใบ ${g.label}` : 'ต้องตรวจก่อน ระบบจึงรู้ว่าใบนี้เป็นของบริษัทไหน'}
                     onClick={() => g.quote && void openPdfPreview(g.quote.quote_company)}
                   >
-                    {groups.length > 1 ? `พรีวิว PDF ${g.co}` : 'พรีวิว PDF'}
+                    พรีวิว PDF
                   </Button>
                 ))}
                 <Button variant="danger" tone="soft" icon={Ban} disabled={confirming} onClick={resetAll}>
