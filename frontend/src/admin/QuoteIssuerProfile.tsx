@@ -218,11 +218,15 @@ export const QuoteIssuerProfile: React.FC<Props> = ({ spUserId, onSpUserIdChange
   useEffect(() => {
     if (isSelfIssueRole) {
       // เซลส์: สองช่องบนใบเป็นคนเดียวกันเสมอ (ตัวเอง) — ตรงกับที่ getIssuerSnapshot คืน null
-      // ให้ PDF เดินเส้นเดิม (ช่องขวาซ้ำชื่อ/ลายเซ็นของช่องกลาง)
+      // ให้ PDF เดินเส้นเดิม (ช่องขวาซ้ำชื่อ/ลายเซ็นของช่องกลาง) ⇒ ใบร่างต้องซ้ำให้เหมือนกัน
+      // ไม่งั้นช่อง "ผู้เสนอราคา" บนจอว่างทั้งที่ไฟล์จริงมีชื่อ
       const identity = own
         ? { name: own.name, phone: own.phone ?? null, sig_url: own.sig_url ?? null }
         : null;
-      onIdentityChange?.({ salesperson: identity, issuer: { name: null, phone: null, sig_url: null } });
+      onIdentityChange?.({
+        salesperson: identity,
+        issuer: identity ?? { name: null, phone: null, sig_url: null },
+      });
       return;
     }
     onIdentityChange?.({
