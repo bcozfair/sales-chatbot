@@ -107,7 +107,7 @@ export const BookImportModal: React.FC<Props> = ({ authHeaders, onClose }) => {
         reader.onerror = () => reject(new Error('อ่านไฟล์ไม่สำเร็จ'));
         reader.readAsDataURL(f);
       });
-      const res = await fetch('/api/admin/pricing/import/preview', {
+      const res = await fetch('/api/admin/pricebook/import/preview', {
         method: 'POST', headers: jsonHeaders, body: JSON.stringify({ file: b64, name: f.name }),
       });
       const body = await res.json();
@@ -128,7 +128,7 @@ export const BookImportModal: React.FC<Props> = ({ authHeaders, onClose }) => {
     setBusy(true);
     setError('');
     try {
-      const res = await fetch('/api/admin/pricing/import/apply', {
+      const res = await fetch('/api/admin/pricebook/import/apply', {
         method: 'POST',
         headers: jsonHeaders,
         body: JSON.stringify({

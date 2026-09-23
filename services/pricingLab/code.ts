@@ -619,6 +619,37 @@ function findModel(book: PriceBook, prefix: string, num: string, suffix: string)
   return undefined;
 }
 
+/**
+ * หัวรหัส = ตระกูล + เลขรุ่น + ตัวอักษรท้ายเลขรุ่น
+ *
+ * `(-0)?` มีไว้สำหรับ `TS_-01-0` ซึ่งเป็น **ตารางราคาคนละตารางในชีตเดียวกัน** (เกลียว M4–M10
+ * แทน M6–5/16") ไม่ใช่รหัสย่อยต่อท้าย — 377 จาก 1,210 รหัสของตระกูล 01 เป็นแบบนี้
+ */
+const HEAD_RE = /^(BH|TS[A-Z]*)-?(\d{2})(-0)?([A-Z]*)/i;
+
+function readHead(normalized: string) {
+  const head = normalized.match(HEAD_RE);
+  if (!head) return null;
+  return {
+    text: head[0],
+    prefix: (head[1] ?? '').toUpperCase(),
+    num: (head[2] ?? '') + (head[3] ?? ''),
+    suffix: (head[4] ?? '').toUpperCase(),
+  };
+}
+
+/**
+ * รหัสนี้คิดราคาจากรุ่นไหนในสมุด — **อ่านแค่หัวรหัส** ไม่อ่านขนาด/รหัสย่อย
+ *
+ * มีไว้ให้หน้า "สมุดราคา" นับว่าแต่ละรุ่นครอบสินค้ากี่รายการ: `parseProductCode` ทั้งตัวกับ
+ * สินค้า 22,297 รหัสใช้ **9.8 วินาที** (วัดบน prod 2026-09-23) ส่วนตัวนี้ใช้ไม่กี่ ms
+ * ⇒ ใช้ `readHead` + `findModel` ตัวเดียวกับ `parseProductCode` เป๊ะ สองทางจึงตอบรุ่นเดียวกันเสมอ
+ */
+export function modelOfCode(input: string, book: PriceBook): PriceModel | undefined {
+  const h = readHead(norm(input));
+  return h ? findModel(book, h.prefix, h.num, h.suffix) : undefined;
+}
+
 export function parseProductCode(input: string, book: PriceBook): ParsedCode {
   const normalized = norm(input);
   const out: ParsedCode = { input, normalized, parts: [], problems: [], warnings: [] };
@@ -627,17 +658,13 @@ export function parseProductCode(input: string, book: PriceBook): ParsedCode {
     return out;
   }
 
-  // `(-0)?` มีไว้สำหรับ `TS_-01-0` ซึ่งเป็น **ตารางราคาคนละตารางในชีตเดียวกัน** (เกลียว M4–M10
-  // แทน M6–5/16") ไม่ใช่รหัสย่อยต่อท้าย — 377 จาก 1,210 รหัสของตระกูล 01 เป็นแบบนี้
-  const head = normalized.match(/^(BH|TS[A-Z]*)-?(\d{2})(-0)?([A-Z]*)/i);
+  const head = readHead(normalized);
   if (!head) {
     out.problems.push('อ่านไม่ออกว่ารหัสนี้เป็นรุ่นอะไร — รหัสต้องขึ้นต้นด้วยตระกูลและเลขรุ่น เช่น TSK-04 หรือ BH-01');
     return out;
   }
 
-  const prefix = (head[1] ?? '').toUpperCase();
-  const num = (head[2] ?? '') + (head[3] ?? '');
-  const suffix = (head[4] ?? '').toUpperCase();
+  const { prefix, num, suffix } = head;
   const model = findModel(book, prefix, num, suffix);
   if (!model) {
     out.problems.push(
@@ -651,7 +678,7 @@ export function parseProductCode(input: string, book: PriceBook): ParsedCode {
 
   out.model = model.code;
   const c: Ctx = { book, model, cfg: { model: model.code }, parts: [], warnings: out.warnings };
-  add(c, { text: normalized.slice(0, head[0].length), reads: `รุ่น ${model.code} — ${model.label}`, kind: 'model' });
+  add(c, { text: normalized.slice(0, head.text.length), reads: `รุ่น ${model.code} — ${model.label}`, kind: 'model' });
 
   // ตัวอักษรท้ายเลขรุ่น สามทางที่ต่างกันคนละเรื่อง:
   //   1. อยู่ในชื่อรุ่นอยู่แล้ว (`TS-01-0`)            ⇒ ไม่ต้องพูดถึง
@@ -685,7 +712,7 @@ export function parseProductCode(input: string, book: PriceBook): ParsedCode {
     });
   }
 
-  const rest = normalized.slice(head[0].length);
+  const rest = normalized.slice(head.text.length);
   // ตัวอักษรตัวแรกหลัง TS บอกชนิดหัววัด (TSK → K) · BH ไม่มีชนิดหัววัด
   const letter = prefix.startsWith('TS') ? prefix.slice(2, 3) : '';
 

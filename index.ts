@@ -163,7 +163,7 @@ import { apiLogMiddleware, getRequestId } from './config/apiLogger.js';
 import { insertQuotationDeleteAudit } from './db/logRepositories.js';
 import { logsRouter } from './routes/logs.js';
 import { dataDirectoryRouter } from './routes/dataDirectory.js';
-import { pricingLabRouter } from './routes/pricingLab.js';
+import { pricingLabRouter, pricebookRouter } from './routes/pricingLab.js';
 import { localContactsRouter } from './routes/localContacts.js';
 import {
   initApiLogWriter,
@@ -241,10 +241,12 @@ app.use('/api/admin/data', adminAuthMiddleware, dataDirectoryRouter);
 
 // ── โมดูลทดลอง "คิดราคาสินค้า" — ดู routes/pricingLab.ts ──────────────────────────────
 // เจ้าของสั่ง 2026-09-18 ให้เอาเข้าหน้าแอดมินจริงเพื่อทดลองใช้หลังล็อกอิน **ยังไม่ต่อกับใบเสนอราคา**
-// ถอนโมดูลออก = ลบ 2 บรรทัดนี้ (import ด้านบน + บรรทัดล่าง) + 1 ช่องใน capabilities.ts
+// ถอนโมดูลออก = ลบ 3 บรรทัดนี้ (import ด้านบน + สองบรรทัดล่าง) + 2 ช่องใน capabilities.ts
 // + 1 เมนูใน AdminApp.tsx + 4 โฟลเดอร์/ไฟล์ของโมดูล + DROP TABLE pricing_subcodes
 // ไม่มีโค้ดเดิมที่ไหน import โฟลเดอร์ services/pricingLab/ — การพึ่งพาเป็นทางเดียวโดยตั้งใจ
 app.use('/api/admin/pricing', adminAuthMiddleware, requireCapability('page.pricing'), pricingLabRouter);
+// หน้า "สมุดราคา" — ทุกเส้นที่แก้ราคา แยกสิทธิ์จากหน้าคิดราคา (เจ้าของสั่ง 2026-09-23)
+app.use('/api/admin/pricebook', adminAuthMiddleware, requireCapability('page.pricebook'), pricebookRouter);
 
 // ── "เพิ่มผู้ติดต่อใหม่เอง" (local_contacts) — ดู routes/localContacts.ts ────────────────────
 // แผน: docs/plan-local-contacts.md ก้อน I2 · ยังไม่มี UI เรียก (ปุ่มมาที่ I3 · หน้ารายการที่ I4)

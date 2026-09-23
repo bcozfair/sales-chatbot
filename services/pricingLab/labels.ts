@@ -86,3 +86,27 @@ export const axisLabel = (key: string): string => AXIS_TH[key] ?? key;
 export const optionLabel = (key: string): string => OPTION_TH[key] ?? key;
 export const dimLabel = (key: string): string => DIM_TH[key] ?? key;
 export const kindLabel = (key: string): string => KIND_TH[key] ?? key;
+
+/**
+ * ชื่อรุ่นที่ขึ้นจอ — รุ่นหลักกับชื่ออื่นที่ **ตระกูลเดียวกัน ต่างกันแค่เลขรุ่น** รวมเป็นชื่อเดียว
+ * แบบเดียวกับที่ข้อมูลสินค้าจาก Odoo ตั้งชื่อซีรีส์ (`products.series`): `BH-01` + `BH-02` → `BH-01,02`
+ *
+ * เจ้าของสั่ง 2026-09-23 หลังเห็นว่าหน้าข้อมูลสินค้าเรียก `BH-01,02` แต่สมุดราคาเรียก `BH-01 + BH-02`
+ * ทั้งที่คิดจากตารางเดียวกันอยู่แล้ว (1,269 รายการ) — **เปลี่ยนแค่ชื่อที่แสดง** รหัสรุ่น `BH-01` ใน
+ * ฐานไม่ขยับ เพราะประวัติราคาทุกเล่มผูกกับรหัสนั้น เปลี่ยนเมื่อไหร่ทางย้อนเล่มขาดทันที
+ *
+ * ชื่ออื่นที่ต่างตระกูล (`TSJ-04` ของรุ่น `TSK-04`) ไม่รวม — มันคือชนิดหัววัดคนละตัว คนต้องเห็นแยกกัน
+ * ⇒ คืนกลับมาใน `others` ให้หน้าจอวาดเป็นคอลัมน์ "ใช้ราคาเดียวกัน"
+ */
+export function displayName(code: string, aliases: readonly string[] = []): { name: string; others: string[] } {
+  const own = /^([A-Z]+-)(\d+)$/.exec(code);
+  if (!own) return { name: code, others: [...aliases] };
+  const nums = [own[2]];
+  const others: string[] = [];
+  for (const a of aliases) {
+    const m = /^([A-Z]+-)(\d+)$/.exec(a);
+    if (m && m[1] === own[1] && m[2].length === own[2].length) nums.push(m[2]);
+    else others.push(a);
+  }
+  return { name: own[1] + nums.join(','), others };
+}

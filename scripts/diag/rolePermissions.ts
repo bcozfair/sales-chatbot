@@ -93,6 +93,8 @@ const TODAY: Record<Capability, [admin: PermissionMode, approver: PermissionMode
   'page.settings_shipping':       ['allow', 'deny', 'deny'],
   // โมดูลทดลอง — หน้าที่ยังไม่เคยมี ⇒ ไม่มีใครเสียสิทธิ์ที่เคยมี · เจ้าของเปิดให้ role อื่นเองได้
   'page.pricing':                 ['allow', 'deny', 'deny'],
+  // แยกจาก page.pricing 2026-09-23 — ค่าเริ่มต้นเท่ากันเป๊ะ ⇒ วันแยกไม่มีใครได้/เสียสิทธิ์
+  'page.pricebook':               ['allow', 'deny', 'deny'],
   'page.productsdata':            ['allow', 'allow', 'allow'],
   'page.customersdata':           ['allow', 'allow', 'allow'],
   'page.odoocontacts':            ['allow', 'allow', 'allow'],
@@ -405,6 +407,15 @@ async function main() {
     /app\.use\('\/api\/admin\/data\/customers',[^)]*requireCapability\('page\.customersdata'\)/.test(indexSrc));
   ok('  และจุด mount ของ dataDirectoryRouter ไม่เหลือ requireRole ค้างไว้ให้ตีความสองทาง',
     /app\.use\('\/api\/admin\/data', adminAuthMiddleware, dataDirectoryRouter\)/.test(indexSrc));
+  // เส้นที่แก้ราคาต้องอยู่หลัง page.pricebook ไม่ใช่ page.pricing — สลับกันเมื่อไหร่ คนที่ได้แค่
+  // "คิดราคา" จะแก้ราคาทั้งเล่มได้ทันที ⇒ อ่านซอร์สของ router มาเทียบว่าไม่มีเส้นเขียนหลุดไปอยู่ฝั่งคิดราคา
+  ok('สมุดราคา: /api/admin/pricebook บังคับด้วย page.pricebook ที่จุด mount',
+    /app\.use\('\/api\/admin\/pricebook',[^)]*requireCapability\('page\.pricebook'\)/.test(indexSrc));
+  const pricingSrc = readFileSync(new URL('../../routes/pricingLab.ts', import.meta.url), 'utf-8');
+  const quoteSide = [...pricingSrc.matchAll(/^pricingLabRouter\.(get|post|put|patch|delete)\('([^']+)'/gm)]
+    .map((m) => `${m[1].toUpperCase()} ${m[2]}`);
+  ok('  ฝั่งคิดราคา (page.pricing) มีแค่ GET /overview + POST /quote — ไม่มีเส้นแก้ราคา',
+    sameSet(quoteSide, ['GET /overview', 'POST /quote']), quoteSide.join(' · '));
 
   // ── เมนูฝั่งหน้าจออ่านจากช่องเดียวกับด่าน ─────────────────────────────────
   //  AdminApp.tsx ถือ `roles: [...]` ไว้เป็น **ค่าสำรอง** ตอนเรียก /me/capabilities ไม่สำเร็จ

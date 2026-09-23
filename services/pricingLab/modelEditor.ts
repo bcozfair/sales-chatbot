@@ -18,7 +18,7 @@
 //  ขึ้นใหม่จากค่าที่รู้จักเท่านั้น ไม่ใช่ `JSON.parse` แล้วยัดลงสมุดราคา
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { AXIS_TH, DIM_TH, KIND_TH, OPTION_TH, axisLabel, dimLabel } from './labels.js';
+import { AXIS_TH, DIM_TH, KIND_TH, OPTION_TH, axisLabel, dimLabel, displayName } from './labels.js';
 import type { Adder, Band, ModelVariant, Money, Predicate, PriceBook, PriceModel } from './types.js';
 
 // ── ที่หน้าจออ่าน ────────────────────────────────────────────────────────────
@@ -61,6 +61,8 @@ export interface EditorAdder {
 
 export interface EditorView {
   code: string;
+  /** ชื่อที่ขึ้นจอ (`BH-01` → `BH-01,02`) — `code` ยังเป็นตัวที่ส่งกลับมาตอนบันทึก */
+  name: string;
   label: string;
   sheet: string;
   aliases: string[];
@@ -142,6 +144,7 @@ export function modelEditorView(book: PriceBook, m: PriceModel): EditorView {
 
   return {
     code: m.code,
+    name: displayName(m.code, m.aliases ?? []).name,
     label: m.label,
     sheet: m.sheet ?? '',
     aliases: m.aliases ?? [],

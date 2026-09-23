@@ -19,7 +19,7 @@ import type { EditorAdder, EditorBand, EditorView } from './types';
  *
  * ⚠️ ต่างจาก `PricingLab.tsx` ตรงที่ **จอนี้ถือราคาไว้ใน state จริง** — จำเป็น เพราะมันคือจอแก้
  *   สิ่งที่ยังต้องเป็นจริงอยู่คือ "ไม่มีราคาอยู่ใน bundle" · ราคาเดินทางมาตอนเปิดรุ่นเท่านั้น
- *   และเส้น API ที่ส่งมาอยู่หลังด่าน `page.pricing` เดียวกับทั้ง router (ดูหัว routes/pricingLab.ts)
+ *   และเส้น API ที่ส่งมาอยู่หลังด่าน `page.pricebook` ของหน้าสมุดราคา (ดูหัว routes/pricingLab.ts)
  */
 
 const fmt = (n: number | null | undefined) =>
@@ -293,7 +293,7 @@ export const ModelPriceEditor: React.FC<{
   const load = useCallback(async () => {
     setError('');
     try {
-      const res = await fetch(`/api/admin/pricing/model/${encodeURIComponent(code)}`, { headers: authHeaders });
+      const res = await fetch(`/api/admin/pricebook/model/${encodeURIComponent(code)}`, { headers: authHeaders });
       const body = await res.json();
       if (!res.ok) throw new Error(body?.error ?? 'โหลดราคาของรุ่นนี้ไม่สำเร็จ');
       setOrig(body.model);
@@ -334,7 +334,7 @@ export const ModelPriceEditor: React.FC<{
     setBusy(true);
     setError('');
     try {
-      const res = await fetch(`/api/admin/pricing/model/${encodeURIComponent(orig.code)}`, {
+      const res = await fetch(`/api/admin/pricebook/model/${encodeURIComponent(orig.code)}`, {
         method: 'PUT',
         headers: jsonHeaders,
         body: JSON.stringify({
@@ -395,7 +395,7 @@ export const ModelPriceEditor: React.FC<{
         <Button icon={ChevronLeft} onClick={() => onBack(savedOnce.current)}>กลับ</Button>
         <div className="min-w-[180px] flex-1">
           <h1 className="text-lg font-bold text-slate-900 truncate">
-            แก้ราคา {orig.code} — {orig.label}
+            แก้ราคา {orig.name ?? orig.code} — {orig.label}
           </h1>
           <p className="text-[11px] text-slate-400 mt-0.5">
             {orig.standardTh && <>รวมในราคาตั้งแล้ว: {orig.standardTh} · </>}
