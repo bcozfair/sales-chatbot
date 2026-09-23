@@ -277,6 +277,17 @@ const CONTACT_SORTS: Record<string, string> = {
 const CREDIT_TERMS_SQL = `(v.customer_payment_terms ~ '^[0-9]+ Days$'
                         OR v.customer_payment_terms LIKE 'เช็คล่วงหน้า%')`;
 
+/**
+ * "จังหวัดเดียวกัน" ในสายตาคน — Odoo เก็บจังหวัดเดียวไว้หลายสะกด (วัด 2026-09-23: 157 ค่า → 80 จังหวัด)
+ *   `กรุงเทพมหานคร` · `กรุงเทพมหานคร (TH)` · `กรุงเทพมหานคร  (TH)` (เว้นสองช่อง) · `กรุงเทพมหานคร ไม่ใช้ (TH)`
+ * ⇒ ยุบช่องว่าง → ตัด `ไม่ใช้` / `(TH)` ท้ายชื่อ · ประเทศอื่นคงรหัสไว้ (`Perugia (IT)`) เพราะไม่ใช่จังหวัดไทย
+ *
+ * ใช้เฉพาะ **ตัวกรองของหน้านี้** — ค่าในคอลัมน์ไม่ถูกแตะ (export ไป Odoo ต้องได้ค่าดิบตรงตัว)
+ * ตัวแสดงผลบนจอ `province()` ใน CustomersDirectory.tsx ตัดแบบเดียวกัน แก้ที่นี่ต้องแก้ที่นั่นด้วย
+ */
+const provinceKey = (col: string) =>
+  `TRIM(regexp_replace(regexp_replace(${col}, '\\s+', ' ', 'g'), '\\s*(ไม่ใช้\\s*)?(\\(TH\\))?\\s*$', ''))`;
+
 function customerWhere(f: CustomerDirectoryFilter): { sql: string; params: any[] } {
   const where: string[] = [];
   const params: any[] = [];
@@ -292,7 +303,14 @@ function customerWhere(f: CustomerDirectoryFilter): { sql: string; params: any[]
   }
   if (f.type) { params.push(f.type); where.push(`v.customer_type = $${params.length}`); }
   if (f.team) { params.push(f.team); where.push(`v.sales_team = $${params.length}`); }
-  if (f.state) { params.push(f.state); where.push(`v.invoice_state = $${params.length}`); }
+  if (f.state) {
+    // เทียบกับ "ค่าดิบทุกสะกดของจังหวัดนั้น" ไม่ใช่ครอบ regex ทุกแถว — ครอบทุกแถว 82k = ~330 ms
+    // ส่วนนี้ยุบเหลือ ~157 ค่าก่อน (OFFSET 0 กันไม่ให้ planner ดัน regex ลงไปทำทีละแถว) = ~90 ms
+    params.push(f.state);
+    where.push(`v.invoice_state IN (
+      SELECT s FROM (SELECT DISTINCT invoice_state AS s FROM customers_data_view OFFSET 0) d
+       WHERE ${provinceKey('d.s')} = $${params.length})`);
+  }
 
   if (f.pay === '__credit') where.push(CREDIT_TERMS_SQL);
   else if (f.pay === '__null') where.push('v.customer_payment_terms IS NULL');
@@ -397,8 +415,16 @@ export async function getCustomerFacets(): Promise<{
           WHERE ${col} IS NOT NULL AND TRIM(${col}) <> ''
           GROUP BY 1 ORDER BY 1`,
       );
+    // จังหวัดรวมทุกสะกดเป็นตัวเลือกเดียว (ดู provinceKey) — นับทีละค่าดิบก่อนแล้วค่อยยุบ
+    const states = pool.query(
+      `SELECT k AS value, sum(n)::int AS n FROM (
+         SELECT ${provinceKey('r.s')} AS k, r.n FROM (
+           SELECT invoice_state AS s, count(*) AS n FROM customers_data_view
+            WHERE invoice_state IS NOT NULL GROUP BY 1 OFFSET 0) r) g
+        WHERE k <> '' GROUP BY 1 ORDER BY 1`,
+    );
     const [t, tm, st, pay] = await Promise.all([
-      q('customer_type'), q('sales_team'), q('invoice_state'), q('customer_payment_terms'),
+      q('customer_type'), q('sales_team'), states, q('customer_payment_terms'),
     ]);
     return { types: t.rows, teams: tm.rows, states: st.rows, payTerms: pay.rows };
   } catch (err) {
