@@ -126,8 +126,19 @@ const THREE: readonly PermissionMode[] = ['deny', 'approval', 'allow'];
 const SWITCH: readonly PermissionMode[] = ['deny', 'allow'];
 
 /**
+ * ⚠️ **ค่าเริ่มต้นของ `salesperson` คือ `deny` ทุกช่อง ไม่มีข้อยกเว้น** (เจ้าของสั่ง 2026-09-23)
+ *
+ * คอลัมน์นี้ยังไม่มีบัญชีสักใบตอนที่เขียนบรรทัดนี้ (§14) ⇒ ไม่มี "พฤติกรรมของวันนี้" ให้รักษา
+ * และวันที่บัญชีแรกเกิดขึ้นคือวันที่ค่าพวกนี้มีผลกับคนจริงทันที เจ้าของจึงเลือกให้เริ่มจาก
+ * **ปิดหมดแล้วเปิดเองทีละช่องจากหน้า "สิทธิ์ตามบทบาท"** แทนการเดาค่าที่ควรเป็นไว้ล่วงหน้า
+ * — เดาแล้วเกินไปคือสิทธิ์ที่ไม่มีใครรู้ว่าใครได้มา ส่วนเดาแล้วขาดคือคนโทรมาถาม
+ *
+ * ⇒ ช่องที่เปิดให้เซลส์จริงจะเป็น **แถวใน `role_permissions`** ไม่ใช่ค่าในไฟล์นี้ ซึ่งตรงกับ
+ *   กติกาของโมดูลอยู่แล้ว ("ของที่ไม่มีใครแก้ ต้องไม่มีแถว" — ของที่แก้แล้วต้องมี)
+ * ⇒ `npm run diag:role-permissions` ข้อ 1 ตรึงข้อนี้ไว้ การเผลอเปิดช่องให้เซลส์จากโค้ด
+ *   (เช่น copy-paste `switchFor` มาทั้งบรรทัด) จะล้มที่ด่าน ไม่ใช่ไปโผล่บนจอของเซลส์
+ *
  * ค่าเริ่มต้นของกฎที่วันนี้ "ติ๊กรับทราบเองได้ทุก role ที่ออกใบได้"
- * — salesperson เป็นคอลัมน์ใหม่ทั้งคอลัมน์ ไม่ได้เปลี่ยนของใคร
  */
 const selfAck = (salesperson: PermissionMode): Record<Role, PermissionMode> => ({
   admin: 'allow',
@@ -159,7 +170,7 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     group: 'rule',
     label: 'สินค้าที่ถูกระงับการเสนอราคา',
     modes: THREE,
-    defaults: selfAck('approval'),
+    defaults: selfAck('deny'),
     enforcedAt: 'services/webQuoteService.ts (createDraftFromWeb)',
   },
   {
@@ -167,7 +178,7 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     group: 'rule',
     label: 'สินค้าไม่พอในสต็อก',
     modes: THREE,
-    defaults: selfAck('approval'),
+    defaults: selfAck('deny'),
     enforcedAt: 'services/webQuoteService.ts (createDraftFromWeb)',
   },
   {
@@ -175,7 +186,7 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     group: 'rule',
     label: 'จำนวนต่ำกว่าขั้นต่ำการสั่งซื้อ',
     modes: THREE,
-    defaults: selfAck('approval'),
+    defaults: selfAck('deny'),
     enforcedAt: 'services/webQuoteService.ts (createDraftFromWeb)',
   },
   {
@@ -183,9 +194,12 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     group: 'rule',
     label: 'ราคาต่ำกว่าราคาขั้นต่ำ',
     modes: THREE,
-    // ทุก role เป็น approval อยู่แล้วตั้งแต่ 2026-09-15 (docs/plan-quote-price-approval.md)
-    // — ช่องนี้ไม่ได้เปลี่ยนอะไรเลย แค่ย้ายค่าที่เคยเป็น APPROVAL_REQUIRED_TYPES มาให้แก้ได้
-    defaults: { admin: 'approval', approver: 'approval', subadmin: 'approval', salesperson: 'approval', user: 'deny' },
+    // admin/approver/subadmin เป็น approval อยู่แล้วตั้งแต่ 2026-09-15
+    // (docs/plan-quote-price-approval.md) — ช่องนี้ไม่ได้เปลี่ยนของใคร แค่ย้ายค่าที่เคยเป็น
+    // APPROVAL_REQUIRED_TYPES มาให้แก้ได้
+    // ⚠️ เซลส์เป็น `deny` ตามกติกา "ปิดหมดก่อน" ⇒ **คิวอนุมัติราคายังไม่เปิดให้เซลส์**
+    //    เปิดเมื่อไหร่ให้ตั้งช่องนี้เป็น approval จากหน้าจอ (ตั้ง allow = ไม่ต้องขอใครเลย)
+    defaults: { admin: 'approval', approver: 'approval', subadmin: 'approval', salesperson: 'deny', user: 'deny' },
     enforcedAt: 'services/quotationService.ts (blockingViolations) + priceApprovalService.ts',
   },
   {
@@ -193,8 +207,9 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     group: 'rule',
     label: 'ลูกค้าอยู่ในบัญชีห้ามเสนอราคา',
     modes: THREE,
-    // เสนอเป็น deny สำหรับเซลส์: blacklist กับเครดิตค้างเป็นเรื่องของ *ตัวลูกค้า* ไม่ใช่ของใบ
-    // คนที่ปลดควรเป็นคนที่แก้สถานะลูกค้าได้ ไม่ใช่คนที่กดอนุมัติใบทีละใบ · เปลี่ยนจากหน้าจอได้ทันที
+    // blacklist กับเครดิตค้างเป็นเรื่องของ *ตัวลูกค้า* ไม่ใช่ของใบ คนที่ปลดควรเป็นคนที่แก้
+    // สถานะลูกค้าได้ ไม่ใช่คนที่กดอนุมัติใบทีละใบ ⇒ เซลส์เป็น deny ด้วยเหตุผลของตัวเอง
+    // นอกเหนือจากกติกา "ปิดหมดก่อน" ข้างบน · เปลี่ยนจากหน้าจอได้ทันที
     defaults: selfAck('deny'),
     enforcedAt: 'services/webQuoteService.ts (createDraftFromWeb)',
   },
@@ -216,7 +231,7 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     group: 'page',
     label: 'ขอใบเสนอราคา',
     modes: SWITCH,
-    defaults: switchFor('allow', 'allow', 'allow', 'allow'),
+    defaults: switchFor('allow', 'allow', 'allow', 'deny'),
     enforcedAt: '/api/admin/webquote/* 8 เส้น (makers · me · salespersons · payment-terms · propose · preview · preview-pdf · drafts)',
   },
   {
@@ -224,7 +239,7 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     group: 'quote',
     label: 'แก้ใบเดิมแล้วออกใหม่ (revise)',
     modes: SWITCH,
-    defaults: switchFor('allow', 'allow', 'allow', 'allow'),
+    defaults: switchFor('allow', 'allow', 'allow', 'deny'),
     enforcedAt: 'POST /api/admin/webquote/revise',
   },
   {
@@ -321,7 +336,7 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     group: 'page',
     label: 'อนุมัติราคา',
     modes: SWITCH,
-    defaults: switchFor('allow', 'allow', 'allow', 'allow'),
+    defaults: switchFor('allow', 'allow', 'allow', 'deny'),
     enforcedAt: '/api/admin/approvals/* ทั้ง 8 เส้น (3 เส้นที่ตัดสินคำขอซ้อน approval.decide อีกชั้น)',
   },
   {
@@ -329,7 +344,7 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     group: 'page',
     label: 'ประวัติใบเสนอราคา',
     modes: SWITCH,
-    defaults: switchFor('allow', 'allow', 'allow', 'allow'),
+    defaults: switchFor('allow', 'allow', 'allow', 'deny'),
     enforcedAt: '/api/admin/quotations/* ทั้ง 7 เส้น (เส้นที่มีด่านของตัวเองอยู่แล้วถูกซ้อนไว้ข้างหน้า)',
   },
   {

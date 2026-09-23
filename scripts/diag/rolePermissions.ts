@@ -140,6 +140,15 @@ async function main() {
   ok('ทุกช่องของกลุ่มหน้าจอเป็นสวิตช์สองค่า (deny/allow) ไม่ใช่สามค่า',
     pageKeys.every(c => c.modes.length === 2), `${pageKeys.length} หน้า`);
 
+  // เจ้าของสั่ง 2026-09-23: ค่าเริ่มต้นของ `salesperson` ปิดหมดทุกช่อง แล้วไปเปิดเองจากหน้าจอ
+  // ⇒ ช่องที่เปิดให้เซลส์ต้องเป็น **แถวใน role_permissions** เท่านั้น ไม่ใช่ค่าในแคตตาล็อก
+  // ด่านนี้กันการเผลอเปิดจากโค้ด ซึ่งเงียบกว่าการเผลอกดบนจอมาก (เช่น copy-paste switchFor
+  // มาทั้งบรรทัดตอนเพิ่มความสามารถใหม่ แล้วเซลส์ได้สิทธิ์นั้นไปตั้งแต่วันแรกโดยไม่มีใครสั่ง)
+  const salesOpen = CAPABILITIES.filter(c => c.defaults.salesperson !== 'deny');
+  ok('ค่าเริ่มต้นของ salesperson เป็น deny ทุกช่อง ไม่มีข้อยกเว้น',
+    salesOpen.length === 0,
+    salesOpen.length ? salesOpen.map(c => `${c.key}=${c.defaults.salesperson}`).join(' · ') : `${keys.length} ช่อง`);
+
   // ── 2. SYSTEM_ERROR ────────────────────────────────────────────────────────
   console.log(`\n${BOLD}2. SYSTEM_ERROR ไม่มีสวิตช์${RESET}`);
   ok('ไม่อยู่ในรายชื่อชนิดกฎที่มีสวิตช์',
@@ -379,7 +388,8 @@ async function main() {
   //  AdminApp.tsx ถือ `roles: [...]` ไว้เป็น **ค่าสำรอง** ตอนเรียก /me/capabilities ไม่สำเร็จ
   //  ค่าสำรองที่ใจกว้างกว่าค่าเริ่มต้นคือช่องโหว่ที่โผล่เฉพาะตอนเน็ตสะดุด ซึ่งไม่มีใครเจอตอนทดสอบ
   //  ⇒ บังคับว่า roles ต้องเป็น **สับเซ็ต** ของ role ที่ค่าเริ่มต้นเปิดให้ (เท่ากันไม่ได้ เพราะ
-  //  salesperson เป็นคอลัมน์ใหม่ที่ยังไม่มีบัญชี จึงยังไม่ถูกใส่ในรายชื่อสำรองของเมนู)
+  //  ค่าเริ่มต้นของ salesperson เป็น deny ทุกช่อง ⇒ ชื่อของมันต้องไม่โผล่ในรายการสำรองสักเมนู
+  //  ไม่งั้นเซลส์จะเห็นเมนูเฉพาะตอนเน็ตสะดุด ซึ่งเป็นตอนที่ไม่มีใครมองอยู่)
   const navSrc = readFileSync(new URL('../../frontend/src/admin/AdminApp.tsx', import.meta.url), 'utf-8');
   const navItems: { roles: string[]; cap: string }[] = [];
   for (const line of navSrc.split('\n')) {
