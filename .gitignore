@@ -54,6 +54,8 @@ data/eval/extraction_corpus.json
 data/eval/extraction_baseline.json
 data/eval/extraction_llm_cache.json
 data/eval/extraction_result_*.json
+# เฉลยกลุ่ม B สร้างใหม่ได้จากตาราง DECISIONS ใน scripts/diag/extractionTruthB.ts (ซึ่ง commit ไว้)
+data/eval/extraction_truth_b.json
 
 # สมุดราคาที่แปลงมาจากไฟล์ Excel (`npm run pricebook:import` เขียนลงที่นี่ที่เดียว)
 # เป็นราคาจริงของบริษัททั้งเล่ม ⇒ ไม่ควรออกนอกเครื่อง เหตุผลเดียวกับที่ mockup/ ถูก ignore
