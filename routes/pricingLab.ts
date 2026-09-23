@@ -6,6 +6,7 @@ import type { AdminRequest } from '../config/auth.js';
 import { loadBook, bookStatus, withSubCodes } from '../services/pricingLab/bookStore.js';
 import { computePrice } from '../services/pricingLab/engine.js';
 import { parseProductCode } from '../services/pricingLab/code.js';
+import { EditRejected, applyModelEdit, modelEditorView } from '../services/pricingLab/modelEditor.js';
 import { makeTemplate, readUploaded, templateFileName } from '../services/pricingLab/bookFile.js';
 import {
   applyModels, bookFingerprint, diffBooks, listBackups, restoreBackup, saveBook, KEEP_BACKUPS,
@@ -46,7 +47,15 @@ import {
  *        `PricingLab.tsx` ไม่เก็บสมุดราคาไว้ใน state สักช่อง
  *     3. **ส่วนต่างที่ส่งกลับ เป็นของไฟล์ที่คนนั้นอัปเข้ามาเอง** ⇒ ไม่ได้บอกอะไรที่เขายังไม่มี
  *        (และตัดเหลือ `MAX_DIFF_ROWS` แถวอยู่ดี)
- *   ⇒ เส้นที่ยัง **ห้ามเพิ่ม** คือเส้นที่คืนสมุดราคาให้ **โดยที่ผู้เรียกไม่ได้เป็นคนเอาเข้ามา**
+ *   **เส้นที่สาม เพิ่ม 2026-09-23** — `GET/PUT /model/:code` (หน้า "แก้ราคาทีละรุ่น")
+ *   เจ้าของสั่งให้เอาแบบที่เคาะใน mockup มาใส่ของจริง: แก้ราคา+โครงกฎทีละรุ่นจากหน้าจอ
+ *   โดยไม่ต้องดาวน์โหลด Excel ⇒ เส้นนี้ **คืนราคาของรุ่นเดียวให้คนที่ไม่ได้เป็นคนอัปมันเข้ามา**
+ *   ซึ่งขัดกับบรรทัดที่เคยเขียนไว้ตรงนี้ ⇒ เขียนเงื่อนไขใหม่ให้ตรงกับของจริง:
+ *     · สามข้อข้างบนยังครบทุกข้อ (ด่านเดียวกัน · ไม่มีอะไรอยู่ใน bundle · โหลดตอนกดเท่านั้น)
+ *     · และ `GET /template` ที่มีอยู่แล้ว **คืนทั้งเล่ม** ให้คนกลุ่มเดียวกันนี้อยู่ก่อนแล้ว
+ *       ⇒ เส้นนี้ให้น้อยกว่าเส้นที่มีอยู่ ไม่ได้เปิดอะไรใหม่ให้ใคร
+ *   ⇒ เส้นที่ยัง **ห้ามเพิ่ม** คือเส้นที่คืนสมุดราคาให้ **คนที่ไม่ได้ผ่านด่าน `page.pricing`**
+ *     หรือเส้นที่ทำให้ราคาไปอยู่ใน bundle ของหน้าแอดมิน (ซึ่งไม่มีด่านอะไรเลย)
  */
 export const pricingLabRouter = Router();
 
@@ -282,6 +291,65 @@ pricingLabRouter.get('/overview', async (_req: AdminRequest, res: Response) => {
         }
       : null,
   });
+});
+
+/**
+ * ── หน้า "แก้ราคาทีละรุ่น" ──────────────────────────────────────────────────
+ *
+ * `GET` คืนทุกอย่างของรุ่นเดียวที่หน้าจอต้องใช้ (ตารางราคา · กฎ · ตัวเลือกท้ายรหัส ·
+ * คำศัพท์ให้ช่องเลือก) — เหตุผลที่เส้นนี้คืนราคาได้อยู่ที่หัวไฟล์ อย่าลบทิ้งเพราะเห็นว่าขัดกฎ
+ */
+pricingLabRouter.get('/model/:code', async (req: AdminRequest, res: Response) => {
+  const book = loadBook();
+  if (!book) return noBook(res);
+  const code = String(req.params.code ?? '');
+  const m = book.models[code];
+  if (!m) return res.status(404).json({ error: `ไม่มีรุ่น ${code} ในสมุดราคา` });
+  res.json({ model: modelEditorView(book, m), fingerprint: bookFingerprint(), version: book.version });
+});
+
+/**
+ * `PUT` บันทึกรุ่นเดียว — **รวมเข้าเล่มเดิม ไม่ใช่เขียนทับทั้งไฟล์**
+ *
+ * `fingerprint` คือด่านกันสองคนแก้ทับกัน: แอดมิน A เปิดหน้าไว้ · B อัปไฟล์ใหม่ทั้งเล่ม ·
+ * A กดบันทึก ⇒ ถ้าไม่ตรวจ งานของ B หายไปทั้งเล่มด้วยหน้าจอที่ A เปิดค้างไว้ตั้งแต่เช้า
+ * (ท่าเดียวกับ `/import/apply` — เส้นนี้เพิ่งมาทีหลัง จึงต้องใช้ด่านเดียวกัน ไม่ใช่ด่านที่สอง)
+ */
+pricingLabRouter.put('/model/:code', async (req: AdminRequest, res: Response) => {
+  const book = loadBook();
+  if (!book) return noBook(res);
+  const code = String(req.params.code ?? '');
+  const current = book.models[code];
+  if (!current) return res.status(404).json({ error: `ไม่มีรุ่น ${code} ในสมุดราคา` });
+
+  if (typeof req.body?.fingerprint === 'string' && req.body.fingerprint !== bookFingerprint()) {
+    return res.status(409).json({
+      error: 'สมุดราคาเพิ่งถูกบันทึกโดยคนอื่นระหว่างที่คุณกำลังแก้อยู่ — เปิดหน้านี้ใหม่แล้วแก้อีกครั้ง เพื่อไม่ให้ทับงานของเขา',
+    });
+  }
+
+  let next;
+  try {
+    next = applyModelEdit(current, req.body);
+  } catch (e) {
+    if (e instanceof EditRejected) return res.status(400).json({ error: e.message });
+    throw e;
+  }
+
+  const at = nowIso();
+  saveBook({
+    ...book,
+    models: { ...book.models, [code]: next },
+    edited: {
+      at,
+      by: req.admin?.username,
+      note: typeof req.body?.note === 'string' && req.body.note.trim()
+        ? `แก้ ${code}: ${req.body.note.trim().slice(0, 200)}`
+        : `แก้ราคารุ่น ${code} จากหน้าจอ`,
+    },
+  });
+
+  res.json({ ok: true, at, fingerprint: bookFingerprint(), model: modelEditorView(book, next) });
 });
 
 /**

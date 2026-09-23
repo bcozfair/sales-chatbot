@@ -38,9 +38,38 @@ export const DIM_TH: Record<string, string> = {
   // ใช้สองความหมายตามพื้นผิว: BH = วงในของฮีตเตอร์รัดท่อ (กรอกเอง) · TS-01 = ขนาดแกนที่รุ่นนั้น
   // มีอยู่ขนาดเดียว (ไม่ได้ให้เลือก แค่บอกว่าตัวเลขในรหัสคืออะไร) — คำกลางจึงต้องไม่ผูกกับรุ่นไหน
   dia_mm: 'เส้นผ่านศูนย์กลาง',
+  // ความกว้างของแผ่น Band Heater — มีที่เดียวคือในเงื่อนไข `constraints[].when` ของ BH
+  // ซึ่งด่านเคยไล่ไม่ถึง จึงหลุดขึ้นจอเป็นคำเครื่องอยู่พักหนึ่ง (ปิดรูไปแล้ว 2026-09-23)
+  width_mm: 'ความกว้างแผ่น',
   watt: 'กำลังไฟ',
   // Band Heater (BH) ไม่ได้คิดตามความยาว แต่คิดตาม "พื้นที่แผ่น" เป็นตารางนิ้ว แล้วเปิดตารางช่วงราคา
   area_in2: 'พื้นที่แผ่น (ตร.นิ้ว)',
+};
+
+/**
+ * ตัวเลือกแบบติ๊ก — คีย์ที่ปรากฏใน `when: { option: ... }` ของกฎบวกเพิ่ม
+ * ต้องมีคำไทยครบทุกตัว เพราะหน้า "แก้ราคาทีละรุ่น" ให้เลือกเงื่อนไขจากรายการนี้
+ * (เลือกจากรายการปิด ไม่ใช่พิมพ์เอง — ดู services/pricingLab/modelEditor.ts)
+ */
+export const OPTION_TH: Record<string, string> = {
+  'bend:L': 'หัก L ดัดงอ',
+  'bend:square': 'หักฉาก (เชื่อมฉาก)',
+  'cable:silicone': 'สาย Silicone',
+  'cable:ss_braid': 'สายถักสแตนเลส',
+  'coat:teflon': 'หุ้มเทปล่อน',
+  'conn:pl2': 'Male Connector PL-2',
+  'element:2': '2 element',
+  flex_tube: 'ท่อเฟ็กส์',
+  'head:alu_l': 'หัวกระโหลก อลูมิเนียม ใหญ่',
+  'head:blacklite_l': 'หัวกระโหลก Blacklite ใหญ่',
+  'head:blacklite_s': 'หัวกระโหลก Blacklite เล็ก',
+  nut: 'ออกน๊อต',
+  'sensor:NTC': 'เซนเซอร์ NTC / PTC',
+  'sensor:PT1000': 'เซนเซอร์ PT1000',
+  'sensor:T': 'เซนเซอร์ Type T',
+  'term:10a': 'เต๋าเซรามิค (ตัวเล็ก) 10A',
+  'term:30a': 'เต๋าเซรามิค (ตัวเล็ก) 30A',
+  thread: 'รุ่นมีเกลียว'
 };
 
 /** ชนิดของกฎบวกเพิ่ม — คำเดียวกับที่ปรากฏในไฟล์ .xlsx ที่ส่งออกไปแก้ */
@@ -54,5 +83,6 @@ export const KIND_TH: Record<string, string> = {
 };
 
 export const axisLabel = (key: string): string => AXIS_TH[key] ?? key;
+export const optionLabel = (key: string): string => OPTION_TH[key] ?? key;
 export const dimLabel = (key: string): string => DIM_TH[key] ?? key;
 export const kindLabel = (key: string): string => KIND_TH[key] ?? key;

@@ -129,6 +129,7 @@ const SHEET = {
   adders: 'กฎบวกเพิ่ม',
   rates: 'อัตราตามแกน',
   constraints: 'เงื่อนไขและข้อห้าม',
+  variants: 'ตัวเลือกท้ายรหัส',
   derived: 'ค่าที่คำนวณเอง',
   subCodes: 'รหัสย่อย',
   basePrefix: 'ฐาน-'
@@ -347,6 +348,7 @@ const README_LINES = [
   `${SHEET.adders}           กฎบวกเพิ่ม — เปอร์เซ็นต์ · เงินคงที่ · ตามส่วนที่เกิน`,
   `${SHEET.rates}           อัตราที่ต่างกันตามขนาดแกน (กฎเดียวแต่คนละราคาตามแกน)`,
   `${SHEET.constraints}    ข้อห้าม/ข้อควรระวัง — ไม่รับผลิต · ต้องขอราคา · เตือน`,
+  `${SHEET.variants}        ตัวอักษรท้ายเลขรุ่นที่คิดเพิ่มจากรุ่นหลัก (ซีรีส์ BH = ตัว C)`,
   `${SHEET.derived}       ค่าที่ระบบคิดให้เอง เช่น พื้นที่ผิว`,
   `${SHEET.subCodes}                ความหมายของตัวอักษรในรหัสสินค้า และผลกับราคา`,
   '',
@@ -719,6 +721,54 @@ function constraintsSheet(book: PriceBook): SheetTable {
   };
 }
 
+/**
+ * ตัวอักษรท้ายเลขรุ่น — หนึ่งรุ่นหนึ่งแถว
+ *
+ * **ทำไมราคาของแถมอยู่ในช่องเดียว ไม่ใช่ชีตของตัวเอง:** ของจริงมีอย่างมากไม่กี่รายการต่อรุ่น
+ * (ซีรีส์ BH = 4) และคนที่แก้ต้องเห็น "20% กับของสี่อย่างนี้" พร้อมกันในสายตาเดียว
+ * แยกเป็นชีตที่สองแล้วจะมีคนแก้ % โดยไม่รู้ว่ายังมีของแถมค้างอยู่อีกชีต
+ */
+function variantsSheet(book: PriceBook): SheetTable {
+  const rows: CellValue[][] = [];
+  for (const m of Object.values(book.models)) {
+    const v = m.variant;
+    if (!v) continue;
+    rows.push([
+      m.code,
+      v.suffix,
+      v.label,
+      v.percent ?? 0,
+      v.order ?? 10,
+      v.disabled ? OFF : ON,
+      v.confirmed === false ? OFF : ON,
+      pairsToText(v.adderPrices),
+      v.source ?? '',
+      v.note ?? ''
+    ]);
+  }
+  return {
+    name: SHEET.variants,
+    title:
+      'ตัวอักษรท้ายเลขรุ่นที่ไม่ได้เปลี่ยนตารางราคา แค่คิดเพิ่มจากรุ่นหลัก · ' +
+      'ช่อง "บวกเพิ่ม" ใส่ 0 = ไม่บวกเพิ่ม (ต่างจากปิดใช้) · ' +
+      'ของแถมที่ไม่มีชื่อในช่องสุดท้าย = คิดเท่ารุ่นหลัก',
+    columns: [
+      { label: 'รหัสรุ่น', width: 12 },
+      { label: 'ตัวอักษรท้ายรหัส', width: 16 },
+      { label: 'ชื่อตัวเลือก', width: 18 },
+      { label: 'บวกเพิ่มจากราคาตั้ง (%)', width: 22 },
+      { label: 'ลำดับการคิด', width: 12 },
+      { label: 'เปิดใช้', width: 9 },
+      { label: 'ยืนยันกับฝ่ายขายแล้ว', width: 20 },
+      { label: 'ราคาของแถมที่ต่างจากรุ่นหลัก', width: 46 },
+      { label: 'ที่มาในไฟล์ราคา', width: 36 },
+      { label: 'หมายเหตุ', width: 30 }
+    ],
+    rows,
+    freeze: true
+  };
+}
+
 function derivedSheet(book: PriceBook): SheetTable {
   const rows: CellValue[][] = [];
   for (const m of Object.values(book.models)) {
@@ -761,6 +811,7 @@ export function bookToSheets(book: PriceBook, opts?: { exportedAt?: string }): S
     addersSheet(book),
     ratesSheet(book),
     constraintsSheet(book),
+    variantsSheet(book),
     derivedSheet(book),
     subCodesSheet(book),
     ...Object.values(book.models).map(baseSheet)
@@ -891,6 +942,7 @@ export function sheetsToBook(grids: RawSheet[]): { book: PriceBook | null; issue
   readAdders(by.get(SHEET.adders), models, R);
   readRates(by.get(SHEET.rates), models, R);
   readConstraints(by.get(SHEET.constraints), models, R);
+  readVariants(by.get(SHEET.variants), models, R);
   readDerived(by.get(SHEET.derived), models, R);
   const subCodes = readSubCodes(by.get(SHEET.subCodes), R);
 
@@ -1391,6 +1443,58 @@ function readConstraints(grid: CellValue[][] | undefined, models: Record<string,
     else c.custom = true;
     if (note !== '') c.note = note;
     model.constraints.push(c);
+  }
+}
+
+/**
+ * อ่านชีตตัวเลือกท้ายรหัสกลับเป็นข้อมูล
+ *
+ * **ไม่มีชีตนี้ ไม่ใช่ความผิดพลาด** เหมือนชีตรหัสย่อย — ไฟล์ที่ส่งออกก่อน 2026-09-23
+ * ยังไม่มีชีตนี้ · แต่ "มีชีตแล้วรุ่นนั้นไม่มีแถว" **แปลว่าไม่มีตัวเลือก** ซึ่งต่างกัน
+ * ⇒ ต้องล้าง `variant` ของรุ่นที่ไม่มีแถวทิ้ง ไม่งั้นลบแถวในไฟล์แล้วตัวเลือกไม่หาย
+ */
+function readVariants(grid: CellValue[][] | undefined, models: Record<string, PriceModel>, R: Reader): void {
+  if (!grid) return;
+  const name = SHEET.variants;
+  const h = findHeader(grid, ['รหัสรุ่น', 'ตัวอักษรท้ายรหัส', 'บวกเพิ่มจากราคาตั้ง (%)']);
+  if (!h) {
+    R.err(name, 'หาแถวหัวตารางไม่เจอ — ต้องมีคำว่า "รหัสรุ่น" และ "ตัวอักษรท้ายรหัส"');
+    return;
+  }
+  for (const m of Object.values(models)) delete m.variant;
+
+  for (let r = h.at + 1; r < grid.length; r++) {
+    const row = grid[r] ?? [];
+    if (isEmptyRow(row)) continue;
+    const code = toText(cell(row, h.index, 'รหัสรุ่น'));
+    if (code === '') continue;
+    const m = models[code];
+    if (!m) {
+      R.err(name, `ไม่มีรุ่น "${code}" ในชีต ${SHEET.models}`, r + 1);
+      continue;
+    }
+    const suffix = toText(cell(row, h.index, 'ตัวอักษรท้ายรหัส')).toUpperCase();
+    if (suffix === '') {
+      R.err(name, `รุ่น ${code} ไม่ได้ใส่ตัวอักษรท้ายรหัส`, r + 1);
+      continue;
+    }
+    const prices = textToPairs(toText(cell(row, h.index, 'ราคาของแถมที่ต่างจากรุ่นหลัก')));
+    for (const id of Object.keys(prices)) {
+      if (!m.adders.some((a) => a.id === id)) {
+        R.err(name, `รุ่น ${code} ไม่มีกฎบวกเพิ่มชื่อ "${id}" — ราคาช่องนี้จะไม่มีผลกับอะไรเลย`, r + 1);
+      }
+    }
+    m.variant = {
+      suffix,
+      label: toText(cell(row, h.index, 'ชื่อตัวเลือก')) || `รุ่น ${suffix}`,
+      percent: toNumber(cell(row, h.index, 'บวกเพิ่มจากราคาตั้ง (%)')) ?? 0,
+      order: toNumber(cell(row, h.index, 'ลำดับการคิด')) ?? 10,
+      disabled: toText(cell(row, h.index, 'เปิดใช้')) === OFF || undefined,
+      confirmed: toText(cell(row, h.index, 'ยืนยันกับฝ่ายขายแล้ว')) === OFF ? false : undefined,
+      adderPrices: Object.keys(prices).length ? prices : undefined,
+      source: toText(cell(row, h.index, 'ที่มาในไฟล์ราคา')) || undefined,
+      note: toText(cell(row, h.index, 'หมายเหตุ')) || undefined
+    };
   }
 }
 
