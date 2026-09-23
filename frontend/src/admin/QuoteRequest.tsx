@@ -523,7 +523,7 @@ const CreditField: React.FC<{
             onChange(v === '' ? null : v);
           }}
           aria-label="เครดิตของใบนี้"
-          className={`h-7 pl-2 pr-6 rounded-lg border bg-card text-[11px] font-semibold text-slate-800 outline-none max-w-[10rem] ${
+          className={`${bare ? 'h-8' : 'h-7'} pl-2 pr-6 rounded-lg border bg-card text-[11px] font-semibold text-slate-800 outline-none max-w-[10rem] ${
             overridden ? 'border-blue-600' : 'border-slate-300'
           }`}
         >
@@ -552,9 +552,13 @@ const CreditField: React.FC<{
               title="ใช้เครดิตของลูกค้า"
               aria-label="ใช้เครดิตของลูกค้า"
             />
-            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full border border-blue-600 text-blue-700">
-              ตั้งเอง
-            </span>
+            {/* ท้ายใบ (bare) ไม่มีป้าย — ขอบน้ำเงิน + บรรทัด "ค่าจริงของลูกค้า" ข้างล่างบอกอยู่แล้ว
+                ป้ายซ้ำในแถวเดียวกันทำให้แถวเงื่อนไขดูรก (เจ้าของทักจากจอจริง 2026-09-23) */}
+            {!bare && (
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full border border-blue-600 text-blue-700">
+                ตั้งเอง
+              </span>
+            )}
           </>
         )}
       </div>
@@ -1752,16 +1756,16 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
           <p className={`mt-3 pt-2 border-t border-slate-100 ${ctx.staleNow ? 'opacity-50' : ''}`}>
             <span className="font-bold text-slate-600">ตัวอักษร:</span> {t ? t.amount_text : '—'}
           </p>
-          {/* เงื่อนไข 3 บรรทัด — "คีย์ : ค่า" แบบเดียวกับกระดาษ
-              เครดิตกับกำหนดส่งแก้ได้ตรงบรรทัดที่มันไปขึ้นบนใบ (เจ้าของสั่ง 2026-09-23 · เดิมอยู่หัวใบฝั่งขวา)
-              ช่องแก้อยู่ใต้ค่า ไม่ใช่แทนค่า ⇒ ยังอ่านออกเสมอว่าบนกระดาษจะพิมพ์ว่าอะไร */}
-          <dl className="mt-3 pt-2 border-t border-slate-100 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 items-start">
-            <dt className="text-slate-500">Price Validity</dt>
-            <dd className="font-semibold text-slate-700">: 7 Day</dd>
+          {/* เงื่อนไข 3 บรรทัด — ลำดับเดียวกับกระดาษ หนึ่งค่าต่อหนึ่งแถว
+              เครดิตกับกำหนดส่ง "ช่องเลือกคือตัวแสดงผล" (เจ้าของสั่ง 2026-09-23) — ไม่พิมพ์ค่าซ้ำเป็นข้อความ
+              ข้างช่องอีก เพราะสองอย่างนี้บอกเรื่องเดียวกันแล้วทำให้แถวรก · คำอธิบายรอง (ค่าจริงของลูกค้า /
+              ตั้งเอง) ตกไปอยู่ใต้ช่องของแถวนั้นเอง · หัวแถวสูง h-8 เท่าช่องเลือก ⇒ ป้ายตรงกับช่องพอดี */}
+          <dl className="mt-3 pt-2 border-t border-slate-100 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5">
+            <dt className="h-8 flex items-center text-slate-500">Price Validity</dt>
+            <dd className="h-8 flex items-center font-semibold text-slate-700">7 Day</dd>
 
-            <dt className="text-slate-500 mt-1">Term Payment</dt>
-            <dd className="min-w-0 flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span className="font-semibold text-slate-700">: {ctx.paymentTerms ?? cust?.payment_terms ?? '—'}</span>
+            <dt className="h-8 flex items-center text-slate-500">Term Payment</dt>
+            <dd className="min-w-0">
               <CreditField
                 effective={ctx.paymentTerms ?? cust?.payment_terms ?? ''}
                 customerValue={cust?.customer_payment_terms ?? ''}
@@ -1773,13 +1777,10 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
               />
             </dd>
 
-            <dt className="text-slate-500 mt-1">Delivery Time</dt>
-            <dd className="min-w-0 flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span className={`font-semibold text-slate-700 ${ctx.staleNow ? 'opacity-50' : ''}`}>
-                : {q?.delivery_text || '—'}
-              </span>
+            <dt className="h-8 flex items-center text-slate-500">Delivery Time</dt>
+            <dd className="min-w-0">
               {ctx.previewing && !q ? (
-                <span className="flex items-center gap-1 text-slate-500">
+                <span className="h-8 flex items-center gap-1 text-slate-500">
                   <Loader2 className="w-3 h-3 animate-spin shrink-0" />
                   กำลังคำนวณกำหนดส่ง...
                 </span>
@@ -1791,7 +1792,7 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
                   onChange={(v) => ctx.setDeliveryOv(q.quote_company, v)}
                 />
               ) : (
-                <span className="text-slate-400">ระบบคำนวณให้ตอนตรวจรายละเอียด</span>
+                <span className="h-8 flex items-center text-slate-400">ระบบคำนวณให้ตอนตรวจรายละเอียด</span>
               )}
             </dd>
           </dl>
