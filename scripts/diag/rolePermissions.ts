@@ -116,7 +116,8 @@ const SALESPERSON_OPEN: Partial<Record<Capability, PermissionMode>> = {
   'quote.create':    'allow',  // ขอใบเสนอราคา
   'quote.revise':    'allow',  // แก้ใบเดิมแล้วออกใหม่
   'page.quotations': 'allow',  // ประวัติใบเสนอราคา (quote.view_all = deny ⇒ เห็นเฉพาะใบของรหัสตัวเอง)
-  'page.approvals':  'allow',  // หน้าอนุมัติราคา (approval.decide = deny ⇒ ดูสถานะคำขอ ไม่ใช่ตัดสิน)
+  // `page.approvals` เคยอยู่ในรายการนี้ แล้วเจ้าของปิดเองเมื่อ 2026-09-23 — กฎทั้ง 6 ข้อของเซลส์
+  // เป็น deny ล้วน ⇒ เขาสร้างคำขออนุมัติไม่ได้เลย หน้านั้นจึงว่างตลอดถ้าเปิดไว้
 };
 
 async function tableExists(name: string): Promise<boolean> {
