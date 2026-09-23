@@ -23,12 +23,18 @@ import { bookToOdooSheets } from '../pricebook/odoo.js';
 import { bookToSheets, sheetsToBook, SHEET_NAMES, VOCAB } from '../pricebook/sheet.js';
 import type { CellValue, RawSheet } from '../pricebook/sheet.js';
 import type { PriceBook, ProductConfig } from '../../services/pricingLab/types.js';
-import { BOOK_PATH } from '../../services/pricingLab/bookStore.js';
+import { NoBook, loadBookFrom } from '../pricebook/bookSource.js';
 import { readWorkbook } from '../pricebook/xlsx.js';
 import { writeXlsx } from '../pricebook/xlsxlite.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const book = JSON.parse(readFileSync(BOOK_PATH, 'utf8')) as PriceBook;
+// เล่มปัจจุบันในฐาน (SELECT อย่างเดียว) · `--data <dir>` = ตรวจกับตัวเลขของชีตตรง ๆ · `--book <ไฟล์>` (ดู bookSource.ts)
+const loaded = await loadBookFrom().catch((e: unknown) => {
+  if (e instanceof NoBook) { console.error(e.message); process.exit(1); }
+  throw e;
+});
+const book = loaded.book;
+console.log(`สมุดราคาที่ใช้: ${loaded.label}\n`);
 const CASES = JSON.parse(readFileSync(join(HERE, 'fixtures', 'pricingCases.json'), 'utf8')) as {
   name: string;
   cfg: ProductConfig;

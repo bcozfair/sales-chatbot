@@ -1,7 +1,18 @@
 // ─────────────────────────────────────────────────────────────────────────────
-//  ตัวนำเข้า: ไฟล์ Excel ของฝ่ายขาย → สมุดราคา JSON
+//  ตัวนำเข้า: ไฟล์ Excel ของฝ่ายขาย → สมุดราคา (ในฐานข้อมูล)
 //
 //  เครื่องมือของสมุดราคา — ดู services/pricingLab/README.md
+//
+//    npx tsx scripts/pricebook/importer.ts --data <โฟลเดอร์ Excel>               รายงานอย่างเดียว ไม่เขียนอะไร
+//    … --data <dir> --apply --by <username>                                    เล่มแรกของฐาน
+//    … --data <dir> --apply --replace-all --by <username>                      แทนทั้งเล่ม (ย้อนได้จากหน้าจอ)
+//    … --from-json pricebook/book.json --apply [--replace-all]                  ย้ายเล่มของยุคไฟล์เข้าฐาน
+//    … --data <dir> --out <ไฟล์.json>                                           เขียนเป็นไฟล์ (ไม่แตะฐาน)
+//
+//  **`--data` ไม่มีค่าเริ่มต้นโดยตั้งใจ** — ยุคไฟล์ตั้งต้นที่ `data/` ซึ่งถูกเสิร์ฟออกเว็บโดยไม่ตรวจสิทธิ์
+//  (express.static ที่ index.ts) ⇒ ค่าเริ่มต้นนั้นคือการชวนให้วางไฟล์ราคาไว้ในที่ที่ใครก็โหลดได้
+//  **ไม่ใส่ `--apply` = ไม่เขียนอะไรเลย** — ของที่ย้อนยากต้องขอตรง ๆ ไม่ใช่เป็นผลข้างเคียงของการดูรายงาน
+//  การเขียนเรียก `seedBook`/`commitBookChange` ตัวเดียวกับหน้าจอ **ห้ามยิง SQL เองในไฟล์นี้**
 //
 //  **ทำไมต้องมีไฟล์ map เขียนมือ ไม่ใช่ auto-detect**
 //  30 ชีตวางหัวตารางคนละแบบ และ "ชนิดเซนเซอร์" ปรากฏ 3 รูปแบบข้ามชีต (เป็น prefix ของรุ่น ·
@@ -16,11 +27,15 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import ExcelJS from 'exceljs';
+import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
-import { join, dirname, resolve } from 'node:path';
+import { basename, join, dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Adder, Band, Constraint, DerivedDim, ModelVariant, PriceBook, PriceModel, SubCode } from '../../services/pricingLab/types.js';
-import { BOOK_PATH } from '../../services/pricingLab/bookStore.js';
+import { pool } from '../../config/db.js';
+import { readBookState } from '../../services/pricingLab/bookStore.js';
+import { BookConflict, BookRejected, commitBookChange, seedBook } from '../../services/pricingLab/bookUpdate.js';
+import type { SourceFile } from '../../db/pricingBookRepo.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -377,24 +392,117 @@ export async function buildBook(dataDir: string, mapDir: string): Promise<{ book
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
+/** ชื่อ + sha256 + ขนาดของไฟล์ต้นทาง — เก็บในแถวหัวของการบันทึก ไม่เก็บตัวไฟล์ (แผน §12 ข้อ 4) */
+function fingerprintFile(path: string): SourceFile {
+  const bytes = readFileSync(path);
+  return { name: basename(path), sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length };
+}
+
+/** ปฏิเสธ `--out` ที่ชี้เข้า `public/` หรือ `data/` — สองโฟลเดอร์ที่ถูกเสิร์ฟออกเว็บโดยไม่ตรวจสิทธิ์ */
+function servedPath(out: string): boolean {
+  const rel = relative(resolve(HERE, '../..'), resolve(out));
+  return ['public', 'data'].some((d) => rel === d || rel.startsWith(d + sep));
+}
+
+async function main(): Promise<number> {
+  const args = process.argv.slice(2);
+  const val = (flag: string): string | undefined => {
+    const i = args.indexOf(flag);
+    return i > -1 ? args[i + 1] : undefined;
+  };
+  const dataDir = val('--data');
+  const fromJson = val('--from-json');
+  const outFile = val('--out');
+  const by = val('--by') ?? null;
+  const apply = args.includes('--apply');
+  const replaceAll = args.includes('--replace-all');
+
+  if (!dataDir === !fromJson) {
+    console.error('ต้องบอกที่มาของสมุดราคาอย่างใดอย่างหนึ่ง:');
+    console.error('  --data <โฟลเดอร์ที่มีไฟล์ Excel ราคา>   หรือ   --from-json <book.json ของยุคไฟล์>');
+    console.error('ไม่ใส่ --apply = แสดงรายงานอย่างเดียว ไม่เขียนอะไร');
+    return 1;
+  }
+  if (outFile && servedPath(outFile)) {
+    console.error(`ไม่เขียน ${outFile} — public/ กับ data/ ถูกเสิร์ฟออกเว็บโดยไม่ตรวจสิทธิ์ ใครก็โหลดสมุดราคาไปได้`);
+    return 1;
+  }
+
+  let book: PriceBook;
+  let reports: ImportReport[] = [];
+  let sourceFiles: SourceFile[];
+  if (fromJson) {
+    book = JSON.parse(readFileSync(resolve(fromJson), 'utf8')) as PriceBook;
+    if (!book || typeof book !== 'object' || !book.models) {
+      console.error(`${fromJson} ไม่ใช่สมุดราคา (ไม่มีช่อง models)`);
+      return 1;
+    }
+    sourceFiles = [fingerprintFile(resolve(fromJson))];
+  } else {
+    const built = await buildBook(resolve(dataDir!), join(HERE, 'maps'));
+    book = built.book;
+    reports = built.reports;
+    sourceFiles = book.source.split(' · ').map((name) => fingerprintFile(resolve(dataDir!, name)));
+  }
+
+  console.log(`ต้นทาง: ${book.source}`);
+  console.log(`รุ่น ${Object.keys(book.models).length} รุ่น · ตารางรหัสย่อยที่ติดมากับไฟล์ ${(book.subCodes ?? []).length} ตัว`);
+  if (reports.length > 0) {
+    console.log('');
+    console.log('รุ่น              ชีต            ช่องมีราคา  ช่องว่าง(ไม่รับผลิต)  ราคา adder  float noise ที่ปัดทิ้ง');
+    for (const r of reports) {
+      console.log(
+        `${r.code.padEnd(16)} ${r.sheet.padEnd(14)} ${String(r.baseCells).padStart(9)} ${String(r.emptyCells).padStart(20)} ${String(r.adderRates).padStart(11)} ${String(r.floatNoiseFixed).padStart(22)}`
+      );
+    }
+  }
+
+  if (outFile) {
+    writeFileSync(resolve(outFile), JSON.stringify(book, null, 2), 'utf8');
+    console.log(`\nเขียนไฟล์ → ${resolve(outFile)} (ไม่แตะฐาน)`);
+  }
+
+  if (!apply) {
+    console.log('\n(ยังไม่ได้เขียนลงฐาน — ใส่ --apply เพื่อนำเข้าเป็นเล่มแรก หรือ --apply --replace-all เพื่อแทนทั้งเล่ม)');
+    return 0;
+  }
+
+  try {
+    const current = replaceAll ? await readBookState() : undefined;
+    const revision = current
+      ? await commitBookChange({
+          parent: current.revision, kind: 'import', next: book, changed: Object.keys(book.models),
+          replaceAll: true, by, sourceFiles,
+        })
+      : await seedBook(book, { by, sourceFiles });
+    console.log(`\nบันทึกลงฐานแล้ว — การบันทึกครั้งที่ ${revision}` +
+      (current ? ` (แทนเล่ม r${current.revision} · ย้อนกลับได้จากปุ่ม "ย้อนไปเล่มก่อนหน้า")` : ' (เล่มแรก)'));
+    console.log('ตรวจต่อ:  npx tsx scripts/diag/pricingDbRoundtrip.ts  ·  npm run diag:pricing');
+    return 0;
+  } catch (e) {
+    if (e instanceof BookConflict) {
+      console.error(replaceAll
+        ? '\nมีคนบันทึกสมุดราคาแทรกเข้ามาระหว่างนี้ — รันคำสั่งเดิมอีกครั้ง'
+        : '\nในฐานมีสมุดราคาอยู่แล้ว — ถ้าตั้งใจแทนทั้งเล่มด้วยของชุดนี้ ให้ใส่ --replace-all ' +
+          '(เป็นการบันทึกครั้งใหม่ ย้อนกลับได้ แต่ราคาที่แอดมินแก้ไว้จะถูกแทนด้วยของจากไฟล์)');
+      return 1;
+    }
+    if (e instanceof BookRejected) {
+      console.error(`\n${e.message}`);
+      for (const p of e.problems) console.error(`  ✗ ${p}`);
+      return 1;
+    }
+    throw e;
+  }
+}
+
 const isMain = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (isMain) {
-  const dataArg = process.argv.indexOf('--data');
-  const dataDir = dataArg > -1 ? process.argv[dataArg + 1]! : resolve(HERE, '../../data');
-  const mapDir = join(HERE, 'maps');
-  const outFile = BOOK_PATH;
-
-  const { book, reports } = await buildBook(dataDir, mapDir);
-  writeFileSync(outFile, JSON.stringify(book, null, 2), 'utf8');
-
-  console.log(`สมุดราคา → ${outFile}`);
-  console.log(`ต้นทาง: ${book.source}`);
-  console.log(`ตารางรหัสย่อยที่ตั้งค่าไว้: ${(book.subCodes ?? []).length} ตัว`);
-  console.log('');
-  console.log('รุ่น              ชีต            ช่องมีราคา  ช่องว่าง(ไม่รับผลิต)  ราคา adder  float noise ที่ปัดทิ้ง');
-  for (const r of reports) {
-    console.log(
-      `${r.code.padEnd(16)} ${r.sheet.padEnd(14)} ${String(r.baseCells).padStart(9)} ${String(r.emptyCells).padStart(20)} ${String(r.adderRates).padStart(11)} ${String(r.floatNoiseFixed).padStart(22)}`
-    );
+  let code = 1;
+  try {
+    code = await main();
+  } finally {
+    await pool.end();
   }
+  process.exit(code);
 }

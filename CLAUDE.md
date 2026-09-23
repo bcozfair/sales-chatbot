@@ -456,7 +456,7 @@ chatbot/
 │   ├── schema.sql        # schema เต็ม (ตั้ง DB ใหม่จากศูนย์ได้จริง — วิธีตรวจอยู่หัวไฟล์)
 │   └── changes/          # migration ทีละไฟล์ `YYYY-MM-DD_NN_*.sql`
 ├── scripts/              # sync/ · diag/ · dev/ (seed ทดสอบ — เครื่อง dev เท่านั้น) · logworker/
-│                         # · pricebook/ (Excel ราคา → pricebook/book.json + แม่แบบ .xlsx + map รายชีต)
+│                         # · pricebook/ (Excel ราคา → สมุดราคาในฐาน ไม่ใช่ pricebook/book.json + แม่แบบ .xlsx + map รายชีต)
 │                         # · runMigration · dbDump/dbRestore · backfill* · evalCustomerSearch
 ├── data/sale_sigs/       # ลายเซ็น — ชื่อไฟล์ต้องเป็น {salesperson_id}.png
 ├── frontend/             # Admin SPA (มี package.json/tsconfig/eslint ของตัวเอง)
@@ -514,11 +514,11 @@ chatbot/
 - **`docs/plan-web-quote-logging.md`** — ประวัตของหน้าเว็บใน `messages` (`web_*` + `meta`) และวิธีวัด `chosen_rank`
 - **`docs/plan-product-block-rules.md`** — กฎบล็อกสินค้า
 - **`docs/plan-pricing-subcodes.md`** — พิมพ์รหัสสินค้าสั่งทำแล้วได้ราคา + ตารางรหัสย่อยที่แอดมินตั้งราคา/กฎเองได้ (เฟส A–C ทำแล้ว · **อยู่ในแอดมินจริงแล้วเป็นโมดูลที่ถอดออกได้** — ดู `services/pricingLab/README.md` · สมุดราคาครอบ 14 รุ่น / 11 ชีต = 80.1% ของรหัสจริง · เฟส D ยังเป็นแบบที่เสนอ)
-  **ตั้งแต่ 2026-09-21 แอดมินแก้ราคาเองจากหน้าจอได้** (ปุ่มดาวน์โหลดแม่แบบ/อัปโหลด) ⇒ **ไฟล์ที่อัปผ่านจอคือตัวจริงของราคา** ส่วน `data/*.xlsx` + `npm run pricebook:import` กลายเป็นทางสำหรับลอกชีตใหม่เข้ามาเท่านั้น และการรันทับจะล้างราคาที่แอดมินแก้ไว้ (ตั้งใจ — มันคือการเริ่มเล่มใหม่) · คู่มือแอดมิน: `docs/guide-pricebook-admin.md`
+  **ตั้งแต่ 2026-09-21 แอดมินแก้ราคาเองจากหน้าจอได้** (ปุ่มดาวน์โหลดแม่แบบ/อัปโหลด) ⇒ **ไฟล์ที่อัปผ่านจอคือตัวจริงของราคา** ส่วน `importer.ts --data <dir>` กลายเป็นทางสำหรับบูตเล่มแรก/ลอกชีตใหม่เข้ามาเท่านั้น และ `--replace-all` จะแทนราคาที่แอดมินแก้ไว้ (ตั้งใจ — มันคือการเริ่มเล่มใหม่ · ย้อนได้จากจอ) · คู่มือแอดมิน: `docs/guide-pricebook-admin.md`
   **ตั้งแต่ 2026-09-23 แก้ราคา+กฎทีละรุ่นจากหน้าจอได้ด้วย** (`GET/PUT /api/admin/pricing/model/:code` · `services/pricingLab/modelEditor.ts`) — ทางเดียวกับ Excel ทุกประการ ต่างแค่ความสะดวก
   **และ "ตัวอักษรท้ายเลขรุ่น" เป็นของจริงในสมุดราคาแล้ว** (`PriceModel.variant`) — ตัว C ของซีรีส์ BH เคยถูกแตกเป็นรุ่น `BH-01C` ต่างหาก ทำให้ **`BH-02C` (11 รายการ) กับ `BH-03C` (1 รายการ) ตกไปคิดเป็นรุ่นฐานเปล่า ๆ ไม่บวก 20% และไม่มีอะไรฟ้อง** ⇒ ย้ายมาเป็นตัวเลือกของรุ่นหลัก ตั้งที่เดียวครอบทุกรหัสที่ลงท้ายด้วยตัวนั้น · **ไม่ใช่ "+20% กับทุกอย่าง"** (ของแถม 4 อย่างคูณสอง ที่เหลือเท่าเดิม ⇒ เก็บเป็นราคารายรายการ) · gate: `npm run diag:pricing` (มี `pricingModelEdit.ts` รวมอยู่แล้ว)
   ⚠️ **`Adder.over` ที่ไม่มีค่า แปลว่า "ใช้ `standard[dim]`" ไม่ใช่ 0** — ใครเติม `?? 0` ให้มันตอนรับค่าจากหน้าจอ กฎอย่าง "สายยาวเกิน 30 CM" จะคิดเงินตั้งแต่เซนติเมตรแรก ทุกใบแพงขึ้น 120 บาทเงียบ ๆ
-- **`docs/plan-pricebook-db.md`** — ย้ายสมุดราคาจาก `pricebook/book.json` เข้า DB (3 ตาราง · `json` ไม่ใช่ `jsonb` เพราะ jsonb สลับลำดับคีย์) · **แผนรอเจ้าของเคาะ §12** (2026-09-23)
+- **`docs/plan-pricebook-db.md`** — **สมุดราคาอยู่ใน DB แล้ว** (โค้ดเฟส 0–2 · 2026-09-23 · เจ้าของเคาะ §12 "ตามที่แนะนำ") — 3 ตาราง `pricing_*` · `spec` เป็น **`json` ไม่ใช่ `jsonb`** เพราะ jsonb สลับลำดับคีย์แล้วแม่แบบ .xlsx เรียงใหม่ 16/22 ชีต · กันทับด้วย `UNIQUE NULLS NOT DISTINCT (parent_id)` · ทางเขียนเดียวคือ `commitBookChange`/`restoreRevision` · **ประวัติเขียนต่อท้ายอย่างเดียว ห้ามมีโค้ด UPDATE/DELETE** · gate: `npm run diag:pricing-db` (ROLLBACK) · เล่มแรกบน PMSV = `DEPLOY.md` ขั้น 4.11 **รอเจ้าของสั่ง**
 - **`docs/plan-logging-audit-compliance.md`** — ระบบ log / audit / ข้อกำหนดตามกฎหมาย
 - **`docs/plan-user-roles-auth.md`** — สิทธิ์ผู้ใช้และการยืนยันตัวตน
 - **`docs/plan-role-permissions.md`** — เมทริกซ์สิทธิ์ต่อ role ที่ตั้งจากหน้าจอได้ + role `salesperson` + ตัวตนบนใบที่ออกจากเว็บ

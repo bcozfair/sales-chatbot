@@ -359,7 +359,8 @@ SELECT to_regclass('public.customers_data_view')  AS matview,
        EXISTS(SELECT 1 FROM information_schema.columns
               WHERE table_name='messages' AND column_name='meta')                             AS msg_meta,
        EXISTS(SELECT 1 FROM information_schema.columns
-              WHERE table_name='quotations' AND column_name='odoo_manual_review')             AS q_manual_review;"
+              WHERE table_name='quotations' AND column_name='odoo_manual_review')             AS q_manual_review,
+       to_regclass('public.pricing_models')                                                   AS pricing_models;"
 ```
 > ⚠️ **`sp_employee_qid` กับ `admin_maker` เป็นคนละตาราง ชื่อคอลัมน์บังเอิญเหมือนกัน** —
 > `salesperson.employee_quotation_id` (ใบจาก LINE) กับ `admin_users.employee_quotation_id`
@@ -425,6 +426,10 @@ done
   โค้ดเก่าไม่รู้จักคอลัมน์ใหม่ก็ไม่พัง (upsert ระบุชื่อคอลัมน์ครบทุกตัว)
   ⚠️ แถวเก่าเป็น NULL หมดจนกว่า Odoo จะแก้เอกสารนั้นแล้ว incremental sync ดึงมาทับ
   ถ้าอยากได้ครบทันทีต้อง `docker compose exec app npm run sync:saleorders -- --full` (กวาดทั้งฐาน ทำนอกเวลา)
+- **ข้อยกเว้น: `2026-09-23_01_pricing_book_db.sql` รันได้ทุกเวลา และสลับลำดับกับ deploy ได้**
+  สร้างสามตารางใหม่ล้วนของสมุดราคา (`pricing_book_revisions` · `pricing_models` · `pricing_model_history`)
+  ไม่ล็อกตารางเดิมสักตัว · โค้ดที่ยังไม่เจอตารางตอบ "ยังไม่มีสมุดราคาในระบบ" แทน 500
+  ⇒ migration อย่างเดียวไม่ทำให้มีราคา — ต้องนำเข้าเล่มแรกตาม **ขั้น 4.11** อีกครั้งเดียว
 - **ข้อยกเว้น: `2026-09-02_03_quotations_odoo_import_link.sql` รันได้ทุกเวลา และรัน "ก่อน" deploy โค้ดใหม่ได้**
   เพิ่ม `quotations.odoo_imported_at` / `odoo_so_id` = สถานะ "นำเข้า Odoo แล้ว" ของหน้าประวัติใบเสนอราคา
   `ADD COLUMN` nullable ไม่มี DEFAULT บนตาราง ~1.3k แถว จบในไม่กี่ ms
@@ -657,6 +662,47 @@ docker compose exec -T db psql -U "$PG_USER" -d "$PG_DATABASE" -c "
 ตารางทั้ง 4 ทิ้งไว้ได้ ไม่มีใครเขียนต่อ · ส่วนหน้าจอถอนด้วยการลบ 2 บรรทัดใน `index.ts`
 (`import { logsRouter }` และ `app.use('/api/admin/logs', ...)`)
 
+### ขั้น 4.11 — นำเข้าสมุดราคาเล่มแรก (ครั้งเดียวต่อ DB · ต้องได้คำสั่งเจ้าของ)
+
+ตั้งแต่ 2026-09-23 สมุดราคาของหน้า "คิดราคาสินค้า" อยู่ในฐาน ([`docs/plan-pricebook-db.md`](docs/plan-pricebook-db.md))
+⇒ deploy ไม่ทำราคาหายอีก และเข้า dump ตีสามเอง · **ไม่กระทบบอท LINE/ใบเสนอราคา** (ไม่มีส่วนไหนเรียกโมดูลนี้)
+แต่ใช้ช่วงเวลาเดียวกับ deploy (20:00–06:00) ตามที่เจ้าของเคาะ
+
+ไฟล์ Excel อยู่ที่ `backup/` บน host ซึ่ง `.dockerignore` กันไว้ ⇒ image ไม่มีไฟล์นี้ **โดยตั้งใจ**
+ใช้คอนเทนเนอร์ครั้งเดียว (`run --rm`) ที่เห็นโฟลเดอร์แบบอ่านอย่างเดียว ⇒ ไม่มีสำเนาค้างในกล่องที่รันอยู่
+(ห้ามคัด Excel เข้า `/tmp` ของกล่องที่รันอยู่ — ลืมลบเมื่อไหร่ก็ค้างอยู่ใน production)
+
+```bash
+cd /home/app_sales/salechatbot/chatbot
+set -a; source .env; set +a
+# 1. สำรองก่อน (ขั้น 2)
+docker compose exec -T db pg_dump -U "$PG_USER" -d "$PG_DATABASE" -Fc > backup-$(date +%F-%H%M)-before-pricebook.dump
+# 2. migration (ถ้ายังไม่ได้รันในขั้น 4) แล้วตรวจ
+docker compose exec -T db psql -U "$PG_USER" -d "$PG_DATABASE" -v ON_ERROR_STOP=1 -f - < migrations/changes/2026-09-23_01_pricing_book_db.sql
+npm run diag:migrations
+# 3. ดูรายงานก่อน (ไม่เขียนอะไร) — ต้องได้ 13 รุ่น 11 ชีต
+docker compose run --rm --no-deps -v "$PWD/backup:/seed:ro" app \
+  npx tsx scripts/pricebook/importer.ts --data /seed
+# 4. เขียนจริง (ใส่ username ของคนที่สั่ง)
+docker compose run --rm --no-deps -v "$PWD/backup:/seed:ro" app \
+  npx tsx scripts/pricebook/importer.ts --data /seed --apply --by <username>
+# 5. ตรวจ — ทั้งสามตัวไม่เขียนตารางจริง
+docker compose exec app npm run diag:pricing-db
+docker compose exec app npm run diag:pricing
+docker compose exec app npm run diag:pricing-coverage     # ≥ 75%
+```
+
+แล้วเปิดหน้า "คิดราคาสินค้า" การ์ดต้องขึ้น 13 รุ่น และคิดราคา `TSK-14 6x200+150-BU` ได้ 5,030 (เฉลยของชีต)
+· เช้าวันถัดไป `npm run diag:backup -- --deep` ต้องเห็นตาราง `pricing_*` ใน TOC ของ dump
+
+ถ้าไม่อยากให้คอนเทนเนอร์ครั้งเดียวเห็นไฟล์ dump ใน `backup/`: `install -d -m 700 /tmp/pbseed && cp backup/*.xlsx /tmp/pbseed/`
+→ mount `/tmp/pbseed` แทน → `rm -rf /tmp/pbseed`
+· นำเข้าซ้ำ = ปฏิเสธ (มีเล่มแล้ว) · ตั้งใจแทนทั้งเล่มด้วย Excel ชุดใหม่ใส่ `--replace-all` (เป็นการบันทึกครั้งใหม่ ย้อนได้จากจอ
+แต่ราคาที่แอดมินแก้ไว้จะถูกแทน)
+
+**ถอยกลับ** (หลัง dump): `TRUNCATE pricing_model_history, pricing_models, pricing_book_revisions;` — หน้าจอกลับไปขึ้น
+"ยังไม่มีสมุดราคาในระบบ" เท่ากับก่อนนำเข้า · ⚠️ `db:restore` / `pg_restore` ของ dump เก่าก็พาราคาย้อนไปตามวันของ dump ด้วย
+
 ---
 
 ## เอกสารการเก็บข้อมูลจราจรทางคอมพิวเตอร์ (พ.ร.บ.คอมพิวเตอร์ ม.26)
@@ -791,6 +837,7 @@ docker compose exec app npx tsx scripts/diag/quoteValidationSmoke.ts
 docker compose exec app npx tsx scripts/diag/apiLogSmoke.ts
 docker compose exec app npx tsx scripts/diag/pdfCacheSmoke.ts
 docker compose exec app npx tsx scripts/diag/appUrlSmoke.ts
+docker compose exec app npx tsx scripts/diag/pricingDbRoundtrip.ts     # เขียนแค่ตารางชั่วคราวแล้ว ROLLBACK
 ```
 > ❌ ห้ามรันบน prod: `diag:export-tracking`, `diag:shipping-fee`, `diag:confirm-race` — สามตัวนี้เขียนข้อมูลทดสอบลง DB
 
@@ -866,6 +913,9 @@ npm run diag:backup -- --deep      # + เปิด TOC ของไฟล์ล
 docker compose cp backup/auto_chatbot_primus_YYYY-MM-DD_HHMM.dump db:/tmp/restore.dump
 docker compose exec db pg_restore -U "$PG_USER" -d "$PG_DATABASE" --clean --if-exists --no-owner /tmp/restore.dump
 ```
+
+⚠️ ตั้งแต่ 2026-09-23 **สมุดราคาของหน้า "คิดราคาสินค้า" อยู่ในฐานด้วย** ⇒ กู้คืน = ราคาที่แอดมินแก้หลังวันของ dump
+หายไปด้วย (สอดคล้องกับข้อมูลอื่นทั้งฐาน) · ถ้าต้องการแค่ย้อนราคา ใช้ปุ่ม "ย้อนไปเล่มก่อนหน้า" บนจอแทน
 
 ⚠️ **ยังไม่มีสำเนานอกเครื่อง** (ตัดสินใจไว้แบบนั้นเมื่อ 2026-09-15) — ไฟล์อยู่ดิสก์ลูกเดียวกับ
 ฐานที่มันสำรอง ⇒ เครื่องหรือดิสก์พัง = หายไปพร้อมกัน ป้องกันได้เฉพาะ "ฐานเสียหาย/ลบผิด/migration

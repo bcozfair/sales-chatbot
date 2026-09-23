@@ -9,24 +9,18 @@
 //    2. **"รุ่นที่ไม่ติ๊ก = คงราคาเดิม"** ต้องจริง ไม่ใช่เขียนทับทั้งเล่ม
 //    3. **รุ่นที่ไม่มีในไฟล์ ห้ามหาย** — แม่แบบที่แอดมินถือมาอาจเก่ากว่าสมุดเล่มปัจจุบัน
 //    4. ช่องที่ถูกเว้นว่าง = **"หายไป"** ไม่ใช่ราคา 0 และต้องถูกเรียงขึ้นบนสุด
-//    5. เก็บเล่มเก่า 3 เล่ม · ย้อนกลับได้ · **ย้อนแล้วยังย้อนกลับมาได้อีก**
-//    6. ลายนิ้วมือเปลี่ยนหลังบันทึก (ตัวกันสองคนอัปพร้อมกัน)
 //
-//  **ไม่แตะ `pricebook/book.json` ของจริงเลยสักไบต์** — ทำงานบนสำเนาในโฟลเดอร์ชั่วคราว
-//  แล้วลบทิ้งท้ายรอบ · อ่านของจริงอย่างเดียวเพื่อเอามาเป็นตัวตั้ง
+//  **ไม่เขียนอะไรเลย** — อ่านเล่มปัจจุบัน (SELECT) มาเป็นตัวตั้ง แล้วทุกข้ออยู่ในหน่วยความจำ
+//  ข้อ "เก็บเล่มเก่า · ย้อนกลับได้ · ย้อนแล้วยังย้อนกลับมาได้อีก · token เปลี่ยนหลังบันทึก" ของยุคไฟล์
+//  ย้ายไปอยู่ที่ `diag:pricing-db` (scripts/diag/pricingDbRoundtrip.ts) ตั้งแต่สมุดราคาย้ายเข้าฐาน 2026-09-23
 //
 //  รัน:  npm run diag:pricing-import   (รวมอยู่ใน npm run diag:pricing แล้ว)
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { BOOK_PATH } from '../../services/pricingLab/bookStore.js';
 import { makeTemplate, readUploaded } from '../../services/pricingLab/bookFile.js';
-import {
-  applyModels, bookFingerprint, diffBooks, listBackups, restoreBackup, saveBook, KEEP_BACKUPS,
-} from '../../services/pricingLab/bookUpdate.js';
+import { applyModels, diffBooks } from '../../services/pricingLab/bookUpdate.js';
 import type { PriceBook } from '../../services/pricingLab/types.js';
+import { NoBook, loadBookFrom } from '../pricebook/bookSource.js';
 
 let pass = 0;
 let fail = 0;
@@ -35,15 +29,13 @@ const check = (label: string, ok: boolean, detail?: string): void => {
   console.log(`${ok ? '✓' : '✗ FAIL'}  ${label}${detail ? `  —  ${detail}` : ''}`);
 };
 
-if (!existsSync(BOOK_PATH)) {
-  console.log(`ยังไม่มีสมุดราคาที่ ${BOOK_PATH}`);
-  console.log('สร้างก่อนด้วย:  npm run pricebook:import');
-  process.exit(0);
-}
-
-const real = JSON.parse(readFileSync(BOOK_PATH, 'utf8')) as PriceBook;
+const loaded = await loadBookFrom().catch((e: unknown) => {
+  if (e instanceof NoBook) { console.error(e.message); process.exit(1); }
+  throw e;
+});
+const real = loaded.book;
 const codes = Object.keys(real.models);
-console.log(`สมุดราคาตั้งต้น: ${codes.length} รุ่น · ${real.version}\n`);
+console.log(`สมุดราคาที่ใช้: ${loaded.label} · ${codes.length} รุ่น\n`);
 
 // ── 1. ไปกลับแล้วต้องไม่มีอะไรเปลี่ยน ────────────────────────────────────────
 
@@ -137,58 +129,6 @@ check('บันทึกแล้วรู้ว่าใครแก้เม�
   JSON.stringify(applied.edited));
 check('สมุดเล่มเดิมในหน่วยความจำไม่ถูกแก้',
   (real.models[A]!.base as { cells: Record<string, number> }).cells[keyA] === oldA);
-
-// ── 5. เขียนลงดิสก์ · เก็บ 3 เล่ม · ย้อนกลับ ─────────────────────────────────
-//
-// ทั้งหมดนี้เกิดในโฟลเดอร์ชั่วคราว — `pricebook/book.json` ของจริงไม่ถูกแตะ
-
-const tmp = mkdtempSync(join(tmpdir(), 'pricebook-diag-'));
-const tmpBook = join(tmp, 'book.json');
-const tmpBackups = join(tmp, 'backups');
-
-try {
-  writeFileSync(tmpBook, JSON.stringify(real, null, 2), 'utf8');
-  const fp0 = bookFingerprint(tmpBook);
-
-  // บันทึก 5 รอบ — ต้องเหลือสำรอง 3 เล่มพอดี ไม่ใช่ 5
-  for (let i = 1; i <= 5; i++) {
-    const step = applyModels(
-      JSON.parse(readFileSync(tmpBook, 'utf8')) as PriceBook,
-      edited, [A],
-      { at: `2026-09-2${i}T00:00:0${i}.000Z`, by: `diag-${i}` },
-    );
-    saveBook(step, tmpBook, new Date(2026, 8, 20 + i, 10, 0, i));
-  }
-
-  const kept = listBackups(tmpBackups);
-  check(`บันทึก 5 รอบ แล้วเหลือเล่มสำรอง ${KEEP_BACKUPS} เล่ม`, kept.length === KEEP_BACKUPS, `เหลือ ${kept.length}`);
-  check('เล่มสำรองเรียงใหม่ไปเก่า', kept.length > 1 && kept[0]!.name > kept[1]!.name,
-    kept.map((k) => k.name.slice(5, 24)).join(' · '));
-  check('ลายนิ้วมือเปลี่ยนหลังบันทึก', bookFingerprint(tmpBook) !== fp0);
-
-  const beforeRollback = bookFingerprint(tmpBook);
-  const target = kept[0]!.name;
-  check('ย้อนไปเล่มก่อนหน้าได้', restoreBackup(target, tmpBook, new Date(2026, 8, 26, 10, 0, 0)));
-  check('ย้อนแล้วสมุดเปลี่ยนจริง', bookFingerprint(tmpBook) !== beforeRollback);
-  check('ย้อนแล้วเล่มที่เพิ่งใช้อยู่ถูกเก็บไว้ให้ย้อนกลับได้อีก',
-    listBackups(tmpBackups).some((b) => {
-      try { return bookFingerprint(join(tmpBackups, b.name)) === beforeRollback; } catch { return false; }
-    }));
-  check('ย้อนไปเล่มที่ไม่มีแล้ว = ปฏิเสธ ไม่ใช่พัง', restoreBackup(target, tmpBook) === false);
-  check('ชื่อไฟล์ที่พาออกนอกโฟลเดอร์ถูกปฏิเสธ',
-    restoreBackup('../../../book.json', tmpBook) === false
-    && restoreBackup('book-../../x.json', tmpBook) === false);
-
-  const finalBook = JSON.parse(readFileSync(tmpBook, 'utf8')) as PriceBook;
-  check('สมุดที่ย้อนกลับมายังอ่านได้และรุ่นครบ', Object.keys(finalBook.models).length === codes.length);
-} finally {
-  rmSync(tmp, { recursive: true, force: true });
-}
-
-// ── สมุดราคาของจริงต้องไม่ถูกแตะ ─────────────────────────────────────────────
-
-check('`pricebook/book.json` ของจริงไม่ถูกแตะ',
-  JSON.stringify(JSON.parse(readFileSync(BOOK_PATH, 'utf8'))) === JSON.stringify(real));
 
 console.log(`\nผ่าน ${pass} · ล้ม ${fail}`);
 process.exit(fail ? 1 : 0);

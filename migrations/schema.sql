@@ -1843,6 +1843,95 @@ CREATE UNIQUE INDEX pricing_subcodes_code_scope_idx ON public.pricing_subcodes U
 
 
 --
+-- Name: pricing_book_revisions; Type: TABLE; Schema: public; Owner: -
+--
+-- สมุดราคาของโมดูล "คิดราคาสินค้า" (migration 2026-09-23_01 · docs/plan-pricebook-db.md)
+-- หนึ่งแถว = การบันทึกหนึ่งครั้ง (เล่มแรก / อัปแม่แบบ / แก้ทีละรุ่น / ย้อน) + ฟิลด์ระดับเล่มหลังครั้งนั้น
+-- UNIQUE NULLS NOT DISTINCT (parent_id) = ด่านกันสองคนบันทึกทับกัน — ต่อได้เฉพาะจากหัวเล่ม
+-- json ไม่ใช่ jsonb โดยตั้งใจ: jsonb สลับลำดับคีย์ แล้วแม่แบบ .xlsx กับช่องเลือกบนจอเรียงใหม่
+-- ถอดโมดูล = DROP สามตาราง pricing_* ชุดนี้ + pricing_subcodes
+--
+
+CREATE TABLE public.pricing_book_revisions (
+    id bigint NOT NULL,
+    parent_id bigint,
+    kind text NOT NULL,
+    restored_from bigint,
+    version text NOT NULL,
+    source text NOT NULL,
+    book_subcodes json DEFAULT '[]'::json NOT NULL,
+    edited json,
+    source_files json,
+    created_by text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pricing_book_revisions_pkey PRIMARY KEY (id),
+    CONSTRAINT pricing_book_revisions_parent_key UNIQUE NULLS NOT DISTINCT (parent_id),
+    CONSTRAINT pricing_book_revisions_kind_check CHECK ((kind = ANY (ARRAY['seed'::text, 'import'::text, 'model'::text, 'restore'::text]))),
+    CONSTRAINT pricing_book_revisions_restore_check CHECK (((kind = 'restore'::text) = (restored_from IS NOT NULL))),
+    CONSTRAINT pricing_book_revisions_root_check CHECK (((kind = 'seed'::text) = (parent_id IS NULL))),
+    CONSTRAINT pricing_book_revisions_parent_id_fkey FOREIGN KEY (parent_id) REFERENCES public.pricing_book_revisions(id),
+    CONSTRAINT pricing_book_revisions_restored_from_fkey FOREIGN KEY (restored_from) REFERENCES public.pricing_book_revisions(id)
+);
+
+ALTER TABLE public.pricing_book_revisions ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME public.pricing_book_revisions_id_seq
+    START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1
+);
+
+--
+-- Name: pricing_models; Type: TABLE; Schema: public; Owner: -
+--
+-- หนึ่งแถว = หนึ่งรุ่นของเล่มปัจจุบัน (spec = PriceModel ทั้งก้อน) · position ไม่ unique โดยตั้งใจ
+--
+
+CREATE TABLE public.pricing_models (
+    code text NOT NULL,
+    "position" integer NOT NULL,
+    spec json NOT NULL,
+    schema_version smallint DEFAULT 1 NOT NULL,
+    revision_id bigint NOT NULL,
+    updated_by text,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pricing_models_pkey PRIMARY KEY (code),
+    CONSTRAINT pricing_models_code_matches CHECK (((spec ->> 'code'::text) = code)),
+    CONSTRAINT pricing_models_spec_is_object CHECK ((json_typeof(spec) = 'object'::text)),
+    CONSTRAINT pricing_models_revision_id_fkey FOREIGN KEY (revision_id) REFERENCES public.pricing_book_revisions(id)
+);
+
+--
+-- Name: pricing_model_history; Type: TABLE; Schema: public; Owner: -
+--
+-- สเปกของรุ่นหนึ่งหลังการบันทึกครั้งหนึ่ง — เขียนต่อท้ายอย่างเดียว (โค้ดไม่มี UPDATE/DELETE ตารางนี้)
+-- spec NULL = รุ่นนี้ถูกเอาออกในครั้งนั้น
+--
+
+CREATE TABLE public.pricing_model_history (
+    id bigint NOT NULL,
+    revision_id bigint NOT NULL,
+    code text NOT NULL,
+    "position" integer,
+    spec json,
+    schema_version smallint DEFAULT 1 NOT NULL,
+    CONSTRAINT pricing_model_history_pkey PRIMARY KEY (id),
+    CONSTRAINT pricing_model_history_rev_code_key UNIQUE (revision_id, code),
+    CONSTRAINT pricing_model_history_code_matches CHECK (((spec IS NULL) OR ((spec ->> 'code'::text) = code))),
+    CONSTRAINT pricing_model_history_removed_check CHECK (((spec IS NULL) = ("position" IS NULL))),
+    CONSTRAINT pricing_model_history_revision_id_fkey FOREIGN KEY (revision_id) REFERENCES public.pricing_book_revisions(id)
+);
+
+ALTER TABLE public.pricing_model_history ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME public.pricing_model_history_id_seq
+    START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1
+);
+
+--
+-- Name: pricing_model_history_code_rev_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX pricing_model_history_code_rev_idx ON public.pricing_model_history USING btree (code, revision_id DESC);
+
+
+--
 -- PostgreSQL database dump complete
 --
 

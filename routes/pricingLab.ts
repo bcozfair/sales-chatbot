@@ -1,15 +1,19 @@
 import { Router, json, type Response } from 'express';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AdminRequest } from '../config/auth.js';
-import { loadBook, bookStatus, withSubCodes } from '../services/pricingLab/bookStore.js';
+import {
+  NO_BOOK_MESSAGE, bookStatus, loadBookState, tokenOf, withSubCodes, type BookState,
+} from '../services/pricingLab/bookStore.js';
 import { computePrice } from '../services/pricingLab/engine.js';
 import { parseProductCode } from '../services/pricingLab/code.js';
 import { EditRejected, applyModelEdit, modelEditorView } from '../services/pricingLab/modelEditor.js';
 import { makeTemplate, readUploaded, templateFileName } from '../services/pricingLab/bookFile.js';
 import {
-  applyModels, bookFingerprint, diffBooks, listBackups, restoreBackup, saveBook, KEEP_BACKUPS,
+  BookConflict, BookRejected, RevisionNotFound, KEEP_BACKUPS,
+  applyModels, commitBookChange, diffBooks, listRestorable, parseRestoreName, restoreRevision,
 } from '../services/pricingLab/bookUpdate.js';
 import type { PriceBook } from '../services/pricingLab/types.js';
 import {
@@ -24,9 +28,15 @@ import {
  * quotationService / utils/pricing / services/rules แม้แต่ตัวเดียว และต้องเป็นแบบนั้นต่อไป
  * จนกว่าจะมีคนสั่งให้ต่อ
  *
- * ถอนโมดูลออก = ลบไฟล์นี้ + db/pricingLabRepo.ts + services/pricingLab/
+ * ถอนโมดูลออก = ลบไฟล์นี้ + db/pricingLabRepo.ts + db/pricingBookRepo.ts + services/pricingLab/
  * + frontend/src/admin/pricingLab/ + 4 บรรทัดในไฟล์เดิม (index.ts 2 · capabilities.ts 1
- * · AdminApp.tsx 1) + `DROP TABLE pricing_subcodes` — ไม่มีของเดิมตัวไหน import โฟลเดอร์นี้
+ * · AdminApp.tsx 1) + `DROP TABLE pricing_subcodes, pricing_model_history, pricing_models,
+ * pricing_book_revisions` — ไม่มีของเดิมตัวไหน import โฟลเดอร์นี้
+ *
+ * **สมุดราคาอยู่ในฐานตั้งแต่ 2026-09-23** (docs/plan-pricebook-db.md) — ทุกเส้นที่เขียนเรียก
+ * `commitBookChange` / `restoreRevision` ใน bookUpdate.ts ที่เดียว ไม่มีเส้นไหนยิง SQL เอง
+ * ช่อง `fingerprint` ที่หน้าจอถือ = `r<เลขการบันทึก>` (ชื่อช่องเดิม ทึบเหมือนเดิม ⇒ frontend ไม่ต้องแก้)
+ * และ **ต้องส่งมาทุกครั้งที่บันทึก** (เจ้าของเคาะ 2026-09-23 · แผน §12 ข้อ 8) — ยุคไฟล์ไม่ส่งก็ข้ามด่านไปเลย
  *
  * สิทธิ์เข้าถึงถูกบังคับที่จุด mount ใน index.ts (adminAuthMiddleware + requireCapability('page.pricing'))
  * ไม่ใช่ในไฟล์นี้ ⇒ ไม่มีทางที่ route ใหม่จะหลุดออกไปโดยไม่มีการตรวจสิทธิ์
@@ -111,16 +121,37 @@ const census: unknown = (() => {
   }
 })();
 
-/** สมุดราคา + รหัสย่อยจากตาราง — ทุก endpoint ที่คิดเลขต้องผ่านตัวนี้ ไม่ใช่ `loadBook()` ตรง ๆ */
+/** สมุดราคา + รหัสย่อยจากตาราง — ทุก endpoint ที่คิดเลขต้องผ่านตัวนี้ ไม่ใช่ `loadBookState()` ตรง ๆ */
 async function bookWithDb(): Promise<PriceBook | undefined> {
-  const book = loadBook();
-  if (!book) return undefined;
-  return withSubCodes(book, await listSubCodes());
+  const state = await loadBookState();
+  if (!state) return undefined;
+  return withSubCodes(state.book, await listSubCodes());
 }
 
 function noBook(res: Response) {
-  return res.status(503).json({ error: bookStatus().message });
+  return res.status(503).json({ error: NO_BOOK_MESSAGE });
 }
+
+/**
+ * ด่านเร็วก่อนบันทึก: ไม่ส่ง token = 400 · token ไม่ใช่หัวเล่มแล้ว = 409 (ไม่ต้องอ่านไฟล์ที่อัปมาเลย)
+ * **ด่านจริงอยู่ที่ฐาน** (UNIQUE ของ parent_id ใน commitBookChange) — ตัวนี้แค่ตอบเร็ว
+ * คืน `true` เมื่อตอบไปแล้ว
+ */
+function staleToken(req: AdminRequest, res: Response, state: BookState, conflictMessage: string): boolean {
+  const fp = req.body?.fingerprint;
+  if (typeof fp !== 'string' || !fp) {
+    res.status(400).json({ error: 'ไม่พบเลขอ้างอิงของสมุดราคาที่เปิดอยู่ — เปิดหน้านี้ใหม่แล้วลองอีกครั้ง' });
+    return true;
+  }
+  if (fp !== state.token) {
+    res.status(409).json({ error: conflictMessage });
+    return true;
+  }
+  return false;
+}
+
+const IMPORT_CONFLICT = 'สมุดราคาเพิ่งถูกบันทึกโดยคนอื่นระหว่างที่คุณกำลังตรวจอยู่ — กรุณาอัปโหลดไฟล์ใหม่อีกครั้งเพื่อดูส่วนต่างที่ตรงกับเล่มล่าสุด';
+const MODEL_CONFLICT = 'สมุดราคาเพิ่งถูกบันทึกโดยคนอื่นระหว่างที่คุณกำลังแก้อยู่ — เปิดหน้านี้ใหม่แล้วแก้อีกครั้ง เพื่อไม่ให้ทับงานของเขา';
 
 /** จำนวนช่องที่มีตัวเลขอยู่ทั้งเล่ม — นับ ไม่ใช่ส่งราคาออกไป */
 function countCells(book: PriceBook): number {
@@ -159,7 +190,7 @@ const nowIso = () => new Date().toISOString();
  * (ต้องแนบ Authorization ⇒ `<a href>` ธรรมดาใช้ไม่ได้ เพราะเบราว์เซอร์ไม่แนบ header ให้)
  */
 pricingLabRouter.get('/template', async (_req: AdminRequest, res: Response) => {
-  const book = loadBook();
+  const book = (await loadBookState())?.book;
   if (!book) return noBook(res);
 
   const today = nowIso().slice(0, 10);
@@ -179,20 +210,20 @@ pricingLabRouter.get('/template', async (_req: AdminRequest, res: Response) => {
  * ถูกคั่นด้วยจอที่บันทึกไม่ได้เสมอ ⇒ คนที่อัปไฟล์ผิดรู้ตัวก่อนที่ราคาจะขยับ ไม่ใช่หลังจากนั้น
  */
 pricingLabRouter.post('/import/preview', async (req: AdminRequest, res: Response) => {
-  const current = loadBook();
-  if (!current) return noBook(res);
+  const state = await loadBookState();
+  if (!state) return noBook(res);
 
   const bytes = decodeUpload(req.body?.file);
   if (!bytes) return res.status(400).json({ error: 'ยังไม่ได้แนบไฟล์ หรือไฟล์ที่แนบมาว่างเปล่า' });
 
   const { book: incoming, issues } = await readUploaded(bytes);
-  if (!incoming) return res.json({ ok: false, issues, fingerprint: bookFingerprint() });
+  if (!incoming) return res.json({ ok: false, issues, fingerprint: state.token });
 
-  const diff = diffBooks(current, incoming);
+  const diff = diffBooks(state.book, incoming);
   res.json({
     ok: true,
     issues,
-    fingerprint: bookFingerprint(),
+    fingerprint: state.token,
     summary: diff.summary,
     models: diff.models,
     untouched: diff.untouched,
@@ -209,8 +240,8 @@ pricingLabRouter.post('/import/preview', async (req: AdminRequest, res: Response
  * ทั้งที่การอ่าน .xlsx ซ้ำใช้เวลาไม่ถึงวินาที ⇒ แลกความเร็วที่ไม่มีใครรู้สึก กับสถานะที่ไม่มีเลย
  */
 pricingLabRouter.post('/import/apply', async (req: AdminRequest, res: Response) => {
-  const current = loadBook();
-  if (!current) return noBook(res);
+  const state = await loadBookState();
+  if (!state) return noBook(res);
 
   const bytes = decodeUpload(req.body?.file);
   if (!bytes) return res.status(400).json({ error: 'ยังไม่ได้แนบไฟล์ หรือไฟล์ที่แนบมาว่างเปล่า' });
@@ -220,12 +251,9 @@ pricingLabRouter.post('/import/apply', async (req: AdminRequest, res: Response) 
     : [];
   if (picked.length === 0) return res.status(400).json({ error: 'ยังไม่ได้เลือกรุ่นที่จะบันทึก' });
 
-  if (typeof req.body?.fingerprint === 'string' && req.body.fingerprint !== bookFingerprint()) {
-    return res.status(409).json({
-      error: 'สมุดราคาเพิ่งถูกบันทึกโดยคนอื่นระหว่างที่คุณกำลังตรวจอยู่ — กรุณาอัปโหลดไฟล์ใหม่อีกครั้งเพื่อดูส่วนต่างที่ตรงกับเล่มล่าสุด',
-    });
-  }
+  if (staleToken(req, res, state, IMPORT_CONFLICT)) return;
 
+  // อ่าน .xlsx ให้จบก่อน BEGIN — exceljs ห้ามอยู่ใน transaction (กฎของ withTransaction)
   const { book: incoming, issues } = await readUploaded(bytes);
   if (!incoming) return res.status(400).json({ error: 'ไฟล์นี้บันทึกไม่ได้', issues });
   // ปล่อยผ่านไปตอนนี้ = ราคาของช่องที่อ่านไม่ออกหายไปเงียบ ๆ ⇒ หยุดที่นี่ ไม่ใช่เตือนแล้วเขียนต่อ
@@ -236,22 +264,58 @@ pricingLabRouter.post('/import/apply', async (req: AdminRequest, res: Response) 
   if (unknown.length > 0) return res.status(400).json({ error: `ไฟล์นี้ไม่มีรุ่น ${unknown.join(' · ')}` });
 
   const at = nowIso();
-  const next = applyModels(current, incoming, picked, {
-    at,
-    by: req.admin?.username,
-    file: typeof req.body?.name === 'string' ? req.body.name.slice(0, 120) : undefined,
-  });
-  saveBook(next);
+  const fileName = typeof req.body?.name === 'string' ? req.body.name.slice(0, 120) : undefined;
+  const next = applyModels(state.book, incoming, picked, { at, by: req.admin?.username, file: fileName });
 
-  res.json({ ok: true, saved: picked.length, at, fingerprint: bookFingerprint(), issues });
+  let revision: number;
+  try {
+    revision = await commitBookChange({
+      parent: state.revision,
+      kind: 'import',
+      next,
+      changed: picked,
+      by: req.admin?.username ?? null,
+      // เก็บแค่ชื่อ + sha256 + ขนาดของไฟล์ที่อัป ไม่เก็บตัวไฟล์ (เจ้าของเคาะ 2026-09-23 · แผน §12 ข้อ 4)
+      sourceFiles: [{
+        name: fileName ?? '(ไม่มีชื่อ)',
+        sha256: createHash('sha256').update(bytes).digest('hex'),
+        bytes: bytes.length,
+      }],
+    });
+  } catch (e) {
+    if (e instanceof BookConflict) return res.status(409).json({ error: IMPORT_CONFLICT });
+    if (e instanceof BookRejected) return res.status(400).json({ error: 'ไฟล์นี้บันทึกไม่ได้', issues: e.problems.map((m) => ({ level: 'error', sheet: '', message: m })) });
+    throw e;
+  }
+
+  res.json({ ok: true, saved: picked.length, at, fingerprint: tokenOf(revision), issues });
 });
 
 /** ย้อนไปเล่มก่อนหน้า — ทางถอยทางเดียวของเครื่องที่ไม่มีใครไปรัน CLI ได้ */
+/**
+ * ย้อนไปเล่มก่อนหน้า — ทางถอยทางเดียวของเครื่องที่ไม่มีใครไปรัน CLI ได้
+ *
+ * ชื่อที่ส่งมาคือ `rev-<เลข>` จากรายการใน `/overview` · การย้อนคือการบันทึกใหม่ ⇒ ย้อนผิดก็ย้อนกลับได้
+ * สิทธิ์เท่ากับทั้งหน้า (`page.pricing`) — เจ้าของเคาะ 2026-09-23 (แผน §12 ข้อ 3)
+ */
 pricingLabRouter.post('/rollback', async (req: AdminRequest, res: Response) => {
   const name = typeof req.body?.name === 'string' ? req.body.name : '';
   if (!name) return res.status(400).json({ error: 'ยังไม่ได้เลือกเล่มที่จะย้อนไป' });
-  if (!restoreBackup(name)) return res.status(404).json({ error: 'ไม่พบเล่มนี้แล้ว — อาจมีคนย้อนไปก่อนหน้านี้' });
-  res.json({ ok: true, fingerprint: bookFingerprint() });
+  const target = parseRestoreName(name);
+  const gone = () => res.status(404).json({ error: 'ไม่พบเล่มนี้แล้ว — อาจมีคนย้อนไปก่อนหน้านี้' });
+  if (target === null) return gone();
+
+  let revision: number;
+  try {
+    revision = await restoreRevision(target, req.admin?.username ?? null);
+  } catch (e) {
+    if (e instanceof RevisionNotFound) return gone();
+    if (e instanceof BookConflict) {
+      return res.status(409).json({ error: 'สมุดราคาเพิ่งถูกบันทึกโดยคนอื่น — เปิดหน้านี้ใหม่แล้วลองอีกครั้ง' });
+    }
+    throw e;
+  }
+  res.json({ ok: true, fingerprint: tokenOf(revision) });
 });
 
 /**
@@ -261,8 +325,9 @@ pricingLabRouter.post('/rollback', async (req: AdminRequest, res: Response) => {
  * (สามช่องนั้นคือราคาจริงทั้งหมดของบริษัท)
  */
 pricingLabRouter.get('/overview', async (_req: AdminRequest, res: Response) => {
-  const status = bookStatus();
-  const book = loadBook();
+  const state = await loadBookState();
+  const status = await bookStatus(state);
+  const book = state?.book;
   const models = book
     ? Object.values(book.models).map((m) => ({
         code: m.code,
@@ -285,8 +350,8 @@ pricingLabRouter.get('/overview', async (_req: AdminRequest, res: Response) => {
           cells: countCells(book),
           sheets: new Set(Object.values(book.models).map((m) => m.sheet).filter(Boolean)).size,
           edited: book.edited ?? null,
-          fingerprint: bookFingerprint(),
-          backups: listBackups(),
+          fingerprint: state.token,
+          backups: await listRestorable(KEEP_BACKUPS),
           keep: KEEP_BACKUPS,
         }
       : null,
@@ -300,12 +365,13 @@ pricingLabRouter.get('/overview', async (_req: AdminRequest, res: Response) => {
  * คำศัพท์ให้ช่องเลือก) — เหตุผลที่เส้นนี้คืนราคาได้อยู่ที่หัวไฟล์ อย่าลบทิ้งเพราะเห็นว่าขัดกฎ
  */
 pricingLabRouter.get('/model/:code', async (req: AdminRequest, res: Response) => {
-  const book = loadBook();
-  if (!book) return noBook(res);
+  const state = await loadBookState();
+  if (!state) return noBook(res);
+  const { book } = state;
   const code = String(req.params.code ?? '');
   const m = book.models[code];
   if (!m) return res.status(404).json({ error: `ไม่มีรุ่น ${code} ในสมุดราคา` });
-  res.json({ model: modelEditorView(book, m), fingerprint: bookFingerprint(), version: book.version });
+  res.json({ model: modelEditorView(book, m), fingerprint: state.token, version: book.version });
 });
 
 /**
@@ -316,17 +382,14 @@ pricingLabRouter.get('/model/:code', async (req: AdminRequest, res: Response) =>
  * (ท่าเดียวกับ `/import/apply` — เส้นนี้เพิ่งมาทีหลัง จึงต้องใช้ด่านเดียวกัน ไม่ใช่ด่านที่สอง)
  */
 pricingLabRouter.put('/model/:code', async (req: AdminRequest, res: Response) => {
-  const book = loadBook();
-  if (!book) return noBook(res);
+  const state = await loadBookState();
+  if (!state) return noBook(res);
+  const { book } = state;
   const code = String(req.params.code ?? '');
   const current = book.models[code];
   if (!current) return res.status(404).json({ error: `ไม่มีรุ่น ${code} ในสมุดราคา` });
 
-  if (typeof req.body?.fingerprint === 'string' && req.body.fingerprint !== bookFingerprint()) {
-    return res.status(409).json({
-      error: 'สมุดราคาเพิ่งถูกบันทึกโดยคนอื่นระหว่างที่คุณกำลังแก้อยู่ — เปิดหน้านี้ใหม่แล้วแก้อีกครั้ง เพื่อไม่ให้ทับงานของเขา',
-    });
-  }
+  if (staleToken(req, res, state, MODEL_CONFLICT)) return;
 
   let next;
   try {
@@ -337,19 +400,33 @@ pricingLabRouter.put('/model/:code', async (req: AdminRequest, res: Response) =>
   }
 
   const at = nowIso();
-  saveBook({
-    ...book,
-    models: { ...book.models, [code]: next },
-    edited: {
-      at,
-      by: req.admin?.username,
-      note: typeof req.body?.note === 'string' && req.body.note.trim()
-        ? `แก้ ${code}: ${req.body.note.trim().slice(0, 200)}`
-        : `แก้ราคารุ่น ${code} จากหน้าจอ`,
-    },
-  });
+  // `version` ไม่ขยับ — แก้ทีละรุ่นไม่ใช่เล่มใหม่ (พฤติกรรมเดิมของยุคไฟล์) · เขียนแค่รุ่นนี้แถวเดียว
+  let revision: number;
+  try {
+    revision = await commitBookChange({
+      parent: state.revision,
+      kind: 'model',
+      next: {
+        ...book,
+        models: { ...book.models, [code]: next },
+        edited: {
+          at,
+          by: req.admin?.username,
+          note: typeof req.body?.note === 'string' && req.body.note.trim()
+            ? `แก้ ${code}: ${req.body.note.trim().slice(0, 200)}`
+            : `แก้ราคารุ่น ${code} จากหน้าจอ`,
+        },
+      },
+      changed: [code],
+      by: req.admin?.username ?? null,
+    });
+  } catch (e) {
+    if (e instanceof BookConflict) return res.status(409).json({ error: MODEL_CONFLICT });
+    if (e instanceof BookRejected) return res.status(400).json({ error: e.message });
+    throw e;
+  }
 
-  res.json({ ok: true, at, fingerprint: bookFingerprint(), model: modelEditorView(book, next) });
+  res.json({ ok: true, at, fingerprint: tokenOf(revision), model: modelEditorView(book, next) });
 });
 
 /**

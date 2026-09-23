@@ -24,6 +24,15 @@ ngrok.exe
 backup
 *.dump
 
+# ราคาจริงของบริษัท — ห้ามเข้า image (2026-09-23 · docs/plan-pricebook-db.md เฟส 0)
+# image ที่ build ก่อนหน้านี้มีไฟล์ Excel ราคาอยู่ใน /app/data/ ซึ่งถูกเสิร์ฟที่ /data/ โดยไม่ตรวจสิทธิ์
+# สมุดราคาอยู่ในฐานแล้ว ⇒ ไม่มีเหตุให้ไฟล์ .xlsx หรือเล่มของยุคไฟล์อยู่ในกล่องเลย
+*.xlsx
+**/*.xlsx
+pricebook
+# worktree ของ agent — สำเนาทั้งรีโปรวมไฟล์ที่ตามมาจาก data/ ของแต่ละทรี
+.claude
+
 # plan / docs ที่ไม่ต้องใน image
 DEPLOY.md
 # ของสำหรับรันบน host เท่านั้น (systemd unit + dependency ของ logworker) ไม่เกี่ยวกับ image

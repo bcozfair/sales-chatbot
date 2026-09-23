@@ -53,14 +53,22 @@ async function main() {
   //     กอง log ภายในตาม พ.ร.บ.คอมพิวเตอร์ ม.26 — มี IP ผู้ใช้ ชื่อผู้แก้ไข และค่าก่อน/หลังของ
   //     การตั้งค่า การเปิดให้ระบบภายนอกดึงได้เท่ากับยกหลักฐานทั้งกองให้คนนอก
   //     (ดู docs/plan-logging-audit-compliance.md)
+  //   pricing_subcodes / pricing_book_revisions / pricing_models / pricing_model_history
+  //     สมุดราคาของโมดูล "คิดราคาสินค้า" = ราคาจริงของบริษัททั้งเล่ม ⇒ ห้ามส่งออกให้ระบบภายนอกเด็ดขาด
+  //     (docs/plan-pricebook-db.md §7 · เพิ่ม 2026-09-23 — ใครย้ายเข้าทะเบียน ข้อ 1b ข้างล่างล้ม)
+  const PRICE_TABLES = ['pricing_subcodes', 'pricing_book_revisions', 'pricing_models', 'pricing_model_history'];
   const INTENTIONALLY_OUT = new Set([
     'sync_api_keys',
     'system_logs', 'log_worker_state', 'audit_logs', 'traffic_daily',
+    ...PRICE_TABLES,
   ]);
 
   const missing = [...dbSet].filter((t) => !regSet.has(t) && !INTENTIONALLY_OUT.has(t));
   ok(`ทุกตารางใน DB อยู่ในทะเบียน (${dbSet.size - INTENTIONALLY_OUT.size} ตาราง)`, missing.length === 0,
      missing.length ? `ตกทะเบียน: ${missing.join(', ')}` : '');
+
+  const leaked = PRICE_TABLES.filter((t) => regSet.has(t));
+  ok('ตารางสมุดราคาไม่อยู่ในทะเบียน (ราคาจริงห้ามออกนอกระบบ)', leaked.length === 0, leaked.join(', '));
 
   const ghost = [...regSet].filter((t) => !dbSet.has(t));
   ok('ทุกตารางในทะเบียนมีอยู่จริงใน DB', ghost.length === 0, ghost.length ? `ไม่พบ: ${ghost.join(', ')}` : '');

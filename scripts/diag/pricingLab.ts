@@ -1,24 +1,28 @@
 /**
  * ด่านของโมดูล "คิดราคาสินค้า" — พิสูจน์สายที่ Node ตรวจได้ทั้งเส้น
  *
- *   pricebook/book.json → ตาราง pricing_subcodes → engine → ราคาบนจอ
+ *   สมุดราคา (ในฐาน) → ตาราง pricing_subcodes → engine → ราคาบนจอ
  *
  * ทำไมต้องมีด่านนี้ทั้งที่ golden.ts ผ่าน 35 เคสแล้ว: golden พิสูจน์ว่า **ถ้าสมุดราคามีแถวนี้
  * engine คิดถูก** แต่ไม่ได้พิสูจน์ว่าแถวที่แอดมินกดบันทึกลงตารางจริง ๆ จะเดินทางกลับเข้า engine
  * ได้ — ซึ่งเป็นคนละเรื่องและเป็นจุดที่โมดูลนี้เพิ่มเข้ามาใหม่ทั้งหมด
  *
- * ⚠️ ด่านนี้ **เขียนฐานจริง** (insert แล้วลบทิ้งใน finally) — ใช้รหัสย่อยทดสอบที่ไม่มีทางชนของจริง
- * และลบทิ้งก่อนเริ่มด้วย เผื่อรอบก่อนตายกลางทาง · ตัวเลข 700 ในไฟล์นี้เป็นค่าสมมติ ไม่ใช่ราคาจริง
+ * ข้อ 5 เขียนตาราง `pricing_subcodes` **ใน transaction แล้ว ROLLBACK เสมอ** (ตั้งแต่ 2026-09-23)
+ * — ยุคก่อนเขียนจริงแล้วลบทิ้งใน finally ด้วย id ที่ upsert คืนมา ซึ่งถ้าแอดมินตั้ง `-BU` ของ TS-14 ไว้
+ * (ON CONFLICT … DO UPDATE คืน id ของแถวเขา) ด่านจะเขียนทับค่าของเขาแล้วลบทิ้ง · ROLLBACK คืนแถวของ
+ * แอดมินให้เอง (ถือ row lock ไม่ถึงวินาที) · ⇒ อยู่กลุ่ม "เขียนแล้ว ROLLBACK" ของ AGENTS.md B2 รันบน PMSV ได้
+ * **ห้ามเปลี่ยน ROLLBACK เป็น COMMIT** · ตัวเลข 700 ในไฟล์นี้เป็นค่าสมมติ ไม่ใช่ราคาจริง
  *
  * ถอนโมดูลออก = ลบไฟล์นี้ + 1 บรรทัดใน package.json ด้วย
  */
 import { pool } from '../../config/db.js';
-import { loadBook, bookStatus, withSubCodes } from '../../services/pricingLab/bookStore.js';
+import { withSubCodes } from '../../services/pricingLab/bookStore.js';
+import { NoBook, loadBookFrom } from '../pricebook/bookSource.js';
 import { AXIS_TH, DIM_TH } from '../../services/pricingLab/labels.js';
 import { parseProductCode, unknownParts } from '../../services/pricingLab/code.js';
 import { computePrice } from '../../services/pricingLab/engine.js';
 import type { Predicate } from '../../services/pricingLab/types.js';
-import { listSubCodes, upsertSubCode, deleteSubCode, clean } from '../../db/pricingLabRepo.js';
+import { listSubCodes, upsertSubCode, clean } from '../../db/pricingLabRepo.js';
 import type { PriceBook } from '../../services/pricingLab/types.js';
 
 const GREEN = '\x1b[32m', RED = '\x1b[31m', DIM = '\x1b[2m', BOLD = '\x1b[1m', RESET = '\x1b[0m';
@@ -49,24 +53,23 @@ function priceOf(book: PriceBook, code: string): number | null {
   return computePrice(parsed.cfg, book).unitPrice;
 }
 
-async function cleanupTestRows() {
-  await pool.query(`DELETE FROM pricing_subcodes WHERE sub_code IN ('ZZDIAG', 'BU')
-                      AND data->>'reads' LIKE '%diag:pricing%'`);
-}
 
 async function main() {
   console.log(`\n${BOLD}ด่านโมดูลคิดราคาสินค้า${RESET}\n`);
 
   console.log(`${BOLD}1. สมุดราคา${RESET}`);
-  const status = bookStatus();
-  if (!status.ok) {
-    console.log(`  ${RED}✗${RESET} ${status.message}`);
-    console.log(`\n${BOLD}สรุป:${RESET} ${RED}รันต่อไม่ได้${RESET} — ไม่มี pricebook/book.json\n`);
+  let loaded;
+  try {
+    loaded = await loadBookFrom();
+  } catch (e) {
+    if (!(e instanceof NoBook)) throw e;
+    console.log(`  ${RED}✗${RESET} ${e.message}`);
+    console.log(`\n${BOLD}สรุป:${RESET} ${RED}รันต่อไม่ได้${RESET} — ยังไม่มีสมุดราคา\n`);
     process.exitCode = 1;
     return;
   }
-  ok('อ่าน pricebook/book.json ได้', true, `${status.models} รุ่น · ${status.version}`);
-  const base = loadBook()!;
+  const base = loaded.book;
+  ok('อ่านสมุดราคาได้', true, `${Object.keys(base.models).length} รุ่น · ${loaded.label}`);
   ok('ไม่มีรหัสย่อยที่ไม่ได้มาจากไฟล์ราคาติดมากับสมุด', (base.subCodes ?? []).every((s) => !!s.source),
     `${(base.subCodes ?? []).length} แถวในไฟล์`);
 
@@ -138,12 +141,15 @@ async function main() {
     clean({ subCode: 'X', effect: 'percent', percent: 10, amount: 999 })?.amount === undefined);
   ok('ทุกแถวจากตารางนี้ถูกตีธง "ตั้งค่าเอง"', clean(TEST_ROW)?.custom === true);
 
-  console.log(`\n${BOLD}5. แถวในตาราง → ราคาขยับ${RESET}`);
-  await cleanupTestRows();
-  const saved = await upsertSubCode({ ...TEST_ROW, subCode: 'BU' }, 'diag');
-  ok('บันทึกลงตารางได้', !!saved && saved.id > 0, saved ? `id ${saved.id}` : '');
+  console.log(`\n${BOLD}5. แถวในตาราง → ราคาขยับ${RESET} ${DIM}(ใน transaction · ROLLBACK ท้ายข้อเสมอ)${RESET}`);
+  const rowsBefore = (await listSubCodes()).length;
+  const client = await pool.connect();
+  let saved;
   try {
-    const rows = await listSubCodes();
+    await client.query('BEGIN');
+    saved = await upsertSubCode({ ...TEST_ROW, subCode: 'BU' }, 'diag', client);
+    ok('บันทึกลงตารางได้', !!saved && saved.id > 0, saved ? `id ${saved.id}` : '');
+    const rows = await listSubCodes(client);
     ok('อ่านกลับออกมาเจอ', rows.some((r) => r.subCode === 'BU' && r.scope === 'TS-14'));
     const merged = withSubCodes(base, rows);
     const after = priceOf(merged, CODE);
@@ -151,20 +157,22 @@ async function main() {
     ok('BU เลิกขึ้นว่าอ่านไม่ออก',
       !unknownParts(parseProductCode(CODE, merged)).some((p) => p.text === 'BU'));
 
-    ok('สมุดราคาตัวที่ cache ไว้ไม่ถูกเขียนทับ', priceOf(loadBook()!, CODE) === EXPECT_BEFORE,
+    ok('สมุดราคาตัวที่ใช้ร่วมกันไม่ถูกเขียนทับ', priceOf(base, CODE) === EXPECT_BEFORE,
       'คำขอของคนหนึ่งต้องไม่เปลี่ยนคำตอบของอีกคน');
 
-    const again = await upsertSubCode({ ...TEST_ROW, subCode: 'BU', amount: 900 }, 'diag');
-    const rows2 = await listSubCodes();
+    const again = await upsertSubCode({ ...TEST_ROW, subCode: 'BU', amount: 900 }, 'diag', client);
+    const rows2 = await listSubCodes(client);
     ok('ตั้งซ้ำที่ (รหัสย่อย, ขอบเขต) เดิม = แก้ของเดิม ไม่ใช่เพิ่มแถวที่สอง',
       again?.id === saved?.id && rows2.filter((r) => r.subCode === 'BU' && r.scope === 'TS-14').length === 1);
     ok('ราคาตามค่าที่แก้ล่าสุด', priceOf(withSubCodes(base, rows2), CODE) === EXPECT_BEFORE + 900);
   } finally {
-    if (saved) await deleteSubCode(saved.id);
-    await cleanupTestRows();
+    await client.query('ROLLBACK');
+    client.release();
   }
-  const leftover = (await listSubCodes()).filter((r) => r.reads.includes('diag:pricing'));
-  ok('ลบแถวทดสอบทิ้งหมดแล้ว', leftover.length === 0, `เหลือ ${leftover.length}`);
+  const after = await listSubCodes();
+  const leftover = after.filter((r) => r.reads.includes('diag:pricing'));
+  ok('หลัง ROLLBACK ไม่มีแถวทดสอบค้าง และจำนวนแถวเท่าเดิม', leftover.length === 0 && after.length === rowsBefore,
+    `ค้าง ${leftover.length} · ${rowsBefore} → ${after.length} แถว`);
 
   console.log(`\n${BOLD}สรุป:${RESET} ${GREEN}ผ่าน ${pass}${RESET}${fail ? ` · ${RED}ล้ม ${fail}${RESET}` : ''}\n`);
   if (fail) process.exitCode = 1;

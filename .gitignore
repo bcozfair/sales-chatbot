@@ -57,11 +57,9 @@ data/eval/extraction_result_*.json
 # เฉลยกลุ่ม B สร้างใหม่ได้จากตาราง DECISIONS ใน scripts/diag/extractionTruthB.ts (ซึ่ง commit ไว้)
 data/eval/extraction_truth_b.json
 
-# สมุดราคาที่แปลงมาจากไฟล์ Excel (`npm run pricebook:import` เขียนลงที่นี่ที่เดียว)
-# เป็นราคาจริงของบริษัททั้งเล่ม ⇒ ไม่ควรออกนอกเครื่อง เหตุผลเดียวกับที่ mockup/ ถูก ignore
-# อยู่นอก public/ และนอก data/ โดยตั้งใจ เพราะสองโฟลเดอร์นั้นถูก express.static เสิร์ฟ
-# ออกเว็บ **โดยไม่มีการตรวจสิทธิ์** ⇒ วางไว้ที่นั่นเมื่อไหร่ ใครก็โหลดราคาทั้งเล่มได้
-# ขึ้นเซิร์ฟเวอร์ด้วยการคัดลอกไฟล์ ไม่ใช่ด้วย git pull (ดู services/pricingLab/README.md)
+# สมุดราคาของยุคไฟล์ (`pricebook/book.json` + `backups/`) — ตั้งแต่ 2026-09-23 สมุดราคาอยู่ในฐาน
+# (docs/plan-pricebook-db.md) บรรทัดนี้คงไว้กันไฟล์ที่ `importer.ts --out` เขียนออกมา และเล่มเก่าที่ยัง
+# ค้างอยู่บนเครื่อง dev หลุดขึ้นรีโป — เป็นราคาจริงของบริษัททั้งเล่ม
 #
 # ⚠️ **ต้องมี `/` นำเสมอ** — `pricebook/` เฉย ๆ แมตช์โฟลเดอร์ชื่อนี้ **ทุกชั้นของต้นไม้**
 # ซึ่งกิน `scripts/pricebook/` (เครื่องมือกับไฟล์ map ที่ต้อง commit) ไปทั้งโฟลเดอร์โดยไม่มีอะไรฟ้อง
@@ -69,4 +67,6 @@ data/eval/extraction_truth_b.json
 /pricebook/
 
 # ไฟล์ Excel ราคาต้นทาง — ห้ามขึ้นเซิร์ฟเวอร์เด็ดขาด ด้วยเหตุผลข้อบน (/data ไม่มี auth)
-data/*.xlsx
+# ทุกที่ ไม่ใช่แค่ data/ (2026-09-23) — แม่แบบที่ `pricebook:xlsx -- export` เคยเขียนลง scripts/pricebook/
+# ซึ่งไม่ได้ ignore ⇒ ไฟล์ราคาทั้งเล่มติด commit ได้โดยไม่มีอะไรฟ้อง · ไฟล์ .xlsx ที่ต้อง track มีค่อยเพิ่ม `!` เฉพาะตัว
+*.xlsx

@@ -8,9 +8,10 @@
  *   3. ช่องที่หน้าจอไม่ได้เปิดให้แก้ (สูตรคำนวณ · ข้อความข้อจำกัด · สเปกมาตรฐาน)
  *      รอดจากการบันทึกไหม — ถ้าไม่รอด แปลว่ายิง API ตรงแล้วลบมันได้
  *
- * รันโดยไม่แตะ `pricebook/book.json` ของจริง — ทุกอย่างอยู่ในหน่วยความจำ
+ * รันโดยไม่เขียนอะไรลงฐาน — อ่านเล่มปัจจุบัน (SELECT) แล้วทุกอย่างอยู่ในหน่วยความจำ
+ * (ทางบันทึกลงฐานของ `PUT /model` พิสูจน์ที่ `diag:pricing-db` ข้อ 6)
  */
-import { loadBook } from '../../services/pricingLab/bookStore.js';
+import { NoBook, loadBookFrom } from '../pricebook/bookSource.js';
 import { computePrice, resolveModel } from '../../services/pricingLab/engine.js';
 import { parseProductCode } from '../../services/pricingLab/code.js';
 import { EditRejected, applyModelEdit, modelEditorView } from '../../services/pricingLab/modelEditor.js';
@@ -24,11 +25,13 @@ const check = (name: string, ok: boolean, extra?: string): void => {
   console.log(`${ok ? '✓ ' : '✗ FAIL'}  ${name}${extra ? `  —  ${extra}` : ''}`);
 };
 
-const book = loadBook();
-if (!book) {
-  console.error('ไม่มี pricebook/book.json — รัน npm run pricebook:import ก่อน');
-  process.exit(1);
-}
+// เล่มปัจจุบันในฐาน (SELECT อย่างเดียว) · `--data <dir>` = ตรวจกับตัวเลขของชีตตรง ๆ · `--book <ไฟล์>` (ดู bookSource.ts)
+const loaded = await loadBookFrom().catch((e: unknown) => {
+  if (e instanceof NoBook) { console.error(e.message); process.exit(1); }
+  throw e;
+});
+const book = loaded.book;
+console.log(`สมุดราคาที่ใช้: ${loaded.label}\n`);
 
 const bh01 = book.models['BH-01'];
 const bh03 = book.models['BH-03'];
