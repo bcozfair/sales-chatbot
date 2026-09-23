@@ -1324,8 +1324,10 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
         </div>
       </div>
 
-      {/* ── ผู้ซื้อ / ข้อมูลเอกสาร — ช่องกรอกอยู่ตรงที่มันไปโผล่บนใบ ไม่ใช่ในฟอร์มอีกใบข้างบน ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 border-b border-slate-200">
+      {/* ── ผู้ซื้อ / ข้อมูลเอกสาร — ช่องกรอกอยู่ตรงที่มันไปโผล่บนใบ ไม่ใช่ในฟอร์มอีกใบข้างบน ──
+          ซ้าย 3/4 · ขวา 1/4 (เจ้าของสั่ง 2026-09-23) — ฝั่งซ้ายมีช่องเลือกบริษัท/ผู้ติดต่อที่ชื่อยาว
+          ส่วนฝั่งขวาเป็นค่าสั้น ๆ ที่ตัดบรรทัดได้ (เครดิต/กำหนดส่ง wrap เองอยู่แล้ว) */}
+      <div className="grid grid-cols-1 sm:grid-cols-[3fr_1fr] border-b border-slate-200">
         <div className="px-4 py-3">
           <DocField label="รหัสลูกค้า">
             {cust?.reference || '—'}
@@ -1335,7 +1337,8 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
           {/* นามผู้ซื้อ = ช่องเลือกบริษัท · ไม่มีฟอร์มแยกข้างบนอีกแล้ว ⇒ ต้องเลือกได้จากในใบ */}
           <div className="flex gap-2 py-[2px] text-[11.5px] items-start">
             <span className="text-slate-400 shrink-0 w-[86px] mt-2">นามผู้ซื้อ</span>
-            <span className="min-w-0 flex-1 max-w-[320px]">
+            {/* เต็มความกว้างคอลัมน์ — เคยตันที่ 320px ชื่อบริษัทถูกตัดจนอ่านไม่ออก */}
+            <span className="min-w-0 flex-1">
               <ComboBox<CustomerOpt>
                 value={ctx.customerOpt}
                 options={ctx.customerOpts}
@@ -1353,7 +1356,7 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
           </div>
           <div className="flex gap-2 py-[2px] text-[11.5px] items-start">
             <span className="text-slate-400 shrink-0 w-[86px] mt-2">ผู้ติดต่อ</span>
-            <span className="min-w-0 flex-1 max-w-[320px]">
+            <span className="min-w-0 flex-1">
               <ComboBox
                 value={ctx.contactOpt}
                 options={ctx.contactOpts}
@@ -1371,7 +1374,7 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
                 /*
                  * ทางเข้าของ "เพิ่มผู้ติดต่อใหม่" — เจ้าของเลือกแบบนี้จาก mockup ชุด lc-* (2026-09-21)
                  * อยู่ท้ายรายการเพราะนั่นคือจังหวะที่คนกำลังหาคนที่ไม่มีอยู่พอดี และไม่กินความกว้าง
-                 * ของช่องบนใบ (มีแค่ 320px) · ช่องนี้ disabled อยู่แล้วเมื่อยังไม่เลือกบริษัท
+                 * ของช่องบนใบ · ช่องนี้ disabled อยู่แล้วเมื่อยังไม่เลือกบริษัท
                  * ⇒ กางไม่ออก = กดไม่ได้ ไม่ต้องมีสถานะ disabled ของแถวนี้แยกอีกชั้น
                  */
                 action={(q) => (
@@ -1387,7 +1390,7 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
               />
             </span>
             {/* แก้/ลบ เฉพาะคนที่เราเพิ่มเอง — ผู้ติดต่อของ Odoo ต้องไปแก้ที่ Odoo (เจ้าของเคาะ
-                2026-09-21) · ไอคอนล้วนเพราะช่องนี้มีที่ให้ใช้แค่ 320px และหัวใบต้องอ่านเหมือน
+                2026-09-21) · ไอคอนล้วนเพราะหัวใบต้องอ่านเหมือน
                 เอกสาร ไม่ใช่แถบเครื่องมือ */}
             {(ctx.onEditContact || ctx.onDeleteContact) && (
               <span className="flex shrink-0 items-center gap-0.5 mt-1">
