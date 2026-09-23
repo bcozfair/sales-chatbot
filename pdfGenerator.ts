@@ -423,6 +423,8 @@ export async function generateQuotationPDF(quoteData: any, quoteNoInput?: string
   // ใบเสนอราคาอ่านจากก้อนเดียวกันผ่านผลตรวจ ⇒ ที่อยู่/เลขผู้เสียภาษีมีที่แก้ที่เดียว
   const companyHtml = companyNameHtml(profile);
   const addressHtml = companyAddressHtml(profile);
+  // ⚠️ ท่อน pdpa · ตัวอักษร · terms ท้ายใบ มีสำเนาบนจอใบร่างใน frontend/src/admin/QuoteRequest.tsx
+  //    (หน้าแอดมิน import ฝั่ง backend ไม่ได้) แก้ข้อความ/ลิงก์ที่นี่ต้องแก้ที่นั่นด้วย
   const tNoteHtml = companyClosingHtml(profile);
 
   // Dynamic pagination based on item content weight

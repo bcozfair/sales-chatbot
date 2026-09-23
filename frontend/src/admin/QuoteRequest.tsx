@@ -1763,14 +1763,42 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
 
       {/* ── สรุปยอด + หมายเหตุท้ายใบ ──
           ทุกตัวเลขมาจาก `q.totals` ที่ server คิดด้วยฟังก์ชันเดียวกับ PDF — ห้ามบวกเองบนจอ
-          ⇒ ยังไม่ได้ตรวจก็ยังไม่มีตัวเลขให้โชว์ พูดว่า “รอผลตรวจ” ตรง ๆ ดีกว่าโชว์เลขที่เดาเอง */}
+          ⇒ ยังไม่ได้ตรวจก็ยังไม่มีตัวเลขให้โชว์ พูดว่า “รอผลตรวจ” ตรง ๆ ดีกว่าโชว์เลขที่เดาเอง
+          ฝั่งซ้ายเรียงตามใบจริง (เจ้าของสั่ง 2026-09-23): หมายเหตุ → นโยบายข้อมูลส่วนบุคคล →
+          ตัวอักษร → เงื่อนไข 3 บรรทัด — ข้อความ/ลิงก์ต้องตรงกับท่อน pdpa/terms ใน pdfGenerator.ts */}
       <div className="grid grid-cols-1 sm:grid-cols-[1fr_300px] border-t border-slate-200">
-        <div className="px-4 py-3 text-[11px] text-slate-400 leading-relaxed">
-          <span className="font-bold text-slate-500">หมายเหตุ:</span> {q?.warranty_note ?? '—'}
-          <p className="mt-2">
-            ขอแจ้งนโยบายขอข้อมูลส่วนบุคคล เพื่อประโยชน์ในการได้รับข้อมูลผลิตภัณฑ์หรือบริการของเรา
-            อาทิ ใบเสนอราคา, การติดต่อกลับเพื่อสอบถามหรือนำเสนอข้อมูล
+        <div className="px-4 py-3 text-[11px] text-slate-500 leading-relaxed">
+          <p>
+            <span className="font-bold text-slate-600">หมายเหตุ:</span> {q?.warranty_note ?? '—'}
           </p>
+          <p className="mt-2 text-slate-400">
+            ขอแจ้งนโยบายขอข้อมูลส่วนบุคคล เพื่อประโยชน์ในการได้รับข้อมูลผลิตภัณฑ์หรือบริการของเรา
+            อาทิ ใบเสนอราคา, การติดต่อกลับเพื่อสอบถามหรือนำเสนอข้อมูล ดูรายละเอียดเพิ่มเติม:{' '}
+            <a
+              href="https://www.primusthai.com/primus/Activity/info?ID=340"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="break-all underline hover:text-[var(--brand-fg)]"
+            >
+              https://www.primusthai.com/primus/Activity/info?ID=340
+            </a>
+          </p>
+          <p className={`mt-3 pt-2 border-t border-slate-100 ${ctx.staleNow ? 'opacity-50' : ''}`}>
+            <span className="font-bold text-slate-600">ตัวอักษร:</span> {t ? t.amount_text : '—'}
+          </p>
+          {/* เงื่อนไข 3 บรรทัด — "คีย์ : ค่า" แบบเดียวกับกระดาษ */}
+          <dl className="mt-3 pt-2 border-t border-slate-100 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+            {[
+              ['Price Validity', '7 Day'],
+              ['Term Payment', ctx.paymentTerms ?? cust?.payment_terms ?? ''],
+              ['Delivery Time', q?.delivery_text ?? ''],
+            ].map(([k, v]) => (
+              <React.Fragment key={k}>
+                <dt className="text-slate-500">{k}</dt>
+                <dd className="font-semibold text-slate-700">: {v || '—'}</dd>
+              </React.Fragment>
+            ))}
+          </dl>
         </div>
         <div
           className={`px-4 py-3 border-t sm:border-t-0 sm:border-l border-slate-200 ${
@@ -1782,27 +1810,12 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
           <SumRow label="มูลค่าหลังหักส่วนลด" value={t ? money2(t.after_discount) : '—'} strong />
           <SumRow label="ภาษีมูลค่าเพิ่ม 7%" value={t ? money2(t.vat) : '—'} />
           <SumRow label="ยอดเงินสุทธิ" value={t ? `฿${money2(t.grand_total)}` : '—'} big />
-          <p className="text-[10.5px] text-slate-400 text-right mt-1">
-            {t ? `ตัวอักษร: ${t.amount_text}` : 'ยอดท้ายใบมาจากผลตรวจ — ยังไม่ได้ตรวจจึงยังไม่มีตัวเลข'}
-          </p>
+          {!t && (
+            <p className="text-[10.5px] text-slate-400 text-right mt-1">
+              ยอดท้ายใบมาจากผลตรวจ — ยังไม่ได้ตรวจจึงยังไม่มีตัวเลข
+            </p>
+          )}
         </div>
-      </div>
-
-      {/* ── เงื่อนไข 3 บรรทัดท้ายใบ ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 border-t border-slate-200">
-        {[
-          ['Price Validity', '7 Day'],
-          ['Term Payment', ctx.paymentTerms ?? cust?.payment_terms ?? '—'],
-          ['Delivery Time', q?.delivery_text ?? '—'],
-        ].map(([k, v], i) => (
-          <div
-            key={k}
-            className={`px-4 py-2.5 ${i > 0 ? 'border-t sm:border-t-0 sm:border-l border-slate-200' : ''}`}
-          >
-            <p className="text-[10px] uppercase tracking-wider text-slate-400">{k}</p>
-            <p className="text-xs font-semibold text-slate-700 mt-0.5">{v || '—'}</p>
-          </div>
-        ))}
       </div>
 
       {/* ── ช่องลงนาม 3 ช่องเหมือนใบจริง ──
