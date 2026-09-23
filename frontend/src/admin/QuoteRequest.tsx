@@ -1250,6 +1250,8 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
     'flex justify-between items-center gap-3 px-4 py-0.5 text-xs text-slate-600 tabular-nums ' +
     'before:content-[attr(data-k)] before:text-slate-400 ' +
     'md:table-cell md:px-2 md:py-2 md:text-right md:align-top md:before:content-none';
+  /** เซลล์ช่องกรอก (จำนวน · หน่วยละ · ส่วนลด) — จัดกลางในโหมดตารางให้ตรงกับหัวคอลัมน์ */
+  const cellC = cell.replace('md:text-right', 'md:text-center');
   /** ของในเซลล์ชิดขวาเสมอ ทั้งโหมดการ์ดและโหมดตาราง */
   const inner = 'inline-flex items-center justify-end gap-1.5';
   const inp =
@@ -1444,10 +1446,13 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
           <tr className="text-[10.5px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
             <th className="text-left font-bold py-2 pl-4 pr-2 w-12">ลำดับ</th>
             <th className="text-left font-bold py-2">รายการ</th>
-            <th className="text-right font-bold py-2 w-[104px]">จำนวน</th>
-            <th className="text-right font-bold py-2 w-[116px]">หน่วยละ</th>
-            <th className="text-right font-bold py-2 w-[132px]">ส่วนลด</th>
-            <th className="text-right font-bold py-2 w-[148px] pr-4">ราคา</th>
+            {/* หัวคอลัมน์ต้องตรงกับช่องกรอกข้างล่าง (เจ้าของทักจากจอจริง 2026-09-23):
+                สามคอลัมน์ที่เป็นช่องกรอก + หน่วย (Pcs / %) จัดกลางทั้งหัวและเซลล์ (`cellC`) ⇒ หัวอยู่
+                กลางกลุ่มช่องพอดี · "ราคา" ชิดขวาแต่เว้นที่ปุ่มลบ (26px + gap 6px) ⇒ หัวตรงกับตัวเลข */}
+            <th className="text-center font-bold py-2 px-2 w-[104px]">จำนวน</th>
+            <th className="text-center font-bold py-2 px-2 w-[116px]">หน่วยละ</th>
+            <th className="text-center font-bold py-2 px-2 w-[132px]">ส่วนลด</th>
+            <th className="text-right font-bold py-2 pl-2 pr-12 w-[148px]">ราคา</th>
           </tr>
         </thead>
         <tbody>
@@ -1567,7 +1572,7 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
                     disabled={r.isService || r.status !== 'ok'}
                   />
                 </td>
-                <td data-k="จำนวน" className={cell}>
+                <td data-k="จำนวน" className={cellC}>
                   <span className={inner}>
                     <input
                       value={r.quantity}
@@ -1581,7 +1586,7 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
                     <span className="text-[11px] text-slate-400">Pcs</span>
                   </span>
                 </td>
-                <td data-k="หน่วยละ" className={cell}>
+                <td data-k="หน่วยละ" className={cellC}>
                   <span className={inner}>
                     <input
                       value={r.price}
@@ -1594,7 +1599,7 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
                     />
                   </span>
                 </td>
-                <td data-k="ส่วนลด" className={cell}>
+                <td data-k="ส่วนลด" className={cellC}>
                   <span className={inner}>
                     {!editable || r.isService ? (
                       <span className="text-slate-400">—</span>
@@ -1675,13 +1680,13 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
                 )}
                 <RowTags tags={ctx.extraTagsOf(it)} dim={ctx.staleNow} checking={false} />
               </td>
-              <td data-k="จำนวน" className={cell}>
+              <td data-k="จำนวน" className={cellC}>
                 <span className={inner}>{money(it.quantity)} Pcs</span>
               </td>
-              <td data-k="หน่วยละ" className={cell}>
+              <td data-k="หน่วยละ" className={cellC}>
                 <span className={inner}>{money2(it.price)}</span>
               </td>
-              <td data-k="ส่วนลด" className={cell}>
+              <td data-k="ส่วนลด" className={cellC}>
                 <span className={inner}>
                   {it.discount_1 || it.discount_2
                     ? [it.discount_1, it.discount_2].filter(Boolean).map((d) => `${money(d)} %`).join(' , ')
@@ -1887,7 +1892,7 @@ const PdfPreviewButton: React.FC<{
       {open && multi && (
         <div
           role="menu"
-          className="absolute right-0 bottom-full mb-1.5 z-30 w-52 bg-card border border-slate-200 rounded-lg shadow-lg py-1 animate-fade-in"
+          className="absolute right-0 bottom-full mb-1.5 z-30 w-36 bg-card border border-slate-200 rounded-lg shadow-lg py-1 animate-fade-in"
         >
           <p className="px-3 pt-1 pb-1.5 text-[10.5px] text-slate-400">เลือกใบที่จะดู</p>
           {ready.map((g) => (
@@ -1899,7 +1904,7 @@ const PdfPreviewButton: React.FC<{
               className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
             >
               <FileText className="w-3.5 h-3.5 shrink-0 text-slate-400" />
-              {g.label}
+              {g.co}
             </button>
           ))}
         </div>
