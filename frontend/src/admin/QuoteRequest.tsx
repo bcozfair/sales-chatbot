@@ -1325,9 +1325,9 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
       </div>
 
       {/* ── ผู้ซื้อ / ข้อมูลเอกสาร — ช่องกรอกอยู่ตรงที่มันไปโผล่บนใบ ไม่ใช่ในฟอร์มอีกใบข้างบน ──
-          ซ้าย 3/4 · ขวา 1/4 (เจ้าของสั่ง 2026-09-23) — ฝั่งซ้ายมีช่องเลือกบริษัท/ผู้ติดต่อที่ชื่อยาว
+          ซ้าย 2/3 · ขวา 1/3 (เจ้าของสั่ง 2026-09-23 · แทน 3/4–1/4 ที่ลองก่อน) — ฝั่งซ้ายมีช่องเลือกบริษัท/ผู้ติดต่อที่ชื่อยาว
           ส่วนฝั่งขวาเป็นค่าสั้น ๆ ที่ตัดบรรทัดได้ (เครดิต/กำหนดส่ง wrap เองอยู่แล้ว) */}
-      <div className="grid grid-cols-1 sm:grid-cols-[3fr_1fr] border-b border-slate-200">
+      <div className="grid grid-cols-1 sm:grid-cols-[2fr_1fr] border-b border-slate-200">
         <div className="px-4 py-3">
           <DocField label="รหัสลูกค้า">
             {cust?.reference || '—'}
