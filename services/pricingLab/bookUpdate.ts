@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-//  เทียบสมุดราคาสองเล่ม · รวมเฉพาะรุ่นที่แอดมินติ๊ก · เก็บเล่มเก่าไว้ย้อนกลับ
+//  เทียบสมุดราคาสองเล่ม · รวมเฉพาะรุ่นที่แอดมินติ๊ก · บันทึกลงฐาน · ย้อนเล่ม
 //
 //  โมดูล "คิดราคาสินค้า" — ถอดออกได้ทั้งก้อน ดู services/pricingLab/README.md
 //
@@ -7,6 +7,7 @@
 //    · **ไฟล์ที่อัปผ่านจอเป็นตัวจริง** — Excel ใน `data/` กลายเป็นเอกสารอ้างอิง ไม่ใช่ทางเข้าของระบบ
 //    · **เลือกได้ว่าจะบันทึกรุ่นไหนบ้าง** — รุ่นที่ไม่ติ๊ก "คงราคาเดิม" ไม่ใช่ถูกลบ
 //    · **เก็บเล่มเก่าไว้ 3 เล่ม** — อัปผิดแล้วต้องย้อนได้จากหน้าจอ ไม่ต้อง ssh ไปรัน CLI
+//      (ตั้งแต่ 2026-09-23 ประวัติอยู่ในฐานครบทุกครั้ง · จอยังโชว์ 3 เล่มล่าสุดเหมือนเดิม — แผน §12 ข้อ 2)
 //    · ช่องที่เว้นว่างในไฟล์ = **ไม่รับผลิต** ไม่ใช่ราคา 0 (กติกาเดิมของทั้งโมดูล)
 //
 //  ⚠️ **สามข้อที่ห้ามทำให้ง่ายกว่านี้**
@@ -19,16 +20,20 @@
 //      และ `withSubCodes()` ให้ของในฐานชนะอยู่แล้ว ⇒ รับจากไฟล์ = เพิ่มทางที่สองให้ค่าเดียวกัน
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { BOOK_PATH } from './bookStore.js';
+import { withTransaction, type DbExecutor } from '../../config/db.js';
+import {
+  countModelsAt, deleteModel, headRevisionId, insertHistory, insertRevision, listRevisionsBefore,
+  readModels, readModelsAt, readRevision, upsertModel,
+  type RevisionKind, type SourceFile,
+} from '../../db/pricingBookRepo.js';
+import { checkPriceModel } from './modelShape.js';
 import type { Money, PriceBook, PriceModel } from './types.js';
 
-/** เก็บเล่มเก่ากี่เล่ม — เจ้าของเคาะ 3 */
+/**
+ * จำนวนเล่มก่อนหน้าที่ **แสดงบนจอ** ให้กดย้อน — เจ้าของเคาะ 3 (2026-09-21)
+ * ตั้งแต่ย้ายเข้าฐาน (2026-09-23) ประวัติเก็บทุกครั้งตลอดไป เลขนี้เป็นแค่ความยาวของรายการบนจอ
+ */
 export const KEEP_BACKUPS = 3;
-
-const BACKUP_DIR = join(dirname(BOOK_PATH), 'backups');
 
 // ── ส่วนต่างของราคา ─────────────────────────────────────────────────────────
 
@@ -175,95 +180,232 @@ export function applyModels(
   };
 }
 
+
+// ── บันทึกลงฐาน ─────────────────────────────────────────────────────────────
+//
+// ทุกทางเขียน (แก้ทีละรุ่น · อัปแม่แบบ · CLI นำเข้าเล่มแรก · ย้อน) ผ่านสองฟังก์ชันข้างล่างนี้เท่านั้น
+// **CLI ห้ามยิง SQL เอง** — ก๊อปเมื่อไหร่ วันหนึ่งเล่มที่เข้าทาง CLI จะไม่มีประวัติหรือข้ามด่านกันทับไป
+//
+// การบันทึกหนึ่งครั้ง = transaction เดียว: แถวหัว (`pricing_book_revisions`) → รุ่นที่แตะ
+// (`pricing_models`) → ประวัติของรุ่นที่แตะ (`pricing_model_history`) · ล้มตรงไหนก็ ROLLBACK ทั้งก้อน
+// ⇒ ไม่มีสถานะ "มีเล่มสำรองแต่ไม่มีเล่มปัจจุบัน" แบบ `saveBook()` ของยุคไฟล์
+//
+// **กันสองคนบันทึกทับกัน — ให้ฐานเป็นคนตัดสิน:** แถวหัวเก็บ `parent_id` = เล่มที่ผู้บันทึกตั้งต้นจาก และมี
+// UNIQUE NULLS NOT DISTINCT บนคอลัมน์นั้น ⇒ ต่อได้เฉพาะจากหัวเล่ม คนที่สองที่ถือเล่มเดียวกันโดน 23505
+// (รวมถึงกรณีที่ตรวจเร็วผ่านแล้วมีคนแทรกก่อน INSERT — ช่องโหว่แบบเดียวกับ `:223→:244` ของยุคไฟล์)
+// **ทางที่ไม่ได้เลือก:** `updated_at` เป็น token (JS ละเอียด ms · PG ละเอียด µs) · advisory lock
+// (logworker ใช้ key ของตัวเองอยู่แล้ว และ constraint อธิบายตัวเองได้)
+
+/** มีคนบันทึกจากเล่มเดียวกันไปก่อนแล้ว — route ตอบ 409 ด้วยข้อความเดิมของยุคไฟล์ */
+export class BookConflict extends Error {
+  constructor() {
+    super('สมุดราคาเพิ่งถูกบันทึกโดยคนอื่น');
+    this.name = 'BookConflict';
+  }
+}
+
+/** ของที่จะบันทึกไม่ผ่านด่านรูป (`checkPriceModel`) — ไม่มีอะไรถูกเขียน */
+export class BookRejected extends Error {
+  constructor(readonly problems: string[]) {
+    super(`สมุดราคาเล่มนี้บันทึกไม่ได้: ${problems.slice(0, 3).join(' · ')}`);
+    this.name = 'BookRejected';
+  }
+}
+
+/** เล่มที่ขอย้อนไปไม่มีแล้ว หรือเป็นหัวเล่มเอง — ไม่มีอะไรถูกเขียน */
+export class RevisionNotFound extends Error {
+  constructor() {
+    super('ไม่พบเล่มนี้');
+    this.name = 'RevisionNotFound';
+  }
+}
+
 /**
- * ลายนิ้วมือของสมุดเล่มที่ใช้อยู่ — ใช้ตอบคำถามเดียว: **"เล่มที่คุณเพิ่งดูส่วนต่าง
- * ยังเป็นเล่มเดียวกับที่กำลังจะเขียนทับอยู่ไหม"**
- *
- * มีเพราะสองคนอัปพร้อมกันได้จริง: A ดูส่วนต่างค้างไว้ · B บันทึกไป · A กดบันทึก
- * ⇒ ส่วนต่างที่ A เห็นเป็นของเล่มที่ไม่มีอยู่แล้ว การปล่อยให้เขียนทับคือการลบงานของ B
- * โดยที่ A ไม่รู้ตัว · ไม่มีไฟล์ = `''` (เล่มแรกของเครื่อง ใครอัปก่อนได้ก่อน)
+ * unique violation ของ `parent_id` — ดูชื่อตาราง + คำว่า parent แทนการเทียบชื่อ constraint ตรงตัว
+ * เพราะตารางเงาของด่าน (`LIKE … INCLUDING ALL`) ได้ชื่อ constraint ใหม่ (`…_parent_id_key`)
+ * ตารางนี้มี unique สองตัว: PK ที่เป็น IDENTITY (ชนไม่ได้) กับตัวนี้ ⇒ ไม่มีทางแปลผิดตัว
  */
-export function bookFingerprint(path: string = BOOK_PATH): string {
+function isParentConflict(e: unknown): boolean {
+  const pg = e as { code?: string; table?: string; constraint?: string } | null;
+  return pg?.code === '23505' && pg.table === 'pricing_book_revisions' && /parent/.test(pg.constraint ?? '');
+}
+
+/**
+ * ตัวรัน transaction — ค่าเริ่มต้นคือ `withTransaction` ของทั้งระบบ
+ * ด่าน `diag:pricing-db` ส่งตัวที่ใช้ SAVEPOINT บน client ของมันเองเข้ามา (ตารางชั่วคราว + ROLLBACK ท้ายรอบ)
+ * ⚠️ ข้างใน fn ห้าม `pool.query` / `loadBookState()` — ใช้ `db` ที่ส่งมาเท่านั้น (กฎของ withTransaction)
+ */
+export type BookTx = <T>(fn: (db: DbExecutor) => Promise<T>) => Promise<T>;
+
+const defaultTx: BookTx = (fn) => withTransaction((client) => fn(client));
+
+export interface BookChange {
+  /** เลขการบันทึกที่ผู้บันทึกตั้งต้นจาก — `null` ได้เฉพาะเล่มแรก (`kind: 'seed'`) */
+  parent: number | null;
+  kind: Exclude<RevisionKind, 'restore'>;
+  /** เล่มหลังการบันทึก — ฟิลด์ระดับเล่ม (`version/source/subCodes/edited`) มาจากตัวนี้ทั้งหมด */
+  next: PriceBook;
+  /** รุ่นที่เขียน — ต้องมีอยู่ใน `next.models` · รุ่นอื่นไม่ถูกแตะสักไบต์ */
+  changed: string[];
+  /**
+   * true = เล่มปลายทางคือ `next` ทั้งเล่ม: รุ่นที่ไม่มีใน `next` ถูกเอาออก และลำดับรุ่นตาม `next`
+   * (เล่มแรก · CLI `--replace-all`) — ทางเขียนของหน้าจอไม่ใช้เด็ดขาด (กติกาข้อ 2 ที่หัวไฟล์)
+   */
+  replaceAll?: boolean;
+  by?: string | null;
+  sourceFiles?: SourceFile[] | null;
+}
+
+/**
+ * บันทึกหนึ่งครั้ง — คืนเลขการบันทึกใหม่ (หน้าจอถือ `tokenOf(เลขนี้)` ต่อ)
+ * โยน `BookConflict` ถ้า `parent` ไม่ใช่หัวเล่มแล้ว · `BookRejected` ถ้ารุ่นที่จะเขียนรูปเสีย (ก่อน BEGIN)
+ */
+export async function commitBookChange(change: BookChange, tx: BookTx = defaultTx): Promise<number> {
+  const { next } = change;
+  const problems: string[] = [];
+  if ((change.kind === 'seed') !== (change.parent === null)) {
+    problems.push(change.kind === 'seed' ? 'เล่มแรกต้องไม่มีเล่มตั้งต้น' : 'ต้องบอกเล่มที่ตั้งต้นจาก');
+  }
+  for (const code of change.changed) {
+    const spec = next.models[code];
+    if (!spec) { problems.push(`${code}: ไม่มีในเล่มที่จะบันทึก`); continue; }
+    for (const p of checkPriceModel(spec, code)) problems.push(`${code} ${p}`);
+  }
+  if (problems.length > 0) throw new BookRejected(problems);
+
+  const by = change.by ?? null;
+  const order = Object.keys(next.models);
+
   try {
-    return createHash('sha256').update(readFileSync(path)).digest('hex').slice(0, 16);
-  } catch {
-    return '';
+    return await tx(async (db) => {
+      // แถวหัวก่อน — ถ้าชนจะรู้ก่อนเขียนอะไรอย่างอื่น
+      const id = await insertRevision({
+        parentId: change.parent,
+        kind: change.kind,
+        version: next.version,
+        source: next.source,
+        bookSubCodes: next.subCodes ?? [],
+        edited: next.edited ?? null,
+        sourceFiles: change.sourceFiles ?? null,
+        createdBy: by,
+      }, db);
+
+      const current = await readModels(db, { forUpdate: true });
+      const have = new Map(current.map((m) => [m.code, m]));
+      let nextPos = current.reduce((n, m) => Math.max(n, m.position), -1) + 1;
+      const changed = new Set(change.changed);
+
+      if (change.replaceAll) {
+        for (const m of current) {
+          if (m.code in next.models) continue;
+          await deleteModel(m.code, db);
+          await insertHistory(id, { code: m.code, position: null, spec: null }, db);
+        }
+      }
+
+      // วนตามลำดับของเล่มปลายทาง ⇒ รุ่นใหม่ต่อท้ายตามลำดับเดียวกับ `{ ...current.models, [code]: x }`
+      for (const [i, code] of order.entries()) {
+        if (!changed.has(code)) continue;
+        const position = change.replaceAll ? i : (have.get(code)?.position ?? nextPos++);
+        const spec = next.models[code]!;
+        await upsertModel({ code, position, spec }, id, by, db);
+        await insertHistory(id, { code, position, spec }, db);
+      }
+      return id;
+    });
+  } catch (e) {
+    if (isParentConflict(e)) throw new BookConflict();
+    throw e;
+  }
+}
+
+/** เล่มแรกของฐาน — มีเล่มอยู่แล้ว = `BookConflict` (ให้ CLI บอกให้ใช้ `--replace-all`) */
+export function seedBook(
+  book: PriceBook,
+  opts: { by?: string | null; sourceFiles?: SourceFile[] | null } = {},
+  tx?: BookTx,
+): Promise<number> {
+  return commitBookChange({
+    parent: null, kind: 'seed', next: book, changed: Object.keys(book.models), replaceAll: true, ...opts,
+  }, tx);
+}
+
+/**
+ * ย้อนไปเล่มของการบันทึกครั้งที่ `targetId` — **เป็นการบันทึกใหม่ ไม่ใช่การถอยประวัติ**
+ *
+ * คนที่กดย้อนเพราะตกใจ แล้วพบว่าย้อนผิดเล่ม ต้องมีทางกลับ ⇒ ไม่มีอะไรถูกลบจากประวัติ ย้อนผิดก็ย้อนกลับได้
+ * (ตรงกับสัญญาบนจอ "เล่มที่ใช้อยู่ตอนนี้จะถูกเก็บไว้") · ฟิลด์ระดับเล่มรวม `edited` คัดมาจากเล่มปลายทาง
+ * ⇒ การ์ดบนจอกลับเป็นสถานะของเล่มนั้น (แผน §12 ข้อ 6) · ใครกดอยู่ที่ `created_by`
+ */
+export async function restoreRevision(targetId: number, by: string | null, tx: BookTx = defaultTx): Promise<number> {
+  try {
+    return await tx(async (db) => {
+      const head = await headRevisionId(db);
+      if (head === null || !Number.isSafeInteger(targetId) || targetId >= head) throw new RevisionNotFound();
+      const target = await readRevision(targetId, db);
+      if (!target) throw new RevisionNotFound();
+
+      const want = await readModelsAt(targetId, db);
+      const current = await readModels(db, { forUpdate: true });
+
+      const id = await insertRevision({
+        parentId: head,
+        kind: 'restore',
+        restoredFrom: targetId,
+        version: target.version,
+        source: target.source,
+        bookSubCodes: target.bookSubCodes,
+        edited: target.edited,
+        sourceFiles: null,
+        createdBy: by,
+      }, db);
+
+      const wanted = new Set(want.map((m) => m.code));
+      for (const m of current) {
+        if (wanted.has(m.code)) continue;
+        await deleteModel(m.code, db);
+        await insertHistory(id, { code: m.code, position: null, spec: null }, db);
+      }
+      const have = new Map(current.map((m) => [m.code, m]));
+      for (const w of want) {
+        const h = have.get(w.code);
+        if (h && h.position === w.position && h.schemaVersion === w.schemaVersion
+          && JSON.stringify(h.spec) === JSON.stringify(w.spec)) continue;
+        const row = { code: w.code, position: w.position, spec: w.spec as PriceModel, schemaVersion: w.schemaVersion };
+        await upsertModel(row, id, by, db);
+        await insertHistory(id, row, db);
+      }
+      return id;
+    });
+  } catch (e) {
+    if (isParentConflict(e)) throw new BookConflict();
+    throw e;
   }
 }
 
 export interface BackupEntry {
-  /** ชื่อไฟล์ล้วน ๆ — เป็นตัวเดียวที่หน้าจอส่งกลับมาตอนกดย้อน (ดู `restoreBackup`) */
+  /** `rev-<เลขการบันทึก>` — ตัวเดียวที่หน้าจอส่งกลับมาตอนกดย้อน (ดู `parseRestoreName`) */
   name: string;
-  /** เวลาที่เล่มนั้นถูกเก็บ รูปแบบ ISO */
+  /** เวลาที่เล่มนั้นถูกบันทึก — คิดแบบเดียวกับ `listBackups()` ของยุคไฟล์ (`edited.at` ?? `version`) */
   at: string;
   models: number;
 }
 
-export function listBackups(dir: string = BACKUP_DIR): BackupEntry[] {
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((f) => f.startsWith('book-') && f.endsWith('.json'))
-    .sort()
-    .reverse()
-    .map((name) => {
-      let models = 0;
-      let at = '';
-      try {
-        const b = JSON.parse(readFileSync(join(dir, name), 'utf8')) as PriceBook;
-        models = Object.keys(b.models ?? {}).length;
-        at = b.edited?.at ?? b.version ?? '';
-      } catch { /* เล่มที่อ่านไม่ออกยังต้องโผล่ในรายการ ไม่ใช่หายไปเงียบ ๆ */ }
-      return { name, at, models };
-    });
-}
-
-/** ชื่อไฟล์สำรองเรียงตามเวลาได้ด้วยตัวอักษร — `sort()` จึงเป็นลำดับเวลาจริง ไม่ต้อง stat */
-function backupName(now: Date): string {
-  return `book-${now.toISOString().replace(/[:.]/g, '-')}.json`;
-}
-
-/**
- * เขียนสมุดเล่มใหม่ **หลังจากย้ายเล่มเดิมไปกองสำรองแล้วเท่านั้น**
- *
- * ลำดับสำคัญ: ย้ายก่อน เขียนทีหลัง — ถ้าเขียนก่อนแล้วไฟฟ้าดับกลางคัน เล่มเดิมหายไปพร้อมกับ
- * เล่มใหม่ที่เขียนไม่จบ · `renameSync` บนไดรฟ์เดียวกันเป็น atomic จึงไม่มีช่วงที่ไม่มีไฟล์เลย
- */
-export function saveBook(book: PriceBook, path: string = BOOK_PATH, now: Date = new Date()): void {
-  const dir = join(dirname(path), 'backups');
-  mkdirSync(dir, { recursive: true });
-
-  if (existsSync(path)) renameSync(path, join(dir, backupName(now)));
-
-  writeFileSync(path, JSON.stringify(book, null, 2), 'utf8');
-
-  // เก็บ 3 เล่ม — ตัดจากท้าย (เก่าสุด) หลังเรียงใหม่→เก่า
-  for (const old of listBackups(dir).slice(KEEP_BACKUPS)) {
-    try { unlinkSync(join(dir, old.name)); } catch { /* ลบไม่ได้ก็ไม่ใช่เหตุให้การบันทึกล้ม */ }
+/** การบันทึกก่อนหัวเล่ม เรียงใหม่ไปเก่า — รูปเดียวกับรายการเล่มสำรองของยุคไฟล์ หน้าจอจึงไม่ต้องแก้ */
+export async function listRestorable(limit: number = KEEP_BACKUPS, db?: DbExecutor): Promise<BackupEntry[]> {
+  const head = await headRevisionId(db);
+  if (head === null) return [];
+  const revs = await listRevisionsBefore(head, limit, db);
+  const out: BackupEntry[] = [];
+  for (const r of revs) {
+    out.push({ name: `rev-${r.id}`, at: r.edited?.at ?? r.version, models: await countModelsAt(r.id, db) });
   }
+  return out;
 }
 
-/**
- * ย้อนไปเล่มก่อนหน้า — **เล่มปัจจุบันถูกเก็บเป็นสำรองด้วย** ไม่ใช่ทิ้ง
- *
- * คนที่กดย้อนเพราะตกใจ แล้วพบว่าย้อนผิดเล่ม ต้องมีทางกลับ ⇒ การย้อนคือการบันทึกอีกครั้ง
- * ไม่ใช่การถอยประวัติ · คืน `false` เมื่อไม่มีไฟล์นั้นแล้ว (มีคนย้อนไปก่อนหน้าเราแล้ว)
- */
-export function restoreBackup(name: string, path: string = BOOK_PATH, now: Date = new Date()): boolean {
-  // กันชื่อที่พาออกนอกโฟลเดอร์ — ชื่อมาจาก body ของ request ไม่ใช่จากรายการที่เราสร้างเอง
-  if (!/^book-[\w.-]+\.json$/.test(name)) return false;
-  const dir = join(dirname(path), 'backups');
-  const src = join(dir, name);
-  if (!existsSync(src)) return false;
-
-  let book: PriceBook;
-  try {
-    book = JSON.parse(readFileSync(src, 'utf8')) as PriceBook;
-  } catch {
-    return false;
-  }
-  if (!book?.models) return false;
-
-  saveBook(book, path, now);
-  try { unlinkSync(src); } catch { /* เล่มที่ถูกยกกลับมาใช้แล้วไม่ต้องค้างอยู่ในกองสำรองอีก */ }
-  return true;
+/** ชื่อที่หน้าจอส่งมาตอนกดย้อน → เลขการบันทึก · รูปอื่นทั้งหมด (รวมชื่อไฟล์ `book-*.json` ของยุคไฟล์) → null */
+export function parseRestoreName(name: unknown): number | null {
+  if (typeof name !== 'string') return null;
+  const m = /^rev-([1-9]\d{0,15})$/.exec(name);
+  return m ? Number(m[1]) : null;
 }

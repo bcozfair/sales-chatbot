@@ -5,8 +5,14 @@
 //
 //    npm run pricebook:xlsx -- export [--out ไฟล์.xlsx]   แม่แบบกฎราคา (แก้แล้วนำกลับได้)
 //    npm run pricebook:xlsx -- odoo   [--out ไฟล์.xlsx]   ตารางราคาสำหรับนำเข้า Odoo
-//    npm run pricebook:xlsx -- import <ไฟล์.xlsx> [--save]
+//    npm run pricebook:xlsx -- import <ไฟล์.xlsx>          ตรวจไฟล์อย่างเดียว ไม่เขียนอะไร
+//  เล่มที่ใช้ = เล่มปัจจุบันในฐาน · `--book <ไฟล์.json>` / `--data <dir>` ใช้แทนได้ (ดู bookSource.ts)
 //
+//  **`import --save` ถูกถอดแล้ว** (เจ้าของเคาะ 2026-09-23 · แผน §12 ข้อ 11) — มันเขียนทับ **ทั้งเล่ม**
+//  (ลบรุ่นที่ไม่มีในไฟล์ ขัดกับกติกาข้อ 2 ของหน้าจอ) และไม่มีประวัติให้ย้อน ⇒ ทางเขียนเหลือสองทาง:
+//  ปุ่มอัปโหลดบนหน้าจอ (รวมรายรุ่น) กับ `importer.ts --apply` (เล่มแรก/แทนทั้งเล่มแบบย้อนได้)
+//  **ไฟล์ปลายทางตั้งต้นที่โฟลเดอร์ชั่วคราวของเครื่อง** ไม่ใช่ `scripts/pricebook/` ซึ่ง git ไม่ได้ ignore
+//  ⇒ ไฟล์ราคาทั้งเล่มจะไม่เผลอติด commit ไปขึ้นรีโป
 //  **เขียนด้วย xlsxlite (เขียนเอง) แต่อ่านด้วย exceljs (ไลบรารีจริง) โดยตั้งใจ**
 //  ถ้าใช้ตัวเดียวกันทั้งอ่านและเขียน ความผิดพลาดที่สมมาตรจะมองไม่เห็น — เขียนผิดแบบไหน
 //  ก็อ่านกลับได้แบบนั้น · การให้ไลบรารีคนละตัวเป็นคนอ่าน คือด่านที่พิสูจน์ว่าไฟล์ที่เราปั้น
@@ -15,20 +21,22 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import ExcelJS from 'exceljs';
-import { readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { pool } from '../../config/db.js';
 import { bookToOdooSheets } from './odoo.js';
 import { bookToSheets, sheetsToBook } from './sheet.js';
 import type { CellValue, ImportIssue, RawSheet } from './sheet.js';
-import type { PriceBook } from '../../services/pricingLab/types.js';
-import { BOOK_PATH } from '../../services/pricingLab/bookStore.js';
+import { NoBook, loadBookFrom } from './bookSource.js';
 import { writeXlsx } from './xlsxlite.js';
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-
-export function loadBook(): PriceBook {
-  return JSON.parse(readFileSync(BOOK_PATH, 'utf8')) as PriceBook;
+/** เล่มที่จะส่งออก + บอกว่าเป็นเล่มไหน (ด่าน/CLI ทุกตัวพิมพ์บรรทัดนี้) */
+async function pickBook(args: string[]) {
+  const loaded = await loadBookFrom(args);
+  console.log(`สมุดราคาที่ใช้: ${loaded.label}`);
+  return loaded.book;
 }
 
 // ── อ่านไฟล์ที่คนแก้กลับมา ───────────────────────────────────────────────────
@@ -92,19 +100,19 @@ async function main(): Promise<void> {
   const today = new Date().toISOString().slice(0, 10);
 
   if (cmd === 'export') {
-    const book = loadBook();
-    const out = outIdx > -1 ? resolve(args[outIdx + 1]!) : join(HERE, `แม่แบบกฎราคา ${today}.xlsx`);
+    const book = await pickBook(args);
+    const out = outIdx > -1 ? resolve(args[outIdx + 1]!) : join(tmpdir(), `แม่แบบกฎราคา ${today}.xlsx`);
     const bytes = writeXlsx(bookToSheets(book, { exportedAt: today }));
     writeFileSync(out, bytes);
     console.log(`แม่แบบกฎราคา → ${out}  (${(bytes.length / 1024).toFixed(0)} KB)`);
-    console.log('แก้ในไฟล์นี้แล้วนำกลับด้วย:  npm run pricebook:xlsx -- import "<ไฟล์>"');
+    console.log('แก้ในไฟล์นี้แล้วนำกลับผ่านปุ่ม "อัปโหลดราคาใหม่" บนหน้าจอ · ตรวจไฟล์ก่อนได้ด้วย  npm run pricebook:xlsx -- import "<ไฟล์>"');
     return;
   }
 
   if (cmd === 'odoo') {
-    const book = loadBook();
+    const book = await pickBook(args);
     const r = bookToOdooSheets(book, { exportedAt: today });
-    const out = outIdx > -1 ? resolve(args[outIdx + 1]!) : join(HERE, `ตารางราคา Odoo ${today}.xlsx`);
+    const out = outIdx > -1 ? resolve(args[outIdx + 1]!) : join(tmpdir(), `ตารางราคา Odoo ${today}.xlsx`);
     const bytes = writeXlsx(r.sheets);
     writeFileSync(out, bytes);
     console.log(`ตารางราคาสำหรับ Odoo → ${out}  (${(bytes.length / 1024).toFixed(0)} KB)`);
@@ -139,10 +147,10 @@ async function main(): Promise<void> {
       console.log(`  ${m.code.padEnd(8)} ${base.padEnd(18)} กฎบวกเพิ่ม ${m.adders.length} · ข้อห้าม ${m.constraints.length}`);
     }
     if (args.includes('--save')) {
-      writeFileSync(BOOK_PATH, JSON.stringify(book, null, 2), 'utf8');
-      console.log('\nบันทึกทับ pricebook/book.json แล้ว — รัน npm run diag:pricing ต่อเพื่อดูว่าราคาที่เคยถูกยังถูกอยู่ไหม');
+      console.log('\n--save ถูกถอดแล้ว — บันทึกผ่านปุ่ม "อัปโหลดราคาใหม่" บนหน้าจอ (เลือกรุ่นได้ · ย้อนได้)');
+      process.exitCode = 1;
     } else {
-      console.log('\n(ยังไม่ได้บันทึกทับ pricebook/book.json — ใส่ --save ถ้าต้องการ)');
+      console.log('\n(ตรวจอย่างเดียว — บันทึกผ่านปุ่ม "อัปโหลดราคาใหม่" บนหน้าจอ)');
     }
     return;
   }
@@ -150,11 +158,19 @@ async function main(): Promise<void> {
   console.log('คำสั่ง:');
   console.log('  npm run pricebook:xlsx -- export [--out ไฟล์.xlsx]   แม่แบบกฎราคา');
   console.log('  npm run pricebook:xlsx -- odoo   [--out ไฟล์.xlsx]   ตารางราคาสำหรับ Odoo');
-  console.log('  npm run pricebook:xlsx -- import <ไฟล์.xlsx> [--save]');
+  console.log('  npm run pricebook:xlsx -- import <ไฟล์.xlsx>          ตรวจไฟล์อย่างเดียว');
   process.exit(1);
 }
 
 // รันเป็นสคริปต์เท่านั้น — ไฟล์นี้ถูก import โดย roundtrip.ts ด้วย
 if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
-  await main();
+  try {
+    await main();
+  } catch (e) {
+    if (!(e instanceof NoBook)) throw e;
+    console.error(e.message);
+    process.exitCode = 1;
+  } finally {
+    await pool.end();
+  }
 }

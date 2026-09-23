@@ -6,7 +6,9 @@
 //  ชีตแถมข้อสอบพร้อมเฉลยมาให้แล้ว — ฝ่ายขายเขียน "วิธีคิดราคา" ไว้ข้าง ๆ ตาราง
 //  นี่คือ golden case ที่ดีที่สุดที่หาได้ เพราะมันคือสิ่งที่ "คนที่รู้เรื่องจริง" บอกว่าถูก
 //
-//  รัน:  npm run diag:pricing
+//  รัน:  npm run diag:pricing   (เล่มในฐาน)  ·  tsx scripts/diag/pricingGolden.ts --data <dir>  (ไฟล์ Excel ตรง ๆ)
+//  ⚠️ เมื่อแอดมินเริ่มแก้ราคาแล้ว เคสอาจตกเพราะ "ราคาในสมุดไม่เท่าตัวอย่างในชีตแล้ว" ซึ่งไม่ใช่บั๊ก —
+//     ดูบรรทัด "สมุดราคาที่ใช้" ว่าเล่มไหนใครแก้ แล้วรันซ้ำด้วย --data เพื่อแยกว่าเป็นที่ engine หรือที่ราคา
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { readFileSync } from 'node:fs';
@@ -15,10 +17,16 @@ import { fileURLToPath } from 'node:url';
 import { parseProductCode } from '../../services/pricingLab/code.js';
 import { computePrice, formatOutcome } from '../../services/pricingLab/engine.js';
 import type { PriceBook, ProductConfig, SubCode } from '../../services/pricingLab/types.js';
-import { BOOK_PATH } from '../../services/pricingLab/bookStore.js';
+import { NoBook, loadBookFrom } from '../pricebook/bookSource.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const book = JSON.parse(readFileSync(BOOK_PATH, 'utf8')) as PriceBook;
+// เล่มปัจจุบันในฐาน (SELECT อย่างเดียว) · `--data <dir>` = ตรวจกับตัวเลขของชีตตรง ๆ · `--book <ไฟล์>` (ดู bookSource.ts)
+const loaded = await loadBookFrom().catch((e: unknown) => {
+  if (e instanceof NoBook) { console.error(e.message); process.exit(1); }
+  throw e;
+});
+const book = loaded.book;
+console.log(`สมุดราคาที่ใช้: ${loaded.label}\n`);
 
 interface Case {
   name: string;

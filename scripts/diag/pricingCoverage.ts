@@ -11,14 +11,14 @@
  *
  * ทั้งสองตัวถูกพิมพ์ออกมาทั้งคู่เพื่อให้เห็นว่ามันสวนทางกันได้ แต่ **เกณฑ์ผ่าน/ตกผูกกับตัวแรกตัวเดียว**
  *
- * ⚠️ ด่านนี้อ่านฐานจริงแบบอ่านอย่างเดียว (`products.model`) และอ่าน `pricebook/book.json`
+ * ⚠️ ด่านนี้อ่านฐานจริงแบบอ่านอย่างเดียว (`products.model` + สมุดราคาในฐาน · `--data <dir>` ใช้ไฟล์ Excel แทนได้)
  *    ไม่มีสมุดราคา = **ตอบไม่ได้ ไม่ใช่ตก** — บอกวิธีสร้างแล้วจบ (เหมือน diag:dead-classes
  *    ที่เจอบิลด์เก่าแล้วหยุดแทนที่จะตัดสิน) เพราะด่านที่ด่าโค้ดที่ถูก ทำให้คนเลิกเชื่อด่านทั้งชุด
  *
  * ถอนโมดูลคิดราคาออก = ลบไฟล์นี้ + 1 บรรทัดใน package.json ด้วย
  */
 import { pool } from '../../config/db.js';
-import { loadBook, bookStatus } from '../../services/pricingLab/bookStore.js';
+import { NoBook, loadBookFrom } from '../pricebook/bookSource.js';
 import { parseProductCode, unknownParts } from '../../services/pricingLab/code.js';
 
 const GREEN = '\x1b[32m', RED = '\x1b[31m', DIM = '\x1b[2m', BOLD = '\x1b[1m', RESET = '\x1b[0m';
@@ -43,12 +43,15 @@ const FAMILY_RE = /^(TS|BH)/;
 async function main(): Promise<void> {
   console.log(`\n${BOLD}ด่านวัดความครอบคลุมของสมุดราคา${RESET}\n`);
 
-  const status = bookStatus();
-  const book = loadBook();
-  if (!book) {
-    console.log(`${DIM}${status.message ?? 'อ่านสมุดราคาไม่ได้'}${RESET}`);
-    console.log('\nสรุป: ตอบไม่ได้ — ยังไม่มีสมุดราคาให้เทียบ');
-    console.log('  สั่ง npm run pricebook:import — ตัวนำเข้าเขียนลง pricebook/book.json ให้เอง\n');
+  let book;
+  try {
+    const loaded = await loadBookFrom();
+    book = loaded.book;
+    console.log(`${DIM}สมุดราคาที่ใช้: ${loaded.label}${RESET}\n`);
+  } catch (e) {
+    if (!(e instanceof NoBook)) throw e;
+    console.log(`${DIM}${e.message}${RESET}`);
+    console.log('\nสรุป: ตอบไม่ได้ — ยังไม่มีสมุดราคาให้เทียบ\n');
     process.exitCode = 1;
     return;
   }
@@ -77,7 +80,7 @@ async function main(): Promise<void> {
   const pct = (n: number) => (codes.length === 0 ? 0 : Math.round((n / codes.length) * 1000) / 10);
   const sheets = [...new Set(Object.values(book.models).map((m) => m.sheet).filter(Boolean))];
 
-  console.log(`สมุดราคา: ${Object.keys(book.models).length} รุ่น จาก ${sheets.length} ชีต ${DIM}(${status.version ?? '—'})${RESET}`);
+  console.log(`สมุดราคา: ${Object.keys(book.models).length} รุ่น จาก ${sheets.length} ชีต ${DIM}(${book.version ?? '—'})${RESET}`);
   console.log(`รหัสจริงในฐาน (ตระกูล TS/BH): ${codes.length.toLocaleString()} รหัส\n`);
 
   const okCoverage = pct(inBook) >= BASELINE_PCT;

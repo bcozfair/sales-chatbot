@@ -9,19 +9,22 @@
 //    npm run pricebook:calc -- BH-01C --dim dia_mm=600 --dim width_mm=150 --opt conn:pl2
 //    npm run pricebook:calc -- TSK-04 --options D   (ดูว่าแกน D รับค่าอะไรได้บ้าง)
 //    npm run pricebook:calc -- --code "TSK-04(S2)6x300+3M"   (อ่านรหัสแล้วคิดราคาให้เลย)
+//  เล่มที่ใช้ = เล่มปัจจุบันในฐาน · `--book <ไฟล์.json>` / `--data <dir>` ใช้แทนได้
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { parseProductCode } from '../../services/pricingLab/code.js';
 import { computePrice, formatOutcome, resolveModel } from '../../services/pricingLab/engine.js';
-import type { PriceBook, ProductConfig } from '../../services/pricingLab/types.js';
-import { BOOK_PATH } from '../../services/pricingLab/bookStore.js';
+import type { ProductConfig } from '../../services/pricingLab/types.js';
+import { NoBook, loadBookFrom } from './bookSource.js';
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const book = JSON.parse(readFileSync(BOOK_PATH, 'utf8')) as PriceBook;
 const argv = process.argv.slice(2);
+// เล่มปัจจุบันในฐาน · `--book <ไฟล์.json>` / `--data <dir>` ใช้แทนได้ (ดู bookSource.ts)
+const loaded = await loadBookFrom(argv).catch((e: unknown) => {
+  if (e instanceof NoBook) { console.error(e.message); process.exit(1); }
+  throw e;
+});
+const book = loaded.book;
+console.log(`สมุดราคาที่ใช้: ${loaded.label}`);
 
 function collect(flag: string): string[] {
   const out: string[] = [];

@@ -1,4 +1,4 @@
-import { pool } from '../config/db.js';
+import { pool, type DbExecutor } from '../config/db.js';
 import type { SubCode, SubCodeEffect } from '../services/pricingLab/types.js';
 
 /**
@@ -7,12 +7,16 @@ import type { SubCode, SubCodeEffect } from '../services/pricingLab/types.js';
  * ⚠️ ไฟล์ใหม่แยกจาก db/repositories.ts โดยเจตนา (เหตุผลเดียวกับ db/logRepositories.ts) —
  *   ไฟล์นั้นเป็นเส้นทางที่ระบบหลักใช้ทุกวินาที การไปแทรกโค้ดของโมดูลทดลองในนั้น
  *   คือความเสี่ยงที่ไม่มีใครได้อะไรกลับมา
- *   ถอนโมดูลออก = ลบไฟล์นี้ + routes/pricingLab.ts + services/pricingLab/
- *   + frontend/src/admin/pricingLab/ + 4 บรรทัดในไฟล์เดิม + `DROP TABLE pricing_subcodes`
+ *   ถอนโมดูลออก = ลบไฟล์นี้ + db/pricingBookRepo.ts + routes/pricingLab.ts + services/pricingLab/
+ *   + frontend/src/admin/pricingLab/ + 4 บรรทัดในไฟล์เดิม
+ *   + `DROP TABLE pricing_subcodes, pricing_model_history, pricing_models, pricing_book_revisions`
  *
  * `import type` ของ SubCode เป็น type-only โดยตั้งใจ — ไม่มีโค้ดของ services/ ถูกรันจากไฟล์นี้
  * (กติกาเดียวกับที่ quotationService.ts ห้าม import config/capabilities.ts แบบ runtime)
  * ที่ไม่นิยาม type ซ้ำที่นี่ เพราะสองนิยามจะเริ่มต่างกันวันที่มีใครเพิ่มช่องข้างเดียว
+ *
+ * ทุกฟังก์ชันรับ `db` เป็นพารามิเตอร์ท้าย (ค่าเริ่มต้น `pool`) — เพื่อให้ด่าน `diag:pricing` รันใน
+ * transaction แล้ว ROLLBACK ได้ แทนการเขียนตารางจริงแล้วลบทิ้ง (ซึ่งเคยจะลบค่า `-BU` ของแอดมินทิ้งด้วย)
  *
  * **รูปของแถวถูกตรวจที่ `clean()` ในไฟล์นี้ที่เดียว** ทั้งขาเข้าและขาออก — jsonb ยอมรับอะไรก็ได้
  * ⇒ ถ้าไม่ตรวจตอนอ่านด้วย แถวที่ใครแก้ด้วยมือใน psql จะไหลเข้า engine แล้วราคาเพี้ยนเงียบ ๆ
@@ -113,8 +117,8 @@ function toStored(rows: Row[]): StoredSubCode[] {
   return out;
 }
 
-export async function listSubCodes(): Promise<StoredSubCode[]> {
-  const { rows } = await pool.query<Row>(
+export async function listSubCodes(db: DbExecutor = pool): Promise<StoredSubCode[]> {
+  const { rows } = await db.query<Row>(
     `SELECT id, data, created_by, updated_at FROM pricing_subcodes ORDER BY sub_code, scope`
   );
   return toStored(rows);
@@ -126,12 +130,12 @@ export async function listSubCodes(): Promise<StoredSubCode[]> {
  * เหตุผลอยู่ที่ unique index: สองแถวที่ขอบเขตเท่ากัน ลำดับการค้นใน subcodes.ts เลือกตัวไหนก็ได้
  * ⇒ ราคาจะเปลี่ยนไปมาโดยไม่มีใครแก้อะไร ซึ่งเป็นบั๊กที่ไล่ไม่เจอ
  */
-export async function upsertSubCode(input: unknown, username: string): Promise<StoredSubCode | null> {
+export async function upsertSubCode(input: unknown, username: string, db: DbExecutor = pool): Promise<StoredSubCode | null> {
   const sc = clean(input);
   if (!sc) return null;
   sc.by = username;
   sc.at = new Date().toISOString().slice(0, 10);
-  const { rows } = await pool.query<Row>(
+  const { rows } = await db.query<Row>(
     `INSERT INTO pricing_subcodes (data, created_by)
           VALUES ($1::jsonb, $2)
      ON CONFLICT (sub_code, scope)
@@ -142,12 +146,14 @@ export async function upsertSubCode(input: unknown, username: string): Promise<S
   return toStored(rows)[0] ?? null;
 }
 
-export async function updateSubCode(id: number, input: unknown, username: string): Promise<StoredSubCode | null> {
+export async function updateSubCode(
+  id: number, input: unknown, username: string, db: DbExecutor = pool,
+): Promise<StoredSubCode | null> {
   const sc = clean(input);
   if (!sc) return null;
   sc.by = username;
   sc.at = new Date().toISOString().slice(0, 10);
-  const { rows } = await pool.query<Row>(
+  const { rows } = await db.query<Row>(
     `UPDATE pricing_subcodes SET data = $2::jsonb, updated_at = now()
       WHERE id = $1
       RETURNING id, data, created_by, updated_at`,
@@ -156,7 +162,7 @@ export async function updateSubCode(id: number, input: unknown, username: string
   return toStored(rows)[0] ?? null;
 }
 
-export async function deleteSubCode(id: number): Promise<boolean> {
-  const { rowCount } = await pool.query(`DELETE FROM pricing_subcodes WHERE id = $1`, [id]);
+export async function deleteSubCode(id: number, db: DbExecutor = pool): Promise<boolean> {
+  const { rowCount } = await db.query(`DELETE FROM pricing_subcodes WHERE id = $1`, [id]);
   return (rowCount ?? 0) > 0;
 }

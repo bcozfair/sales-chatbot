@@ -10,29 +10,45 @@
    → อัปไฟล์ที่แก้แล้ว → ติ๊กรุ่น → บันทึก → การ์ดอัปเดต → ย้อนเล่ม
    ทำซ้ำที่ 1280px และ 390px (390px ต้องเป็น **การ์ด** ไม่ใช่ตารางที่ย่อลง — docs/design.md)
 
-   ⚠️ **สมุดราคาที่ถูกเขียนคือของใน cwd ของเซิร์ฟเวอร์ที่รันอยู่** (`pricebook/book.json`)
-      ⇒ รันด่านนี้กับเซิร์ฟเวอร์ที่ **ไม่ใช่** ทรีหลักเสมอ และห้ามรันบน PMSV
-      ตัวด่านเองปฏิเสธถ้าเซิร์ฟเวอร์ไม่ได้อยู่ใน `.claude/worktrees/`
+   ⚠️ **ปุ่มบนจอเขียนสมุดราคาในฐานที่เซิร์ฟเวอร์ต่ออยู่** (ตั้งแต่ 2026-09-23 สมุดราคาอยู่ในฐาน ไม่ใช่
+      `pricebook/book.json` ของ cwd) ⇒ ด่านกันเครื่องแบบเดิม "เซิร์ฟเวอร์ต้องอยู่ใต้ .claude/worktrees/"
+      **กันไม่ได้แล้ว** เพราะเซิร์ฟเวอร์ใน worktree บน PMSV ต่อฐานจริง · ด่านนี้จึงปฏิเสธเอง เว้นแต่ครบสามข้อ
+      (ท่าเดียวกับ scripts/dev/seedPhaseH.ts): PG_HOST เป็น localhost · NODE_ENV ≠ production ·
+      ตั้ง PB_UI_WRITE_OK=1 เอง — ในกล่อง prod PG_HOST=db และ NODE_ENV=production จึงโดนกันสองชั้น
+      **รันบนเครื่อง dev เท่านั้น** · เซิร์ฟเวอร์กับด่านต้องอ่าน .env ชุดเดียวกัน (ด่านอ่านผลสุดท้ายจากฐานเอง)
+      สคริปต์ `mockup/_pl-*.mjs` ก็เขียนฐานผ่าน API แบบเดียวกัน
 
    ต้องมี API รันอยู่ที่พอร์ตที่ส่งมาทาง PB_PORT (ค่าเริ่มต้น 3098)
      PORT=3098 npm run dev      (ในทรีของงานนี้)
-     npm run diag:pb-ui
+     PB_UI_WRITE_OK=1 npm run diag:pb-ui
 
    ⚠️ `/admin` ตอบ 404 เมื่อรันจาก worktree (res.sendFile ปฏิเสธ path ที่มีเซกเมนต์ขึ้นต้น
       ด้วยจุด) ⇒ เข้าทาง `/admin.html` ตรง ๆ ซึ่ง static middleware เสิร์ฟให้เหมือนกันทุกไบต์
    ───────────────────────────────────────────────────────────────────────────── */
 import puppeteer from 'puppeteer';
 import jwt from 'jsonwebtoken';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pool } from '../../config/db.js';
 import { getJwtSecret } from '../../config/jwt.js';
 import { readUploaded } from '../../services/pricingLab/bookFile.js';
+import { readBookState } from '../../services/pricingLab/bookStore.js';
 import { writeXlsx } from '../pricebook/xlsxlite.js';
 import { bookToSheets } from '../pricebook/sheet.js';
-import type { PriceBook } from '../../services/pricingLab/types.js';
+
+// ── ด่านกันเครื่อง: ปุ่มบนจอเขียนสมุดราคาในฐานจริงของเซิร์ฟเวอร์ ────────────
+{
+  const host = String(process.env.PG_HOST || '').trim().toLowerCase();
+  const local = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+  if (!local || process.env.NODE_ENV === 'production' || process.env.PB_UI_WRITE_OK !== '1') {
+    console.error('ไม่รัน — ด่านนี้กดบันทึก/ย้อนสมุดราคาจริงในฐานที่เซิร์ฟเวอร์ต่ออยู่');
+    console.error(`   ต้องครบสามข้อ: PG_HOST เป็น localhost · NODE_ENV ≠ production · PB_UI_WRITE_OK=1`);
+    console.error(`   ตอนนี้ PG_HOST="${process.env.PG_HOST ?? ''}" NODE_ENV="${process.env.NODE_ENV ?? ''}" PB_UI_WRITE_OK="${process.env.PB_UI_WRITE_OK ?? ''}"`);
+    process.exit(1);
+  }
+}
 
 const PORT = process.env.PB_PORT || '3098';
 const BASE = `http://localhost:${PORT}`;
@@ -245,8 +261,8 @@ ok('กดยกเลิกแล้วสมุดราคาไม่ขย�
 
 // ── บันทึกจริงหนึ่งรอบ แล้วย้อนกลับ ──────────────────────────────────────────
 //
-// เขียนลง `pricebook/book.json` ของ **ทรีนี้** เท่านั้น (สำเนาที่คัดมาตอนเปิดทรี)
-// และคืนค่าเดิมด้วยการกดย้อนบนจอจริง ซึ่งคือทางถอยเดียวกับที่แอดมินจะใช้
+// เขียนลงฐานของเครื่อง dev (ด่านกันเครื่องข้างบน) แล้วคืนค่าเดิมด้วยการกดย้อนบนจอจริง
+// ซึ่งคือทางถอยเดียวกับที่แอดมินจะใช้ — การย้อนเป็นการบันทึกใหม่ ประวัติในฐานจึงเพิ่มขึ้นสองแถวต่อรอบ
 
 console.log('\n── บันทึกจริงแล้วย้อนกลับ ───────────────────────────────');
 await openPage(1280);
@@ -284,7 +300,8 @@ if (input3) {
 
 // ── ราคาต้องกลับมาเท่าเดิมทุกบาท ────────────────────────────────────────────
 
-const finalBook = JSON.parse(readFileSync(join(process.cwd(), 'pricebook', 'book.json'), 'utf8')) as PriceBook;
+const finalBook = (await readBookState())?.book;
+if (!finalBook) throw new Error('อ่านสมุดราคาจากฐานไม่ได้หลังจบด่าน');
 const finalCells = (finalBook.models[target.code]!.base as { cells: Record<string, number> }).cells;
 ok('ราคาที่ด่านนี้แก้ไป ถูกย้อนกลับครบ', finalCells[cellKey] === before, `${finalCells[cellKey]} (ควรเป็น ${before})`);
 
