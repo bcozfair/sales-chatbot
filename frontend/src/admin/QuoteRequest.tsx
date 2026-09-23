@@ -563,8 +563,10 @@ const CreditField: React.FC<{
         )}
       </div>
       {overridden && (
-        <p className="mt-1 text-[10.5px] text-slate-500 leading-relaxed">
-          ค่าจริงของลูกค้า: <span className="font-semibold">{customerValue || 'ไม่มีข้อมูล'}</span> —
+        /* สีน้ำเงิน + ✏️ ตั้งเอง = ภาษาเดียวกับบรรทัด "ตั้งเอง" ของกำหนดส่ง (DeliveryStrip) ที่อยู่แถวถัดไป
+           (เจ้าของสั่ง 2026-09-23 · เดิม slate-500 จมหายไปกับพื้น) · คำเตือนสีเหลืองข้างในยังเป็นสีเหลืองเหมือนเดิม */
+        <p className="mt-1 text-[10.5px] text-blue-700 leading-relaxed">
+          ✏️ ตั้งเอง — ค่าจริงของลูกค้า: <span className="font-semibold">{customerValue || 'ไม่มีข้อมูล'}</span> —
           ใบนี้จะบันทึกเป็น “{effective || '(ว่าง)'}”
           {/* คำเตือนสำคัญกว่าเรื่องกฎค่าบริการ: ค่านี้ไหลตรงเข้าคอลัมน์ payment_term_id ของไฟล์
               นำเข้า Odoo (services/odooSaleOrderExport.ts) ค่าที่ Odoo ไม่รู้จัก = แถวนั้น
