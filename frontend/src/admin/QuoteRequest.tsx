@@ -1833,6 +1833,81 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
   );
 };
 
+// ── ปุ่มพรีวิว PDF ในแถบยืนยัน (เจ้าของสั่ง 2026-09-23) ─────────────────────────
+//
+//  ปุ่มเดียวเสมอ ชื่อ "พรีวิว PDF" · ใบเดียว = กดแล้วเปิดเลย · ใบแยกสองบริษัท = กางเมนูให้เลือก
+//  PM / THT (กางขึ้นข้างบน เพราะแถบนี้ติดขอบล่างจอ กางลงจะตกขอบ)
+//  ยังไม่ตรวจ = ยังไม่รู้ว่าใบเป็นของบริษัทไหน ⇒ ปุ่มจางพร้อมบอกเหตุผล
+//  ปิดเมนูด้วยคลิกนอกกล่อง/Esc — ท่าเดียวกับเมนู "..." ของ SyncPanel.tsx
+
+const PdfPreviewButton: React.FC<{
+  groups: DocGroup[];
+  busy: 'PM' | 'THT' | null;
+  onOpen: (co: 'PM' | 'THT') => void;
+}> = ({ groups, busy, onOpen }) => {
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const ready = groups.filter((g) => g.quote);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const pick = (co: 'PM' | 'THT') => { setOpen(false); onOpen(co); };
+  const multi = ready.length > 1;
+
+  return (
+    <div className="relative" ref={boxRef}>
+      <Button
+        variant="neutral"
+        tone="soft"
+        icon={FileText}
+        busy={busy !== null}
+        disabled={ready.length === 0}
+        title={ready.length === 0 ? 'ต้องตรวจก่อน ระบบจึงรู้ว่าใบนี้เป็นของบริษัทไหน' : undefined}
+        aria-haspopup={multi ? 'menu' : undefined}
+        aria-expanded={multi ? open : undefined}
+        onClick={() => {
+          if (ready.length === 1) pick(ready[0].quote!.quote_company);
+          else if (multi) setOpen((v) => !v);
+        }}
+      >
+        พรีวิว PDF
+      </Button>
+      {open && multi && (
+        <div
+          role="menu"
+          className="absolute right-0 bottom-full mb-1.5 z-30 w-52 bg-card border border-slate-200 rounded-lg shadow-lg py-1 animate-fade-in"
+        >
+          <p className="px-3 pt-1 pb-1.5 text-[10.5px] text-slate-400">เลือกใบที่จะดู</p>
+          {ready.map((g) => (
+            <button
+              key={g.co}
+              role="menuitem"
+              type="button"
+              onClick={() => pick(g.quote!.quote_company)}
+              className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+            >
+              <FileText className="w-3.5 h-3.5 shrink-0 text-slate-400" />
+              {g.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ── ป๊อปอัป "ใช้ส่วนลดนี้กับทุกรายการ" (เจ้าของสั่ง 2026-09-17) ───────────────
 //
 //  **เป็นข้อเสนอ ไม่ใช่คำถามที่ต้องตอบ** จึงไม่ใช่โมดัล — พิมพ์ต่อ เลื่อนจอ กดที่อื่น หรือ Esc
@@ -3453,24 +3528,8 @@ export const QuoteRequest: React.FC = () => {
                 {!canIssue && (
                   <span className="text-[11px] text-amber-700 max-w-[320px]">{issueBlockedBecause()}</span>
                 )}
-                {/* พรีวิว PDF อยู่แถวเดียวกับปุ่มยืนยัน (เจ้าของสั่ง 2026-09-23 · เดิมเป็นแถวท้ายการ์ดของแต่ละใบ)
-                    ⇒ ติดขอบล่างจอตามไปด้วย · ใบแยกสองบริษัท = ปุ่มละใบ เรียง PM → THT ตามลำดับใบบนจอ
-                    ชื่อปุ่มเป็น "พรีวิว PDF" เสมอ (เจ้าของสั่ง) ชื่อบริษัทอยู่ใน title ตอนชี้
-                    ยังไม่ตรวจ = ยังไม่รู้ว่าใบเป็นของบริษัทไหน ⇒ ปุ่มจางพร้อมบอกเหตุผล */}
-                {groups.map((g) => (
-                  <Button
-                    key={g.co}
-                    variant="neutral"
-                    tone="soft"
-                    icon={FileText}
-                    busy={pdfBusy === g.co}
-                    disabled={!g.quote}
-                    title={g.quote ? `พรีวิว PDF ของใบ ${g.label}` : 'ต้องตรวจก่อน ระบบจึงรู้ว่าใบนี้เป็นของบริษัทไหน'}
-                    onClick={() => g.quote && void openPdfPreview(g.quote.quote_company)}
-                  >
-                    พรีวิว PDF
-                  </Button>
-                ))}
+                {/* พรีวิว PDF อยู่แถวเดียวกับปุ่มยืนยัน (เจ้าของสั่ง 2026-09-23) — ปุ่มเดียวเสมอ ดู PdfPreviewButton */}
+                <PdfPreviewButton groups={groups} busy={pdfBusy} onOpen={(co) => void openPdfPreview(co)} />
                 <Button variant="danger" tone="soft" icon={Ban} disabled={confirming} onClick={resetAll}>
                   ยกเลิก
                 </Button>
