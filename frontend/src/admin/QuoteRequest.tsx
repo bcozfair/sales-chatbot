@@ -1434,40 +1434,6 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
             <span className="text-slate-400">—</span>
           </DocField>
           <DocField label="สถานที่ส่งของ">{cust?.address || '—'}</DocField>
-          <div className="flex gap-2 py-[2px] text-[11.5px] items-start">
-            <span className="text-slate-400 shrink-0 w-[86px] mt-1">เครดิต</span>
-            <span className="min-w-0 flex-1 text-[11px]">
-              <CreditField
-                effective={ctx.paymentTerms ?? cust?.payment_terms ?? ''}
-                customerValue={cust?.customer_payment_terms ?? ''}
-                overridden={ctx.paymentTerms !== null}
-                hasCredit={cust?.has_credit_terms ?? false}
-                options={ctx.paymentTermOpts}
-                onChange={ctx.setPaymentTerms}
-                bare
-              />
-            </span>
-          </div>
-          <div className="flex gap-2 py-[2px] text-[11.5px] items-start">
-            <span className="text-slate-400 shrink-0 w-[86px] mt-1.5">กำหนดส่ง</span>
-            <span className="min-w-0 flex-1 text-[11px]">
-              {ctx.previewing && !q ? (
-                <span className="flex items-center gap-1 text-slate-500">
-                  <Loader2 className="w-3 h-3 animate-spin shrink-0" />
-                  กำลังคำนวณกำหนดส่ง...
-                </span>
-              ) : q ? (
-                <DeliveryStrip
-                  quote={q}
-                  types={ctx.deliveryTypes}
-                  ov={ctx.deliveryOv[q.quote_company]}
-                  onChange={(v) => ctx.setDeliveryOv(q.quote_company, v)}
-                />
-              ) : (
-                <span className="text-slate-400">ระบบคำนวณให้ตอนตรวจรายละเอียด</span>
-              )}
-            </span>
-          </div>
         </div>
       </div>
 
@@ -1786,18 +1752,48 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
           <p className={`mt-3 pt-2 border-t border-slate-100 ${ctx.staleNow ? 'opacity-50' : ''}`}>
             <span className="font-bold text-slate-600">ตัวอักษร:</span> {t ? t.amount_text : '—'}
           </p>
-          {/* เงื่อนไข 3 บรรทัด — "คีย์ : ค่า" แบบเดียวกับกระดาษ */}
-          <dl className="mt-3 pt-2 border-t border-slate-100 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
-            {[
-              ['Price Validity', '7 Day'],
-              ['Term Payment', ctx.paymentTerms ?? cust?.payment_terms ?? ''],
-              ['Delivery Time', q?.delivery_text ?? ''],
-            ].map(([k, v]) => (
-              <React.Fragment key={k}>
-                <dt className="text-slate-500">{k}</dt>
-                <dd className="font-semibold text-slate-700">: {v || '—'}</dd>
-              </React.Fragment>
-            ))}
+          {/* เงื่อนไข 3 บรรทัด — "คีย์ : ค่า" แบบเดียวกับกระดาษ
+              เครดิตกับกำหนดส่งแก้ได้ตรงบรรทัดที่มันไปขึ้นบนใบ (เจ้าของสั่ง 2026-09-23 · เดิมอยู่หัวใบฝั่งขวา)
+              ช่องแก้อยู่ใต้ค่า ไม่ใช่แทนค่า ⇒ ยังอ่านออกเสมอว่าบนกระดาษจะพิมพ์ว่าอะไร */}
+          <dl className="mt-3 pt-2 border-t border-slate-100 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 items-start">
+            <dt className="text-slate-500">Price Validity</dt>
+            <dd className="font-semibold text-slate-700">: 7 Day</dd>
+
+            <dt className="text-slate-500 mt-1">Term Payment</dt>
+            <dd className="min-w-0 flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="font-semibold text-slate-700">: {ctx.paymentTerms ?? cust?.payment_terms ?? '—'}</span>
+              <CreditField
+                effective={ctx.paymentTerms ?? cust?.payment_terms ?? ''}
+                customerValue={cust?.customer_payment_terms ?? ''}
+                overridden={ctx.paymentTerms !== null}
+                hasCredit={cust?.has_credit_terms ?? false}
+                options={ctx.paymentTermOpts}
+                onChange={ctx.setPaymentTerms}
+                bare
+              />
+            </dd>
+
+            <dt className="text-slate-500 mt-1">Delivery Time</dt>
+            <dd className="min-w-0 flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className={`font-semibold text-slate-700 ${ctx.staleNow ? 'opacity-50' : ''}`}>
+                : {q?.delivery_text || '—'}
+              </span>
+              {ctx.previewing && !q ? (
+                <span className="flex items-center gap-1 text-slate-500">
+                  <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+                  กำลังคำนวณกำหนดส่ง...
+                </span>
+              ) : q ? (
+                <DeliveryStrip
+                  quote={q}
+                  types={ctx.deliveryTypes}
+                  ov={ctx.deliveryOv[q.quote_company]}
+                  onChange={(v) => ctx.setDeliveryOv(q.quote_company, v)}
+                />
+              ) : (
+                <span className="text-slate-400">ระบบคำนวณให้ตอนตรวจรายละเอียด</span>
+              )}
+            </dd>
           </dl>
         </div>
         <div
