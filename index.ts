@@ -118,6 +118,11 @@ import { Parser } from 'json2csv';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { pool, withTransaction, type DbExecutor } from './config/db.js';
+import {
+  recordIncomingEvent, markEventOutcome, markRedeliveryAction,
+  type IncomingEvent,
+} from './db/webhookEventsRepo.js';
+import { decideRedelivery, lostCommandMessage } from './services/redeliveryPolicy.js';
 import { getJwtSecret } from './config/jwt.js';
 import { getAppUrl } from './config/appUrl.js';
 import { adminAuthMiddleware, requireRole, requireCapability, type Role, type AdminIdentity } from './config/auth.js';
@@ -288,6 +293,95 @@ const webhookQueue = new KeyedTaskQueue(12);
 /** ตัวนับสะสมสำหรับ C.5 — อ่านจาก log ด้วย: docker compose logs app | grep "\[queue\]" */
 const queueMetrics = { replied: 0, timedOut: 0, droppedBeforeStart: 0, failed: 0 };
 
+/** แปลง event ดิบของ LINE เป็นใบรับ — จุดเดียวที่รู้จักรูปร่างของ event เพื่อไม่ให้กระจายไปทั้งไฟล์ */
+function toIncomingEvent(event: any, receivedAtMs: number, requestId: string | null): IncomingEvent | null {
+  const id = event?.webhookEventId;
+  if (typeof id !== 'string' || id === '') return null;   // ไม่มี id = กันซ้ำไม่ได้ ⇒ ปล่อยผ่านตามเดิม
+  return {
+    webhookEventId: id,
+    eventType: String(event?.type ?? 'unknown'),
+    messageType: event?.type === 'message' ? (event?.message?.type ?? null) : null,
+    postbackData: event?.type === 'postback' ? (event?.postback?.data ?? null) : null,
+    lineUserId: event?.source?.userId ?? null,
+    sourceType: event?.source?.type ?? null,
+    eventAtMs: typeof event?.timestamp === 'number' ? event.timestamp : null,
+    receivedAtMs,
+    replyToken: event?.replyToken ?? null,
+    requestId,
+  };
+}
+
+/**
+ * จัดการ event ที่ LINE ส่งซ้ำ — ตัดสินจาก "เคยทำจนจบหรือยัง" ไม่ใช่จากธง isRedelivery เพียว ๆ
+ *
+ * ของเดิมข้ามทุกตัวโดยถือว่าเป็นของซ้ำเสมอ ซึ่งจริงแค่ 5 ใน 7 ครั้ง (วัด 2026-09-23) —
+ * อีก 2 ครั้งรอบแรกไม่เคยมาถึงแอปเลย ⇒ คำสั่งเซลส์หายเงียบ (ใบ 4ae3ef39 ค้างเป็นร่าง)
+ *
+ * ทำไมตอบได้: token ของ event ที่ยังไม่ถูกใช้ **ไม่ได้ตายที่ 60 วินาที** — ทดลองจริง 2026-09-23
+ * ได้ HTTP 200 ที่ 10 / 65 / 120 วินาที ส่วนของจริงมาถึงที่ 53–104 วินาที (ดู
+ * docs/line-webhook-redelivery.md) · สาเหตุของ 400 คือ token ถูกใช้ไปแล้ว ซึ่งเป็นกรณีของกลุ่ม A
+ *
+ * ⚠️ ห้ามย้ายมาไว้ก่อน `res.sendStatus(200)` — ฟังก์ชันนี้ยิง LINE API (~100–300 ms)
+ *    ถ้าไปถ่วงการตอบ 200 เราจะกลายเป็นต้นเหตุของการส่งซ้ำเสียเอง
+ */
+async function handleRedelivery(
+  event: any,
+  ctx: { receipt: IncomingEvent | null; queueKey: string; reqId: string | null; receivedAt: number }
+): Promise<void> {
+  const { receipt, queueKey, reqId, receivedAt } = ctx;
+  const ageMs = typeof event?.timestamp === 'number' ? receivedAt - event.timestamp : null;
+  const age = ageMs === null ? '?' : Math.round(ageMs / 1000);
+  const who = `user=${queueKey} type=${event?.type}`;
+
+  recordWebhookProcessing({
+    requestId: reqId ?? undefined, lineUserId: queueKey, outcome: 'dropped',
+    waitedMs: 0, totalMs: Date.now() - receivedAt,
+    llmMs: 0, llmCalls: 0, ownMs: 0, llmPromptTokens: 0, llmCachedTokens: 0,
+  });
+
+  // ไม่มี webhookEventId (ไม่เคยเจอในของจริง) หรือถามฐานไม่ได้ ⇒ ตกกลับไปพฤติกรรมเดิม: ข้ามเงียบ
+  // เลือกทางนี้เพราะถ้าฐานตอบไม่ได้ เราก็พิสูจน์ไม่ได้ว่าทำไปแล้วหรือยัง การเดาแล้วยิงข้อความ
+  // มีโอกาสกวนเซลส์ที่ได้คำตอบไปเรียบร้อยแล้ว
+  const seen = receipt
+    ? await recordIncomingEvent(receipt)
+    : { known: false, isFirstSight: false, previousOutcome: null, deliveryCount: 0 };
+  const decision = decideRedelivery(seen);
+
+  if (decision.action === 'skip') {
+    if (decision.reason === 'already_replied') {
+      // กลุ่ม A ของจริง — เซลส์ได้คำตอบไปแล้ว และ token ก็ถูกใช้ไปแล้ว ไม่มีอะไรต้องทำ
+      // ระดับ log ไม่ใช่ warn โดยตั้งใจ: มันคือเหตุการณ์ปกติที่ระบบจัดการได้เอง ไม่ต้องให้ใครมาดู
+      console.log(`[queue] LINE ส่งซ้ำ ${who} (รอบที่ ${seen.deliveryCount}) — ตอบไปแล้วตั้งแต่รอบแรก ทิ้งเงียบ`);
+      if (receipt) await markRedeliveryAction(receipt.webhookEventId, 'skipped_duplicate');
+    } else {
+      console.warn(`[queue] ⚠️ LINE ส่งซ้ำ ${who} เหตุการณ์เดิมเมื่อ ${age} วิที่แล้ว — ` +
+        `ตรวจใบรับไม่ได้ ข้ามไว้ก่อน (ปลอดภัยกว่าเสี่ยงกวนเซลส์ที่ได้คำตอบไปแล้ว)`);
+    }
+    return;
+  }
+
+  const reason = decision.reason === 'never_arrived'
+    ? 'รอบแรกไม่เคยมาถึง'
+    : `รอบแรกจบแบบ ${seen.previousOutcome ?? 'ไม่ทราบผล'}`;
+  console.warn(`[queue] ⚠️ LINE ส่งซ้ำ ${who} เหตุการณ์เดิมเมื่อ ${age} วิที่แล้ว — ${reason} ` +
+    `⇒ ไม่ทำงานให้ แต่แจ้งเซลส์ให้สั่งใหม่`);
+
+  try {
+    await lineClient.replyMessage({
+      replyToken: event.replyToken,
+      messages: [{ type: 'text', text: lostCommandMessage(event) }],
+    });
+    console.log(`[queue] แจ้งเซลส์เรื่องคำสั่งตกหล่นสำเร็จ ${who}`);
+    if (receipt) await markRedeliveryAction(receipt.webhookEventId, 'warned');
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    // ระดับ error เพื่อให้ขึ้นหน้า "บันทึกระบบ" — นี่คือเคสเดียวที่ต้องมีคนตามต่อด้วยมือ
+    console.error(`[queue] ❌ คำสั่งของเซลส์ตกหล่นและแจ้งกลับไม่สำเร็จ ${who} ` +
+      `เหตุการณ์เดิมเมื่อ ${age} วิที่แล้ว${receipt?.postbackData ? ` data=${receipt.postbackData}` : ''} — ${msg}`);
+    if (receipt) await markRedeliveryAction(receipt.webhookEventId, 'warn_failed', msg);
+  }
+}
+
 // --- Webhook สำหรับรับข้อความและเหตุการณ์จาก LINE ---
 app.post('/callback', line.middleware(lineConfig), (req: any, res: any) => {
   // ◀ นาฬิกางบเวลาเริ่มตรงนี้ ไม่ใช่ตอนถูกดึงออกจากคิว — เวลารอคิวต้องถูกนับด้วย
@@ -313,23 +407,23 @@ app.post('/callback', line.middleware(lineConfig), (req: any, res: any) => {
       // key คิวด้วย userId เพื่อให้ event ของคนเดียวกันรันทีละตัว (groupId/anonymous เป็น fallback)
       const queueKey = event?.source?.userId || event?.source?.groupId || 'anonymous';
 
-      // LINE ส่ง event ซ้ำเมื่อรอบแรกไม่ได้ 200 (แอปล่มระหว่าง deploy / tunnel หลุด) โดยพก replyToken
-      // "เดิม" มาด้วย ซึ่งอายุเกิน 60 วิไปแล้วเสมอ ⇒ ตอบไม่ได้ทุกกรณี (push ห้ามใช้) การปล่อยเข้าคิว
-      // = เสีย LLM + สล็อตคิว แล้วจบด้วย 400 "Invalid reply token" สองครั้ง
-      // (วัด 2026-09-21→22: 8/8 ครั้งเป็นแบบนี้ · ตัวที่มาเร็วสุดยังอายุ 62.7 วิ = เกิน TTL อยู่ดี)
-      // และมันกันงานซ้ำด้วย: เคยเจอ action=confirm ของใบที่ยืนยันไปแล้ว ถูกส่งซ้ำมาให้ทำอีกรอบ
+      const receipt = toIncomingEvent(event, receivedAt, reqId ?? null);
+
+      // LINE ส่ง event ซ้ำเมื่อรอบแรกไม่ได้ 2xx (แอปล่มตอน deploy / response หายกลางทาง) โดยพก
+      // webhookEventId และ replyToken **ตัวเดิม** มาด้วย ⇒ กันซ้ำได้ด้วย id ไม่ต้องเดาจากธง
+      // ห้ามเอาเข้าคิวประมวลผลเต็มไม่ว่ากรณีไหน — เผา LLM + สล็อตคิวของคนที่ยังตอบทัน
+      // รายละเอียดและตัวเลขทั้งหมด: docs/line-webhook-redelivery.md
       if (event?.deliveryContext?.isRedelivery === true) {
         queueMetrics.droppedBeforeStart++;
-        const ageMs = typeof event.timestamp === 'number' ? receivedAt - event.timestamp : null;
-        console.warn(`[queue] ⚠️ LINE ส่งซ้ำ (isRedelivery) user=${queueKey} type=${event?.type} ` +
-          `เหตุการณ์เดิมเมื่อ ${ageMs === null ? '?' : Math.round(ageMs / 1000)} วิที่แล้ว — ข้าม ตอบไม่ได้ (token หมดอายุแล้ว)`);
-        recordWebhookProcessing({
-          requestId: reqId, lineUserId: queueKey, outcome: 'dropped',
-          waitedMs: 0, totalMs: Date.now() - receivedAt,
-          llmMs: 0, llmCalls: 0, ownMs: 0, llmPromptTokens: 0, llmCachedTokens: 0,
-        });
+        // ไม่ await — งานนี้ยิง LINE API ได้ ซึ่งต้องไม่ไปถ่วงการรับ event ตัวถัดไปใน batch เดียวกัน
+        void handleRedelivery(event, { receipt, queueKey, reqId: reqId ?? null, receivedAt })
+          .catch((e: any) => console.error('[queue] handleRedelivery พังเอง:', e?.message || e));
         return;
       }
+
+      // ใบรับของ event ปกติ — ไม่ await ตรงนี้เพื่อไม่ให้ DB ถ่วงการเข้าคิว แต่เก็บ promise ไว้
+      // เพราะตอนจบงานต้องรอให้ INSERT ลงก่อนจึงจะ UPDATE ผลทับได้ (งานที่จบใน ~200ms ชนะ INSERT ได้จริง)
+      const receiptWritten = receipt ? recordIncomingEvent(receipt) : null;
 
       webhookQueue.push(queueKey, async () => {
         const { waited, remaining, expired } = replyBudget(receivedAt, Date.now());
@@ -349,6 +443,12 @@ app.post('/callback', line.middleware(lineConfig), (req: any, res: any) => {
             // ใส่ 0 ไม่ใช่ null เพราะนี่คือ "วัดแล้วได้ศูนย์" ไม่ใช่ "ไม่มีข้อมูล"
             llmMs: 0, llmCalls: 0, ownMs: 0, llmPromptTokens: 0, llmCachedTokens: 0,
           });
+          // เส้นนี้ return ก่อนถึง finally ⇒ ต้องปิดใบรับเองที่นี่ ไม่งั้นแถวค้างเป็น "ยังไม่จบ"
+          // แล้วถ้า LINE ส่งซ้ำมา เราจะแจ้งเซลส์ว่าตกหล่น — ซึ่งถูกต้อง เพราะงานนี้ไม่ได้ทำจริง
+          if (receipt && receiptWritten) {
+            await receiptWritten.catch(() => {});
+            await markEventOutcome(receipt.webhookEventId, 'dropped');
+          }
           return;
         }
         if (waited > 5_000) console.warn(`[queue] รอคิวนาน ${waited}ms ${who}`);
@@ -425,6 +525,12 @@ app.post('/callback', line.middleware(lineConfig), (req: any, res: any) => {
             llmMs: llm.ms, llmCalls: llm.calls, ownMs,
             llmPromptTokens: llm.promptTokens, llmCachedTokens: llm.cachedTokens,
           });
+          // ปิดใบรับ — ต้องรอ INSERT ให้ลงก่อน ไม่งั้น UPDATE วิ่งแซงแล้วไม่โดนแถวไหนเลย
+          // (งานที่จบใน ~200ms ชนะ INSERT ได้จริง) · ห้าม await ค้างนาน: ทั้งคู่จับ error เองแล้ว
+          if (receipt && receiptWritten) {
+            await receiptWritten.catch(() => {});
+            await markEventOutcome(receipt.webhookEventId, outcome);
+          }
         }
       });
     });

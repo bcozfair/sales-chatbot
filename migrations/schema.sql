@@ -1932,6 +1932,65 @@ CREATE INDEX pricing_model_history_code_rev_idx ON public.pricing_model_history 
 
 
 --
+-- Name: webhook_events; Type: TABLE; Schema: public; Owner: -
+--
+-- ใบรับของ webhook ทุก event ที่ LINE ยิงเข้ามา — ตัวกันซ้ำ + หลักฐานสอบกลับ
+-- ที่มา: migrations/changes/2026-09-23_02_webhook_events.sql · docs/line-webhook-redelivery.md
+
+CREATE TABLE public.webhook_events (
+    webhook_event_id text NOT NULL,
+    first_seen_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_seen_at timestamp with time zone DEFAULT now() NOT NULL,
+    delivery_count smallint DEFAULT 1 NOT NULL,
+    event_type text NOT NULL,
+    message_type text,
+    postback_data text,
+    line_user_id text,
+    source_type text,
+    event_at timestamp with time zone,
+    first_delay_ms integer,
+    last_delay_ms integer,
+    reply_token text,
+    request_id text,
+    handled_at timestamp with time zone,
+    outcome text,
+    redelivery_action text,
+    note text,
+    CONSTRAINT webhook_events_outcome_check CHECK ((outcome = ANY (ARRAY['replied'::text, 'timeout'::text, 'dropped'::text, 'failed'::text]))),
+    CONSTRAINT webhook_events_redelivery_action_check CHECK ((redelivery_action = ANY (ARRAY['skipped_duplicate'::text, 'warned'::text, 'warn_failed'::text])))
+);
+
+
+--
+-- Name: webhook_events webhook_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.webhook_events
+    ADD CONSTRAINT webhook_events_pkey PRIMARY KEY (webhook_event_id);
+
+
+--
+-- Name: idx_webhook_events_seen; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_webhook_events_seen ON public.webhook_events USING btree (first_seen_at DESC);
+
+
+--
+-- Name: idx_webhook_events_user; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_webhook_events_user ON public.webhook_events USING btree (line_user_id, first_seen_at DESC);
+
+
+--
+-- Name: idx_webhook_events_redelivered; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_webhook_events_redelivered ON public.webhook_events USING btree (first_seen_at DESC) WHERE (delivery_count > 1);
+
+
+--
 -- PostgreSQL database dump complete
 --
 

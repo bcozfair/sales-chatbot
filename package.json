@@ -50,6 +50,7 @@
     "diag:sync-api": "tsx scripts/diag/syncApiSmoke.ts",
     "diag:customer-search": "tsx scripts/diag/customerSearchEval.ts",
     "diag:log-worker": "tsx scripts/diag/logWorkerSmoke.ts",
+    "diag:redelivery": "tsx scripts/diag/redelivery.ts",
     "diag:llm-timing": "tsx scripts/diag/llmTimingSmoke.ts",
     "diag:block-parity": "tsx scripts/diag/blockParity.ts",
     "diag:block-rule": "tsx scripts/diag/blockRuleSmoke.ts",
