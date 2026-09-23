@@ -151,7 +151,9 @@ function splitName(n: string | null): { base: string; branch: string } {
   return m ? { base: m[1], branch: m[2] } : { base: n ?? '', branch: '' };
 }
 
-const province = (s: string | null) => (s ? s.replace(/\s*\(TH\)$/, '') : null);
+/** ตัดแบบเดียวกับ `provinceKey` ใน db/dataDirectoryRepo.ts — จอกับตัวกรองต้องเรียกจังหวัดชื่อเดียวกัน */
+const province = (s: string | null) =>
+  s ? s.replace(/\s+/g, ' ').replace(/\s*(ไม่ใช้\s*)?(\(TH\))?\s*$/, '').trim() : null;
 
 export const CustomersDirectory: React.FC = () => {
   const { token } = useAuth();
