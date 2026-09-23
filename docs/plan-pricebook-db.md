@@ -1,7 +1,7 @@
 # ย้ายสมุดราคา (โมดูล pricingLab) จาก `pricebook/book.json` เข้า PostgreSQL
 
-> สถานะ: **เจ้าของเคาะ §12 "ตามที่แนะนำ" ทุกข้อ (2026-09-23) · โค้ดเฟส 0–2 ลงแล้ว — ดู §13**
-> · เฟส 1 บน PMSV (รัน migration) และเฟส 3 (นำเข้าเล่มแรก) **ยังไม่ได้ทำ รอเจ้าของสั่ง**
+> สถานะ: **ขึ้น production แล้ว 2026-09-23** (เจ้าของเคาะ §12 "ตามที่แนะนำ" · สั่ง migration → deploy → นำเข้า
+> ตอน 13:19 ของวันเดียวกัน) — ดู §13 · เหลือเฟส 2.5 บนเครื่อง dev
 > · แผนเขียน 2026-09-23 บน PMSV ที่ `main` @ `db222be`
 > · ตัวเลขทุกตัววัดเมื่อ **2026-09-23** และมีวิธีวัดกำกับไว้ให้วัดซ้ำได้
 > · ทิศทางหลักเจ้าของเห็นชอบแล้ว (jsonb รุ่นละแถว + ประวัติแบบเขียนต่อท้าย) — แผนนี้**ไม่รื้อ**
@@ -583,11 +583,11 @@ docker compose exec app npm run diag:pricing-coverage # ≥ 75%
 
 | เฟส | สถานะ |
 | --- | --- |
-| 0 | ✅ โค้ด — `.gitignore` `*.xlsx` · `.dockerignore` `*.xlsx` `**/*.xlsx` `pricebook` `.claude` (พิสูจน์ด้วย build ทดลอง: `.xlsx` ทุกชั้น · `pricebook/` · `.claude/` ไม่เข้า · `scripts/pricebook/` กับ `data/*_sigs` ยังเข้า) · `xlsx.ts` เขียนลงโฟลเดอร์ชั่วคราวเป็นค่าตั้งต้น · ⏳ ตรวจ `curl -4 -sI` ได้ 404 หลัง deploy |
-| 1 | ✅ `migrations/changes/2026-09-23_01_pricing_book_db.sql` + ยุบเข้า `schema.sql` (ฐานที่ตั้งจาก `schema.sql` ใหม่ = `schema.sql` เดิม + migration ทุกบรรทัดของ `pg_dump` — ตรวจบนฐานชั่วคราว ไม่ใช่ฐานจริง ⇒ บรรทัด "ตรวจล่าสุด" ที่หัว `schema.sql` ยังไม่ขยับ) · ⏳ **ยังไม่ได้รันบน PMSV** |
-| 2 | ✅ โค้ด §5.1 ทั้งชุด + ด่าน §8 + เอกสาร §10 |
+| 0 | ✅ `.gitignore` `*.xlsx` · `.dockerignore` `*.xlsx` `**/*.xlsx` `pricebook` `.claude` · `xlsx.ts` เขียนลงโฟลเดอร์ชั่วคราวเป็นค่าตั้งต้น · **deploy 13:23 — image ใหม่ไม่มี `.xlsx`/`pricebook/`/`.claude/` · ไฟล์ Excel ทั้งสองไฟล์ใต้ `/data/` ผ่านโดเมนจริง (`curl -4`) = 404** |
+| 1 | ✅ `migrations/changes/2026-09-23_01_pricing_book_db.sql` + ยุบเข้า `schema.sql` (ฐานที่ตั้งจาก `schema.sql` ใหม่ = `schema.sql` เดิม + migration ทุกบรรทัดของ `pg_dump` — ตรวจบนฐานชั่วคราว ไม่ใช่ฐานจริง ⇒ บรรทัด "ตรวจล่าสุด" ที่หัว `schema.sql` ยังไม่ขยับ) · **รันบน PMSV แล้ว 2026-09-23 13:20** (สำรองก่อน `backup-2026-09-23-1319-before-pricebook.dump`) · `diag:migrations` ครบทุกไฟล์ |
+| 2 | ✅ โค้ด §5.1 ทั้งชุด + ด่าน §8 + เอกสาร §10 · deploy แล้ว (`56117e7` · บอทเงียบ 13:23:49→13:23:55) |
 | 2.5 | ⏳ เครื่อง dev ที่มี `pricebook/book.json`: `importer.ts --from-json pricebook/book.json --apply` |
-| 3 | ⏳ รอเจ้าของสั่ง — runbook ย้ายไปอยู่ `DEPLOY.md` ขั้น 4.11 |
+| 3 | ✅ นำเข้าเล่มแรก 2026-09-23 ตาม `DEPLOY.md` ขั้น 4.11 — `r1` · 13 รุ่น · `--by admin` · sha256 ของไฟล์ Excel สองไฟล์อยู่ใน `source_files` · ในกล่อง prod: `diag:pricing-db` 51/51 · `diag:pricing` 21·64·30·16·33·51 · coverage 80.1% · จำนวนแถวหลังรันด่านเท่าเดิม (1·13·13 · `pricing_subcodes` 0) · API จริง: การ์ด 13 รุ่น · `TSK-14 6x200+150-BU` = 5,030 |
 
 **พิสูจน์บนฐาน Postgres 18 ชั่วคราว** (คอนเทนเนอร์แยก ไม่ใช่ฐานจริง · โครงสร้างจาก `schema.sql` + `products.model`
 51,775 แถวที่คัดจากฐานจริงแบบอ่านอย่างเดียว · ลบทิ้งหลังจบ) — ก่อน = โค้ด `main` ยุคไฟล์ · หลัง = นำเข้าเล่มจาก Excel ชุดเดียวกันด้วย `importer --apply`:
