@@ -4028,6 +4028,9 @@ app.get('/api/admin/customers/types', adminAuthMiddleware, requireCapability('pa
 const SP_NAME_SQL = `COALESCE(s.name, q.employee_details->>'saleperson')`;
 const SP_PHONE_SQL = `COALESCE(s.phone, q.employee_details->>'sale_phone')`;
 const SP_CODE_SQL = `COALESCE(s.salesperson_id, q.employee_details->>'salesperson_id', q.salesperson_id)`;
+// ชื่อในช่อง "ผู้เสนอราคา" ของใบ — กติกาเดียวกับ pdfGenerator: ใบจากเว็บมี snapshot `issuer_name`
+// ส่วนใบ LINE/ใบเก่าไม่มีคีย์นี้ ⇒ ช่องขวาของใบพิมพ์ชื่อเซลส์ จึงถอยไปใช้ชื่อเซลส์เหมือนกัน
+const ISSUER_NAME_SQL = `COALESCE(NULLIF(q.employee_details->>'issuer_name', ''), ${SP_NAME_SQL})`;
 
 // กัน path param ที่ไม่ใช่ uuid ยิงเข้า query แล้วได้ error 500 จาก Postgres แทน 400 ที่อ่านรู้เรื่อง
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -4052,6 +4055,7 @@ app.get('/api/admin/quotations', adminAuthMiddleware, requireCapability('page.qu
       created_at: 'q.created_at',
       customer_name: "(q.customer_details->>'customer_name')",
       salesperson_name: SP_NAME_SQL,
+      issuer_name: ISSUER_NAME_SQL,
       total_sum: 'q.total_sum',
       status: 'q.status',
       odoo_exported_at: 'q.odoo_exported_at'
@@ -4066,7 +4070,7 @@ app.get('/api/admin/quotations', adminAuthMiddleware, requireCapability('page.qu
     let paramIndex = 1;
 
     if (search.trim()) {
-      conditions.push(`(q.quotation_no ILIKE $${paramIndex} OR (q.customer_details->>'customer_name') ILIKE $${paramIndex} OR ${SP_NAME_SQL} ILIKE $${paramIndex})`);
+      conditions.push(`(q.quotation_no ILIKE $${paramIndex} OR (q.customer_details->>'customer_name') ILIKE $${paramIndex} OR ${SP_NAME_SQL} ILIKE $${paramIndex} OR ${ISSUER_NAME_SQL} ILIKE $${paramIndex})`);
       params.push(`%${search.trim()}%`);
       paramIndex++;
     }
@@ -4182,6 +4186,7 @@ app.get('/api/admin/quotations/export', adminAuthMiddleware, requireCapability('
       created_at: 'q.created_at',
       customer_name: "(q.customer_details->>'customer_name')",
       salesperson_name: SP_NAME_SQL,
+      issuer_name: ISSUER_NAME_SQL,
       total_sum: 'q.total_sum',
       status: 'q.status',
       odoo_exported_at: 'q.odoo_exported_at'
@@ -4196,7 +4201,7 @@ app.get('/api/admin/quotations/export', adminAuthMiddleware, requireCapability('
     let paramIndex = 1;
 
     if (search.trim()) {
-      conditions.push(`(q.quotation_no ILIKE $${paramIndex} OR (q.customer_details->>'customer_name') ILIKE $${paramIndex} OR ${SP_NAME_SQL} ILIKE $${paramIndex})`);
+      conditions.push(`(q.quotation_no ILIKE $${paramIndex} OR (q.customer_details->>'customer_name') ILIKE $${paramIndex} OR ${SP_NAME_SQL} ILIKE $${paramIndex} OR ${ISSUER_NAME_SQL} ILIKE $${paramIndex})`);
       params.push(`%${search.trim()}%`);
       paramIndex++;
     }
