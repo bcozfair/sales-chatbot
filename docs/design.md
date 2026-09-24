@@ -219,11 +219,12 @@ lint ผ่าน และดูปกติในธีมที่คนเ�
 | `SettingToggle` · `DateInput` · `ProductComboBox` · `ScopeComboBox` | `admin/*.tsx` | ใช้ร่วมได้ |
 | `Button` | `admin/Button.tsx` | **ใหม่ 2026-09-14** — บทบาท×tone ตามหัวข้อ 2.1 · ใช้แล้ว 2 หน้า (`QuoteRequest` · `PriceApprovals`) |
 | `ComboBox` (โครงกลาง) + `PersonComboBox` (ชั้น "คน") | `admin/PersonComboBox.tsx` | โครงกลางแยกออกมา 2026-09-14 ตอนทำช่องบริษัท/ผู้ติดต่อ — รองรับทั้งรายการในเครื่องและค้นจาก server (`onQueryChange`) |
-| ชุดคอมโพเนนต์ตาราง/ตัวกรอง (`TableCard` `SortHeader` `Pagination` `EmptyState` `SkeletonRows` `StatusPill` `FilterCard` …) | `admin/logs/ui.tsx` | **มีอยู่จริงและดีมาก แต่ใช้แค่ 5 หน้า** (4 หน้าในกลุ่มบันทึก + `ApiLogs`) |
+| ชุดคอมโพเนนต์ตาราง/ตัวกรอง (`TableCard` `SortHeader` `Pagination` `EmptyState` `SkeletonRows` `StatusPill` `FilterCard` …) | `admin/logs/ui.tsx` | **ใช้ 10 ไฟล์แล้ว** (วัด 2026-09-24): 4 หน้าในกลุ่มบันทึก + `ApiLogs` · `CustomersDirectory` · `ProductsDirectory` · `OdooContacts` · `PriceApprovals` · `Users` — เดิมเขียนไว้ว่า "แค่ 5 หน้า" |
 | ตัวช่วยแสดงผล (`formatDateTime` `relativeTime` `errMsg`) | `admin/logs/format.ts` | เดิมเป็นสำเนาจาก `ApiLogs.tsx` แล้วยุบกลับมาที่เดียว |
 | `IssuerNameField` | `admin/IssuerNameField.tsx` | **ใหม่ 2026-09-23** — ช่องชื่อผู้เสนอราคาที่ *เลือกจากรายชื่อ Odoo ก็ได้ พิมพ์เองก็ได้* · ใช้ 1 หน้า (`Users`) · **คนละตัวกับ `ComboBox` โดยตั้งใจ** เพราะตัวนั้นเป็นรายการปิด ส่วนช่องนี้ต้องยอมให้พิมพ์ชื่อที่ยังไม่มีในรายชื่อ · ⚠️ ช่อง `employee_name` ใน `Salespersons.tsx` ยังถือสำเนาของตัวเองอยู่ — ย้ายมาใช้ไฟล์นี้เป็นงานของตัวเอง |
 | `SettingsStatus` · `SettingsSaveBar` | `admin/SettingsSaveBar.tsx` | ท้ายฟอร์มตั้งค่าที่ "แก้แล้วกดบันทึก" — ใช้ 2 หน้า (`CreditPolicy` · `ShippingFee`) ตั้งแต่ 2026-09-12 |
-| `FilterBar` + `FilterSearch` · `FilterSelect` · `FilterDateRange` | `admin/FilterBar.tsx` | **ใหม่ 2026-09-15** — แถบตัวกรองเหนือตาราง ใช้ **7 หน้า**: `Quotations` (ต้นแบบเดิม) + ทั้ง 6 หน้าที่มีตารางในกลุ่ม "เงื่อนไข & กฎ" · **คนละชุดกับ `FilterCard` ของ `logs/ui.tsx` โดยตั้งใจ** — ชุดนั้นวางป้ายกำกับเหนือช่อง ส่วนชุดนี้เป็นแถวเดียวไม่มีป้าย |
+| `FilterBar` + `FilterSearch` · `FilterSelect` · `FilterDateRange` | `admin/FilterBar.tsx` | **ใหม่ 2026-09-15** — แถบตัวกรองเหนือตาราง ใช้ **8 หน้า** (วัด 2026-09-24): `Quotations` (ต้นแบบเดิม) + ทั้ง 6 หน้าที่มีตารางในกลุ่ม "เงื่อนไข & กฎ"
++ `Users` (เพิ่ม 2026-09-24) · **คนละชุดกับ `FilterCard` ของ `logs/ui.tsx` โดยตั้งใจ** — ชุดนั้นวางป้ายกำกับเหนือช่อง ส่วนชุดนี้เป็นแถวเดียวไม่มีป้าย |
 | `Modal` (เปลือกกล่องโต้ตอบ) | `admin/Modal.tsx` | **ใหม่ 2026-09-15** — portal + ฉากหลัง + หัวกล่อง + แถบปุ่มท้าย · ใช้ 5 กล่อง (`ChangePasswordModal` · `ConfirmIssueModal` · กล่อง "ไม่อนุมัติ" ใน `PriceApprovals` · `DeleteQuotationModal` · `BookImportModal`) · `size: 'xl'` เพิ่มเมื่อ 2026-09-21 สำหรับกล่องที่มี **ตาราง** ให้อ่านก่อนตัดสินใจ (`lg` = 512px ทำให้คอลัมน์สุดท้ายของตาราง 5 เสาตกขอบ) · **ไม่ปิดเมื่อคลิกฉากหลัง** โดยตั้งใจ · กล่องที่กดพลาดแล้วย้อนไม่ได้ให้ปิดกลางคันไม่ได้ระหว่างที่กำลังทำงาน (ส่ง `onClose` เป็น `undefined` ตอน busy) |
 
 **หน้าที่มีตารางในกลุ่ม "เงื่อนไข & กฎ" ใช้ `FilterBar` ทุกหน้า (2026-09-15)** — ก่อนหน้านั้น 5 หน้า
@@ -253,8 +254,13 @@ lint ผ่าน และดูปกติในธีมที่คนเ�
 ไม่งั้นพิมพ์ 1 ตัวอักษร = ยิง 1 request ไปที่ตาราง 51,665 แถว
 · และ **ห้ามประกาศคอมโพเนนต์ย่อยระหว่าง render** (`react-hooks/static-components`)
 
-**ของจริงที่ต้องรู้: มี 15 ไฟล์ที่เขียน `<table>` ของตัวเอง** ทั้งที่ `TableCard` + `SortHeader` +
-`Pagination` มีอยู่แล้วใน `logs/ui.tsx`
+**ของจริงที่ต้องรู้: มี 24 ไฟล์ที่เขียน `<table>` ของตัวเอง** (วัด 2026-09-24 · เดิมเขียนว่า 15)
+ทั้งที่ `TableCard` + `SortHeader` + `Pagination` มีอยู่แล้วใน `logs/ui.tsx`
+
+**หยิบทีละชิ้นได้ ไม่ต้องยกตารางทั้งตัวมาใช้ของร่วม** (ตัวอย่างที่เดินจริง: `Users` 2026-09-24) —
+หน้านั้นยังเขียน `<table>` ของตัวเองเหมือนเดิมทุกบรรทัด แต่ยืม `Pagination` + `EmptyState`
+มาใส่ท้ายการ์ด และยืม `FilterBar` มาวางเหนือตาราง ⇒ **ได้ของร่วมโดยไม่ต้องรื้อ**
+ซึ่งตรงกับกติกาข้างล่างพอดี: ห้ามไปไล่รื้อ 24 ไฟล์ แต่ของที่เพิ่มเข้าไปใหม่ต้องเป็นของร่วมเสมอ
 
 **สำเนาท้ายฟอร์มตั้งค่า ยุบแล้ว 2026-09-12** — `CreditPolicy.tsx` กับ `ShippingFee.tsx` ถือ
 โค้ดก้อนเดียวกัน **ยาว 42 บรรทัด เหมือนกันทุกตัวอักษร** ต่างกันแค่ชื่อตัวแปรที่ส่งให้ปุ่มย้อนกลับ

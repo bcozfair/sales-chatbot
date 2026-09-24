@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth, type Role } from '../context/AuthContext';
 import {
   Users as UsersIcon,
@@ -14,9 +14,12 @@ import {
   Loader2,
   AlertTriangle,
   CheckCircle2,
+  Search,
   X,
 } from 'lucide-react';
 import { PageHeader } from './PageHeader';
+import { FilterBar, FilterSearch, FilterSelect } from './FilterBar';
+import { EmptyState, Pagination } from './logs/ui';
 import { ROLE_ORDER, ROLE_LABEL, ROLE_DESCRIPTION } from './roles';
 import { IssuerNameField, type IssuerNameOption } from './IssuerNameField';
 
@@ -76,6 +79,14 @@ const ROLE_BADGE: Record<Role, { className: string; Icon: typeof Shield }> = {
   user: { className: 'bg-slate-50 border-slate-200 text-slate-500', Icon: Shield },
 };
 
+/**
+ * ชิปรหัสพนักงานขาย — ใช้ทั้งใต้ชื่อในตารางและในกล่องฟอร์ม
+ * ยกออกมาเป็นค่าเดียวตอนที่จุดที่สองเกิดขึ้นจริง (2026-09-24) ไม่ใช่ตอนเดาว่าจะมี
+ * (docs/design.md ข้อ 11) — รหัสเดียวกันที่หน้าตาต่างกันสองแบบ คือของสองอย่างในหัวคนใช้
+ */
+const SALES_CODE_CHIP =
+  'inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[var(--brand)]/8 border border-[var(--brand-fg)]/20 text-[var(--brand-fg)] font-semibold';
+
 type FormMode = { kind: 'create' } | { kind: 'edit'; target: AdminUserRow };
 
 const inputClass =
@@ -103,6 +114,14 @@ export const Users: React.FC = () => {
   const [deleteTarget, setDeleteTarget] = useState<AdminUserRow | null>(null);
   // บวกค่านี้ = สั่งให้ effect โหลดรายชื่อใหม่ ใช้หลังเพิ่ม/แก้/ลบสำเร็จ
   const [reloadKey, setReloadKey] = useState(0);
+
+  // ── ตัวกรองและการแบ่งหน้า — ทำในเครื่องทั้งหมด ────────────────────────────
+  // `GET /api/admin/users` คืนมาครบทุกแถวอยู่แล้วตั้งแต่โหลดครั้งแรก (45 บัญชี · วัด 2026-09-24)
+  // การกรองจึงไม่ต้องยิง API ใหม่ และไม่ต้อง debounce ช่องค้นหาเหมือนหน้าที่แบ่งหน้าจาก server
+  const [query, setQuery] = useState('');
+  const [roleFilter, setRoleFilter] = useState<Role | ''>('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
 
   useEffect(() => {
     if (!token) return;
@@ -132,6 +151,35 @@ export const Users: React.FC = () => {
     const timer = setTimeout(() => setSuccessMsg(''), 3000);
     return () => clearTimeout(timer);
   }, [successMsg]);
+
+  /**
+   * จำนวนบัญชีต่อสิทธิ์ — ตัวเลือกใน dropdown มาจาก **แถวที่โหลดมาแล้ว** ไม่ใช่ `ROLE_ORDER` ทั้งชุด
+   * (docs/design.md ข้อ 3: ตัวเลือกที่เลือกแล้วได้ตารางว่างทุกครั้ง คือตัวเลือกที่ไม่ควรมี)
+   */
+  const roleCounts = useMemo(() => {
+    const counts = new Map<Role, number>();
+    users.forEach((u) => counts.set(u.role, (counts.get(u.role) ?? 0) + 1));
+    return counts;
+  }, [users]);
+
+  // ค้นด้วยรหัสพนักงานขายได้ด้วย เพราะรหัสคือตัวที่ผูก "ใบของฉัน" ให้แต่ละคน และมันอยู่บนจอแล้ว
+  const filteredUsers = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return users.filter((u) => {
+      if (roleFilter && u.role !== roleFilter) return false;
+      if (!needle) return true;
+      return u.username.toLowerCase().includes(needle)
+        || u.name.toLowerCase().includes(needle)
+        || u.salesperson_ids.some((code) => code.toLowerCase().includes(needle));
+    });
+  }, [users, query, roleFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / pageSize));
+  // หนีบค่าตอนคำนวณ ไม่ใช่ setState ใน effect — ลบบัญชีสุดท้ายของหน้าสุดท้ายแล้วต้องไม่ค้างหน้าว่าง
+  // (และ `react-hooks/set-state-in-effect` ห้ามท่าหลังอยู่แล้ว — docs/design.md ข้อ 3)
+  const currentPage = Math.min(page, totalPages);
+  const pagedUsers = filteredUsers.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const hasFilter = query !== '' || roleFilter !== '';
 
   const handleSaved = (message: string) => {
     setFormMode(null);
@@ -176,6 +224,30 @@ export const Users: React.FC = () => {
           <p className="text-xs">{loadError}</p>
         </div>
       ) : (
+        <>
+        <FilterBar
+          columns="grid-cols-1 sm:grid-cols-[2.4fr_1fr]"
+          active={hasFilter}
+          onClear={() => { setQuery(''); setRoleFilter(''); setPage(1); }}
+        >
+          <FilterSearch
+            value={query}
+            onChange={(v) => { setQuery(v); setPage(1); }}
+            placeholder="ค้นหาชื่อผู้ใช้งาน ชื่อ-นามสกุล หรือรหัสเซลส์"
+          />
+          <FilterSelect
+            value={roleFilter}
+            onChange={(v) => { setRoleFilter(v as Role | ''); setPage(1); }}
+            icon={Shield}
+            aria-label="กรองตามสิทธิ์"
+          >
+            <option value="">สิทธิ์ — ทั้งหมด</option>
+            {ROLE_ORDER.filter((r) => roleCounts.has(r)).map((r) => (
+              <option key={r} value={r}>{ROLE_LABEL[r]} ({roleCounts.get(r)})</option>
+            ))}
+          </FilterSelect>
+        </FilterBar>
+
         <div className="bg-card border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-left">
@@ -188,7 +260,7 @@ export const Users: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-sm text-slate-700">
-                {users.map((row) => {
+                {pagedUsers.map((row) => {
                   const isSelf = row.id === currentUser?.id;
                   const badge = ROLE_BADGE[row.role];
                   return (
@@ -197,7 +269,18 @@ export const Users: React.FC = () => {
                         <div className="font-semibold text-slate-900 font-mono text-[13px]">{row.username}</div>
                         {isSelf && <div className="text-[11px] text-slate-400">บัญชีของคุณ</div>}
                       </td>
-                      <td className="px-4 py-2.5">{row.name}</td>
+                      <td className="px-4 py-2.5">
+                        <div>{row.name}</div>
+                        {row.salesperson_ids.length > 0 && (
+                          <div className="mt-0.5 flex flex-wrap gap-1">
+                            {row.salesperson_ids.map((code) => (
+                              <span key={code} className={`${SALES_CODE_CHIP} text-[11px]`}>
+                                เซลส์<span className="font-mono">{code}</span>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </td>
                       <td className="px-4 py-2.5">
                         <span
                           className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border ${badge.className}`}
@@ -238,7 +321,26 @@ export const Users: React.FC = () => {
               </tbody>
             </table>
           </div>
+
+          {filteredUsers.length === 0 && (
+            <EmptyState
+              icon={Search}
+              title="ไม่พบผู้ใช้ที่ตรงกับตัวกรอง"
+              hint="ลองลบคำค้น หรือเลือกสิทธิ์เป็น “ทั้งหมด”"
+            />
+          )}
+
+          <Pagination
+            page={currentPage}
+            pages={totalPages}
+            size={pageSize}
+            total={filteredUsers.length}
+            unit="บัญชี"
+            onPage={setPage}
+            onSize={(s) => { setPageSize(s); setPage(1); }}
+          />
         </div>
+        </>
       )}
 
       {formMode && (
@@ -397,7 +499,7 @@ const BoundSalespersonIds: React.FC<{ codes: string[]; unknownName: boolean }> =
       {codes.map((c) => (
         <span
           key={c}
-          className="inline-flex items-center px-2 py-0.5 rounded-lg bg-[var(--brand)]/8 border border-[var(--brand-fg)]/20 text-[var(--brand-fg)] font-mono font-semibold"
+          className={`${SALES_CODE_CHIP} font-mono`}
         >
           {c}
         </span>
