@@ -19,7 +19,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { AXIS_TH, DIM_TH, KIND_TH, OPTION_TH, axisLabel, dimLabel, displayName } from './labels.js';
-import type { Adder, Band, ModelVariant, Money, Predicate, PriceBook, PriceModel } from './types.js';
+import type { Adder, Band, ModelVariant, Money, Predicate, PriceBook, PriceModel, SheetLayout } from './types.js';
 
 // ── ที่หน้าจออ่าน ────────────────────────────────────────────────────────────
 
@@ -92,6 +92,11 @@ export interface EditorView {
    * เกณฑ์อยู่ที่ `excelReady()` ที่เดียว
    */
   excel: boolean;
+  /**
+   * หน้าตาของชีตรอบตาราง (แสดงผลอย่างเดียว ไม่มีราคา) — อ่านแบบกันพังเสมอ เพราะ `modelShape.ts`
+   * ปล่อยช่องนี้ผ่านโดยไม่ตรวจ (engine ไม่อ่าน) ⇒ ของเสียในฐานต้องไม่ทำให้จอพัง
+   */
+  layout: { rowNote: { label: string; values: Record<string, string> } | null; colNotes: Record<string, string>; highlightCols: string[] };
   variant: (ModelVariant & { covers: string[] }) | null;
   adders: EditorAdder[];
   constraints: { id: string; level: string; levelTh: string; message: string; whenTh: string; disabled: boolean }[];
@@ -206,6 +211,22 @@ export function excelReady(m: PriceModel): boolean {
   );
 }
 
+const strMap = (v: unknown): Record<string, string> =>
+  v && typeof v === 'object' && !Array.isArray(v)
+    ? Object.fromEntries(Object.entries(v as Record<string, unknown>).filter(([, x]) => typeof x === 'string') as [string, string][])
+    : {};
+
+function layoutView(L: SheetLayout | undefined): EditorView['layout'] {
+  const rn = L?.rowNote;
+  return {
+    rowNote: rn && typeof rn === 'object'
+      ? { label: typeof rn.label === 'string' ? rn.label : 'หมายเหตุ', values: strMap(rn.values) }
+      : null,
+    colNotes: strMap(L?.colNotes),
+    highlightCols: Array.isArray(L?.highlightCols) ? L!.highlightCols.filter((x) => typeof x === 'string') : []
+  };
+}
+
 /** `TSK-01` + ชื่อพ้อง `TS-01` → `TS_-01` (แบบที่หัวชีตเขียน) */
 function sheetTitle(m: PriceModel, name: string): string {
   const generic = (m.aliases ?? []).find((a) => /^TS-/.test(a));
@@ -254,6 +275,7 @@ export function modelEditorView(book: PriceBook, m: PriceModel): EditorView {
     name,
     title: sheetTitle(m, name),
     excel: excelReady(m),
+    layout: layoutView(m.layout),
     label: m.label,
     sheet: m.sheet ?? '',
     aliases: m.aliases ?? [],
@@ -559,6 +581,41 @@ function readCells(raw: unknown, base: Extract<PriceModel['base'], { kind: 'matr
   return ordered;
 }
 
+/**
+ * หน้าตาของชีต (`SheetLayout`) จากหน้าสมุดรายชีต — `{ rowNote: {แถว: ข้อความ}, colNotes: {คอลัมน์: ข้อความ}, highlightCols: [คอลัมน์] }`
+ * · คีย์ต้องเป็นแถว/คอลัมน์ที่ตารางมีอยู่ · ข้อความว่าง = ไม่มี · หัวคอลัมน์ท้ายตารางคงของเดิม (มาจากชีต)
+ * · เรียงตามลำดับแถว/คอลัมน์ของตาราง = ลำดับเดียวกับที่ตัวนำเข้าเขียน ⇒ บันทึกเปล่าได้ JSON เดิมทุกไบต์
+ */
+function readLayout(raw: unknown, current: PriceModel): SheetLayout | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) reject('หน้าตาของชีต: รูปแบบไม่ถูกต้อง');
+  if (current.base.kind !== 'matrix' || current.base.axes.length !== 2) reject('หน้าตาของชีตใช้ได้กับตารางสองแกนเท่านั้น');
+  const base = current.base as Extract<PriceModel['base'], { kind: 'matrix' }>;
+  const [rows, cols] = matrixValues(base.cells, 2) as [string[], string[]];
+  const o = raw as Record<string, unknown>;
+  const texts = (v: unknown, keys: string[], what: string): Record<string, string> => {
+    const m = (v ?? {}) as Record<string, unknown>;
+    if (typeof m !== 'object' || Array.isArray(m)) reject(`${what}: รูปแบบไม่ถูกต้อง`);
+    for (const k of Object.keys(m)) if (!keys.includes(k)) reject(`${what}: ไม่มี "${k}" ในตาราง`);
+    const out: Record<string, string> = {};
+    for (const k of keys) {
+      const t = text(m[k], `${what} ${k}`, 60, false);
+      if (t) out[k] = t;
+    }
+    return out;
+  };
+  const L: SheetLayout = {};
+  const rn = texts(o.rowNote, rows, 'ข้อความท้ายแถว');
+  if (Object.keys(rn).length) L.rowNote = { label: current.layout?.rowNote?.label ?? 'หมายเหตุ', values: rn };
+  const cn = texts(o.colNotes, cols, 'ข้อความใต้คอลัมน์');
+  if (Object.keys(cn).length) L.colNotes = cn;
+  if (o.highlightCols !== undefined && !Array.isArray(o.highlightCols)) reject('คอลัมน์ไฮไลต์: รูปแบบไม่ถูกต้อง');
+  const hl = (o.highlightCols ?? []) as unknown[];
+  for (const k of hl) if (typeof k !== 'string' || !cols.includes(k)) reject(`คอลัมน์ไฮไลต์: ไม่มี "${String(k)}" ในตาราง`);
+  const hcols = cols.filter((c) => hl.includes(c));
+  if (hcols.length) L.highlightCols = hcols;
+  return Object.keys(L).length ? L : undefined;
+}
+
 function readVariant(raw: unknown, adders: Adder[], prev?: ModelVariant): ModelVariant | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const o = raw as Record<string, unknown>;
@@ -633,13 +690,20 @@ export function applyModelEdit(current: PriceModel, body: unknown, book?: PriceB
   );
   const constraints = current.constraints.map((c) => ({ ...c, disabled: offIds.has(c.id) || undefined }));
 
-  return {
+  const next: PriceModel = {
     ...current,
     base,
     adders,
     constraints,
     variant: readVariant(b.variant, adders, current.variant)
   };
+  // ไม่ส่ง `layout` มา = คงเดิม (หน้าแก้ทีละรุ่นไม่มีช่องพวกนี้) · ส่งมาแล้วว่างทั้งหมด = ลบ
+  if (b.layout !== undefined) {
+    const layout = readLayout(b.layout, current);
+    if (layout) next.layout = layout;
+    else delete next.layout;
+  }
+  return next;
 }
 
 /**

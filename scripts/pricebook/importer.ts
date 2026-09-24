@@ -7,6 +7,7 @@
 //    … --data <dir> --apply --by <username>                                    เล่มแรกของฐาน
 //    … --data <dir> --apply --replace-all --by <username>                      แทนทั้งเล่ม (ย้อนได้จากหน้าจอ)
 //    … --from-json pricebook/book.json --apply [--replace-all]                  ย้ายเล่มของยุคไฟล์เข้าฐาน
+//    … --data <dir> --layout-only [--apply --by <username>]                      เติมหน้าตาของชีต (ข้อความ/ไฮไลต์) ลงเล่มปัจจุบัน ไม่แตะราคา
 //    … --data <dir> --out <ไฟล์.json>                                           เขียนเป็นไฟล์ (ไม่แตะฐาน)
 //
 //  **`--data` ไม่มีค่าเริ่มต้นโดยตั้งใจ** — ยุคไฟล์ตั้งต้นที่ `data/` ซึ่งถูกเสิร์ฟออกเว็บโดยไม่ตรวจสิทธิ์
@@ -31,7 +32,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { basename, join, dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Adder, Band, Constraint, DerivedDim, ModelVariant, PriceBook, PriceModel, SubCode } from '../../services/pricingLab/types.js';
+import type { Adder, Band, Constraint, DerivedDim, ModelVariant, PriceBook, PriceModel, SheetLayout, SubCode } from '../../services/pricingLab/types.js';
 import { pool } from '../../config/db.js';
 import { readBookState } from '../../services/pricingLab/bookStore.js';
 import { BookConflict, BookRejected, commitBookChange, seedBook } from '../../services/pricingLab/bookUpdate.js';
@@ -104,6 +105,19 @@ interface VariantSpec extends Omit<ModelVariant, 'adderPrices'> {
   adderPricesTimes?: Record<string, number>;
 }
 
+/**
+ * หน้าตาของชีตรอบตารางราคาตั้ง (`SheetLayout`) — แสดงผลอย่างเดียว ไม่มีผลกับราคา
+ * อ่านได้เฉพาะตารางสองแกน (หัวคอลัมน์แถวเดียว)
+ */
+interface LayoutSpec {
+  /** คอลัมน์ข้อความท้ายตาราง เช่น "G" — หัวอ่านจากแถวหัวคอลัมน์ ข้อความอ่านจากแถวเดียวกับราคา */
+  rowNoteCol?: string;
+  /** แถวข้อความใต้ตาราง เช่น 16 (ตัวหนังสือแดง `*M8x1.25`) */
+  colNotesRow?: number;
+  /** true = หาคอลัมน์ที่ระบายเหลืองทุกช่องของตาราง (อ่านสีจากไฟล์ ไม่ได้พิมพ์ลงแมป) */
+  highlight?: boolean;
+}
+
 interface SheetMap {
   file: string;
   sheet: string;
@@ -117,6 +131,7 @@ interface SheetMap {
   base: MatrixSpec | BandedSpec | RefSpec;
   adders: AdderSpec[];
   constraints: Constraint[];
+  layout?: LayoutSpec;
 }
 
 // ── ตัวช่วยอ่านเซลล์ ─────────────────────────────────────────────────────────
@@ -148,6 +163,12 @@ function cellText(ws: ExcelJS.Worksheet, row: number, col: string): string {
  * **ปัดเป็นสตางค์เสมอ** เพราะไฟล์จริงมี float noise 182 เซลล์ (110.00000000000001 ·
  * 1595.0000000000002) ถ้าเก็บดิบ PDF จะพิมพ์ทศนิยม 13 ตำแหน่งออกไปหาลูกค้า
  */
+/** สีพื้นเหลืองล้วนแบบที่ฝ่ายขายใช้ไฮไลต์ (FFFF00) — เทียบตรงตัว ไม่เดาเฉดใกล้เคียง */
+function isYellow(ws: ExcelJS.Worksheet, row: number, col: string): boolean {
+  const fill = ws.getRow(row).getCell(colToIndex(col)).fill as { fgColor?: { argb?: string } } | undefined;
+  return (fill?.fgColor?.argb ?? '').toUpperCase() === 'FFFFFF00';
+}
+
 function cellMoney(ws: ExcelJS.Worksheet, row: number, col: string): number | undefined {
   const v = cellValue(ws, row, col);
   if (typeof v === 'number') return Math.round(v * 100) / 100;
@@ -212,6 +233,7 @@ function importSheet(
 
   // ── ฐานราคา ───────────────────────────────────────────────────────────────
   let base: PriceModel['base'];
+  let layout: SheetLayout | undefined;
 
   if (map.base.kind === 'matrix') {
     const spec = map.base;
@@ -241,6 +263,7 @@ function importSheet(
       });
     }
     base = { kind: 'matrix', axes: spec.axes, cells };
+    layout = readLayout(map, ws, spec, colHeaders);
   } else if (map.base.kind === 'banded') {
     const spec = map.base;
     const bands: Band[] = [];
@@ -326,6 +349,7 @@ function importSheet(
     adders,
     constraints: map.constraints,
     variant,
+    layout,
     // ติดสถิติการนำเข้าไปกับสมุดราคาเลย เพราะหน้าเดโมนับเองจากคีย์ไม่ได้:
     // แถวที่ว่างทั้งแถว (เช่น D = "7TN" ของ TS-04) ไม่โผล่ในคีย์ของ cells สักตัว
     // นับจากคีย์จึงได้ช่องว่าง 46 ขณะที่ของจริงคือ 52 — ตัวเลขที่เอาไปให้คนดูต้องมาจากที่เดียว
@@ -333,6 +357,48 @@ function importSheet(
   };
 
   return { model, report };
+}
+
+/**
+ * `SheetLayout` จากชีต — ลำดับคีย์ = ลำดับแถว/คอลัมน์ในชีต (ตรงกับลำดับคีย์ของ `cells`)
+ * ⇒ หน้าจอบันทึกเปล่าแล้วได้ JSON เดิมทุกไบต์ (ดู `readLayout` ใน modelEditor.ts)
+ */
+function readLayout(map: SheetMap, ws: ExcelJS.Worksheet, spec: MatrixSpec, colHeaders: string[]): SheetLayout | undefined {
+  const L = map.layout;
+  if (!L) return undefined;
+  const headerRows = Array.isArray(spec.colHeaderRow) ? spec.colHeaderRow : [spec.colHeaderRow];
+  if (headerRows.length !== 1) throw new Error(`${map.code}: layout อ่านได้เฉพาะตารางสองแกน`);
+  const rowKeys: { r: number; key: string }[] = [];
+  for (let r = spec.rows[0]; r <= spec.rows[1]; r++) {
+    const key = cellText(ws, r, spec.rowHeaderCol);
+    if (key) rowKeys.push({ r, key });
+  }
+  const out: SheetLayout = {};
+  if (L.rowNoteCol) {
+    const values: Record<string, string> = {};
+    for (const { r, key } of rowKeys) {
+      const t = cellText(ws, r, L.rowNoteCol);
+      if (t) values[key] = t;
+    }
+    const label = cellText(ws, headerRows[headerRows.length - 1]!, L.rowNoteCol) || 'หมายเหตุ';
+    if (Object.keys(values).length) out.rowNote = { label, values };
+  }
+  if (L.colNotesRow) {
+    const notes: Record<string, string> = {};
+    spec.cols.forEach((c, i) => {
+      const t = cellText(ws, L.colNotesRow!, c);
+      if (t) notes[colHeaders[i]!] = t;
+    });
+    if (Object.keys(notes).length) out.colNotes = notes;
+  }
+  if (L.highlight) {
+    const cols = spec.cols
+      .map((c, i) => ({ c, h: colHeaders[i]! }))
+      .filter(({ c }) => rowKeys.length > 0 && rowKeys.every(({ r }) => isYellow(ws, r, c)))
+      .map(({ h }) => h);
+    if (cols.length) out.highlightCols = cols;
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 // ── ตัวหลัก ──────────────────────────────────────────────────────────────────
@@ -404,6 +470,66 @@ function servedPath(out: string): boolean {
   return ['public', 'data'].some((d) => rel === d || rel.startsWith(d + sep));
 }
 
+/** ใส่ `layout` ไว้ตำแหน่งเดียวกับที่ `importSheet` เขียน (ก่อน `importStats`) — ลำดับคีย์คือลำดับในแม่แบบ */
+function withLayout(m: PriceModel, layout: SheetLayout): PriceModel {
+  const out: Record<string, unknown> = {};
+  let placed = false;
+  for (const [k, v] of Object.entries(m)) {
+    if (k === 'layout') continue;
+    if (k === 'importStats' && !placed) { out.layout = layout; placed = true; }
+    out[k] = v;
+  }
+  if (!placed) out.layout = layout;
+  return out as unknown as PriceModel;
+}
+
+/**
+ * `--layout-only` — เติม "หน้าตาในไฟล์ราคา" (`SheetLayout`: ข้อความท้ายแถว · ตัวหนังสือใต้คอลัมน์ · คอลัมน์ไฮไลต์เหลือง)
+ * จากไฟล์ Excel ลงเล่มปัจจุบันในฐาน **โดยไม่แตะราคาสักช่อง**
+ *
+ * มีเพราะเล่มในฐานบูตก่อนที่ตัวนำเข้าจะอ่านสามอย่างนี้ (เจ้าของสั่งเพิ่ม 2026-09-24) และการนำเข้าทั้งเล่มซ้ำ
+ * (`--replace-all`) จะทับราคาที่แอดมินแก้จากจอไปแล้ว ⇒ ทางนี้แตะเฉพาะช่อง `layout` ของรุ่นที่แมปมี `layout`
+ * ไม่ใส่ `--apply` = รายงานอย่างเดียว · ใส่ = การบันทึกหนึ่งครั้ง (ย้อนได้จากปุ่มย้อนเล่มเหมือนทุกการบันทึก)
+ */
+async function applyLayoutOnly(fromFile: PriceBook, opts: { apply: boolean; by: string | null }): Promise<number> {
+  const state = await readBookState();
+  if (!state) {
+    console.error('ยังไม่มีสมุดราคาในฐาน — --layout-only เติมได้เฉพาะเล่มที่มีอยู่แล้ว');
+    return 1;
+  }
+  const models = { ...state.book.models };
+  const changed: string[] = [];
+  for (const [code, m] of Object.entries(state.book.models)) {
+    const want = fromFile.models[code]?.layout;
+    if (!want) continue; // แมปของรุ่นนี้ไม่ได้บอกให้อ่านหน้าตา ⇒ ไม่แตะ (รวมถึงของที่คนตั้งจากจอ)
+    if (JSON.stringify(m.layout) === JSON.stringify(want)) continue;
+    models[code] = withLayout(m, want);
+    changed.push(code);
+    console.log(`\n${code}:`);
+    if (want.rowNote) console.log(`  ${want.rowNote.label}: ${Object.entries(want.rowNote.values).map(([k, v]) => `${k} = ${v}`).join(' · ')}`);
+    if (want.colNotes) console.log(`  ข้อความใต้คอลัมน์: ${Object.entries(want.colNotes).map(([k, v]) => `${k} → ${v}`).join(' · ')}`);
+    if (want.highlightCols) console.log(`  คอลัมน์ไฮไลต์เหลือง: ${want.highlightCols.join(', ')}`);
+  }
+  if (changed.length === 0) {
+    console.log('\nเล่มในฐานมีหน้าตาตรงกับไฟล์ทุกรุ่นแล้ว — ไม่มีอะไรต้องเขียน');
+    return 0;
+  }
+  if (!opts.apply) {
+    console.log(`\n(ยังไม่ได้เขียนลงฐาน — ${changed.length} รุ่น · ใส่ --apply --by <username> เพื่อบันทึก · ไม่แตะราคา)`);
+    return 0;
+  }
+  const at = new Date().toISOString();
+  const revision = await commitBookChange({
+    parent: state.revision,
+    kind: 'model',
+    next: { ...state.book, models, edited: { at, by: opts.by ?? undefined, note: 'เติมหน้าตาของชีตจากไฟล์ราคา (ไม่แตะราคา)' } },
+    changed,
+    by: opts.by,
+  });
+  console.log(`\nบันทึกแล้ว — การบันทึกครั้งที่ ${revision} (${changed.join(', ')})`);
+  return 0;
+}
+
 async function main(): Promise<number> {
   const args = process.argv.slice(2);
   const val = (flag: string): string | undefined => {
@@ -416,6 +542,7 @@ async function main(): Promise<number> {
   const by = val('--by') ?? null;
   const apply = args.includes('--apply');
   const replaceAll = args.includes('--replace-all');
+  const layoutOnly = args.includes('--layout-only');
 
   if (!dataDir === !fromJson) {
     console.error('ต้องบอกที่มาของสมุดราคาอย่างใดอย่างหนึ่ง:');
@@ -456,6 +583,8 @@ async function main(): Promise<number> {
       );
     }
   }
+
+  if (layoutOnly) return applyLayoutOnly(book, { apply, by });
 
   if (outFile) {
     writeFileSync(resolve(outFile), JSON.stringify(book, null, 2), 'utf8');

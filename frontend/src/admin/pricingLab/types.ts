@@ -266,6 +266,12 @@ export interface EditorView {
   title: string;
   /** เปิดแบบชีต Excel ได้ครบทุกช่อง */
   excel: boolean;
+  /** หน้าตาของชีตรอบตาราง (แสดงผลอย่างเดียว ไม่มีผลกับราคา) — คีย์ = ค่าแกนแถว/คอลัมน์ */
+  layout: {
+    rowNote: { label: string; values: Record<string, string> } | null;
+    colNotes: Record<string, string>;
+    highlightCols: string[];
+  };
   label: string;
   sheet: string;
   aliases: string[];

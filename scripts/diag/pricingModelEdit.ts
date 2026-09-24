@@ -15,7 +15,9 @@ import { NoBook, loadBookFrom } from '../pricebook/bookSource.js';
 import { computePrice, resolveModel } from '../../services/pricingLab/engine.js';
 import { parseProductCode } from '../../services/pricingLab/code.js';
 import { EditRejected, applyModelEdit, excelReady, modelEditorView } from '../../services/pricingLab/modelEditor.js';
-import type { PriceBook, PriceModel } from '../../services/pricingLab/types.js';
+import type { PriceBook, PriceModel, SheetLayout } from '../../services/pricingLab/types.js';
+import { makeTemplate, readUploaded } from '../../services/pricingLab/bookFile.js';
+import { applyModels } from '../../services/pricingLab/bookUpdate.js';
 
 let pass = 0;
 const fails: string[] = [];
@@ -352,6 +354,55 @@ if (!ts01 || !ts010 || ts01.base.kind !== 'matrix') {
     check(`${m.code} — บันทึกทั้งชีตแบบไม่แก้อะไร ได้ JSON เดิมทุกไบต์`,
       JSON.stringify(applyModelEdit(m, body, book)) === JSON.stringify(m));
   }
+}
+
+console.log('\n── 7. หน้าตาของชีต (ชนิดสายรุ่นเริ่มต้น · ตัวหนังสือแดง · คอลัมน์เหลือง) ────────\n');
+
+// เจ้าของสั่งเพิ่ม 2026-09-24 — แสดงผลอย่างเดียว ⇒ ข้อที่สำคัญที่สุดคือ "ราคาไม่ขยับ" และ "ไม่หายระหว่างทาง"
+// ค่าเดียวกับที่ `importer.ts --layout-only` อ่านได้จากไฟล์จริง (TS-01+TS-01-0!G11:G15 · C16:D16 · E11:E15)
+if (ts01 && ts01.base.kind === 'matrix') {
+  const LAY: SheetLayout = {
+    rowNote: { label: 'ชนิดสาย รุ่นเริ่มต้น', values: { 'TSK/TSJ': 'สาย ถักสแตนเลส', TST: 'สาย เทปล่อน', TSP: 'สาย PVC', TSPA: 'สาย PVC', TSZ: 'สาย PVC' } },
+    colNotes: { 'M8x1.0': '*M8x1.25', 'M10x1.25': '*M10x1.5' },
+    highlightCols: ['1/4”'],
+  };
+  const withL: PriceModel = { ...ts01, layout: LAY };
+  const bookL = withModel(withL);
+  const v7 = modelEditorView(bookL, withL);
+  check('จอได้หน้าตาครบสามอย่าง',
+    v7.layout.rowNote?.values.TST === 'สาย เทปล่อน' && v7.layout.colNotes['M8x1.0'] === '*M8x1.25' && v7.layout.highlightCols[0] === '1/4”');
+  const priceAll = (b: PriceBook) => ['TSK/TSJ', 'TST', 'TSZ'].map((r) =>
+    computePrice({ model: 'TSK-01', axes: { sensor: r, thread: 'M8x1.0' } }, b).unitPrice).join(',');
+  check('มีหน้าตาแล้วราคาไม่ขยับสักช่อง', priceAll(bookL) === priceAll(book));
+
+  const sameBody = { layout: { rowNote: LAY.rowNote!.values, colNotes: LAY.colNotes, highlightCols: LAY.highlightCols } };
+  check('บันทึกหน้าตาเดิมกลับไป ⇒ JSON เดิมทุกไบต์', JSON.stringify(applyModelEdit(withL, sameBody, bookL)) === JSON.stringify(withL));
+  check('ไม่ส่ง layout มา ⇒ คงเดิม (หน้าแก้ทีละรุ่นไม่ลบของที่มันไม่เห็น)',
+    JSON.stringify(applyModelEdit(withL, { cells: {} }, bookL).layout) === JSON.stringify(LAY));
+  const e7 = applyModelEdit(withL, { layout: { ...sameBody.layout, rowNote: { ...LAY.rowNote!.values, TSZ: 'สาย ไฟเบอร์กลาส' }, highlightCols: ['M6x1.0', '1/4”'] } }, bookL);
+  check('แก้ข้อความท้ายแถว + เพิ่มคอลัมน์เหลือง ได้ตามลำดับคอลัมน์ของตาราง',
+    e7.layout?.rowNote?.values.TSZ === 'สาย ไฟเบอร์กลาส' && e7.layout?.highlightCols?.join(',') === 'M6x1.0,1/4”'
+      && e7.layout?.rowNote?.label === 'ชนิดสาย รุ่นเริ่มต้น', JSON.stringify(e7.layout));
+  const cleared = applyModelEdit(withL, { layout: { rowNote: {}, colNotes: {}, highlightCols: [] } }, bookL);
+  check('ลบทุกอย่าง ⇒ ช่อง layout หายไปทั้งช่อง (ไม่เหลือ {} ค้าง)', !('layout' in cleared));
+  expectReject('ข้อความของแถวที่ไม่มีในตาราง ถูกปฏิเสธ',
+    () => applyModelEdit(withL, { layout: { rowNote: { TSX: 'x' } } }, bookL), /ไม่มี "TSX"/);
+  expectReject('ไฮไลต์คอลัมน์ที่ไม่มี ถูกปฏิเสธ',
+    () => applyModelEdit(withL, { layout: { highlightCols: ['M99'] } }, bookL), /ไม่มี "M99"/);
+  expectReject('ข้อความยาวเกิน ถูกปฏิเสธ',
+    () => applyModelEdit(withL, { layout: { colNotes: { 'M6x1.0': 'x'.repeat(61) } } }, bookL), /ยาวเกิน/);
+  const bad = modelEditorView(bookL, { ...withL, layout: { rowNote: 'พัง', colNotes: [1], highlightCols: 'x' } as unknown as SheetLayout });
+  check('layout เสียในฐาน (ใครแก้มือ) ⇒ จอไม่พัง อ่านเป็นว่าง',
+    bad.layout.rowNote === null && Object.keys(bad.layout.colNotes).length === 0 && bad.layout.highlightCols.length === 0);
+
+  // แม่แบบ Excel ไป-กลับ: หน้าตาต้องไม่หายระหว่างทาง (ชีต "หน้าตาในไฟล์ราคา")
+  const { book: back } = await readUploaded(Buffer.from(makeTemplate(bookL, '2026-09-24')));
+  check('แม่แบบ .xlsx ไป-กลับ ⇒ หน้าตาเท่าเดิมทุกไบต์',
+    JSON.stringify(back?.models['TSK-01']?.layout) === JSON.stringify(LAY), JSON.stringify(back?.models['TSK-01']?.layout));
+  // ไฟล์รุ่นเก่า (ไม่มีชีตหน้าตา) = ไม่รู้ ไม่ใช่ลบ
+  const oldFile: PriceBook = { ...bookL, models: { ...bookL.models, 'TSK-01': { ...withL, layout: undefined } } };
+  const merged = applyModels(bookL, oldFile, ['TSK-01'], { at: '2026-09-24T00:00:00.000Z' });
+  check('อัปแม่แบบรุ่นก่อนที่ไม่มีชีตหน้าตา ⇒ หน้าตาเดิมยังอยู่', JSON.stringify(merged.models['TSK-01']?.layout) === JSON.stringify(LAY));
 }
 
 console.log(`\n${'─'.repeat(70)}`);
