@@ -123,7 +123,7 @@ push ซึ่งมีโควตารายเดือนและมีค
 npm run dev          # API (tsx watch)
 npm run dev:web      # Admin SPA (Vite)
 npm run dev:all      # API + admin + ngrok พร้อมกัน
-# บนเครื่อง PMSV ไม่ใช้สามตัวบน — พรีวิวร่วมคือ localhost:5180 (systemd user service · docs/dev-preview.md)
+npm run preview:start · preview:stop · preview:status · preview:logs   # PMSV: พรีวิวร่วม localhost:5180 เปิด/ปิดเอง (docs/dev-preview.md) — ใช้แทนสามตัวบน
 
 npx tsc --noEmit                   # typecheck backend — ด่านหลัก ไม่มี unit test suite
 npm --prefix frontend run lint     # eslint ของ admin
@@ -514,6 +514,7 @@ chatbot/
 - **`docs/agent-team.md`** — ทีม agent 7 ตัวใน `.claude/agents/` · เกณฑ์ `effort`/`isolation` · loop ของงาน
 - **`docs/dev-preview.md`** — **พรีวิวร่วมบน PMSV ที่ `localhost:5180`** = โค้ดของ main (ไม่ใช่ worktree) ทั้ง backend+frontend
   เปลี่ยนเองเมื่อโค้ดเปลี่ยน · **ใช้ฐานตัวจริง** · ห้ามเปิด Vite/backend ชั่วคราวของตัวเองบน 5180 — อยากให้เจ้าของดู = merge เข้า main
+  · **เจ้าของเปิด/ปิดเอง** (`npm run preview:start`/`stop`) ไม่รันค้าง — agent เปิดทดสอบแล้วต้องปิดคืนถ้าเดิมมันปิดอยู่
 - **`DEPLOY.md`** — Docker, LINE webhook, กฎ LIFF ต้องอยู่ provider เดียวกับ Messaging API channel,
   กู้รหัสผ่านแอดมิน, พ.ร.บ.คอมพิวเตอร์ ม.26, แก้ปัญหาเบื้องต้น
 - **`README.md`** — โครงสร้างละเอียด: endpoint ทั้งหมด, schema, business logic รายบริการ

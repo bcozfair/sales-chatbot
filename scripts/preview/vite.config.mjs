@@ -1,4 +1,4 @@
-// Vite ของพรีวิวร่วม (deploy/preview/primus-preview-web.service · docs/dev-preview.md)
+// Vite ของพรีวิวร่วม (scripts/preview/preview.sh · docs/dev-preview.md)
 //
 // ต่างจาก frontend/vite.config.ts แค่สองข้อ — ที่เหลือ (พอร์ต 5180 · strictPort · plugin) เอามาทั้งก้อน
 //  1. proxy ไปที่ backend ของพรีวิว (PREVIEW_API · ตั้งต้น 127.0.0.1:3098) ไม่ใช่ 3011 ของตัวจริง

@@ -3,6 +3,7 @@
 > เจ้าของสั่ง 2026-09-24: *"พรีวิวตอน dev ก่อน deploy บนเครื่อง PMSV ให้ใช้พอร์ตทดสอบเดียวกัน
 > ทุก session เห็นได้ทั้ง backend และ frontend ตรงกับ code ล่าสุด เปลี่ยนทันทีเมื่อ code เปลี่ยน
 > ไม่ต้อง refresh"* · และในวันเดียวกัน *"อยากรัน local มากกว่า"* (ไม่ใช่ docker — ดู "ทางที่ไม่ได้เลือก")
+> และ *"ไม่ต้องการให้ server พรีวิวรันค้างไว้ ต้อง start และ stop เองได้"*
 
 ## สรุปสั้น
 
@@ -13,21 +14,30 @@
 | แก้หน้าจอ (`frontend/src`) | จอเปลี่ยนเองทันที (Vite HMR) — state บนจอยังอยู่ |
 | แก้ backend (`*.ts` นอก frontend) | backend รีสตาร์ตเอง (`tsx watch`) ขึ้นเสร็จแล้ว **หน้าเว็บรีโหลดเอง** ไม่ต้องกด |
 | ฐานข้อมูล | **ตัวจริง** — ฐานเดียวบนเครื่องนี้ (ดู "ข้อควรระวัง") |
-| โปรเซส | systemd **user** service สองตัว รันบนโฮสต์ตรง ๆ (ไม่ใช่ docker) ขึ้นเองหลังรีบูต (linger เปิดไว้) |
-| ไฟล์ | `deploy/preview/*.service` · `scripts/preview/vite.config.mjs` · `PREVIEW_MODE` ใน `index.ts` |
+| เปิด/ปิด | **เจ้าของสั่งเอง** — ไม่รันค้าง ไม่ขึ้นเองตอนบูต (รีบูตแล้วหาย) |
+| ไฟล์ | `scripts/preview/preview.sh` · `scripts/preview/vite.config.mjs` · `PREVIEW_MODE` ใน `index.ts` |
 
-| service | ทำอะไร | พอร์ต |
+```bash
+npm run preview:start    # เปิด แล้วรอจนพร้อม (~5 วิ) · รันเบื้องหลัง ปิด terminal ได้
+npm run preview:stop     # ปิด (ไม่แตะตัวจริง)
+npm run preview:status   # เปิดอยู่ไหม
+npm run preview:logs     # log ทั้งสองตัว (Ctrl-C ออก — พรีวิวยังรันต่อ)
+```
+สั่งจากทรีหลักหรือจาก worktree ไหนก็ได้ — สคริปต์หาทรีหลักจาก `git worktree list` เอง
+start ซ้ำตอนเปิดอยู่แล้ว = บอกว่าเปิดอยู่ ไม่เปิดชุดที่สอง
+
+| ตัว (transient unit ของ `systemd-run --user`) | ทำอะไร | พอร์ต |
 | --- | --- | --- |
 | `primus-preview-api` | `tsx watch index.ts` + `PREVIEW_MODE=1` · อ่าน `.env` ของทรีหลัก | `127.0.0.1:3098` |
 | `primus-preview-web` | Vite + HMR · proxy `/api` `/data` `/download-pdf` ไป 3098 | `127.0.0.1:5180` |
 
-```bash
-systemctl --user status  primus-preview-api primus-preview-web
-systemctl --user restart primus-preview-api      # ปกติไม่ต้อง — tsx watch รีสตาร์ตเองเมื่อไฟล์เปลี่ยน
-journalctl --user -u primus-preview-api -f       # log ของ backend พรีวิว
-journalctl --user -u primus-preview-web -f       # log ของ Vite
-systemctl --user stop    primus-preview-api primus-preview-web   # ปิด (ไม่แตะตัวจริง)
-```
+ทำไม `systemd-run` ไม่ใช่ไฟล์ `.service`: ไม่มีไฟล์ unit ติดตั้งไว้ในเครื่อง = ไม่มีทางเผลอ `enable`
+ให้ขึ้นเองตอนบูต (ตามที่เจ้าของสั่ง) แต่ยังได้การรันต่อหลังปิด terminal · log ใน journal ·
+ชื่อตายตัวกันเปิดซ้ำสองชุด · ทางที่ไม่ได้เลือก: `concurrently` แบบ `dev:all` — ปิด terminal แล้วตาย
+และถ้าลืมปิด ตัวที่สองจะชนพอร์ตแบบอ่านยาก
+
+**agent:** พรีวิวเป็นของเจ้าของเปิด/ปิด — ถ้าต้องเปิดเพื่อทดสอบเอง ให้ **ปิดคืนเมื่อเสร็จ ถ้าก่อนเริ่มมันปิดอยู่**
+(เช็กด้วย `npm run preview:status` ก่อน) · ถ้าเจ้าของเปิดไว้อยู่แล้ว ห้ามปิดของเขา
 
 ## ทำไมถึงเป็น "main" ไม่ใช่ worktree ของแต่ละ session
 
@@ -45,8 +55,8 @@ session หนึ่งเปิด Vite+backend ชั่วคราวค้�
 ## ห้าม
 
 - **ห้ามเปิด Vite / backend ชั่วคราวของตัวเองบน 5180** (`npm run dev:web` บนโฮสต์ก็ใช่)
-  — `strictPort` ทำให้ตัวที่มาทีหลังตายเสียงดัง ซึ่งเป็นสิ่งที่ต้องการ อย่าไปหยุด service เพื่อเปิดของตัวเอง
-- **ห้ามแก้ `WorkingDirectory` ให้ชี้ worktree** — พรีวิวจะกลายเป็นโค้ดของ worktree นั้นสำหรับทุกคน
+  — `strictPort` ทำให้ตัวที่มาทีหลังตายเสียงดัง ซึ่งเป็นสิ่งที่ต้องการ อย่าไปหยุดพรีวิวเพื่อเปิดของตัวเอง
+- **ห้ามแก้ `preview.sh` ให้รันโค้ดจาก worktree** — พรีวิวจะกลายเป็นโค้ดของ worktree นั้นสำหรับทุกคน
 - **ห้ามชี้ proxy ไปที่ตัวจริง (3011) แทน 3098** — ตัวจริงรันโค้ดของ deploy ล่าสุด ไม่ใช่ main
   ⇒ ส่วนที่ต้องใช้ backend ใหม่จะดูเหมือนพังทั้งที่ไม่ได้พัง
 
@@ -86,28 +96,23 @@ puppeteer หา Chrome ที่ `~/.cache/puppeteer/chrome/linux-<เวอร
   · วัด 2026-09-24: ใบ `QT-260905398` จากพรีวิว (Chrome 148 บนโฮสต์ · 1.4 วิ) เทียบกับตัวจริง
   **หน้าตาตรงกันทุกจุด** ทั้งตัวหนังสือไทย ตำแหน่ง และการตัดบรรทัด (ไฟล์ 153 KB กับ 156 KB)
 
-## ติดตั้ง (ครั้งเดียวต่อเครื่อง)
+## ติดตั้ง (ครั้งเดียวต่อเครื่อง — ทำแล้วบน PMSV 2026-09-24)
 
 ```bash
 cd /home/app_sales/salechatbot/chatbot
 PUPPETEER_SKIP_DOWNLOAD=true npm ci --include=dev         # node_modules ของ backend บนโฮสต์
 # Chrome + library + ฟอนต์ไทย: หัวข้อข้างบน
-mkdir -p ~/.config/systemd/user
-ln -sf "$PWD"/deploy/preview/primus-preview-api.service ~/.config/systemd/user/
-ln -sf "$PWD"/deploy/preview/primus-preview-web.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now primus-preview-api primus-preview-web
 ```
+ไม่มีขั้น systemd — `preview:start` สร้างตัวรันชั่วคราวให้เองทุกครั้ง
 
 ## เมื่อ dependency เปลี่ยน
 
 | เปลี่ยนที่ | ทำอะไร |
 | --- | --- |
-| `package.json` (backend) | `PUPPETEER_SKIP_DOWNLOAD=true npm ci --include=dev` ที่ทรีหลัก แล้ว `systemctl --user restart primus-preview-api` (ถ้า puppeteer ขยับเวอร์ชัน ต้องโหลด Chrome เวอร์ชันใหม่ด้วย) |
-| `frontend/package.json` | `npm --prefix frontend install` แล้ว `systemctl --user restart primus-preview-web` |
-| `deploy/preview/*.service` | `systemctl --user daemon-reload && systemctl --user restart primus-preview-api primus-preview-web` |
-| `scripts/preview/vite.config.mjs` | `systemctl --user restart primus-preview-web` |
-| เวอร์ชัน node ของ nvm | แก้ path ใน `ExecStart`/`PATH` ของทั้งสองไฟล์ `.service` |
+| `package.json` (backend) | `PUPPETEER_SKIP_DOWNLOAD=true npm ci --include=dev` ที่ทรีหลัก แล้ว stop/start (ถ้า puppeteer ขยับเวอร์ชัน ต้องโหลด Chrome เวอร์ชันใหม่ด้วย) |
+| `frontend/package.json` | `npm --prefix frontend install` แล้ว stop/start |
+| `scripts/preview/*` | stop/start |
+| เวอร์ชัน node ของ nvm | ไม่ต้องทำอะไร — สคริปต์ใช้ `node` ตัวที่อยู่ใน PATH ตอนสั่ง start |
 
 ## กลไก (เผื่อต้องแก้)
 

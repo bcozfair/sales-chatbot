@@ -207,7 +207,7 @@ getAppUrl();
 
 const app = express();
 
-// ── โหมดพรีวิวร่วมของเครื่อง dev (systemd user service · docs/dev-preview.md) ────────────────
+// ── โหมดพรีวิวร่วมของเครื่อง dev (npm run preview:start · docs/dev-preview.md) ────────────────
 // ตัวจริงไม่ได้ตั้งค่านี้ ⇒ บล็อกนี้ไม่มีผลอะไรกับ production เลย
 // เปิดแล้วต่างจากตัวจริงแค่สามข้อ:
 //  1. `/__preview/boot` ตอบรหัสประจำโปรเซส — Vite ของพรีวิวถามทุกวินาที รหัสเปลี่ยน = backend
