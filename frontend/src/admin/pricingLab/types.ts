@@ -234,7 +234,8 @@ export interface EditorAdder {
   unit: string;
   byAxis: string | null;
   byAxisTh: string | null;
-  rates: { value: string; rate: number }[] | null;
+  /** `rate: null` = ค่าแกนนี้ไม่มีราคา (ต้องขอราคา) — ไม่ใช่ 0 */
+  rates: { value: string; rate: number | null }[] | null;
   disabled: boolean;
   custom: boolean;
   note: string;

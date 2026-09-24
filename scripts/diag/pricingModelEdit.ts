@@ -180,6 +180,81 @@ check('กฎเดิมไม่ถูกมาร์กว่าเพิ่�
 check('ที่มาในชีตของกฎเดิมยังอยู่',
   added.adders.find((a) => a.id === 'hold')?.source === bh01.adders.find((a) => a.id === 'hold')?.source);
 
+console.log('\n── 4. ราคาแยกตามค่าแกน (ซีรีส์ TS) — ช่องว่างต้องไม่กลายเป็น 0 ────────────\n');
+
+// เจ้าของเจอ 2026-09-23: ลบเลขในช่อง "ความยาวแกน L1 · ขนาด 2" ทิ้งแล้วบันทึก เดิมหน้าจอส่ง 0 ⇒ ขนาดนั้น
+// กลายเป็น "ไม่คิดเงินเพิ่ม" เงียบ ๆ · ของที่ถูกคือ "ไม่มีราคา" ⇒ ตัวคิดราคาต้องไม่คิดราคาขนาดนั้นให้
+const tsk04 = book.models['TSK-04'];
+if (!tsk04?.adders.find((a) => a.id === 'len_l1')?.rates) {
+  check('สมุดมี TSK-04 พร้อมกฎ len_l1 ที่ราคาแยกตามขนาดแกน', false, 'ไม่มี — ข้ามหัวข้อนี้');
+} else {
+  const tView = modelEditorView(book, tsk04);
+  const tAdders = tView.adders.map((a) => ({ ...a, when: a.when ?? { always: true } }));
+  const withRate = (rate: number | null) => applyModelEdit(tsk04, {
+    adders: tAdders.map((a) => (a.id !== 'len_l1' ? a : {
+      ...a, rates: a.rates!.map((r) => (r.value === '2' ? { ...r, rate } : r)),
+    })),
+    constraintsOff: [],
+  });
+  const emptied = withRate(null).adders.find((a) => a.id === 'len_l1')!;
+  check('ลบเลขทิ้ง ⇒ ขนาดนั้นหายจากตาราง (ไม่มีราคา) ไม่ใช่ 0', !('2' in (emptied.rates ?? {})),
+    JSON.stringify(emptied.rates?.['2']));
+  check('  ขนาดอื่นในกฎเดียวกันไม่ขยับ',
+    Object.keys(emptied.rates ?? {}).length === Object.keys(tsk04.adders.find((a) => a.id === 'len_l1')!.rates!).length - 1);
+  check('ใส่ 0 เอง ⇒ เก็บเป็น 0 จริง (ไม่คิดเงินเพิ่ม)',
+    withRate(0).adders.find((a) => a.id === 'len_l1')!.rates?.['2'] === 0);
+}
+
+/**
+ * จุดแรกที่สองค่าต่างกันจริง — ไม่นับลำดับคีย์ในออบเจกต์ และไม่นับคีย์ที่ค่าเป็น undefined
+ * (ตัวบันทึกประกอบกฎใหม่ด้วยลำดับคีย์ของมันเอง ซึ่งไม่กระทบราคาและไม่กระทบแม่แบบ .xlsx)
+ * ลำดับใน **อาเรย์** ยังนับ — ลำดับกฎ/ช่วงราคาคือสิ่งที่คนเห็นในแม่แบบ
+ */
+function firstDiff(a: unknown, b: unknown, path = ''): string | null {
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b)) return `${path}: ${JSON.stringify(a)} → ${JSON.stringify(b)}`;
+    if (a.length !== b.length) return `${path}: ${a.length} → ${b.length} รายการ`;
+    for (let i = 0; i < a.length; i++) {
+      const d = firstDiff(a[i], b[i], `${path}[${i}]`);
+      if (d) return d;
+    }
+    return null;
+  }
+  if (a && b && typeof a === 'object' && typeof b === 'object') {
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+    for (const k of keys) {
+      const d = firstDiff((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k], `${path}.${k}`);
+      if (d) return d;
+    }
+    return null;
+  }
+  return a === b ? null : `${path}: ${JSON.stringify(a)} → ${JSON.stringify(b)}`;
+}
+
+console.log('\n── 5. บันทึกโดยไม่แตะอะไร ⇒ สมุดต้องเท่าเดิมทุกค่า ทุกรุ่น ──────────────────\n');
+
+// ข้อนี้มีเพราะเจอพร้อมกันสามเรื่อง 2026-09-23: TS-18 บันทึกไม่ได้เลย (เงื่อนไขประกอบถูกปฏิเสธ) ·
+// ช่วงราคาของ BH สลับลำดับคีย์ · หน่วย " m" ถูกตัดช่องว่าง — สองเรื่องหลังไม่เปลี่ยนราคา แต่ทำให้
+// ประวัติบันทึกว่า "เปลี่ยน" ทั้งที่ไม่มีใครแก้อะไร ⇒ ส่งสิ่งที่หน้าจอส่งจริง แล้วเทียบทั้งรุ่น (ไม่นับลำดับคีย์)
+for (const m of Object.values(book.models)) {
+  const v = modelEditorView(book, m);
+  const body: Record<string, unknown> = {
+    adders: v.adders.map((a) => ({ ...a, when: a.when ?? { always: true } })),
+    constraintsOff: v.constraints.filter((c) => c.disabled).map((c) => c.id),
+  };
+  if (v.base.kind === 'banded') body.bands = v.base.bands;
+  if (v.variant) {
+    body.variant = { suffix: v.variant.suffix, label: v.variant.label, percent: v.variant.percent,
+      adderPrices: v.variant.adderPrices ?? {}, disabled: v.variant.disabled };
+  }
+  try {
+    const diff = firstDiff(m, applyModelEdit(m, body));
+    check(`${m.code} — บันทึกเปล่าแล้วสมุดเท่าเดิม`, diff === null, diff ?? '');
+  } catch (e) {
+    check(`${m.code} — บันทึกเปล่าแล้วสมุดเท่าเดิม`, false, e instanceof Error ? e.message : String(e));
+  }
+}
+
 console.log(`\n${'─'.repeat(70)}`);
 console.log(`ผล: ผ่าน ${pass} · ตก ${fails.length}`);
 console.log('─'.repeat(70));

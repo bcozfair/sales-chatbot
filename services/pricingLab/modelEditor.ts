@@ -240,10 +240,20 @@ function text(v: unknown, what: string, max: number, required = true): string {
  * ส่งกลับมาทั้งก้อนไม่ได้ ⇒ กฎที่เงื่อนไขซับซ้อนกว่านี้ แก้ได้แค่ตัวเลขกับชื่อ
  * (หน้าจอบอกไว้ก่อนแล้วว่าบันทึกแล้วเงื่อนไขจะถูกแทน)
  */
-function readWhen(raw: unknown): Predicate | undefined {
+/**
+ * เงื่อนไขของกฎ — ไวยากรณ์ปิด ไม่ใช่ expression อิสระ (เหตุผลที่หัว RuleEditModal.tsx)
+ *
+ * รับเงื่อนไขประกอบ (`all` / `any` / `not`) และ "ค่าแกนอยู่/ไม่อยู่ในรายการ" (`axis` + `in`/`notIn`) ด้วย
+ * **เพราะกฎที่ลอกมาจากชีตมีแบบนี้อยู่จริง** — เดิมรับแค่ `option` กับ `dim` ⇒ หน้า TS-18 (กฎ 2 element
+ * ที่แยก Thermocouple กับ RTD) บันทึกไม่ได้เลยสักครั้ง แม้แก้แค่ตัวเลขช่องเดียวที่ไม่เกี่ยวกัน
+ * เพราะหน้าจอส่งเงื่อนไขเดิมกลับมาทั้งก้อน (เจอ 2026-09-23 จากด่านบันทึกเปล่าทุกรุ่น)
+ * ทุกใบของต้นไม้ยังต้องชี้ไปยังคำในรายการปิด (OPTION_TH · DIM_TH · AXIS_TH) เหมือนเดิม และลึกได้ไม่เกิน 4 ชั้น
+ */
+function readWhen(raw: unknown, depth = 0): Predicate | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
+  if (depth > 4) reject('เงื่อนไข: ซ้อนกันลึกเกินไป');
   const o = raw as Record<string, unknown>;
-  if (o.always === true) return undefined; // "ทุกกรณี" = ไม่เก็บเงื่อนไขเลย
+  if (o.always === true) return depth === 0 ? undefined : { always: true }; // "ทุกกรณี" = ไม่เก็บเงื่อนไขเลย
   if (typeof o.option === 'string') {
     const key = o.option;
     if (!(key in OPTION_TH)) reject(`เงื่อนไข: ไม่รู้จักตัวเลือก "${key}"`);
@@ -262,6 +272,27 @@ function readWhen(raw: unknown): Predicate | undefined {
     if (n === 0) reject('เงื่อนไข: ยังไม่ได้ใส่ตัวเลขเกณฑ์');
     return out;
   }
+  if (typeof o.axis === 'string' && (Array.isArray(o.in) || Array.isArray(o.notIn))) {
+    const axis = o.axis;
+    if (!(axis in AXIS_TH)) reject(`เงื่อนไข: ไม่รู้จักแกน "${axis}"`);
+    const list = (Array.isArray(o.in) ? o.in : o.notIn) as unknown[];
+    if (list.length === 0 || list.length > 200) reject(`เงื่อนไข ${axis}: รายการค่าต้องมี 1–200 ค่า`);
+    const values = list.map((v) => text(v, `เงื่อนไข ${axis} — ค่า`, 40));
+    return Array.isArray(o.in) ? { axis, in: values } : { axis, notIn: values };
+  }
+  for (const k of ['all', 'any'] as const) {
+    if (Array.isArray(o[k])) {
+      const list = o[k] as unknown[];
+      if (list.length === 0 || list.length > 10) reject('เงื่อนไข: เงื่อนไขย่อยต้องมี 1–10 ข้อ');
+      const parts = list.map((x) => readWhen(x, depth + 1) ?? reject('เงื่อนไข: เงื่อนไขย่อยว่าง'));
+      return (k === 'all' ? { all: parts } : { any: parts }) as Predicate;
+    }
+  }
+  if (o.not && typeof o.not === 'object') {
+    const inner = readWhen(o.not, depth + 1);
+    if (!inner) reject('เงื่อนไข: "ไม่ใช่" ต้องมีเงื่อนไขข้างใน');
+    return { not: inner! };
+  }
   reject('เงื่อนไข: อ่านไม่ออกว่าเป็นแบบไหน');
   return undefined;
 }
@@ -273,12 +304,15 @@ function readBands(raw: unknown): Band[] {
     const max = b.max === null || b.max === undefined || b.max === '' ? null : money(b.max, `ช่วงที่ ${i + 1} — ถึง`);
     if (max !== null && max < min) reject(`ช่วงที่ ${i + 1}: "ถึง" น้อยกว่า "ตั้งแต่"`);
     const price = optMoney(b.price, `ช่วงที่ ${i + 1} — ราคา`);
-    const out: Band = { min, max, label: text(b.label, '', 40, false) || `${min} - ${max ?? 'ขึ้นไป'}` };
+    // ลำดับคีย์ = ลำดับเดียวกับที่ตัวนำเข้าเขียน (min · max · ราคา · label) ⇒ บันทึกโดยไม่แตะอะไร
+    // ได้ JSON เดิมทุกไบต์ ไม่งั้นประวัติจะบันทึกว่า "เปลี่ยน" ทั้งที่ไม่มีราคาไหนขยับ (คอลัมน์เป็น json ไม่ใช่ jsonb)
+    const out: Band = { min, max };
     // ช่องราคาที่เว้นว่าง = ไม่รับผลิตขนาดนั้น ไม่ใช่ราคา 0 ⇒ ไม่เก็บทั้งสองช่อง
     if (price !== undefined) {
       if (b.kind === 'rate') out.rate = price;
       else out.flat = price;
     }
+    out.label = text(b.label, '', 40, false) || `${min} - ${max ?? 'ขึ้นไป'}`;
     return out;
   });
   bands.sort((a, b) => a.min - b.min);
@@ -305,7 +339,7 @@ function readAdders(raw: unknown, before: Adder[]): Adder[] {
   if ((raw as unknown[]).length > 100) reject('กฎบวกเพิ่ม: มากเกิน 100 ข้อ');
   const used = new Set<string>();
   const old = new Map(before.map((a) => [a.id, a]));
-  return (raw as Record<string, unknown>[]).map((a) => {
+  const out = (raw as Record<string, unknown>[]).map((a) => {
     const id = readId(a.id, used);
     const prev = old.get(id);
     const kind = a.kind === 'percent' || a.kind === 'perUnit' ? a.kind : 'flat';
@@ -335,7 +369,9 @@ function readAdders(raw: unknown, before: Adder[]): Adder[] {
       out.over = optMoney(a.over, `กฎ ${id} — ส่วนที่เกิน`);
       out.step = optMoney(a.step, `กฎ ${id} — ทุก ๆ`);
       if (out.step !== undefined && out.step <= 0) reject(`กฎ ${id}: ช่อง "ทุก ๆ" ต้องมากกว่า 0`);
-      out.unit = text(a.unit, '', 16, false);
+      // หน่วยจากชีตบางตัวมีช่องว่างนำหน้า (" m") และมันไปอยู่ในข้อความที่มาของราคา ⇒ ถ้าคนไม่ได้แก้ เก็บของเดิม
+      const unit = text(a.unit, '', 16, false);
+      out.unit = prev?.unit !== undefined && prev.unit.trim() === unit ? prev.unit : unit;
       out.rate = optMoney(a.rate, `กฎ ${id} — ราคาต่อหน่วย`);
       out.times = optMoney(a.times, `กฎ ${id} — ตัวคูณ`);
       out.round = prev?.round;
@@ -359,6 +395,14 @@ function readAdders(raw: unknown, before: Adder[]): Adder[] {
     }
     return out;
   });
+  // หน้าจอเรียงกฎตาม `order` ส่วนสมุดเก็บตามลำดับในชีต — engine เรียงเองตอนคิดอยู่แล้ว ลำดับจึงไม่กระทบราคา
+  // แต่ถ้าเขียนตามลำดับของจอ บันทึกครั้งแรกของทุกรุ่นจะเรียงสมุดใหม่ทั้งรุ่น ⇒ ประวัติเห็นเป็น "เปลี่ยน"
+  // และแม่แบบ .xlsx สลับแถว ⇒ กฎเดิมคงตำแหน่งเดิม · กฎใหม่ต่อท้ายตามลำดับที่หน้าจอส่งมา
+  const pos = new Map(before.map((a, i) => [a.id, i]));
+  return out
+    .map((a, i) => ({ a, k: pos.get(a.id) ?? before.length + i }))
+    .sort((x, y) => x.k - y.k)
+    .map((x) => x.a);
 }
 
 function readVariant(raw: unknown, adders: Adder[], prev?: ModelVariant): ModelVariant | undefined {
