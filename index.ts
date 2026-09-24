@@ -2800,11 +2800,8 @@ app.get('/api/admin/webquote/me', adminAuthMiddleware, requireCapability('quote.
       isReady = (profile?.employee_quotation_id ?? null) !== null;
     }
 
-    // ค่าที่แอดมินเลือก "ออกในนาม" ล่าสุด (§13.4) — เก็บใน DB แทน localStorage ตั้งแต่ 2026-09-22
-    // ผู้เรียก (frontend) ยังต้องเทียบกับรายชื่อที่โหลดได้จริงก่อนใช้เสมอ (เซลส์อาจถูกปิดไปแล้ว)
-    const { rows: actingRows } = await pool.query(
-      'SELECT acting_salesperson_id FROM admin_users WHERE id = $1', [admin.id]
-    );
+    // ไม่คืน acting_salesperson_id แล้ว (2026-09-24) — ช่อง "ออกในนาม" เริ่มว่างแล้วเติมจากลูกค้า
+    // (docs/plan-web-quote-auto-salesperson.md) · คอลัมน์ยังอยู่ในฐาน ไม่มีใครอ่าน/เขียน
 
     res.json({
       admin_id: admin.id,
@@ -2815,7 +2812,6 @@ app.get('/api/admin/webquote/me', adminAuthMiddleware, requireCapability('quote.
       has_signature: sig.exists,
       signature_url: sig.url,
       is_ready: isReady,
-      acting_salesperson_id: actingRows[0]?.acting_salesperson_id ?? null,
       own_salesperson: ownSalesperson,
     });
   } catch (err: any) {
@@ -2837,29 +2833,9 @@ app.put('/api/admin/webquote/me', adminAuthMiddleware, requireCapability('quote.
   });
 });
 
-/**
- * จำเซลส์ที่แอดมิน "ออกในนาม" ล่าสุดไว้ที่ DB แทน localStorage (§13.4)
- *
- * เก็บ**รหัส**พนักงานขาย ไม่ใช่ `user_id` — ตรงกับที่ `admin_users.acting_salesperson_id`
- * นิยามไว้ (คอลัมน์นี้มีอยู่แล้วตั้งแต่ P1) ไม่ใช่สิทธิ์และไม่มีผลย้อนหลังกับใบที่ออกไปแล้ว
- * (ใบตรึง `employee_details` ไว้ตั้งแต่ยืนยัน) จึง guard ด้วย `quote.create` เดิมพอ ไม่ต้องมี
- * capability ใหม่ · รับได้ทั้งชื่อ (`null` = ล้างค่า) และรหัสว่าง/มีค่า ไม่ตรวจว่ารหัสนั้นมีแถวจริง
- * ไหม (เป็นแค่ความสะดวกของ UI ไม่ใช่ด่านสิทธิ์ — ผู้เรียกฝั่ง frontend เทียบกับรายชื่อจริงเองอยู่แล้ว)
- */
-app.put('/api/admin/webquote/me/acting-salesperson', adminAuthMiddleware, requireCapability('quote.create'), express.json(), async (req: any, res: any) => {
-  try {
-    const raw = req.body?.salesperson_id;
-    const value = raw === null || raw === undefined ? null : String(raw).trim() || null;
-    await pool.query(
-      'UPDATE admin_users SET acting_salesperson_id = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1',
-      [req.admin.id, value]
-    );
-    res.json({ success: true, acting_salesperson_id: value });
-  } catch (err: any) {
-    console.error('PUT /api/admin/webquote/me/acting-salesperson error:', err);
-    res.status(500).json({ error: 'บันทึกไม่สำเร็จ' });
-  }
-});
+// `PUT /api/admin/webquote/me/acting-salesperson` (จำเซลส์ที่ "ออกในนาม" ล่าสุด · §13.4) ถูกถอดออก
+// 2026-09-24 — ช่องเริ่มว่างแล้วเติมจากลูกค้าแทน การเติม "คนเดิม" ให้ทุกใบคือการออกใบในนามคนผิด
+// (docs/plan-web-quote-auto-salesperson.md) · คอลัมน์ `admin_users.acting_salesperson_id` ยังอยู่ ไม่ drop
 
 /**
  * อัปโหลดลายเซ็นของตัวเอง — เก็บเป็นไฟล์ใน data/admin_sigs/<token สุ่ม>.<ext>
@@ -3083,6 +3059,7 @@ app.post('/api/admin/webquote/drafts', adminAuthMiddleware, requireCapability('q
       contactId: req.body?.contact_id,
       items: req.body?.items,
       proposeMsgId: req.body?.propose_msg_id,
+      spSource: req.body?.sp_source,
       reviseFrom: req.body?.revise_from,
       paymentTermsOverride: req.body?.payment_terms_override,
       delivery: req.body?.delivery,

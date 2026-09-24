@@ -68,8 +68,16 @@ interface ComboProps<T extends ComboOption> {
    * รับ `query` ที่พิมพ์ค้างไว้ไปด้วย — คนที่พิมพ์ชื่อแล้วไม่เจอ ไม่ควรต้องพิมพ์ซ้ำในกล่องถัดไป
    */
   action?: (query: string) => React.ReactNode;
-  /** ข้อเท็จจริงท้ายบรรทัด — ตัวเดียวใช้ทั้งในช่องและในรายการ ไม่งั้นคนนึกว่าคนละชุดข้อมูล */
-  facts?: (opt: T) => React.ReactNode;
+  /**
+   * ข้อเท็จจริงท้ายบรรทัด — ตัวเดียวใช้ทั้งในช่องและในรายการ ไม่งั้นคนนึกว่าคนละชุดข้อมูล
+   * `where` บอกว่ากำลังวาดที่ไหน ⇒ ผู้เรียกย่อในช่องได้โดยรายการยังครบ (ดู `badge`)
+   */
+  facts?: (opt: T, where: 'field' | 'list') => React.ReactNode;
+  /**
+   * ป้ายท้ายค่าที่เลือก (เฉพาะในช่อง ไม่ขึ้นในรายการ) — เช่น "ระบบเลือก" / "เลือกเอง" ของช่อง
+   * "ออกในนาม" (docs/plan-web-quote-auto-salesperson.md §3.4) · ไม่ส่ง = หน้าตาเดิมทุกอย่าง
+   */
+  badge?: React.ReactNode;
   /** ข้อความที่เอาไปกรองในเครื่อง (ค่าเริ่มต้น = ชื่อ) */
   searchText?: (opt: T) => string;
   /**
@@ -94,6 +102,7 @@ export function ComboBox<T extends ComboOption>({
   footer,
   action,
   facts,
+  badge,
   searchText,
   onQueryChange,
 }: ComboProps<T>) {
@@ -158,7 +167,8 @@ export function ComboBox<T extends ComboOption>({
         onKeyDown={onKeyDown}
         className={`flex items-center gap-2 w-full h-10 px-3 rounded-xl border text-sm transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-fg)]/30 ${frame}`}
       >
-        <Search className="w-4 h-4 text-slate-400 shrink-0" />
+        {/* มีป้ายต่อท้าย + ยังไม่กาง ⇒ ซ่อนแว่นขยาย คืนที่ให้ชื่อ (ช่อง "ออกในนาม" กว้างแค่ ~196px ที่ 1280) */}
+        <Search className={`w-4 h-4 text-slate-400 shrink-0 ${badge != null && value && !open ? 'hidden' : ''}`} />
         {open ? (
           <input
             autoFocus
@@ -175,7 +185,8 @@ export function ComboBox<T extends ComboOption>({
         ) : value ? (
           <span className="flex flex-1 items-center gap-2 min-w-0">
             <span className="font-semibold text-slate-800 truncate">{value.name}</span>
-            {facts?.(value)}
+            {facts?.(value, 'field')}
+            {badge}
           </span>
         ) : (
           <span className={`flex-1 truncate ${invalid ? 'text-amber-700' : 'text-slate-400'}`}>{placeholder}</span>
@@ -215,7 +226,7 @@ export function ComboBox<T extends ComboOption>({
                   }`}
                 >
                   <span className="truncate">{o.name}</span>
-                  {facts?.(o)}
+                  {facts?.(o, 'list')}
                 </button>
               ))
             )}
@@ -233,15 +244,26 @@ export function ComboBox<T extends ComboOption>({
 /**
  * รหัส + เบอร์ ของคนคนหนึ่ง — ใช้ทั้งในช่องที่เลือกแล้วและในรายชื่อตอนกาง
  * ที่เดียวโดยตั้งใจ: ถ้าสองที่แสดงไม่เหมือนกัน คนจะนึกว่าเป็นข้อมูลคนละชุด
+ *
+ * `compact` = ช่องที่มีป้ายต่อท้าย ⇒ ในช่องเหลือแค่ ชื่อ + ป้าย ทุกขนาดจอ (วัด 2026-09-24: ช่อง "ออกในนาม"
+ * กว้าง ~196px ที่ 1280 และ ~150px ที่ 390 — ไม่ซ่อน = ชื่อกว้าง 0px หายทั้งคำ) · **คำเตือน "ไม่มีเบอร์"
+ * ไม่ถูกซ่อน** ตามกติกาหัวไฟล์ · รหัสและเบอร์ยังเห็นครบในรายการตอนกาง
  */
-const PersonFacts: React.FC<{ person: PersonOption }> = ({ person }) => (
-  <span className="flex items-baseline gap-2 shrink-0 text-xs whitespace-nowrap">
-    {person.code && <span className="text-slate-500">{person.code}</span>}
-    <span className={person.phone ? 'text-slate-500' : 'text-amber-700 font-medium'}>
-      {person.phone || 'ไม่มีเบอร์'}
+const PersonFacts: React.FC<{ person: PersonOption; compact?: boolean }> = ({ person, compact }) => {
+  if (compact) {
+    return person.phone ? null : (
+      <span className="shrink-0 text-xs whitespace-nowrap text-amber-700 font-medium">ไม่มีเบอร์</span>
+    );
+  }
+  return (
+    <span className="flex items-baseline gap-2 shrink-0 text-xs whitespace-nowrap">
+      {person.code && <span className="text-slate-500">{person.code}</span>}
+      <span className={person.phone ? 'text-slate-500' : 'text-amber-700 font-medium'}>
+        {person.phone || 'ไม่มีเบอร์'}
+      </span>
     </span>
-  </span>
-);
+  );
+};
 
 type PersonProps = Omit<
   ComboProps<PersonOption>,
@@ -253,6 +275,6 @@ export const PersonComboBox: React.FC<PersonProps> = (props) => (
     {...props}
     searchPlaceholder="พิมพ์ชื่อ รหัส หรือเบอร์เพื่อค้นหา..."
     searchText={(o) => `${o.name} ${o.code ?? ''} ${o.phone ?? ''}`}
-    facts={(o) => <PersonFacts person={o} />}
+    facts={(o, where) => <PersonFacts person={o} compact={where === 'field' && props.badge != null} />}
   />
 );

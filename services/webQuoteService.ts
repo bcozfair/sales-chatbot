@@ -550,6 +550,12 @@ async function assertMayProposeWithoutSalesperson(role: Role | undefined): Promi
   throw new WebQuoteError('BAD_REQUEST', 'ต้องระบุเซลส์ที่จะออกใบในนาม (sp_user_id)', 400);
 }
 
+/** ค่าที่ `sp_source` รับได้ — นอกรายการ = null (ข้อมูลประวัติ ไม่ใช่เหตุให้ปฏิเสธคำขอ) */
+const SP_SOURCES = ['customer', 'contact', 'last_order', 'older_order', 'quotation', 'manual'] as const;
+function parseSpSource(raw: unknown): (typeof SP_SOURCES)[number] | null {
+  return (SP_SOURCES as readonly string[]).includes(String(raw)) ? (raw as (typeof SP_SOURCES)[number]) : null;
+}
+
 /** คีย์ที่ยาวกว่านี้ไม่มีทางมาจาก `violationKey()` — กันคนยิง payload บวมเข้ามาตรง ๆ */
 const VIOLATION_KEY_MAX = 120;
 
@@ -742,6 +748,12 @@ export async function createDraft(params: {
   items: WebQuoteItemInput[];
   /** id ของแถว `web_propose` ที่ฟอร์มได้มาจากขั้นก่อนหน้า — ไม่ส่งมาก็สร้างร่างได้ตามปกติ */
   proposeMsgId?: number | string | null;
+  /**
+   * ช่อง "ออกในนาม" ได้ค่ามาจากไหน — ข้อมูลประวัติล้วน ไม่มีผลกับการออกใบ (ด่านสิทธิ์ยังเป็น
+   * assertMayActAs ตัวเดิม) · ใช้วัดว่าแต่ละขั้นของ customerSalesOwner.ts ช่วยได้จริงแค่ไหน
+   * และคนเลือกทับบ่อยแค่ไหน (docs/plan-web-quote-auto-salesperson.md §3.4)
+   */
+  spSource?: unknown;
   /**
    * เลขที่ใบต้นทางเมื่อร่างนี้เกิดจากการ "แก้ใบเดิม" — ติดไว้ใน `customer_name` ด้วยตัวต่อสตริง
    * ตัวเดียวกับ reviseQuotation() (`appendReviseFrom`) ⇒ รูปแบบ `revise_from=` ของสองเส้นไม่เพี้ยนกัน
@@ -1003,6 +1015,7 @@ export async function createDraft(params: {
       meta: {
         propose_msg_id: proposeMsgId,
         revise_from: reviseFrom || null,
+        sp_source: parseSpSource(params.spSource),
         // ค่าที่คนกดตั้งทับระบบ — ต้องตอบได้ย้อนหลังว่า "เครดิตในใบนี้ไม่ตรงกับลูกค้าเพราะใคร"
         payment_terms_override: overrides.paymentTerms,
         delivery_overrides: overrides.delivery ?? null,

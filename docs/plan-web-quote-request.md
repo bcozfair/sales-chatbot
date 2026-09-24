@@ -2020,6 +2020,7 @@ watermark 1 บรรทัดใน `refreshCustomerDirectory.ts` + rebuild `cu
 | `POST /api/admin/webquote/drafts` | D | admin, subadmin | ฟอร์มที่เคาะแล้ว → สร้างร่างจริง คืน `quotes` |
 | `POST /api/admin/webquote/revise` | D | admin, subadmin | `quotationNo` → ร่าง revision คืน `draftQuoteId` |
 | `GET /api/admin/webquote/payment-terms` | F | admin, subadmin | 15 ค่าเครดิตที่มีจริง (ฟีเจอร์ 1) |
+| `GET /api/admin/webquote/sales-owner` | **2026-09-24** | `quote.act_as_any_salesperson` | `customer_id` → เซลส์ที่ช่อง "ออกในนาม" ควรเติมให้ (ถอย 4 ขั้นใน `company_id` เดียวกัน) · `/propose` `/revise` รับ `sp_user_id` ว่างได้แล้ว — `docs/plan-web-quote-auto-salesperson.md` |
 | `PUT /api/admin/webquote/quotes/:id/credit` | G | admin, subadmin | เขียนทับเครดิตของใบนั้น — **400 ถ้าค่าไม่อยู่ในชุด** |
 | `GET/POST/DELETE /api/admin/webquote/shipping-presets` | G | admin, subadmin | dropdown ชื่อค่าขนส่ง (ฟีเจอร์ 2) |
 | `PUT /api/admin/webquote/quotes/:id/shipping` | G | admin, subadmin | ตั้ง `shipping_mode` (`force_on`/`force_off`/ล้าง) + ชื่อ/ราคาของบรรทัด |

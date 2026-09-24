@@ -121,6 +121,19 @@ export interface ApprovalReloadPayload {
 
 // ── รูปร่างข้อมูลที่ backend ส่งมา ───────────────────────────────────────────
 
+/**
+ * ช่อง "ออกในนาม" ได้ค่ามาจากไหน — สี่ค่าแรกคือขั้นของ services/customerSalesOwner.ts ·
+ * `quotation` = แก้ใบเดิม · `manual` = คนเลือกเอง · บนจอยุบเหลือสองป้าย ("ระบบเลือก" / "เลือกเอง")
+ * แต่ส่งค่าเต็มไปเก็บใน `sp_source` ของประวัติ ไว้วัดว่าแต่ละขั้นช่วยได้จริงแค่ไหน
+ */
+type SpSource = 'customer' | 'contact' | 'last_order' | 'older_order' | 'quotation' | 'manual';
+
+/** คำตอบของ GET /api/admin/webquote/sales-owner — รูปร่างเดียวกับ `SalesOwner` ฝั่ง server */
+type SalesOwner =
+  | { status: 'resolved'; source: Exclude<SpSource, 'manual'>; user_id: string; name: string; odoo_name: string | null }
+  | { status: 'inactive'; odoo_name: string | null }
+  | { status: 'none' };
+
 interface Candidate {
   model: string;
   sales_price: number | string;
@@ -2026,11 +2039,28 @@ const BulkDiscountChips: React.FC<{
 // ── หน้าหลัก ─────────────────────────────────────────────────────────────────
 
 export const QuoteRequest: React.FC = () => {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const [profileReady, setProfileReady] = useState(false);
   const [spUserId, setSpUserId] = useState('');
+  // ── "ออกในนาม" เติมเองจากลูกค้า (2026-09-24 · docs/plan-web-quote-auto-salesperson.md) ──
+  //  role ที่เลือกเซลส์ได้เริ่มจากช่องว่าง แล้วระบบเติมให้เมื่อรู้ลูกค้า · role salesperson
+  //  ออกในนามตัวเองเสมอ ไม่ผ่านส่วนนี้เลย (QuoteIssuerProfile ตั้งค่าให้เอง)
+  const canPickAnySp = user?.role !== 'salesperson';
+  /** ช่องได้ค่ามาจากไหน — `manual` = คนเลือกเอง (ระบบห้ามเขียนทับ) · อื่น ๆ = ขั้นที่ระบบใช้ · null = ว่าง */
+  const [spSource, setSpSource] = useState<SpSource | null>(null);
+  const spSourceRef = useRef<SpSource | null>(null);
+  useEffect(() => { spSourceRef.current = spSource; }, [spSource]);
+  /** เหตุผลที่ระบบเติมให้ไม่ได้ — ขึ้นใต้แถบ "ออกในนาม" */
+  const [spNotice, setSpNotice] = useState<string | null>(null);
+  /** แก้ใบเดิมแล้วเซลส์ของใบเดิมออกใบไม่ได้ ⇒ รอบถัดไปต้องส่งคนที่เลือกเองไปแทน */
+  const [reviseNeedsPick, setReviseNeedsPick] = useState(false);
+  const onSpPick = useCallback((userId: string) => {
+    setSpUserId(userId);
+    setSpSource('manual');
+    setSpNotice(null);
+  }, []);
   const onReadyChange = useCallback((v: boolean) => setProfileReady(v), []);
   /** ตัวตนที่จะไปขึ้นช่องลงนามของใบ — คอมโพเนนต์แถบบนโหลดมาแล้ว ไม่ยิง API ซ้ำที่นี่ */
   const [identity, setIdentity] = useState<QuoteIssuerIdentity | null>(null);
@@ -2154,6 +2184,13 @@ export const QuoteRequest: React.FC = () => {
     setApprovalSent(null);
     setApprovalNote('');
     setReplacesRequestId(null);
+    // ใบใหม่ = ช่อง "ออกในนาม" กลับเป็นว่าง (role ที่เลือกได้) — เซลส์ออกใบเองคงตัวเองไว้
+    if (canPickAnySp) {
+      setSpUserId('');
+      setSpSource(null);
+      setSpNotice(null);
+      setReviseNeedsPick(false);
+    }
   };
 
   // ── คำขอที่ถูกตีกลับ → เปิดกลับเข้าฟอร์ม ───────────────────────────────────
@@ -2210,6 +2247,51 @@ export const QuoteRequest: React.FC = () => {
     const body = await res.json().catch(() => ({}));
     return describeApiError(body, fallback);
   };
+
+  // เติม "ออกในนาม" จากเซลส์ของลูกค้าทุกครั้งที่บริษัทเปลี่ยน — ตรรกะการเลือกอยู่ฝั่ง server ที่เดียว
+  // (services/customerSalesOwner.ts: ข้อมูลลูกค้า → ผู้ติดต่ออื่น → ใบสั่งขายล่าสุด → ใบเก่ากว่า)
+  //  · คนเลือกเองแล้ว = ไม่เขียนทับ · แก้ใบเดิม = ใช้เซลส์ของใบเดิม ไม่ดูลูกค้า
+  //  · หาไม่เจอ = ล้างค่าที่ระบบเคยเติมให้ลูกค้ารายก่อน แล้วบอกเหตุผล **ไม่เดาแทน**
+  //  · เรียก API ไม่ผ่าน (ไม่มีสิทธิ์/ล่ม) = เงียบ ปล่อยให้เลือกเอง — ช่องนี้เป็นความสะดวก
+  useEffect(() => {
+    if (!canPickAnySp || reviseFrom) return;
+    let cancelled = false;
+    // อ่านค่าสดทุกครั้ง (ไม่ใช่ค่าที่ TS จำกัดชนิดไว้ก่อน await) — คนอาจกดเลือกเองระหว่างรอคำตอบ
+    const pickedByHand = () => spSourceRef.current === 'manual';
+    (async () => {
+      if (pickedByHand()) return;
+      if (customerId === null) {
+        if (spSourceRef.current !== null) {
+          setSpUserId('');
+          setSpSource(null);
+        }
+        setSpNotice(null);
+        return;
+      }
+      try {
+        const res = await fetch(`/api/admin/webquote/sales-owner?customer_id=${customerId}`, { headers: authHeaders });
+        if (!res.ok || cancelled) return;
+        const { owner } = (await res.json()) as { owner: SalesOwner };
+        if (cancelled || pickedByHand()) return;
+        if (owner?.status === 'resolved') {
+          setSpUserId(owner.user_id);
+          setSpSource(owner.source);
+          setSpNotice(null);
+        } else {
+          setSpUserId('');
+          setSpSource(null);
+          setSpNotice(
+            owner?.status === 'inactive'
+              ? `ไม่มีเซลส์ของลูกค้ารายนี้ที่ออกใบในนามได้${owner.odoo_name ? ` (ใน Odoo: ${owner.odoo_name})` : ''} — เลือกพนักงานขายเองก่อนออกใบ`
+              : 'ลูกค้ารายนี้ยังไม่มีเซลส์ในระบบ — เลือกพนักงานขายเองก่อนออกใบ',
+          );
+        }
+      } catch {
+        /* เติมให้ไม่ได้ = ให้คนเลือกเอง */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [customerId, reviseFrom, canPickAnySp, authHeaders]);
 
   // โหลดผู้ติดต่อทุกครั้งที่บริษัทเปลี่ยน — endpoint เดิมของ LIFF ใช้ได้ตรง ๆ (§0.3)
   useEffect(() => {
@@ -2391,7 +2473,7 @@ export const QuoteRequest: React.FC = () => {
 
   // ── ส่วนที่ 1: วางข้อความ → ร่าง ──
   const propose = async () => {
-    if (!text.trim() || !spUserId) return;
+    if (!text.trim()) return;
     setProposing(true);
     setProposeError('');
     setSystemBusy(false);
@@ -2400,7 +2482,12 @@ export const QuoteRequest: React.FC = () => {
       const res = await fetch('/api/admin/webquote/propose', {
         method: 'POST',
         headers: { ...authHeaders, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sp_user_id: spUserId, text }),
+        // ส่งเซลส์ไปเฉพาะคนที่ "เลือกเอง" (หรือเซลส์ออกใบเอง) — ค่าที่ระบบเติมจากลูกค้ารายก่อนต้องไม่ติด
+        // ไปถ่วงการค้นหาลูกค้าของข้อความใหม่ (findCustomerCandidates ให้น้ำหนักลูกค้าของเซลส์คนนั้น)
+        body: JSON.stringify({
+          sp_user_id: !canPickAnySp || spSource === 'manual' ? spUserId : undefined,
+          text,
+        }),
       });
       if (!res.ok) throw new Error(await readError(res, 'สร้างร่างไม่สำเร็จ'));
       const data: ProposeResult = await res.json();
@@ -2912,6 +2999,7 @@ export const QuoteRequest: React.FC = () => {
           customer_id: customerId,
           contact_id: contactId,
           propose_msg_id: proposeMsgId,
+          sp_source: canPickAnySp ? spSource : null,
           // ใบนี้เกิดจากการแก้ใบเดิม ⇒ ให้หลังบ้านติด revise_from ไว้ด้วยตัวต่อสตริงของมันเอง
           revise_from: reviseFrom || undefined,
           items: itemsPayload,
@@ -2979,18 +3067,34 @@ export const QuoteRequest: React.FC = () => {
   //  ออกใบจริงที่ปุ่มยืนยันเส้นเดียวกับทางปกติ · ร่างที่ค้างไว้ถูก insertDraftQuotations ลบทิ้ง
   //  ให้เองตอนสร้างใบจริง (คู่แอดมิน×เซลส์เดียวกัน) ⇒ ไม่มีร่างซ้อน
   const doRevise = async () => {
-    if (!reviseNo.trim() || !spUserId) return;
+    if (!reviseNo.trim() || (!canPickAnySp && !spUserId)) return;
     setRevising(true);
     setReviseError('');
+    // แก้ใบเดิม = เซลส์ของใบเดิม (เจ้าของเคาะ 2026-09-24) ⇒ ไม่ส่งเซลส์ให้ server หาเอง
+    // ยกเว้นรอบที่ server บอกแล้วว่าเซลส์ของใบเดิมออกใบไม่ได้ และคนเลือกเองแล้ว
+    const pickedForRevise = reviseNeedsPick && spSource === 'manual';
     try {
       const res = await fetch('/api/admin/webquote/revise', {
         method: 'POST',
         headers: { ...authHeaders, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sp_user_id: spUserId, quotation_no: reviseNo }),
+        body: JSON.stringify({
+          sp_user_id: !canPickAnySp || pickedForRevise ? spUserId : undefined,
+          quotation_no: reviseNo,
+        }),
       });
-      if (!res.ok) throw new Error(await readError(res, 'เตรียมใบแก้ไขไม่สำเร็จ'));
+      if (!res.ok) {
+        const body = await res.clone().json().catch(() => null);
+        if (body?.code === 'SALESPERSON_REQUIRED') setReviseNeedsPick(true);
+        throw new Error(await readError(res, 'เตรียมใบแก้ไขไม่สำเร็จ'));
+      }
       const data = await res.json();
       setWebUserId(data.web_user_id);
+      if (canPickAnySp) {
+        setSpUserId(String(data.sp_user_id ?? ''));
+        setSpSource(pickedForRevise ? 'manual' : 'quotation');
+        setSpNotice(null);
+        setReviseNeedsPick(false);
+      }
       setReviseFrom(data.revise_from);
       const q = ((data.quotes ?? []) as DraftQuote[])[0];
       // บรรทัดที่ "กฎ" เป็นคนเติม (สินค้าพ่วง · ค่าขนส่งอัตโนมัติ) ต้องไม่กลับเข้าฟอร์ม ไม่งั้น
@@ -3202,6 +3306,9 @@ export const QuoteRequest: React.FC = () => {
       <QuoteIssuerProfile
         spUserId={spUserId}
         onSpUserIdChange={setSpUserId}
+        onSpPick={onSpPick}
+        spBadge={spSource === null ? null : spSource === 'manual' ? 'manual' : 'system'}
+        spNotice={spNotice}
         onReadyChange={onReadyChange}
         onIdentityChange={onIdentityChange}
       />
@@ -3238,12 +3345,12 @@ export const QuoteRequest: React.FC = () => {
               size="md"
               icon={ArrowRight}
               busy={proposing}
-              disabled={!text.trim() || !spUserId}
+              disabled={!text.trim() || (!canPickAnySp && !spUserId)}
               onClick={propose}
             >
               {proposing ? 'กำลังสกัดคำสั่ง...' : 'สร้างร่าง'}
             </Button>
-            {!spUserId && <span className="text-xs text-amber-700">เลือกพนักงานขายที่จะออกใบในนามก่อน</span>}
+            {!canPickAnySp && !spUserId && <span className="text-xs text-amber-700">เลือกพนักงานขายที่จะออกใบในนามก่อน</span>}
             {proposing && <span className="text-xs text-slate-400">ระบบมีเวลาสกัดสูงสุด 60 วินาที</span>}
             <p className="basis-full text-[11px] text-slate-400">
               ไม่มีข้อความก็ได้ — พิมพ์รายการลงในใบด้านล่างได้เลย
@@ -3650,7 +3757,7 @@ export const QuoteRequest: React.FC = () => {
             size="md"
             icon={ArrowRight}
             busy={revising}
-            disabled={!reviseNo.trim() || !spUserId}
+            disabled={!reviseNo.trim() || (!canPickAnySp && !spUserId) || (reviseNeedsPick && spSource !== 'manual')}
             onClick={doRevise}
           >
             เตรียมใบแก้ไข
