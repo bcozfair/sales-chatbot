@@ -888,7 +888,8 @@ docker compose ps                 # ดูสถานะกล่อง
 docker compose logs -f app        # ดู log แอป (เรียลไทม์)
 docker compose logs -f db         # ดู log database
 docker compose restart app        # รีสตาร์ทแอป (ไม่ rebuild)
-docker compose down               # หยุดทุกกล่อง (ข้อมูลใน volume ยังอยู่)
+docker compose down               # หยุดทุกกล่อง (ข้อมูลใน volume ยังอยู่) — ถ้าพรีวิวเปิดอยู่ให้ down พรีวิวก่อน
+                                  # ไม่งั้นลบ network ไม่ได้ (docs/dev-preview.md) · deploy ปกติไม่ใช้ down
 docker compose up -d              # เปิดใหม่
 ```
 
