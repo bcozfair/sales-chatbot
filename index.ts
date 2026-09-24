@@ -207,18 +207,25 @@ getAppUrl();
 
 const app = express();
 
-// ── โหมดพรีวิวร่วมของเครื่อง dev (docker-compose.preview.yml · docs/dev-preview.md) ──────────
+// ── โหมดพรีวิวร่วมของเครื่อง dev (systemd user service · docs/dev-preview.md) ────────────────
 // ตัวจริงไม่ได้ตั้งค่านี้ ⇒ บล็อกนี้ไม่มีผลอะไรกับ production เลย
-// เปิดแล้วต่างจากตัวจริงแค่สองข้อ:
+// เปิดแล้วต่างจากตัวจริงแค่สามข้อ:
 //  1. `/__preview/boot` ตอบรหัสประจำโปรเซส — Vite ของพรีวิวถามทุกวินาที รหัสเปลี่ยน = backend
 //     เพิ่งรีสตาร์ตจากโค้ดใหม่ ⇒ สั่งหน้าเว็บรีโหลดเอง · วางไว้ "ก่อน" apiLogMiddleware
 //     เพราะมันโดนถามวันละ ~86,000 ครั้ง ถ้าลง api_logs จะกลบ traffic จริงทั้งตาราง
 //  2. ไม่เริ่มตัวตั้งเวลา auto sync (ดู app.listen ท้ายไฟล์) — พรีวิวใช้ฐานเดียวกับตัวจริง
 //     ถ้าเปิดไว้จะได้ sync สองรอบซ้อนกันจากสองโปรเซส (ตัวล็อก runState อยู่ในโปรเซสใครโปรเซสมัน)
+//  3. อัป/ลบลายเซ็นไม่ได้ — พรีวิวรันบนโฮสต์ `data/*_sigs` ของมันคือไฟล์ในรีโป (commit อยู่) ไม่ใช่
+//     volume ของตัวจริง ⇒ อัปในพรีวิวแล้วฐานจริงชี้ไฟล์ที่ตัวจริงไม่มี = PDF ของจริงไม่มีลายเซ็น
+//     และไฟล์ไปโผล่ใน working tree ของ main · ดูลายเซ็นได้ตามปกติ (GET ผ่าน)
 const PREVIEW_MODE = process.env.PREVIEW_MODE === '1';
 if (PREVIEW_MODE) {
   const bootId = `${process.pid}-${Date.now()}`;
   app.get('/__preview/boot', (_req: any, res: any) => { res.type('text/plain').send(bootId); });
+  app.use(['/api/admin/signatures', '/api/admin/webquote/me/signature'], (req: any, res: any, next: any) => {
+    if (req.method === 'GET') return next();
+    res.status(503).json({ error: 'พรีวิวอัปหรือลบลายเซ็นไม่ได้ — ทำที่ระบบจริงแทน (ไฟล์ลายเซ็นของพรีวิวไม่ใช่ชุดเดียวกับตัวจริง)' });
+  });
 }
 
 // ── บันทึกการเรียก API (ตาราง api_logs) — ต้องเป็น middleware ตัวแรกสุด ────────────────────
@@ -5294,7 +5301,7 @@ app.get('/api/sync/v1/tables/:table/ids', ...syncApiGuards, async (req: any, res
 const port = process.env.PORT || 3011;
 const server = app.listen(port, () => {
   console.log(`listening on ${port}`);
-  // เริ่มตัวตั้งเวลา auto-sync (อ่าน config จากตาราง sync_settings) — ยกเว้นกล่องพรีวิว (ดู PREVIEW_MODE ใต้ `const app`)
+  // เริ่มตัวตั้งเวลา auto-sync (อ่าน config จากตาราง sync_settings) — ยกเว้นพรีวิว (ดู PREVIEW_MODE ใต้ `const app`)
   if (PREVIEW_MODE) console.log('[preview] PREVIEW_MODE=1 — ไม่เริ่มตัวตั้งเวลา auto sync');
   else initScheduler().catch((err) => console.error('[scheduler] init ล้มเหลว:', err));
   // เริ่มตัวเขียน api_logs แบบ batch + ตัวลบของเก่า (ทั้งคู่เป็น timer แยก ไม่แตะเส้นทางของ request)

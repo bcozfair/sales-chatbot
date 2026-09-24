@@ -123,7 +123,7 @@ push ซึ่งมีโควตารายเดือนและมีค
 npm run dev          # API (tsx watch)
 npm run dev:web      # Admin SPA (Vite)
 npm run dev:all      # API + admin + ngrok พร้อมกัน
-# บนเครื่อง PMSV ไม่ใช้สามตัวบน — พรีวิวร่วมคือ localhost:5180 (docker-compose.preview.yml · docs/dev-preview.md)
+# บนเครื่อง PMSV ไม่ใช้สามตัวบน — พรีวิวร่วมคือ localhost:5180 (systemd user service · docs/dev-preview.md)
 
 npx tsc --noEmit                   # typecheck backend — ด่านหลัก ไม่มี unit test suite
 npm --prefix frontend run lint     # eslint ของ admin

@@ -1,14 +1,14 @@
-// Vite ของพรีวิวร่วม (docker-compose.preview.yml · docs/dev-preview.md)
+// Vite ของพรีวิวร่วม (deploy/preview/primus-preview-web.service · docs/dev-preview.md)
 //
-// ต่างจาก frontend/vite.config.ts แค่สามข้อ — ที่เหลือ (พอร์ต 5180 · strictPort · plugin) เอามาทั้งก้อน
-//  1. proxy ไปที่กล่อง api ของพรีวิว (PREVIEW_API) ไม่ใช่ localhost:3011 ของตัวจริง
-//  2. cacheDir อยู่ใน /tmp ของกล่อง — รีโปเมานต์อ่านอย่างเดียว
-//  3. backend รีสตาร์ตเสร็จ (tsx watch) ⇒ สั่งหน้าเว็บรีโหลดเอง: ถาม /__preview/boot ทุกวินาที
+// ต่างจาก frontend/vite.config.ts แค่สองข้อ — ที่เหลือ (พอร์ต 5180 · strictPort · plugin) เอามาทั้งก้อน
+//  1. proxy ไปที่ backend ของพรีวิว (PREVIEW_API · ตั้งต้น 127.0.0.1:3098) ไม่ใช่ 3011 ของตัวจริง
+//     ซึ่งรันโค้ดของ deploy ล่าสุด ไม่ใช่ main
+//  2. backend รีสตาร์ตเสร็จ (tsx watch) ⇒ สั่งหน้าเว็บรีโหลดเอง: ถาม /__preview/boot ทุกวินาที
 //     รหัสเปลี่ยน = โปรเซสใหม่ขึ้นแล้วและพร้อมตอบ · ไม่ได้เดาจากเวลาไฟล์เปลี่ยน เพราะตอนไฟล์
 //     เปลี่ยน backend ตัวเก่ายังตอบอยู่ รีโหลดตอนนั้นจะได้ของเก่าหรือเจอช่วงที่มันกำลังปิด
 import base from '../../frontend/vite.config.ts'
 
-const target = process.env.PREVIEW_API || 'http://localhost:3011'
+const target = process.env.PREVIEW_API || 'http://127.0.0.1:3098'
 
 function reloadOnBackendRestart() {
   return {
@@ -38,7 +38,6 @@ function reloadOnBackendRestart() {
 
 export default {
   ...base,
-  cacheDir: '/tmp/vite-cache',
   plugins: [...(base.plugins || []), reloadOnBackendRestart()],
   server: {
     ...base.server,

@@ -1,0 +1,28 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  พรีวิวร่วม — หน้าแอดมิน (Vite + HMR) ที่ http://localhost:5180 · proxy /api ไป 127.0.0.1:3098
+#  คู่มือ + วิธีติดตั้ง: docs/dev-preview.md
+#
+#  ดูสถานะ:  systemctl --user status primus-preview-web
+#  ดู log:   journalctl --user -u primus-preview-web -f
+#
+#  ⚠️ ExecStart ชี้ node ของ nvm ตรง ๆ (systemd ไม่โหลด nvm) — เปลี่ยนเวอร์ชัน node เมื่อไหร่ต้องแก้ path
+# ─────────────────────────────────────────────────────────────────────────────
+[Unit]
+Description=พรีวิวร่วม chatbot — หน้าแอดมิน (Vite) :5180
+Documentation=file:///home/app_sales/salechatbot/chatbot/docs/dev-preview.md
+Wants=primus-preview-api.service
+After=primus-preview-api.service
+StartLimitBurst=5
+StartLimitIntervalSec=300
+
+[Service]
+Type=simple
+WorkingDirectory=/home/app_sales/salechatbot/chatbot/frontend
+ExecStart=/home/app_sales/.nvm/versions/node/v22.23.2/bin/node node_modules/.bin/vite --config ../scripts/preview/vite.config.mjs --host 127.0.0.1
+Environment=PATH=/home/app_sales/.nvm/versions/node/v22.23.2/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PREVIEW_API=http://127.0.0.1:3098
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=default.target

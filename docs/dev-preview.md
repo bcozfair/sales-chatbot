@@ -2,7 +2,7 @@
 
 > เจ้าของสั่ง 2026-09-24: *"พรีวิวตอน dev ก่อน deploy บนเครื่อง PMSV ให้ใช้พอร์ตทดสอบเดียวกัน
 > ทุก session เห็นได้ทั้ง backend และ frontend ตรงกับ code ล่าสุด เปลี่ยนทันทีเมื่อ code เปลี่ยน
-> ไม่ต้อง refresh"*
+> ไม่ต้อง refresh"* · และในวันเดียวกัน *"อยากรัน local มากกว่า"* (ไม่ใช่ docker — ดู "ทางที่ไม่ได้เลือก")
 
 ## สรุปสั้น
 
@@ -11,22 +11,23 @@
 | ลิงก์ | **`http://localhost:5180/admin.html`** (เปิดผ่าน port forwarding ของ VSCode — ลิงก์ IP วงแลนเปิดไม่ได้) |
 | รันโค้ดจาก | working tree หลัก **`/home/app_sales/salechatbot/chatbot` (= main)** |
 | แก้หน้าจอ (`frontend/src`) | จอเปลี่ยนเองทันที (Vite HMR) — state บนจอยังอยู่ |
-| แก้ backend (`*.ts` นอก frontend) | กล่อง api รีสตาร์ตเอง (`tsx watch`) ขึ้นเสร็จแล้ว **หน้าเว็บรีโหลดเอง** ไม่ต้องกด |
+| แก้ backend (`*.ts` นอก frontend) | backend รีสตาร์ตเอง (`tsx watch`) ขึ้นเสร็จแล้ว **หน้าเว็บรีโหลดเอง** ไม่ต้องกด |
 | ฐานข้อมูล | **ตัวจริง** — ฐานเดียวบนเครื่องนี้ (ดู "ข้อควรระวัง") |
-| ไฟล์ | `docker-compose.preview.yml` · `scripts/preview/vite.config.mjs` · `PREVIEW_MODE` ใน `index.ts` |
+| โปรเซส | systemd **user** service สองตัว รันบนโฮสต์ตรง ๆ (ไม่ใช่ docker) ขึ้นเองหลังรีบูต (linger เปิดไว้) |
+| ไฟล์ | `deploy/preview/*.service` · `scripts/preview/vite.config.mjs` · `PREVIEW_MODE` ใน `index.ts` |
+
+| service | ทำอะไร | พอร์ต |
+| --- | --- | --- |
+| `primus-preview-api` | `tsx watch index.ts` + `PREVIEW_MODE=1` · อ่าน `.env` ของทรีหลัก | `127.0.0.1:3098` |
+| `primus-preview-web` | Vite + HMR · proxy `/api` `/data` `/download-pdf` ไป 3098 | `127.0.0.1:5180` |
 
 ```bash
-cd /home/app_sales/salechatbot/chatbot          # ต้องเป็นทรีหลักเท่านั้น
-docker compose -f docker-compose.preview.yml up -d            # เปิด (ค้างไว้ถาวร · รีบูตแล้วขึ้นเอง)
-docker compose -f docker-compose.preview.yml ps
-docker compose -f docker-compose.preview.yml logs -f api      # log ของ backend พรีวิว
-docker compose -f docker-compose.preview.yml logs -f web      # log ของ Vite
-docker compose -f docker-compose.preview.yml down             # ปิด (ไม่แตะตัวจริง)
+systemctl --user status  primus-preview-api primus-preview-web
+systemctl --user restart primus-preview-api      # ปกติไม่ต้อง — tsx watch รีสตาร์ตเองเมื่อไฟล์เปลี่ยน
+journalctl --user -u primus-preview-api -f       # log ของ backend พรีวิว
+journalctl --user -u primus-preview-web -f       # log ของ Vite
+systemctl --user stop    primus-preview-api primus-preview-web   # ปิด (ไม่แตะตัวจริง)
 ```
-
-**ทดสอบด้วย Chromium จริง 2026-09-24** (puppeteer ในกล่อง api เปิดหน้าล็อกอินค้างไว้):
-แก้ข้อความปุ่มใน `Login.tsx` ⇒ จอเปลี่ยนใน < 1 วิ **ไม่มีการโหลดหน้าใหม่** (ตัวแปรที่ตั้งไว้ใน
-`window` ยังอยู่) · `touch index.ts` ⇒ `tsx watch` รีสตาร์ต แล้วหน้าเว็บรีโหลดเอง **~3 วิ** หลังไฟล์เปลี่ยน
 
 ## ทำไมถึงเป็น "main" ไม่ใช่ worktree ของแต่ละ session
 
@@ -44,45 +45,82 @@ session หนึ่งเปิด Vite+backend ชั่วคราวค้�
 ## ห้าม
 
 - **ห้ามเปิด Vite / backend ชั่วคราวของตัวเองบน 5180** (`npm run dev:web` บนโฮสต์ก็ใช่)
-  — `strictPort` ทำให้ตัวที่มาทีหลังตายเสียงดัง ซึ่งเป็นสิ่งที่ต้องการ อย่าไปฆ่ากล่อง web ทิ้งเพื่อเปิดของตัวเอง
-- **ห้ามสั่ง `docker compose -f docker-compose.preview.yml up` จาก worktree** — `./` ของไฟล์ compose
-  คือโค้ดที่จะรัน สั่งจาก worktree ไหน พรีวิวก็กลายเป็นของ worktree นั้นสำหรับทุกคน
-- **ห้ามชี้ proxy ไปที่ตัวจริง (3011) แทนกล่อง api** — ตัวจริงรันโค้ดของ deploy ล่าสุด ไม่ใช่ main
+  — `strictPort` ทำให้ตัวที่มาทีหลังตายเสียงดัง ซึ่งเป็นสิ่งที่ต้องการ อย่าไปหยุด service เพื่อเปิดของตัวเอง
+- **ห้ามแก้ `WorkingDirectory` ให้ชี้ worktree** — พรีวิวจะกลายเป็นโค้ดของ worktree นั้นสำหรับทุกคน
+- **ห้ามชี้ proxy ไปที่ตัวจริง (3011) แทน 3098** — ตัวจริงรันโค้ดของ deploy ล่าสุด ไม่ใช่ main
   ⇒ ส่วนที่ต้องใช้ backend ใหม่จะดูเหมือนพังทั้งที่ไม่ได้พัง
 
 ## ข้อควรระวัง — พรีวิวใช้ฐานตัวจริง
 
-- กดยืนยันใบ = ออกเลขใบจริง · แก้กฎราคา/ผู้ใช้/สมุดราคา = แก้ของจริง · อัปลายเซ็น = volume จริง
-  (กล่อง api เมานต์ `primus-chatbot_sig_sale` / `_sig_admin` ตัวเดียวกับตัวจริง เพราะแถวในฐาน
-  ชี้ไฟล์ในนั้น)
+- กดยืนยันใบ = ออกเลขใบจริง · แก้กฎราคา/ผู้ใช้/สมุดราคา = แก้ของจริง
+- **ลายเซ็นในพรีวิวไม่ใช่ชุดเดียวกับตัวจริง** — พรีวิวอ่าน `data/sale_sigs` · `data/admin_sigs` ในรีโป
+  (ไฟล์ที่ commit ไว้) ส่วนตัวจริงอ่าน docker volume · วัด 2026-09-24: รีโป 37 ไฟล์ / volume 35
+  ต่างกัน 4 ไฟล์ ⇒ PDF ในพรีวิวอาจขาดหรือได้ลายเซ็นคนละรูปกับของจริง
+  **`PREVIEW_MODE` จึงปิดการอัป/ลบลายเซ็น** (503) — อัปในพรีวิวแล้วฐานจริงจะชี้ไฟล์ที่ตัวจริงไม่มี
 - **migration ที่ยังไม่ได้รันบนฐาน** ⇒ ส่วนที่ต้องใช้คอลัมน์ใหม่จะ error ในพรีวิวด้วย —
   รัน migration ก็คือแก้ฐานจริง ต้องได้คำสั่งเจ้าของเหมือนตอน deploy
 - **auto sync ปิดในพรีวิว** (`PREVIEW_MODE=1`) เพราะตัวล็อกกัน sync ซ้อนอยู่ในโปรเซสใครโปรเซสมัน
   แต่ **ปุ่ม sync เองในหน้าแอดมินของพรีวิวยังกดได้** และจะวิ่งซ้อนกับรอบของตัวจริงได้ — ไม่ต้องกดในพรีวิว
 - การใช้งานผ่านพรีวิวลง `api_logs` เหมือนตัวจริง (เป็นการกระทำจริงกับข้อมูลจริง จึงต้องมีร่องรอย)
   ส่วนตัวถามรหัส `/__preview/boot` ทุกวินาทีอยู่ก่อน `apiLogMiddleware` จึงไม่ลงตาราง
-- ไม่มี webhook LINE เข้ากล่อง api (ไม่มีทางเข้า) ⇒ พรีวิวไม่แย่ง replyToken กับตัวจริง
+- ไม่มี webhook LINE เข้าพรีวิว (ไม่มีทางเข้า) ⇒ ไม่แย่ง replyToken กับตัวจริง
+- **ผลพลอยได้ที่ต้องระวัง:** ทรีหลักมี `node_modules` ของ backend บนโฮสต์แล้ว ⇒ `npx tsc --noEmit`
+  รันบนโฮสต์ได้ แต่ **สคริปต์ sync / diag / backfill ก็รันบนโฮสต์ได้ด้วย และ `.env` ชี้ฐานตัวจริง**
+  (`PG_HOST=localhost:5432`) — ก่อนหน้านี้รันไม่ได้เพราะไม่มีแพ็กเกจ ตอนนี้ต้องระวังเอง
+
+## PDF บนโฮสต์ — Chrome และฟอนต์ไทย
+
+puppeteer หา Chrome ที่ `~/.cache/puppeteer/chrome/linux-<เวอร์ชัน>/` เอง (ไม่ต้องตั้ง env)
+- เครื่องนี้ไม่มี `unzip` ⇒ `npm ci` โหลด Chrome เองไม่สำเร็จ ต้อง `PUPPETEER_SKIP_DOWNLOAD=true npm ci`
+  แล้วโหลด `chrome-linux64.zip` ของเวอร์ชันใน `node_modules/puppeteer-core/lib/puppeteer/revisions.js`
+  จาก `storage.googleapis.com/chrome-for-testing-public/<ver>/linux64/` แล้วแตกด้วย python `zipfile`
+  (ต้องคืน permission ของไฟล์เอง — `zipfile` ไม่คืนให้)
+- library ของระบบที่ Chrome ต้องใช้ + ฟอนต์ไทย ต้องลงด้วย sudo (วัด 2026-09-24 · Ubuntu 24.04):
+  ```bash
+  sudo apt-get install -y libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libasound2t64 \
+    libcairo2 libpango-1.0-0 libxdamage1 libatspi2.0-0t64 fonts-thai-tlwg
+  ```
+  ตรวจ: `ldd ~/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome | grep "not found"` ต้องว่าง
+- Chrome/ฟอนต์บนโฮสต์ **ไม่ใช่ชุดเดียวกับในอิมเมจ** (อิมเมจใช้ `chromium` ของ Debian) ⇒ การตัดบรรทัด/
+  ตัดหน้าของ PDF อาจต่างจากของจริงเล็กน้อย — ตัดสินหน้าตา PDF สุดท้ายจากตัวจริงหลัง deploy
+
+## ติดตั้ง (ครั้งเดียวต่อเครื่อง)
+
+```bash
+cd /home/app_sales/salechatbot/chatbot
+PUPPETEER_SKIP_DOWNLOAD=true npm ci --include=dev         # node_modules ของ backend บนโฮสต์
+# Chrome + library + ฟอนต์ไทย: หัวข้อข้างบน
+mkdir -p ~/.config/systemd/user
+ln -sf "$PWD"/deploy/preview/primus-preview-api.service ~/.config/systemd/user/
+ln -sf "$PWD"/deploy/preview/primus-preview-web.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now primus-preview-api primus-preview-web
+```
 
 ## เมื่อ dependency เปลี่ยน
 
 | เปลี่ยนที่ | ทำอะไร |
 | --- | --- |
-| `frontend/package.json` | `npm --prefix frontend install` บนโฮสต์ แล้ว `docker compose -f docker-compose.preview.yml restart web` |
-| `package.json` (backend) | node_modules ของกล่อง api มาจากอิมเมจตัวจริง ⇒ **ได้ของใหม่หลัง deploy เท่านั้น** (deploy build อิมเมจให้) แล้วค่อย `docker compose -f docker-compose.preview.yml up -d --force-recreate -V api` · ห้าม `docker compose build app` เองเพื่อพรีวิว — มันเขียนทับแท็กอิมเมจของตัวจริง `up -d` ครั้งถัดไปของใครก็ตามจะกลายเป็น deploy |
-| `docker-compose.preview.yml` / `scripts/preview/vite.config.mjs` | `docker compose -f docker-compose.preview.yml up -d --force-recreate` |
+| `package.json` (backend) | `PUPPETEER_SKIP_DOWNLOAD=true npm ci --include=dev` ที่ทรีหลัก แล้ว `systemctl --user restart primus-preview-api` (ถ้า puppeteer ขยับเวอร์ชัน ต้องโหลด Chrome เวอร์ชันใหม่ด้วย) |
+| `frontend/package.json` | `npm --prefix frontend install` แล้ว `systemctl --user restart primus-preview-web` |
+| `deploy/preview/*.service` | `systemctl --user daemon-reload && systemctl --user restart primus-preview-api primus-preview-web` |
+| `scripts/preview/vite.config.mjs` | `systemctl --user restart primus-preview-web` |
+| เวอร์ชัน node ของ nvm | แก้ path ใน `ExecStart`/`PATH` ของทั้งสองไฟล์ `.service` |
 
 ## กลไก (เผื่อต้องแก้)
 
-- **api** = อิมเมจ `primus-chatbot-app:latest` ตัวเดียวกับตัวจริง · เมานต์รีโปแบบอ่านอย่างเดียว ·
-  `node_modules` เป็น anonymous volume ที่ก๊อปจากอิมเมจตอนสร้างกล่อง (ของรีโปบนโฮสต์ว่าง) ·
-  ต่อ network `primus-chatbot_default` เพื่อคุยกับ `db` (db ไม่ publish พอร์ต) · ไม่ publish พอร์ตเอง
-- **web** = `node:22-bookworm-slim` รันด้วย uid 1000 · ใช้ `frontend/node_modules` ของโฮสต์ ·
-  config ต่อจาก `frontend/vite.config.ts` ทั้งก้อน (พอร์ต 5180 · strictPort) เปลี่ยนแค่ proxy →
-  `http://api:3011` · cacheDir → `/tmp` · และ plugin รีโหลดเมื่อ backend รีสตาร์ต
 - **รีโหลดเมื่อ backend รีสตาร์ต** ตัดสินจากรหัสโปรเซสที่ `/__preview/boot` ตอบ ไม่ใช่จากเวลาไฟล์เปลี่ยน
   — ตอนไฟล์เปลี่ยน backend ตัวเก่ายังตอบอยู่ รีโหลดตอนนั้นจะได้ของเก่า
-- เป็น compose project แยก (`primus-chatbot-preview`) ⇒ deploy (`docker compose up -d --build`)
-  ไม่แตะพรีวิว และ `down` ของพรีวิวไม่แตะตัวจริง
-  ⚠️ ข้อยกเว้นข้อเดียว: **`docker compose down` ของตัวจริงจะลบ network ไม่ได้** ระหว่างที่พรีวิวยังต่ออยู่
-  (กล่องของตัวจริงหยุดครบตามปกติ แค่มีข้อความ error เรื่อง network) — ถ้าต้อง `down` ตัวจริงจริง ๆ
-  ให้ `down` พรีวิวก่อน
+- Vite ของพรีวิวต่อจาก `frontend/vite.config.ts` ทั้งก้อน (พอร์ต 5180 · strictPort) เปลี่ยนแค่ proxy
+  กับเพิ่ม plugin รีโหลด
+
+**ทดสอบด้วย Chromium จริง 2026-09-24** (ตอนยังเป็นกล่อง docker · กลไกเดียวกัน):
+แก้ข้อความปุ่มใน `Login.tsx` ⇒ จอเปลี่ยนใน < 1 วิ **ไม่มีการโหลดหน้าใหม่** (ตัวแปรที่ตั้งไว้ใน
+`window` ยังอยู่) · `touch index.ts` ⇒ `tsx watch` รีสตาร์ต แล้วหน้าเว็บรีโหลดเอง **~3 วิ** หลังไฟล์เปลี่ยน
+
+## ทางที่ไม่ได้เลือก: กล่อง docker (ใช้อยู่ครึ่งวัน 2026-09-24 · `084b487`–`ebcb3a7`)
+
+อิมเมจเดียวกับตัวจริงให้ PDF/ลายเซ็นตรงของจริงเป๊ะ แต่เจ้าของเลือกรันบนโฮสต์ — ข้อแลกที่รู้อยู่แล้ว
+คือ PDF/ลายเซ็นอาจไม่ตรงของจริง (ข้างบน) · ถ้าจะกลับไปใช้ ดูไฟล์ `docker-compose.preview.yml`
+ใน `ebcb3a7` (ต้องวาง tmpfs ทับ `/app/node_modules` ให้ Vite เขียน `.vite-temp` ได้ และต้องต่อ network
+`primus-chatbot_default` ซึ่งทำให้ `docker compose down` ของตัวจริงลบ network ไม่ได้ระหว่างพรีวิวเปิด)
