@@ -69,6 +69,12 @@ interface ComboProps<T extends ComboOption> {
    */
   action?: (query: string) => React.ReactNode;
   /**
+   * แถวกดได้ **บนสุด** ของรายการ — ทางเลือกที่ไม่ใช่รายการใดรายการหนึ่ง เช่น "ระบบเลือกอัตโนมัติ"
+   * ของช่อง "ออกในนาม" (docs/plan-web-quote-auto-salesperson.md §3.4) · กดแล้วหุบเหมือน `action`
+   * · **ซ่อนตอนพิมพ์ค้น** เพราะมันไม่ใช่ชื่อคน การค้นไม่ควรเจอมัน และมันจะดันผลค้นลงไป
+   */
+  leading?: React.ReactNode;
+  /**
    * ข้อเท็จจริงท้ายบรรทัด — ตัวเดียวใช้ทั้งในช่องและในรายการ ไม่งั้นคนนึกว่าคนละชุดข้อมูล
    * `where` บอกว่ากำลังวาดที่ไหน ⇒ ผู้เรียกย่อในช่องได้โดยรายการยังครบ (ดู `badge`)
    */
@@ -101,6 +107,7 @@ export function ComboBox<T extends ComboOption>({
   disabled,
   footer,
   action,
+  leading,
   facts,
   badge,
   searchText,
@@ -206,6 +213,7 @@ export function ComboBox<T extends ComboOption>({
             {busy ? 'กำลังค้นหา...' : `${filtered.length} รายการ`}
             <span className="ml-auto hidden sm:inline">↑ ↓ เลื่อน · Enter เลือก · Esc ปิด</span>
           </div>
+          {leading && !query.trim() && <div onClick={close} className="border-b border-slate-200">{leading}</div>}
           <div className="max-h-64 overflow-y-auto divide-y divide-slate-100">
             {filtered.length === 0 ? (
               <p className="px-4 py-3 text-center text-xs text-slate-400">{emptyText}</p>
