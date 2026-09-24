@@ -13,7 +13,10 @@
 //
 //  สิ่งที่ยังเลือกได้เหมือนเดิม:
 //    · แอดมิน/subadmin/approver ยังเลือก "ออกในนาม" (พนักงานขาย) ได้อิสระ — combobox เดิม
-//      ต่างแค่ "จำตัวล่าสุด" ย้ายจาก localStorage ไปที่ `admin_users.acting_salesperson_id` (§13.4)
+//      ตั้งแต่ 2026-09-24 **ช่องเริ่มต้นว่าง** แล้วหน้าแม่ (QuoteRequest) เติมให้เองจากเซลส์ของลูกค้า
+//      (docs/plan-web-quote-auto-salesperson.md) · เลิกเติม "คนที่เลือกครั้งก่อน" จาก
+//      `admin_users.acting_salesperson_id` แล้ว — ลูกค้าคนละรายมีเซลส์คนละคน การเติมคนเดิมให้ทุกใบ
+//      คือการออกใบในนามคนผิดโดยไม่มีใครสังเกต
 //    · ลายเซ็นของแอดมินเอง (ใต้ชื่อผู้เสนอราคา) ยังอัป/ลบเองได้ — ไม่ใช่การอ้างชื่อคนอื่น (§13.3)
 //
 //  role='salesperson' ไม่มี combobox เลยสักช่อง (ไม่มีใครให้เลือก เป็นตัวเอง) ⇒ แถวเดียว ล็อกทั้งแถว
@@ -36,7 +39,6 @@ interface IssuerProfile {
   has_signature: boolean;
   signature_url: string | null;
   is_ready: boolean;
-  acting_salesperson_id: string | null;
   own_salesperson: OwnSalesperson | null;
 }
 
@@ -73,10 +75,19 @@ export interface QuoteIssuerIdentity {
   issuer: { name: string | null; phone: string | null; sig_url: string | null };
 }
 
+/** ป้ายในช่อง "ออกในนาม" — เจ้าของเคาะ 2026-09-24 ว่ามีแค่สองคำนี้ (แบบ A ของ mockup) */
+export type SpBadge = 'system' | 'manual';
+
 interface Props {
   /** เซลส์ที่เลือก "ออกในนาม" — ว่าง = ยังไม่เลือก (หน้าแม่ใช้บล็อกปุ่มสร้างร่าง) */
   spUserId: string;
   onSpUserIdChange: (userId: string) => void;
+  /** คนกดเลือกเองจาก combobox — แยกจาก onSpUserIdChange เพราะหน้าแม่ต้องรู้ว่า "คนเลือก" ไม่ใช่ระบบ */
+  onSpPick?: (userId: string) => void;
+  /** `system` = ระบบเลือก (เติมจากลูกค้า/ใบเดิม) · `manual` = เลือกเอง · null = ไม่มีป้าย */
+  spBadge?: SpBadge | null;
+  /** เหตุผลที่ระบบเติมให้ไม่ได้ — ขึ้นเป็นกล่องเหลืองใต้แถบ ให้คนรู้ว่าต้องเลือกเอง */
+  spNotice?: string | null;
   /** true เมื่อบัญชีพร้อมออกใบ (ดูเกณฑ์แยกตาม role ที่หัวไฟล์) — หน้าแม่ใช้บล็อกทั้งหน้าเมื่อยังไม่พร้อม */
   onReadyChange: (ready: boolean) => void;
   /** ตัวตนที่จะขึ้นบนใบ — เปลี่ยนเมื่อเลือกเซลส์คนใหม่ หรือโปรไฟล์โหลดเสร็จ */
@@ -88,9 +99,12 @@ interface Props {
  * ⇒ สัดส่วนที่เห็นตรงกับบนกระดาษ รูปที่ยาวเกินจนจะถูกย่อจนอ่านไม่ออกดูออกตั้งแต่ตอนอัป
  * ทั้งสองฝั่งต้องใช้ค่าเดียวกัน เพราะนี่คือจุดที่ตาใช้เทียบซ้าย–ขวา
  */
+//
+// จอแคบกว่า sm ย่อเหลือ 80×22 (ยังเป็น 3.6:1) — วัดที่ 390px: กรอบ 144px เหลือที่ให้ช่อง "ออกในนาม"
+// จนชื่อเซลส์กว้าง 0px เมื่อมีป้าย "ระบบเลือก"/"เลือกเอง" ต่อท้าย (2026-09-24 · ตรงกับ mockup ที่เจ้าของเลือก)
 const SIG_FRAME =
-  'relative w-[144px] h-[40px] shrink-0 rounded-xl border border-dashed border-slate-300 bg-slate-50 flex items-center justify-center overflow-hidden';
-const SIG_BOX = 'max-h-[36px] max-w-[138px] object-contain';
+  'relative w-[80px] h-[22px] sm:w-[144px] sm:h-[40px] shrink-0 rounded-xl border border-dashed border-slate-300 bg-slate-50 flex items-center justify-center overflow-hidden';
+const SIG_BOX = 'max-h-[18px] max-w-[74px] sm:max-h-[36px] sm:max-w-[138px] object-contain';
 
 /** กล่องล็อก (อ่านอย่างเดียว) แทนที่ PersonComboBox ของฝั่งที่แก้เองไม่ได้แล้ว (§13.3/§13.2) */
 const LockedField: React.FC<{
@@ -140,7 +154,9 @@ const NotReadyCard: React.FC<{ role: string }> = ({ role }) => (
   </div>
 );
 
-export const QuoteIssuerProfile: React.FC<Props> = ({ spUserId, onSpUserIdChange, onReadyChange, onIdentityChange }) => {
+export const QuoteIssuerProfile: React.FC<Props> = ({
+  spUserId, onSpUserIdChange, onSpPick, spBadge, spNotice, onReadyChange, onIdentityChange,
+}) => {
   const { token, user } = useAuth();
   const role = user?.role ?? 'admin';
   const isSelfIssueRole = role === 'salesperson';
@@ -152,11 +168,6 @@ export const QuoteIssuerProfile: React.FC<Props> = ({ spUserId, onSpUserIdChange
   const [saving, setSaving] = useState(false);
 
   const fileRef = useRef<HTMLInputElement>(null);
-  // อ่านค่าปัจจุบันของ prop ใน effect โดยไม่ต้องใส่เป็น dependency — ใส่แล้ว effect จะยิง fetch ใหม่ทุกครั้งที่เลือกเซลส์
-  const spUserIdRef = useRef(spUserId);
-  useEffect(() => {
-    spUserIdRef.current = spUserId;
-  }, [spUserId]);
 
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
@@ -190,16 +201,9 @@ export const QuoteIssuerProfile: React.FC<Props> = ({ spUserId, onSpUserIdChange
         setSalespersons(data.salespersons);
         onReadyChange(data.me.is_ready);
 
-        if (isSelfIssueRole) {
-          // เซลส์ไม่มีอะไรให้เลือก — ตัวตนคือ own_salesperson เสมอ (ถ้ามี)
-          if (data.me.own_salesperson) onSpUserIdChange(data.me.own_salesperson.user_id);
-        } else if (!spUserIdRef.current) {
-          // คืนค่าเซลส์ที่เลือกไว้ล่าสุดจาก DB (§13.4) — เฉพาะตอนที่หน้ายังไม่ได้เลือกอะไร
-          // และรหัสนั้นยังอยู่ในรายชื่อจริง (เซลส์อาจถูกยุบ/ปิดไปแล้ว)
-          const remembered = data.me.acting_salesperson_id;
-          const match = remembered ? data.salespersons.find((s) => s.salesperson_id === remembered) : null;
-          if (match) onSpUserIdChange(match.user_id);
-        }
+        // เซลส์ไม่มีอะไรให้เลือก — ตัวตนคือ own_salesperson เสมอ (ถ้ามี)
+        // role อื่นเริ่มว่าง (2026-09-24) — หน้าแม่เติมให้เมื่อรู้ลูกค้า ดูหัวไฟล์
+        if (isSelfIssueRole && data.me.own_salesperson) onSpUserIdChange(data.me.own_salesperson.user_id);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : 'โหลดข้อมูลไม่สำเร็จ');
       } finally {
@@ -251,18 +255,18 @@ export const QuoteIssuerProfile: React.FC<Props> = ({ spUserId, onSpUserIdChange
     [salespersons],
   );
 
-  /** จำเซลส์ที่เลือกไว้ล่าสุดลง DB (§13.4) — best-effort ไม่บล็อก UI ถ้าบันทึกไม่สำเร็จ */
-  const rememberActingSalesperson = async (salespersonId: string | null) => {
-    try {
-      await fetch('/api/admin/webquote/me/acting-salesperson', {
-        method: 'PUT',
-        headers: { ...authHeaders, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ salesperson_id: salespersonId }),
-      });
-    } catch {
-      /* จำไม่ได้ไม่ใช่เหตุให้ออกใบไม่ได้ — เหมือนตอนยังใช้ localStorage */
-    }
-  };
+  // ป้ายในช่อง: เขียว = ระบบเลือก · น้ำเงินขอบ = เลือกเอง (ภาษาเดียวกับป้าย "ตั้งเอง" ของเครดิต/กำหนดส่ง
+  // — docs/design.md §8 · สื่อด้วยคำ ไม่ใช่สีอย่างเดียว)
+  const badge =
+    spBadge === 'system' ? (
+      <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full border border-[var(--brand-fg)]/40 bg-[var(--brand-soft)] text-[var(--brand-fg)]">
+        ระบบเลือก
+      </span>
+    ) : spBadge === 'manual' ? (
+      <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full border border-blue-600 text-blue-700">
+        เลือกเอง
+      </span>
+    ) : null;
 
   const uploadSignature = async (file: File) => {
     setSaving(true);
@@ -417,10 +421,8 @@ export const QuoteIssuerProfile: React.FC<Props> = ({ spUserId, onSpUserIdChange
                 : null
             }
             options={spOptions}
-            onPick={(o) => {
-              onSpUserIdChange(o.id);
-              void rememberActingSalesperson(o.code ?? null);
-            }}
+            onPick={(o) => (onSpPick ?? onSpUserIdChange)(o.id)}
+            badge={selectedSp ? badge : undefined}
             placeholder="เลือกพนักงานขายที่จะออกใบในนาม"
             emptyText="ไม่พบพนักงานขายชื่อ รหัส หรือเบอร์นี้"
             ariaLabel="พนักงานขายที่จะออกใบในนาม"
@@ -443,6 +445,13 @@ export const QuoteIssuerProfile: React.FC<Props> = ({ spUserId, onSpUserIdChange
           </div>
         </div>
       </div>
+
+      {spNotice && !spUserId && (
+        <div className="mx-4 mb-3 flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs text-amber-800">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-px" />
+          <span>{spNotice}</span>
+        </div>
+      )}
 
       <div className="mx-4 mb-3 text-[11px] text-slate-400">
         ชื่อผู้เสนอราคาตั้งที่หน้า “จัดการผู้ใช้งานระบบ” — แก้ไม่ได้จากหน้านี้

@@ -69,8 +69,10 @@ import {
   ensureWebProxy,
   getAdminIssuerProfile,
   listActingSalespersons,
+  buildWebProposeKey,
 } from './webIdentity.js';
 import { dedupeActingSalespersons, type PickedSalesperson } from './salespersonPicker.js';
+import { resolveCustomerSalesOwner, resolveQuotationSalesOwner, type SalesOwner } from './customerSalesOwner.js';
 
 /**
  * งบเวลาต่อ 1 คำขอของหน้าเว็บ
@@ -102,6 +104,7 @@ export type WebQuoteErrorCode =
   | 'MAKER_NOT_SET'            // แอดมินยังไม่ได้ตั้งชื่อผู้จัดทำ (เฟส B/B2)
   | 'ADMIN_NOT_FOUND'
   | 'SALESPERSON_NOT_FOUND'
+  | 'SALESPERSON_REQUIRED'     // ระบบหาเซลส์ให้เองไม่ได้ ⇒ ต้องเลือกเอง (customerSalesOwner.ts)
   | 'BAD_REQUEST'
   | 'QUOTATION_NOT_FOUND'
   | 'QUOTATION_NOT_CONFIRMED'
@@ -339,15 +342,27 @@ export async function proposeFromText(params: {
   adminId: number;
   /** role ของคนที่กำลังวางข้อความ — บังคับส่งเสมอ ใช้ตรวจว่าออกใบในนามรหัสนี้ได้ไหม (§13.2/§13.6 ข้อ 9) */
   role: Role;
-  spUserId: string;
+  /**
+   * ว่างได้ (2026-09-24) เฉพาะ role ที่เลือกเซลส์คนไหนก็ได้ — ช่อง "ออกในนาม" เริ่มต้นว่าง แล้ว
+   * หน้าจอเติมให้จากลูกค้าที่ได้จากขั้นนี้ (docs/plan-web-quote-auto-salesperson.md)
+   */
+  spUserId?: string | null;
   text: string;
 }): Promise<ProposeResult> {
   const text = String(params.text ?? '').trim();
   if (text === '') throw new WebQuoteError('BAD_REQUEST', 'ต้องมีข้อความที่จะสกัด (text)', 400);
 
-  // ออกใบในนามคนอื่นไม่ได้ ถ้าไม่มีสิทธิ์ — ก่อน resolveWebUserId เสมอ (มันเขียนแถวพร็อกซีแล้ว)
-  await assertMayActAs(params.adminId, params.role, params.spUserId);
-  const webUserId = await resolveWebUserId(params.adminId, params.spUserId, params.role);
+  const spUserId = String(params.spUserId ?? '').trim();
+  let webUserId: string;
+  if (spUserId === '') {
+    // ยังไม่รู้เซลส์ ⇒ ไม่สร้างแถวพร็อกซี (ขั้นนี้ไม่เขียน quotations อยู่แล้ว) ใช้คีย์คิว/ประวัติแทน
+    await assertMayProposeWithoutSalesperson(params.role);
+    webUserId = buildWebProposeKey(params.adminId);
+  } else {
+    // ออกใบในนามคนอื่นไม่ได้ ถ้าไม่มีสิทธิ์ — ก่อน resolveWebUserId เสมอ (มันเขียนแถวพร็อกซีแล้ว)
+    await assertMayActAs(params.adminId, params.role, spUserId);
+    webUserId = await resolveWebUserId(params.adminId, spUserId, params.role);
+  }
 
   return runQueued(webUserId, async () => {
     const startedAt = Date.now();
@@ -402,7 +417,9 @@ export async function proposeFromText(params: {
     // ใช้แถวเซลส์ "ตัวจริง" ไม่ใช่แถวพร็อกซี — การให้คะแนนใช้ชื่อเจ้าของลูกค้าและสาขา
     // ซึ่งแถวพร็อกซีไม่ได้ก๊อป branch มาด้วยตามที่ §2.3 ตั้งใจ ⇒ ใช้พร็อกซีจะได้คะแนน
     // ต่างจากตอนเซลส์คนนั้นทักเอง ทั้งที่เป็นใบของลูกค้ารายเดียวกัน
-    const realSp = await getSalespersonByUserId(String(params.spUserId).trim());
+    // ยังไม่เลือกเซลส์ = null ⇒ ไม่มีสัญญาณ "เซลส์เจ้าของลูกค้าตรงกับผู้ส่ง" (ถูกแล้ว: คนวางข้อความ
+    // ไม่ใช่เจ้าของลูกค้า) — baseline ของ eval วัดโหมดนี้อยู่แล้ว (plan §4)
+    const realSp = spUserId === '' ? null : await getSalespersonByUserId(spUserId);
     const customerQuery = String(extracted.quoteData.customer_query ?? '').trim();
     const contactQuery = String(extracted.quoteData.contact_query ?? '').trim();
 
@@ -520,6 +537,23 @@ async function assertMayActAs(adminId: number, role: Role | undefined, spUserId:
   if (code === '' || !mine.includes(code)) {
     throw new WebQuoteError('FORBIDDEN', 'บัญชีนี้ออกใบเสนอราคาได้เฉพาะในนามตัวเองเท่านั้น', 403);
   }
+}
+
+/**
+ * ไม่ส่งเซลส์มาได้ไหม — ได้เฉพาะบัญชีที่เลือกเซลส์คนไหนก็ได้ (ช่องเริ่มต้นว่าง · 2026-09-24)
+ *
+ * บัญชีที่ออกในนามตัวเองเท่านั้น (role salesperson) หน้าจอเติมรหัสตัวเองให้เสมอ ⇒ ถ้ามาถึงนี่
+ * แบบว่าง ๆ คือ client ผิดปกติ — ตอบข้อความเดิมก่อนมีฟีเจอร์นี้เป๊ะ
+ */
+async function assertMayProposeWithoutSalesperson(role: Role | undefined): Promise<void> {
+  if (role && (await can(role, 'quote.act_as_any_salesperson'))) return;
+  throw new WebQuoteError('BAD_REQUEST', 'ต้องระบุเซลส์ที่จะออกใบในนาม (sp_user_id)', 400);
+}
+
+/** ค่าที่ `sp_source` รับได้ — นอกรายการ = null (ข้อมูลประวัติ ไม่ใช่เหตุให้ปฏิเสธคำขอ) */
+const SP_SOURCES = ['customer', 'contact', 'last_order', 'older_order', 'quotation', 'manual'] as const;
+function parseSpSource(raw: unknown): (typeof SP_SOURCES)[number] | null {
+  return (SP_SOURCES as readonly string[]).includes(String(raw)) ? (raw as (typeof SP_SOURCES)[number]) : null;
 }
 
 /** คีย์ที่ยาวกว่านี้ไม่มีทางมาจาก `violationKey()` — กันคนยิง payload บวมเข้ามาตรง ๆ */
@@ -714,6 +748,12 @@ export async function createDraft(params: {
   items: WebQuoteItemInput[];
   /** id ของแถว `web_propose` ที่ฟอร์มได้มาจากขั้นก่อนหน้า — ไม่ส่งมาก็สร้างร่างได้ตามปกติ */
   proposeMsgId?: number | string | null;
+  /**
+   * ช่อง "ออกในนาม" ได้ค่ามาจากไหน — ข้อมูลประวัติล้วน ไม่มีผลกับการออกใบ (ด่านสิทธิ์ยังเป็น
+   * assertMayActAs ตัวเดิม) · ใช้วัดว่าแต่ละขั้นของ customerSalesOwner.ts ช่วยได้จริงแค่ไหน
+   * และคนเลือกทับบ่อยแค่ไหน (docs/plan-web-quote-auto-salesperson.md §3.4)
+   */
+  spSource?: unknown;
   /**
    * เลขที่ใบต้นทางเมื่อร่างนี้เกิดจากการ "แก้ใบเดิม" — ติดไว้ใน `customer_name` ด้วยตัวต่อสตริง
    * ตัวเดียวกับ reviseQuotation() (`appendReviseFrom`) ⇒ รูปแบบ `revise_from=` ของสองเส้นไม่เพี้ยนกัน
@@ -975,6 +1015,7 @@ export async function createDraft(params: {
       meta: {
         propose_msg_id: proposeMsgId,
         revise_from: reviseFrom || null,
+        sp_source: parseSpSource(params.spSource),
         // ค่าที่คนกดตั้งทับระบบ — ต้องตอบได้ย้อนหลังว่า "เครดิตในใบนี้ไม่ตรงกับลูกค้าเพราะใคร"
         payment_terms_override: overrides.paymentTerms,
         delivery_overrides: overrides.delivery ?? null,
@@ -1652,6 +1693,11 @@ async function resolveChosenRank(
 
 export interface ReviseResult {
   web_user_id: string;
+  /**
+   * เซลส์ที่ใบ revision นี้ออกในนาม — หน้าจอเอาไปตั้งช่อง "ออกในนาม" ต่อ ไม่งั้นกดออกใบจริง
+   * จะไปคนละคู่ (แอดมิน × เซลส์) กับร่างที่เพิ่งสร้าง
+   */
+  sp_user_id: string;
   /** id ของ "ร่าง" ที่เพิ่งสร้าง — ฟอร์มเปิดใบนี้ต่อในหน้าเดิม */
   draft_quote_id: string;
   /** เลขที่ใบต้นทางที่กำลังแก้ */
@@ -1675,15 +1721,25 @@ export async function reviseQuotation(params: {
    *    (§13.6 ข้อ 9) — ไม่ส่ง role มาจะตกไปที่ด่านที่เข้มที่สุด (ต้องเป็นรหัสของตัวเองเท่านั้น)
    */
   role?: Role;
-  spUserId: string;
+  /**
+   * ว่างได้ (2026-09-24) เฉพาะ role ที่เลือกเซลส์คนไหนก็ได้ ⇒ ใช้ **เซลส์ของใบต้นทาง**
+   * (เจ้าของเคาะ: แก้ใบเดิมให้คงเซลส์ของใบเดิมไว้) · ส่งมา = คนเลือกทับเอง ใช้ค่านั้นตามเดิม
+   */
+  spUserId?: string | null;
   quotationNo: string;
 }): Promise<ReviseResult> {
   const quoteNo = String(params.quotationNo ?? '').trim().toUpperCase();
   if (quoteNo === '') throw new WebQuoteError('BAD_REQUEST', 'ต้องระบุเลขที่ใบเสนอราคา (quotation_no)', 400);
 
+  let spUserId = String(params.spUserId ?? '').trim();
+  if (spUserId === '') {
+    await assertMayProposeWithoutSalesperson(params.role);
+    spUserId = await salespersonOfQuotation(quoteNo);
+  }
+
   // ออกใบ (revision) ในนามคนอื่นไม่ได้ ถ้าไม่มีสิทธิ์ — เส้นนี้เขียนร่างจริงลง DB (§13.6 ข้อ 9)
-  await assertMayActAs(params.adminId, params.role, params.spUserId);
-  const webUserId = await resolveWebUserId(params.adminId, params.spUserId, params.role);
+  await assertMayActAs(params.adminId, params.role, spUserId);
+  const webUserId = await resolveWebUserId(params.adminId, spUserId, params.role);
 
   return runQueued(webUserId, async () => {
     const startedAt = Date.now();
@@ -1757,6 +1813,7 @@ export async function reviseQuotation(params: {
 
     return {
       web_user_id: webUserId,
+      sp_user_id: spUserId,
       draft_quote_id: String(quotes[0].id),
       revise_from: active.quotation_no,
       quotes,
@@ -1777,6 +1834,40 @@ export async function reviseQuotation(params: {
  */
 export async function listSalespersonsForWeb(): Promise<PickedSalesperson[]> {
   return dedupeActingSalespersons(await listActingSalespersons());
+}
+
+// ── เติม "ออกในนาม" ให้เอง — ตรรกะอยู่ที่ services/customerSalesOwner.ts ─────────
+//  ส่งรายชื่อ dropdown ตัวเดียวกับ GET /salespersons เข้าไป ⇒ คำตอบเป็นตัวเลือกที่มีอยู่จริงเสมอ
+
+/** เซลส์เจ้าของบริษัทนี้ (ใบใหม่) — หาไม่เจอไม่ throw แต่คืนสถานะบอกเหตุผล (throw เฉพาะ id ผิดรูป) */
+export async function getCustomerSalesOwner(customerId: unknown): Promise<SalesOwner> {
+  const id = Number(customerId);
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new WebQuoteError('BAD_REQUEST', 'ต้องระบุ customer_id', 400);
+  }
+  return resolveCustomerSalesOwner(id, await listSalespersonsForWeb());
+}
+
+/**
+ * เซลส์ของใบต้นทาง (แก้ใบเดิม) — คืน `user_id` ที่ใช้เป็น `sp_user_id` ได้ทันที
+ *
+ * หาไม่ได้ **ไม่เดาแทน** (ไม่ถอยไปใช้เซลส์ของลูกค้าวันนี้ หรือคนที่เลือกล่าสุด) — ใบ revision
+ * คือใบเดิมที่ลูกค้าถืออยู่ ผู้ลงนามต้องไม่เปลี่ยนเงียบ ๆ ⇒ ตอบ 400 ให้คนเลือกเองแล้วกดใหม่
+ */
+async function salespersonOfQuotation(quoteNo: string): Promise<string> {
+  const active = await loadActiveQuotation(quoteNo);
+  if (!active) {
+    throw new WebQuoteError('QUOTATION_NOT_FOUND', `ไม่พบใบเสนอราคาเลขที่ "${quoteNo}" ในระบบ`, 404);
+  }
+  const owner = await resolveQuotationSalesOwner(active.user_id, await listSalespersonsForWeb());
+  if (owner.status === 'resolved') return owner.user_id;
+  const who = owner.status === 'inactive' && owner.odoo_name ? ` (${owner.odoo_name})` : '';
+  throw new WebQuoteError(
+    'SALESPERSON_REQUIRED',
+    `เซลส์ของใบเดิม${who}ไม่อยู่ในรายชื่อที่ออกใบในนามได้แล้ว — เลือกพนักงานขายที่จะออกในนามก่อน แล้วกดแก้ไขอีกครั้ง`,
+    400,
+    { owner }
+  );
 }
 
 // ── รายการเครดิตสำหรับช่อง "เขียนทับเครดิต" ──────────────────────────────────

@@ -320,6 +320,71 @@ export async function getSalespersonByUserId(userId: string): Promise<any | null
 }
 
 /**
+ * เซลส์ทุกคนที่ผูกกับผู้ติดต่อของ "บริษัท" นี้ตามข้อมูล Odoo — เรียงตาม `contact_id` น้อยสุดของแต่ละคน
+ *
+ * ตัวแรกของผลลัพธ์ = "คนแรกที่ไม่ว่างของบริษัท" (ขั้น 1 · เจ้าของเคาะ 2026-09-24) · ตัวถัดไป =
+ * ผู้ติดต่อคนอื่นของบริษัทเดียวกัน (ขั้น 2) · กรองด้วย **ชื่อ** ไม่ใช่รหัส เพราะชื่อที่ไม่มีรหัส
+ * (`purchase_user_1` ฯลฯ) ยังเป็นคำตอบของ "ใครเป็นเจ้าของ" ที่ต้องเอาไปบอกคน
+ *
+ * `[]` = ไม่มีชื่อเซลส์เลยสักแถว หรือ query ล้ม (ช่องนี้เป็นความสะดวก ห้าม throw)
+ */
+export async function getCompanySalespersons(
+  companyId: number
+): Promise<{ salesperson: string; salesperson_id: string | null }[]> {
+  try {
+    const { rows } = await pool.query(
+      `SELECT salesperson, salesperson_id
+         FROM customers_data_view
+        WHERE company_id = $1 AND salesperson IS NOT NULL
+        GROUP BY salesperson, salesperson_id
+        ORDER BY min(contact_id)`,
+      [companyId]
+    );
+    return rows.map((r: any) => ({
+      salesperson: String(r.salesperson),
+      salesperson_id: r.salesperson_id ? String(r.salesperson_id) : null,
+    }));
+  } catch (err) { logErr('getCompanySalespersons', err); return []; }
+}
+
+/**
+ * เซลส์ที่เคยออกใบสั่งขายให้ผู้ติดต่อของบริษัทนี้ — คนละแถวต่อรหัส เรียงจากใบล่าสุดของแต่ละคน
+ *
+ * ตัวแรก = เซลส์ของ "ใบล่าสุด" (ขั้น 3) · ตัวถัดไป = ใบที่เก่าลงไปเรื่อย ๆ (ขั้น 4 · ไม่จำกัดอายุ
+ * — เจ้าของเคาะ 2026-09-24)
+ *
+ * ⚠️ **เชื่อมด้วย `contact_id` เท่านั้น ห้ามใช้ `sale_orders.company_id`** — คอลัมน์นั้นคือ
+ *    "บริษัทผู้ขาย" (มีแค่ 1 = PM · 2 = THT · วัด 2026-09-24: 235,259 / 87,420 ใบ) ไม่ใช่ลูกค้า
+ *    เผลอ join ด้วยมันแล้วผลจะดูถูกแต่ว่างเกือบทั้งหมด (CLAUDE.md กับดักข้อแรก) ·
+ *    `diag:web-sales-owner` อ่านซอร์สฟังก์ชันนี้มาตรวจว่าไม่มี `s.company_id`
+ * ⚠️ กรอง `contact_id` ก่อนแล้วค่อยเรียง ⇒ ใช้ `idx_so_contact_latest` ได้ (บริษัทที่ใบเยอะสุด
+ *    1,810 ใบ ~13ms · วัด 2026-09-24)
+ */
+export async function getCompanyOrderSalespersons(
+  companyId: number
+): Promise<{ salesperson: string | null; salesperson_id: string; last_order_date: string | null }[]> {
+  try {
+    const { rows } = await pool.query(
+      `SELECT code AS salesperson_id, salesperson, last_order_date
+         FROM (SELECT DISTINCT ON (s.salesperson_id)
+                      s.salesperson_id::text AS code, s.salesperson, s.order_date AS last_order_date
+                 FROM sale_orders s
+                WHERE s.contact_id IN (SELECT contact_id FROM customers_data_view
+                                        WHERE company_id = $1 AND contact_id > 0)
+                  AND s.salesperson_id IS NOT NULL
+                ORDER BY s.salesperson_id, s.order_date DESC NULLS LAST) per_sp
+        ORDER BY last_order_date DESC NULLS LAST`,
+      [companyId]
+    );
+    return rows.map((r: any) => ({
+      salesperson: r.salesperson ? String(r.salesperson).trim() : null,
+      salesperson_id: String(r.salesperson_id),
+      last_order_date: r.last_order_date ? new Date(r.last_order_date).toISOString() : null,
+    }));
+  } catch (err) { logErr('getCompanyOrderSalespersons', err); return []; }
+}
+
+/**
  * แถวพนักงานขายทั้งหมดสำหรับหน้า "จัดการพนักงานขาย" — **ตัดแถวพร็อกซีของหน้าเว็บแอดมินออก**
  *
  * `web:<admin_id>:<sp_user_id>` ไม่ใช่คน แต่ก๊อป name/salesperson_id มาจากเซลส์ตัวจริง

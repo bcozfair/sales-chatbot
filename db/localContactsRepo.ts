@@ -64,7 +64,10 @@ export async function ensureDirectoryRow(
             v.customer_type, v.phone, v.mobile, v.email,
             public.clean_text($3), public.clean_text($4), public.clean_text($4), public.clean_text($5),
             v.invoice_street, v.invoice_district, v.invoice_sub_district, v.invoice_state, v.invoice_zip,
-            v.last_order_at
+            v.last_order_at,
+            -- รหัสเซลส์ตามชื่อ v.salesperson ที่ลอกมา — ต้องอยู่ท้ายสุดตรงกับคอลัมน์ท้ายของ view
+            -- (migration 2026-09-24_01) · ไม่มีบรรทัดนี้ Postgres จะเติม NULL ให้เงียบ ๆ
+            v.salesperson_id
        FROM public.customers_data_view v
       WHERE v.company_id = $1::int AND v.source <> 'local'
       ORDER BY v.contact_id                        -- เกณฑ์เดียวกับ local_anchor ของ Arm 3 เป๊ะ

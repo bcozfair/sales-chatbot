@@ -54,6 +54,8 @@ interface Quotation {
   salesperson_name: string;
   salesperson_phone: string;
   salesperson_employee_code: string | null;
+  /** ชื่อผู้เสนอราคา — มีเฉพาะใบจากเว็บ · null = ใบ LINE/ใบเก่า ซึ่งช่องผู้เสนอราคาบนใบคือชื่อเซลส์ */
+  issuer_name?: string | null;
   total_sum: number;
   items: QuotationItem[];
   user_id: string;
@@ -865,10 +867,10 @@ export const Quotations: React.FC = () => {
                     ลูกค้า {renderSortIcon('customer_name')}
                   </th>
                   <th 
-                    onClick={() => handleSort('salesperson_name')}
+                    onClick={() => handleSort('issuer_name')}
                     className="px-4 py-3 whitespace-nowrap cursor-pointer hover:bg-slate-100 transition-colors"
                   >
-                    พนักงานขาย {renderSortIcon('salesperson_name')}
+                    ผู้เสนอราคา {renderSortIcon('issuer_name')}
                   </th>
                   <th 
                     onClick={() => handleSort('total_sum')}
@@ -956,10 +958,10 @@ export const Quotations: React.FC = () => {
                           </div>
                         </td>
 
-                        {/* Salesperson */}
+                        {/* ผู้เสนอราคา — กติกาเดียวกับช่องขวาของใบ PDF: ไม่มี issuer_name ⇒ ชื่อเซลส์ */}
                         <td className="px-4 py-2.5 whitespace-nowrap">
                           <span className="text-slate-700 text-sm">
-                            {quote.salesperson_name || '-'}
+                            {quote.issuer_name || quote.salesperson_name || '-'}
                           </span>
                         </td>
 

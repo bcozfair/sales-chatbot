@@ -148,6 +148,7 @@ import {
   previewDraft as previewWebQuoteDraft,
   previewQuotePdf as previewWebQuotePdf,
   reviseQuotation as reviseWebQuotation,
+  getCustomerSalesOwner,
 } from './services/webQuoteService.js';
 import {
   getClientIp,
@@ -206,6 +207,27 @@ getJwtSecret();
 getAppUrl();
 
 const app = express();
+
+// ── โหมดพรีวิวร่วมของเครื่อง dev (npm run preview:start · docs/dev-preview.md) ────────────────
+// ตัวจริงไม่ได้ตั้งค่านี้ ⇒ บล็อกนี้ไม่มีผลอะไรกับ production เลย
+// เปิดแล้วต่างจากตัวจริงแค่สามข้อ:
+//  1. `/__preview/boot` ตอบรหัสประจำโปรเซส — Vite ของพรีวิวถามทุกวินาที รหัสเปลี่ยน = backend
+//     เพิ่งรีสตาร์ตจากโค้ดใหม่ ⇒ สั่งหน้าเว็บรีโหลดเอง · วางไว้ "ก่อน" apiLogMiddleware
+//     เพราะมันโดนถามวันละ ~86,000 ครั้ง ถ้าลง api_logs จะกลบ traffic จริงทั้งตาราง
+//  2. ไม่เริ่มตัวตั้งเวลา auto sync (ดู app.listen ท้ายไฟล์) — พรีวิวใช้ฐานเดียวกับตัวจริง
+//     ถ้าเปิดไว้จะได้ sync สองรอบซ้อนกันจากสองโปรเซส (ตัวล็อก runState อยู่ในโปรเซสใครโปรเซสมัน)
+//  3. อัป/ลบลายเซ็นไม่ได้ — พรีวิวรันบนโฮสต์ `data/*_sigs` ของมันคือไฟล์ในรีโป (commit อยู่) ไม่ใช่
+//     volume ของตัวจริง ⇒ อัปในพรีวิวแล้วฐานจริงชี้ไฟล์ที่ตัวจริงไม่มี = PDF ของจริงไม่มีลายเซ็น
+//     และไฟล์ไปโผล่ใน working tree ของ main · ดูลายเซ็นได้ตามปกติ (GET ผ่าน)
+const PREVIEW_MODE = process.env.PREVIEW_MODE === '1';
+if (PREVIEW_MODE) {
+  const bootId = `${process.pid}-${Date.now()}`;
+  app.get('/__preview/boot', (_req: any, res: any) => { res.type('text/plain').send(bootId); });
+  app.use(['/api/admin/signatures', '/api/admin/webquote/me/signature'], (req: any, res: any, next: any) => {
+    if (req.method === 'GET') return next();
+    res.status(503).json({ error: 'พรีวิวอัปหรือลบลายเซ็นไม่ได้ — ทำที่ระบบจริงแทน (ไฟล์ลายเซ็นของพรีวิวไม่ใช่ชุดเดียวกับตัวจริง)' });
+  });
+}
 
 // ── บันทึกการเรียก API (ตาราง api_logs) — ต้องเป็น middleware ตัวแรกสุด ────────────────────
 // วางบนสุดเพราะ app.use() ที่วางไว้ล่างสุดจะทำงานเฉพาะ request ที่ไม่มี route ไหนรับ (เห็นแค่ 404)
@@ -2778,11 +2800,8 @@ app.get('/api/admin/webquote/me', adminAuthMiddleware, requireCapability('quote.
       isReady = (profile?.employee_quotation_id ?? null) !== null;
     }
 
-    // ค่าที่แอดมินเลือก "ออกในนาม" ล่าสุด (§13.4) — เก็บใน DB แทน localStorage ตั้งแต่ 2026-09-22
-    // ผู้เรียก (frontend) ยังต้องเทียบกับรายชื่อที่โหลดได้จริงก่อนใช้เสมอ (เซลส์อาจถูกปิดไปแล้ว)
-    const { rows: actingRows } = await pool.query(
-      'SELECT acting_salesperson_id FROM admin_users WHERE id = $1', [admin.id]
-    );
+    // ไม่คืน acting_salesperson_id แล้ว (2026-09-24) — ช่อง "ออกในนาม" เริ่มว่างแล้วเติมจากลูกค้า
+    // (docs/plan-web-quote-auto-salesperson.md) · คอลัมน์ยังอยู่ในฐาน ไม่มีใครอ่าน/เขียน
 
     res.json({
       admin_id: admin.id,
@@ -2793,7 +2812,6 @@ app.get('/api/admin/webquote/me', adminAuthMiddleware, requireCapability('quote.
       has_signature: sig.exists,
       signature_url: sig.url,
       is_ready: isReady,
-      acting_salesperson_id: actingRows[0]?.acting_salesperson_id ?? null,
       own_salesperson: ownSalesperson,
     });
   } catch (err: any) {
@@ -2815,29 +2833,9 @@ app.put('/api/admin/webquote/me', adminAuthMiddleware, requireCapability('quote.
   });
 });
 
-/**
- * จำเซลส์ที่แอดมิน "ออกในนาม" ล่าสุดไว้ที่ DB แทน localStorage (§13.4)
- *
- * เก็บ**รหัส**พนักงานขาย ไม่ใช่ `user_id` — ตรงกับที่ `admin_users.acting_salesperson_id`
- * นิยามไว้ (คอลัมน์นี้มีอยู่แล้วตั้งแต่ P1) ไม่ใช่สิทธิ์และไม่มีผลย้อนหลังกับใบที่ออกไปแล้ว
- * (ใบตรึง `employee_details` ไว้ตั้งแต่ยืนยัน) จึง guard ด้วย `quote.create` เดิมพอ ไม่ต้องมี
- * capability ใหม่ · รับได้ทั้งชื่อ (`null` = ล้างค่า) และรหัสว่าง/มีค่า ไม่ตรวจว่ารหัสนั้นมีแถวจริง
- * ไหม (เป็นแค่ความสะดวกของ UI ไม่ใช่ด่านสิทธิ์ — ผู้เรียกฝั่ง frontend เทียบกับรายชื่อจริงเองอยู่แล้ว)
- */
-app.put('/api/admin/webquote/me/acting-salesperson', adminAuthMiddleware, requireCapability('quote.create'), express.json(), async (req: any, res: any) => {
-  try {
-    const raw = req.body?.salesperson_id;
-    const value = raw === null || raw === undefined ? null : String(raw).trim() || null;
-    await pool.query(
-      'UPDATE admin_users SET acting_salesperson_id = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1',
-      [req.admin.id, value]
-    );
-    res.json({ success: true, acting_salesperson_id: value });
-  } catch (err: any) {
-    console.error('PUT /api/admin/webquote/me/acting-salesperson error:', err);
-    res.status(500).json({ error: 'บันทึกไม่สำเร็จ' });
-  }
-});
+// `PUT /api/admin/webquote/me/acting-salesperson` (จำเซลส์ที่ "ออกในนาม" ล่าสุด · §13.4) ถูกถอดออก
+// 2026-09-24 — ช่องเริ่มว่างแล้วเติมจากลูกค้าแทน การเติม "คนเดิม" ให้ทุกใบคือการออกใบในนามคนผิด
+// (docs/plan-web-quote-auto-salesperson.md) · คอลัมน์ `admin_users.acting_salesperson_id` ยังอยู่ ไม่ drop
 
 /**
  * อัปโหลดลายเซ็นของตัวเอง — เก็บเป็นไฟล์ใน data/admin_sigs/<token สุ่ม>.<ext>
@@ -2906,6 +2904,22 @@ app.get('/api/admin/webquote/salespersons', adminAuthMiddleware, requireCapabili
     res.json({ salespersons: await listSalespersonsForWeb() });
   } catch (err: any) {
     sendWebQuoteError(res, 'GET /api/admin/webquote/salespersons', err);
+  }
+});
+
+/**
+ * เซลส์เจ้าของลูกค้ารายนี้ — ให้ช่อง "ออกในนาม" (เริ่มต้นว่าง) เติมเองเมื่อรู้ลูกค้าแล้ว
+ * แผน: docs/plan-web-quote-auto-salesperson.md · ตรรกะอยู่ที่ services/customerSalesOwner.ts
+ *
+ * คร่อมด้วย `quote.act_as_any_salesperson` เพิ่ม เพราะคำตอบคือ "ใบนี้ควรออกในนามคนอื่น" ซึ่งมีความหมาย
+ * เฉพาะบัญชีที่เลือกเซลส์ได้ · บัญชีที่ออกในนามตัวเองเท่านั้นไม่มีอะไรให้เติม
+ * ไม่ใช่ด่านสิทธิ์ของการออกใบ — ตอนสร้างร่างยังผ่าน assertMayActAs() ตามเดิม
+ */
+app.get('/api/admin/webquote/sales-owner', adminAuthMiddleware, requireCapability('quote.create'), requireCapability('quote.act_as_any_salesperson'), async (req: any, res: any) => {
+  try {
+    res.json({ owner: await getCustomerSalesOwner(req.query?.customer_id) });
+  } catch (err: any) {
+    sendWebQuoteError(res, 'GET /api/admin/webquote/sales-owner', err);
   }
 });
 
@@ -3045,6 +3059,7 @@ app.post('/api/admin/webquote/drafts', adminAuthMiddleware, requireCapability('q
       contactId: req.body?.contact_id,
       items: req.body?.items,
       proposeMsgId: req.body?.propose_msg_id,
+      spSource: req.body?.sp_source,
       reviseFrom: req.body?.revise_from,
       paymentTermsOverride: req.body?.payment_terms_override,
       delivery: req.body?.delivery,
@@ -4028,6 +4043,9 @@ app.get('/api/admin/customers/types', adminAuthMiddleware, requireCapability('pa
 const SP_NAME_SQL = `COALESCE(s.name, q.employee_details->>'saleperson')`;
 const SP_PHONE_SQL = `COALESCE(s.phone, q.employee_details->>'sale_phone')`;
 const SP_CODE_SQL = `COALESCE(s.salesperson_id, q.employee_details->>'salesperson_id', q.salesperson_id)`;
+// ชื่อในช่อง "ผู้เสนอราคา" ของใบ — กติกาเดียวกับ pdfGenerator: ใบจากเว็บมี snapshot `issuer_name`
+// ส่วนใบ LINE/ใบเก่าไม่มีคีย์นี้ ⇒ ช่องขวาของใบพิมพ์ชื่อเซลส์ จึงถอยไปใช้ชื่อเซลส์เหมือนกัน
+const ISSUER_NAME_SQL = `COALESCE(NULLIF(q.employee_details->>'issuer_name', ''), ${SP_NAME_SQL})`;
 
 // กัน path param ที่ไม่ใช่ uuid ยิงเข้า query แล้วได้ error 500 จาก Postgres แทน 400 ที่อ่านรู้เรื่อง
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -4052,6 +4070,7 @@ app.get('/api/admin/quotations', adminAuthMiddleware, requireCapability('page.qu
       created_at: 'q.created_at',
       customer_name: "(q.customer_details->>'customer_name')",
       salesperson_name: SP_NAME_SQL,
+      issuer_name: ISSUER_NAME_SQL,
       total_sum: 'q.total_sum',
       status: 'q.status',
       odoo_exported_at: 'q.odoo_exported_at'
@@ -4066,7 +4085,7 @@ app.get('/api/admin/quotations', adminAuthMiddleware, requireCapability('page.qu
     let paramIndex = 1;
 
     if (search.trim()) {
-      conditions.push(`(q.quotation_no ILIKE $${paramIndex} OR (q.customer_details->>'customer_name') ILIKE $${paramIndex} OR ${SP_NAME_SQL} ILIKE $${paramIndex})`);
+      conditions.push(`(q.quotation_no ILIKE $${paramIndex} OR (q.customer_details->>'customer_name') ILIKE $${paramIndex} OR ${SP_NAME_SQL} ILIKE $${paramIndex} OR ${ISSUER_NAME_SQL} ILIKE $${paramIndex})`);
       params.push(`%${search.trim()}%`);
       paramIndex++;
     }
@@ -4182,6 +4201,7 @@ app.get('/api/admin/quotations/export', adminAuthMiddleware, requireCapability('
       created_at: 'q.created_at',
       customer_name: "(q.customer_details->>'customer_name')",
       salesperson_name: SP_NAME_SQL,
+      issuer_name: ISSUER_NAME_SQL,
       total_sum: 'q.total_sum',
       status: 'q.status',
       odoo_exported_at: 'q.odoo_exported_at'
@@ -4196,7 +4216,7 @@ app.get('/api/admin/quotations/export', adminAuthMiddleware, requireCapability('
     let paramIndex = 1;
 
     if (search.trim()) {
-      conditions.push(`(q.quotation_no ILIKE $${paramIndex} OR (q.customer_details->>'customer_name') ILIKE $${paramIndex} OR ${SP_NAME_SQL} ILIKE $${paramIndex})`);
+      conditions.push(`(q.quotation_no ILIKE $${paramIndex} OR (q.customer_details->>'customer_name') ILIKE $${paramIndex} OR ${SP_NAME_SQL} ILIKE $${paramIndex} OR ${ISSUER_NAME_SQL} ILIKE $${paramIndex})`);
       params.push(`%${search.trim()}%`);
       paramIndex++;
     }
@@ -5275,8 +5295,9 @@ app.get('/api/sync/v1/tables/:table/ids', ...syncApiGuards, async (req: any, res
 const port = process.env.PORT || 3011;
 const server = app.listen(port, () => {
   console.log(`listening on ${port}`);
-  // เริ่มตัวตั้งเวลา auto-sync (อ่าน config จากตาราง sync_settings)
-  initScheduler().catch((err) => console.error('[scheduler] init ล้มเหลว:', err));
+  // เริ่มตัวตั้งเวลา auto-sync (อ่าน config จากตาราง sync_settings) — ยกเว้นพรีวิว (ดู PREVIEW_MODE ใต้ `const app`)
+  if (PREVIEW_MODE) console.log('[preview] PREVIEW_MODE=1 — ไม่เริ่มตัวตั้งเวลา auto sync');
+  else initScheduler().catch((err) => console.error('[scheduler] init ล้มเหลว:', err));
   // เริ่มตัวเขียน api_logs แบบ batch + ตัวลบของเก่า (ทั้งคู่เป็น timer แยก ไม่แตะเส้นทางของ request)
   initApiLogWriter();
 });

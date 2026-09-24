@@ -47,6 +47,7 @@ import { isLocalContactId } from './localContacts';
 import {
   AlertCircle,
   AlertTriangle,
+  ArrowDown,
   ArrowRight,
   BadgeCheck,
   Ban,
@@ -119,6 +120,19 @@ export interface ApprovalReloadPayload {
 }
 
 // ── รูปร่างข้อมูลที่ backend ส่งมา ───────────────────────────────────────────
+
+/**
+ * ช่อง "ออกในนาม" ได้ค่ามาจากไหน — สี่ค่าแรกคือขั้นของ services/customerSalesOwner.ts ·
+ * `quotation` = แก้ใบเดิม · `manual` = คนเลือกเอง · บนจอยุบเหลือสองป้าย ("ระบบเลือก" / "เลือกเอง")
+ * แต่ส่งค่าเต็มไปเก็บใน `sp_source` ของประวัติ ไว้วัดว่าแต่ละขั้นช่วยได้จริงแค่ไหน
+ */
+type SpSource = 'customer' | 'contact' | 'last_order' | 'older_order' | 'quotation' | 'manual';
+
+/** คำตอบของ GET /api/admin/webquote/sales-owner — รูปร่างเดียวกับ `SalesOwner` ฝั่ง server */
+type SalesOwner =
+  | { status: 'resolved'; source: Exclude<SpSource, 'manual'>; user_id: string; name: string; odoo_name: string | null }
+  | { status: 'inactive'; odoo_name: string | null }
+  | { status: 'none' };
 
 interface Candidate {
   model: string;
@@ -1201,8 +1215,13 @@ interface DocCtx {
   patchRow: (key: string, patch: Partial<Row>) => void;
   removeRow: (key: string) => void;
   pickCandidate: (key: string, c: Candidate) => void;
-  /** พิมพ์ส่วนลดเสร็จแล้วเสนอ "ใช้กับทุกรายการ" — ผู้เรียกเป็นคนหน่วงเวลาและวางตำแหน่งเอง */
-  offerBulk: (key: string, el: HTMLInputElement) => void;
+  /** พิมพ์ส่วนลดเสร็จแล้วเสนอ "ใช้กับทุกรายการ" — ผู้เรียกเป็นคนหน่วงเวลาเอง */
+  offerBulk: (key: string) => void;
+  /** ข้อเสนอที่กำลังโชว์ (ชิปใต้ช่องส่วนลดของแถว `rowKey`) · null = ไม่มี */
+  bulkOffer: BulkOffer | null;
+  multiDoc: boolean;
+  applyBulk: (scope: 'doc' | 'all') => void;
+  dismissBulk: () => void;
   rowTagsOf: (r: Row, hit: PreviewItem | null) => RowTag[];
   extraTagsOf: (it: PreviewItem) => RowTag[];
   // ── หัวใบ: ลูกค้า · เครดิต · กำหนดส่ง ──
@@ -1602,43 +1621,53 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
                   </span>
                 </td>
                 <td data-k="ส่วนลด" className={cellC}>
-                  <span className={inner}>
-                    {!editable || r.isService ? (
-                      <span className="text-slate-400">—</span>
-                    ) : (
-                      <>
-                        <input
-                          value={r.disc1}
-                          /* ล้างชั้น 1 แล้วชั้น 2 ต้องหายด้วย — ไม่งั้นจะเหลือช่องที่กรอกไม่ได้แต่ยังหักเงินอยู่ */
-                          onChange={(e) => {
-                            const el = e.currentTarget;
-                            const v = el.value;
-                            ctx.patchRow(r.key, num(v) > 0 ? { disc1: v } : { disc1: v, disc2: '' });
-                            ctx.offerBulk(r.key, el);
-                          }}
-                          inputMode="decimal"
-                          aria-label="ส่วนลดชั้นที่ 1 (%)"
-                          className={`${inp} w-[46px]`}
-                        />
-                        <span className="text-[11px] text-slate-400">%</span>
-                        <span className="text-[11px] text-slate-300">,</span>
-                        <input
-                          value={r.disc2}
-                          onChange={(e) => {
-                            const el = e.currentTarget;
-                            ctx.patchRow(r.key, { disc2: el.value });
-                            ctx.offerBulk(r.key, el);
-                          }}
-                          inputMode="decimal"
-                          aria-label="ส่วนลดชั้นที่ 2 (%)"
-                          /* ล็อกเฉพาะตอนที่ "ไม่มีอะไรอยู่เลย" — ใบเก่าที่มีชั้น 2 มาโดยไม่มีชั้น 1
-                             (ใบเก่าจาก LINE เป็นแบบนี้ได้) ต้องแก้ไขได้ ไม่งั้นกลายเป็นเลขที่ใครก็แก้ไม่ได้ */
-                          disabled={num(r.disc1) <= 0 && num(r.disc2) <= 0}
-                          title={num(r.disc1) > 0 ? undefined : 'กรอกส่วนลดชั้นที่ 1 ก่อน'}
-                          className={`${inp} w-[46px]`}
-                        />
-                        <span className="text-[11px] text-slate-400">%</span>
-                      </>
+                  {/* ห่อไว้ตลอด ไม่ใช่เฉพาะตอนมีชิป — เปลี่ยนโครงรอบช่องกรอกเมื่อไหร่ React ถอดช่องแล้วสร้างใหม่
+                      ⇒ เคอร์เซอร์หลุดจากช่องที่กำลังพิมพ์ */}
+                  <span className="inline-flex flex-col items-end md:items-center gap-1.5">
+                    <span className={inner}>
+                      {!editable || r.isService ? (
+                        <span className="text-slate-400">—</span>
+                      ) : (
+                        <>
+                          <input
+                            value={r.disc1}
+                            /* ล้างชั้น 1 แล้วชั้น 2 ต้องหายด้วย — ไม่งั้นจะเหลือช่องที่กรอกไม่ได้แต่ยังหักเงินอยู่ */
+                            onChange={(e) => {
+                              const v = e.currentTarget.value;
+                              ctx.patchRow(r.key, num(v) > 0 ? { disc1: v } : { disc1: v, disc2: '' });
+                              ctx.offerBulk(r.key);
+                            }}
+                            inputMode="decimal"
+                            aria-label="ส่วนลดชั้นที่ 1 (%)"
+                            className={`${inp} w-[46px]`}
+                          />
+                          <span className="text-[11px] text-slate-400">%</span>
+                          <span className="text-[11px] text-slate-300">,</span>
+                          <input
+                            value={r.disc2}
+                            onChange={(e) => {
+                              ctx.patchRow(r.key, { disc2: e.currentTarget.value });
+                              ctx.offerBulk(r.key);
+                            }}
+                            inputMode="decimal"
+                            aria-label="ส่วนลดชั้นที่ 2 (%)"
+                            /* ล็อกเฉพาะตอนที่ "ไม่มีอะไรอยู่เลย" — ใบเก่าที่มีชั้น 2 มาโดยไม่มีชั้น 1
+                               (ใบเก่าจาก LINE เป็นแบบนี้ได้) ต้องแก้ไขได้ ไม่งั้นกลายเป็นเลขที่ใครก็แก้ไม่ได้ */
+                            disabled={num(r.disc1) <= 0 && num(r.disc2) <= 0}
+                            title={num(r.disc1) > 0 ? undefined : 'กรอกส่วนลดชั้นที่ 1 ก่อน'}
+                            className={`${inp} w-[46px]`}
+                          />
+                          <span className="text-[11px] text-slate-400">%</span>
+                        </>
+                      )}
+                    </span>
+                    {ctx.bulkOffer?.rowKey === r.key && (
+                      <BulkDiscountChips
+                        offer={ctx.bulkOffer}
+                        multiDoc={ctx.multiDoc}
+                        onApply={ctx.applyBulk}
+                        onDismiss={ctx.dismissBulk}
+                      />
                     )}
                   </span>
                 </td>
@@ -1915,18 +1944,19 @@ const PdfPreviewButton: React.FC<{
   );
 };
 
-// ── ป๊อปอัป "ใช้ส่วนลดนี้กับทุกรายการ" (เจ้าของสั่ง 2026-09-17) ───────────────
+// ── ชิป "ใช้ส่วนลดนี้กับรายการอื่น" (เจ้าของสั่ง 2026-09-17 · เป็นชิปใต้ช่องตั้งแต่ 2026-09-24) ──
 //
-//  **เป็นข้อเสนอ ไม่ใช่คำถามที่ต้องตอบ** จึงไม่ใช่โมดัล — พิมพ์ต่อ เลื่อนจอ กดที่อื่น หรือ Esc
+//  **เป็นข้อเสนอ ไม่ใช่คำถามที่ต้องตอบ** จึงไม่ใช่โมดัล — พิมพ์ต่อ กดที่อื่น ย้ายไปช่องอื่น หรือ Esc
 //  ก็หายไปโดยไม่มีอะไรเปลี่ยน · โมดัลที่เด้งทุกครั้งที่กรอกส่วนลดคือโมดัลที่ขวางงานมากกว่าช่วย
+//
+//  **อยู่ในเซลล์ส่วนลดเอง ไม่ใช่กล่องลอย** (เจ้าของเลือกแบบ C จาก mockup 3 แบบ 2026-09-24) — กล่องลอย
+//  เดิมสูง ~131px บังแถวถัดไปทั้งแถว และต้องคอยวางตำแหน่งตามช่องทุกครั้งที่จอขยับ (เคยแวบหายเอง
+//  เพราะแถบสถานะเหนือตารางเปลี่ยนความสูงตอนตรวจรายละเอียด) · อยู่ในเซลล์ = ไม่บังอะไรและไม่มีตำแหน่ง
+//  ให้คลาด แลกกับแถวนั้นสูงขึ้นชั่วคราวระหว่างที่ชิปโผล่
 //
 //  ขอบเขตที่มันแตะได้คือ "สินค้าที่แก้ได้" เท่านั้น — ค่าขนส่ง/ค่าบริการรับส่วนลดไม่ได้อยู่แล้ว
 //  และบรรทัดที่กฎเติมให้เองไม่ได้อยู่ใน `rows` ตั้งแต่ต้น ⇒ ถูกกันออกโดยโครงสร้าง ไม่ใช่โดยเงื่อนไข
-
-/** ขนาดของป๊อปอัป — ต้องตรงกับคลาสข้างล่าง เพราะมันคือตัวเลขที่ใช้วางตำแหน่งโดยไม่ต้องวัด DOM
- *  (`POP_H` เป็นความสูงโดยประมาณ ใช้แค่ตัดสินว่าจะเด้งขึ้นหรือลง วัดจริงได้ 131px) */
-const POP_W = 272;
-const POP_H = 150;
+//  คำอธิบายข้อนี้อยู่ใน tooltip ของชิป ไม่ได้โชว์ตลอด เพราะไม่ใช่ทางเลือกที่คนต้องตัดสินใจ
 
 interface BulkOffer {
   rowKey: string;
@@ -1936,10 +1966,16 @@ interface BulkOffer {
   /** จำนวนบรรทัดที่จะโดน — ไม่นับบรรทัดต้นทางเอง */
   inDoc: number;
   inAll: number;
-  anchor: DOMRect;
 }
 
-const BulkDiscountPopup: React.FC<{
+/** ชิปในตาราง สูง 24px ไม่ใช่ `btn-h` — docs/design.md 2.2 "ชิป/ป้ายกดได้ในตาราง 20–28px" */
+const CHIP =
+  'h-6 px-2 inline-flex items-center gap-1 rounded-full border text-[11px] font-bold whitespace-nowrap transition-colors';
+const CHIP_BRAND =
+  `${CHIP} border-[var(--brand-border)] bg-[var(--brand-soft)] text-[var(--brand-fg)] hover:bg-[var(--brand-soft-strong)]`;
+const CHIP_PLAIN = `${CHIP} border-slate-300 bg-slate-100 text-slate-500 hover:text-slate-800`;
+
+const BulkDiscountChips: React.FC<{
   offer: BulkOffer;
   multiDoc: boolean;
   onApply: (scope: 'doc' | 'all') => void;
@@ -1948,85 +1984,83 @@ const BulkDiscountPopup: React.FC<{
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    /* "ข้างใน" = ทั้งเซลล์ส่วนลด (ช่องกรอก + ชิป) ไม่ใช่แค่ตัวชิป — คลิกกลับเข้าช่องเดิมเพื่อแก้ตัวเลข
+       ไม่ควรปิด เพราะพิมพ์ต่อเมื่อไหร่ `offerBulk` ล้างของเก่าแล้วเสนอใหม่ด้วยตัวเลขใหม่อยู่แล้ว */
+    const zone = () => ref.current?.parentElement ?? null;
+    const outside = (t: EventTarget | null) => !(t instanceof Node && zone()?.contains(t));
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onDismiss(); };
-    const onPointer = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) onDismiss();
-    };
-    // `scroll` ต้องดักแบบ capture เพราะกล่องที่เลื่อนอาจไม่ใช่ตัวหน้าเว็บ
-    window.addEventListener('scroll', onDismiss, true);
-    window.addEventListener('resize', onDismiss);
+    const onPointer = (e: MouseEvent) => { if (outside(e.target)) onDismiss(); };
+    // กด Tab ไปช่องอื่น = เลิกสนใจแล้ว เหมือนคลิกที่อื่น (Tab จากช่องส่วนลดมาถึงชิปก่อนพอดี)
+    const onFocus = (e: FocusEvent) => { if (outside(e.target)) onDismiss(); };
     document.addEventListener('keydown', onKey);
     document.addEventListener('mousedown', onPointer);
+    document.addEventListener('focusin', onFocus);
     return () => {
-      window.removeEventListener('scroll', onDismiss, true);
-      window.removeEventListener('resize', onDismiss);
       document.removeEventListener('keydown', onKey);
       document.removeEventListener('mousedown', onPointer);
+      document.removeEventListener('focusin', onFocus);
     };
   }, [onDismiss]);
 
-  /* วางด้วย right/top-หรือ-bottom ไม่ใช่ left/top ที่คำนวณจากขนาดของตัวเอง — ไม่ต้องวัดก่อนวาด
-     (ป๊อปอัปที่ต้องวัดตัวเองก่อนถึงจะรู้ที่อยู่ = ป๊อปอัปที่กระพริบตอนเปิด)
-     แต่ความกว้างรู้ล่วงหน้าอยู่แล้วจากคลาสของตัวเอง ⇒ เอามากันขอบซ้ายได้โดยไม่ต้องวัด
-     — วัดจริงที่ 390px: ยึดขอบขวาอย่างเดียวแล้วขอบซ้ายเลยจอไป 3px */
-  const w = Math.min(POP_W, window.innerWidth - 24);
-  const style: React.CSSProperties = {
-    position: 'fixed',
-    right: Math.min(
-      Math.max(8, window.innerWidth - offer.anchor.right),
-      Math.max(8, window.innerWidth - w - 8),
-    ),
-    // ไม่มีที่ข้างล่างก็เด้งขึ้นข้างบนแทน — ป๊อปอัปที่โผล่นอกจอเท่ากับไม่ได้โผล่
-    ...(offer.anchor.bottom + POP_H <= window.innerHeight
-      ? { top: offer.anchor.bottom + 6 }
-      : { bottom: Math.max(8, window.innerHeight - offer.anchor.top + 6) }),
-  };
   const label = offer.d2 > 0 ? `${money(offer.d1)}% , ${money(offer.d2)}%` : `${money(offer.d1)}%`;
+  const hint = `ใส่ส่วนลด ${label} ให้สินค้าบรรทัดอื่นด้วย — ไม่รวมค่าขนส่ง ค่าบริการ และบรรทัดที่กฎเติมให้เอง`;
+  const doc = offer.inDoc > 0;
+  const all = multiDoc && offer.inAll > offer.inDoc;
 
-  return createPortal(
-    <div
-      ref={ref}
-      role="dialog"
-      aria-label="ใช้ส่วนลดนี้กับทุกรายการ"
-      style={style}
-      className="z-50 w-[272px] max-w-[calc(100vw-24px)] bg-card border border-slate-200 rounded-2xl shadow-xl px-3.5 py-3"
-    >
-      <p className="text-[12.5px] font-extrabold text-slate-900">ใช้ส่วนลดนี้กับทุกรายการ?</p>
-      <p className="mt-1 text-[11px] text-slate-500 leading-relaxed">
-        ลด {label} — ใส่ให้สินค้าบรรทัดอื่นด้วย (ไม่รวมค่าขนส่ง ค่าบริการ และบรรทัดที่กฎเติมให้เอง)
-      </p>
-      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-        {offer.inDoc > 0 && (
-          <Button variant="primary" onClick={() => onApply('doc')}>
-            ใช้กับใบนี้ ({offer.inDoc})
-          </Button>
-        )}
-        {multiDoc && offer.inAll > offer.inDoc && (
-          <Button variant="neutral" tone="soft" onClick={() => onApply('all')}>
-            ใช้กับทุกใบ ({offer.inAll})
-          </Button>
-        )}
-        <button
-          type="button"
-          onClick={onDismiss}
-          className="text-[11px] font-semibold text-slate-500 hover:text-slate-800 px-1.5 py-1"
-        >
-          ไม่ใช้
+  return (
+    <div ref={ref} role="group" aria-label="ใช้ส่วนลดนี้กับรายการอื่น" title={hint} className="flex flex-wrap justify-end md:justify-center gap-1">
+      {doc && !all && (
+        <button type="button" onClick={() => onApply('doc')} className={CHIP_BRAND}>
+          <ArrowDown className="w-3 h-3 shrink-0" />
+          ใช้กับอีก {offer.inDoc} รายการ
         </button>
-      </div>
-    </div>,
-    document.body,
+      )}
+      {doc && all && (
+        <>
+          <button type="button" onClick={() => onApply('doc')} className={CHIP_BRAND}>
+            <ArrowDown className="w-3 h-3 shrink-0" />
+            ใบนี้ ({offer.inDoc})
+          </button>
+          <button type="button" onClick={() => onApply('all')} className={CHIP_PLAIN}>
+            ทุกใบ ({offer.inAll})
+          </button>
+        </>
+      )}
+      {!doc && all && (
+        <button type="button" onClick={() => onApply('all')} className={CHIP_BRAND}>
+          <ArrowDown className="w-3 h-3 shrink-0" />
+          ใช้กับทุกใบ ({offer.inAll})
+        </button>
+      )}
+    </div>
   );
 };
 
 // ── หน้าหลัก ─────────────────────────────────────────────────────────────────
 
 export const QuoteRequest: React.FC = () => {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const [profileReady, setProfileReady] = useState(false);
   const [spUserId, setSpUserId] = useState('');
+  // ── "ออกในนาม" เติมเองจากลูกค้า (2026-09-24 · docs/plan-web-quote-auto-salesperson.md) ──
+  //  role ที่เลือกเซลส์ได้เริ่มจากช่องว่าง แล้วระบบเติมให้เมื่อรู้ลูกค้า · role salesperson
+  //  ออกในนามตัวเองเสมอ ไม่ผ่านส่วนนี้เลย (QuoteIssuerProfile ตั้งค่าให้เอง)
+  const canPickAnySp = user?.role !== 'salesperson';
+  /** ช่องได้ค่ามาจากไหน — `manual` = คนเลือกเอง (ระบบห้ามเขียนทับ) · อื่น ๆ = ขั้นที่ระบบใช้ · null = ว่าง */
+  const [spSource, setSpSource] = useState<SpSource | null>(null);
+  const spSourceRef = useRef<SpSource | null>(null);
+  useEffect(() => { spSourceRef.current = spSource; }, [spSource]);
+  /** เหตุผลที่ระบบเติมให้ไม่ได้ — ขึ้นใต้แถบ "ออกในนาม" */
+  const [spNotice, setSpNotice] = useState<string | null>(null);
+  /** แก้ใบเดิมแล้วเซลส์ของใบเดิมออกใบไม่ได้ ⇒ รอบถัดไปต้องส่งคนที่เลือกเองไปแทน */
+  const [reviseNeedsPick, setReviseNeedsPick] = useState(false);
+  const onSpPick = useCallback((userId: string) => {
+    setSpUserId(userId);
+    setSpSource('manual');
+    setSpNotice(null);
+  }, []);
   const onReadyChange = useCallback((v: boolean) => setProfileReady(v), []);
   /** ตัวตนที่จะไปขึ้นช่องลงนามของใบ — คอมโพเนนต์แถบบนโหลดมาแล้ว ไม่ยิง API ซ้ำที่นี่ */
   const [identity, setIdentity] = useState<QuoteIssuerIdentity | null>(null);
@@ -2150,6 +2184,13 @@ export const QuoteRequest: React.FC = () => {
     setApprovalSent(null);
     setApprovalNote('');
     setReplacesRequestId(null);
+    // ใบใหม่ = ช่อง "ออกในนาม" กลับเป็นว่าง (role ที่เลือกได้) — เซลส์ออกใบเองคงตัวเองไว้
+    if (canPickAnySp) {
+      setSpUserId('');
+      setSpSource(null);
+      setSpNotice(null);
+      setReviseNeedsPick(false);
+    }
   };
 
   // ── คำขอที่ถูกตีกลับ → เปิดกลับเข้าฟอร์ม ───────────────────────────────────
@@ -2206,6 +2247,51 @@ export const QuoteRequest: React.FC = () => {
     const body = await res.json().catch(() => ({}));
     return describeApiError(body, fallback);
   };
+
+  // เติม "ออกในนาม" จากเซลส์ของลูกค้าทุกครั้งที่บริษัทเปลี่ยน — ตรรกะการเลือกอยู่ฝั่ง server ที่เดียว
+  // (services/customerSalesOwner.ts: ข้อมูลลูกค้า → ผู้ติดต่ออื่น → ใบสั่งขายล่าสุด → ใบเก่ากว่า)
+  //  · คนเลือกเองแล้ว = ไม่เขียนทับ · แก้ใบเดิม = ใช้เซลส์ของใบเดิม ไม่ดูลูกค้า
+  //  · หาไม่เจอ = ล้างค่าที่ระบบเคยเติมให้ลูกค้ารายก่อน แล้วบอกเหตุผล **ไม่เดาแทน**
+  //  · เรียก API ไม่ผ่าน (ไม่มีสิทธิ์/ล่ม) = เงียบ ปล่อยให้เลือกเอง — ช่องนี้เป็นความสะดวก
+  useEffect(() => {
+    if (!canPickAnySp || reviseFrom) return;
+    let cancelled = false;
+    // อ่านค่าสดทุกครั้ง (ไม่ใช่ค่าที่ TS จำกัดชนิดไว้ก่อน await) — คนอาจกดเลือกเองระหว่างรอคำตอบ
+    const pickedByHand = () => spSourceRef.current === 'manual';
+    (async () => {
+      if (pickedByHand()) return;
+      if (customerId === null) {
+        if (spSourceRef.current !== null) {
+          setSpUserId('');
+          setSpSource(null);
+        }
+        setSpNotice(null);
+        return;
+      }
+      try {
+        const res = await fetch(`/api/admin/webquote/sales-owner?customer_id=${customerId}`, { headers: authHeaders });
+        if (!res.ok || cancelled) return;
+        const { owner } = (await res.json()) as { owner: SalesOwner };
+        if (cancelled || pickedByHand()) return;
+        if (owner?.status === 'resolved') {
+          setSpUserId(owner.user_id);
+          setSpSource(owner.source);
+          setSpNotice(null);
+        } else {
+          setSpUserId('');
+          setSpSource(null);
+          setSpNotice(
+            owner?.status === 'inactive'
+              ? `ไม่มีเซลส์ของลูกค้ารายนี้ที่ออกใบในนามได้${owner.odoo_name ? ` (ใน Odoo: ${owner.odoo_name})` : ''} — เลือกพนักงานขายเองก่อนออกใบ`
+              : 'ลูกค้ารายนี้ยังไม่มีเซลส์ในระบบ — เลือกพนักงานขายเองก่อนออกใบ',
+          );
+        }
+      } catch {
+        /* เติมให้ไม่ได้ = ให้คนเลือกเอง */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [customerId, reviseFrom, canPickAnySp, authHeaders]);
 
   // โหลดผู้ติดต่อทุกครั้งที่บริษัทเปลี่ยน — endpoint เดิมของ LIFF ใช้ได้ตรง ๆ (§0.3)
   useEffect(() => {
@@ -2387,7 +2473,7 @@ export const QuoteRequest: React.FC = () => {
 
   // ── ส่วนที่ 1: วางข้อความ → ร่าง ──
   const propose = async () => {
-    if (!text.trim() || !spUserId) return;
+    if (!text.trim()) return;
     setProposing(true);
     setProposeError('');
     setSystemBusy(false);
@@ -2396,7 +2482,12 @@ export const QuoteRequest: React.FC = () => {
       const res = await fetch('/api/admin/webquote/propose', {
         method: 'POST',
         headers: { ...authHeaders, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sp_user_id: spUserId, text }),
+        // ส่งเซลส์ไปเฉพาะคนที่ "เลือกเอง" (หรือเซลส์ออกใบเอง) — ค่าที่ระบบเติมจากลูกค้ารายก่อนต้องไม่ติด
+        // ไปถ่วงการค้นหาลูกค้าของข้อความใหม่ (findCustomerCandidates ให้น้ำหนักลูกค้าของเซลส์คนนั้น)
+        body: JSON.stringify({
+          sp_user_id: !canPickAnySp || spSource === 'manual' ? spUserId : undefined,
+          text,
+        }),
       });
       if (!res.ok) throw new Error(await readError(res, 'สร้างร่างไม่สำเร็จ'));
       const data: ProposeResult = await res.json();
@@ -2908,6 +2999,7 @@ export const QuoteRequest: React.FC = () => {
           customer_id: customerId,
           contact_id: contactId,
           propose_msg_id: proposeMsgId,
+          sp_source: canPickAnySp ? spSource : null,
           // ใบนี้เกิดจากการแก้ใบเดิม ⇒ ให้หลังบ้านติด revise_from ไว้ด้วยตัวต่อสตริงของมันเอง
           revise_from: reviseFrom || undefined,
           items: itemsPayload,
@@ -2975,18 +3067,34 @@ export const QuoteRequest: React.FC = () => {
   //  ออกใบจริงที่ปุ่มยืนยันเส้นเดียวกับทางปกติ · ร่างที่ค้างไว้ถูก insertDraftQuotations ลบทิ้ง
   //  ให้เองตอนสร้างใบจริง (คู่แอดมิน×เซลส์เดียวกัน) ⇒ ไม่มีร่างซ้อน
   const doRevise = async () => {
-    if (!reviseNo.trim() || !spUserId) return;
+    if (!reviseNo.trim() || (!canPickAnySp && !spUserId)) return;
     setRevising(true);
     setReviseError('');
+    // แก้ใบเดิม = เซลส์ของใบเดิม (เจ้าของเคาะ 2026-09-24) ⇒ ไม่ส่งเซลส์ให้ server หาเอง
+    // ยกเว้นรอบที่ server บอกแล้วว่าเซลส์ของใบเดิมออกใบไม่ได้ และคนเลือกเองแล้ว
+    const pickedForRevise = reviseNeedsPick && spSource === 'manual';
     try {
       const res = await fetch('/api/admin/webquote/revise', {
         method: 'POST',
         headers: { ...authHeaders, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sp_user_id: spUserId, quotation_no: reviseNo }),
+        body: JSON.stringify({
+          sp_user_id: !canPickAnySp || pickedForRevise ? spUserId : undefined,
+          quotation_no: reviseNo,
+        }),
       });
-      if (!res.ok) throw new Error(await readError(res, 'เตรียมใบแก้ไขไม่สำเร็จ'));
+      if (!res.ok) {
+        const body = await res.clone().json().catch(() => null);
+        if (body?.code === 'SALESPERSON_REQUIRED') setReviseNeedsPick(true);
+        throw new Error(await readError(res, 'เตรียมใบแก้ไขไม่สำเร็จ'));
+      }
       const data = await res.json();
       setWebUserId(data.web_user_id);
+      if (canPickAnySp) {
+        setSpUserId(String(data.sp_user_id ?? ''));
+        setSpSource(pickedForRevise ? 'manual' : 'quotation');
+        setSpNotice(null);
+        setReviseNeedsPick(false);
+      }
       setReviseFrom(data.revise_from);
       const q = ((data.quotes ?? []) as DraftQuote[])[0];
       // บรรทัดที่ "กฎ" เป็นคนเติม (สินค้าพ่วง · ค่าขนส่งอัตโนมัติ) ต้องไม่กลับเข้าฟอร์ม ไม่งั้น
@@ -3056,8 +3164,8 @@ export const QuoteRequest: React.FC = () => {
   /** มีอะไรให้ล้างไหม — การ์ดร่างที่เปิดค้างไว้เปล่า ๆ ไม่ใช่ "งานที่เริ่มแล้ว" */
   const hasWork = rows.length > 0 || text.trim().length > 0 || customerId !== null || issued || requested;
 
-  // ── ป๊อปอัป "ใช้ส่วนลดนี้กับทุกรายการ" (เจ้าของสั่ง 2026-09-17) ────────────
-  //  หน่วง 650ms หลังหยุดพิมพ์แล้วค่อยเสนอ — เด้งทุกตัวอักษรคือป๊อปอัปที่กระพริบใส่หน้าคน
+  // ── ชิป "ใช้ส่วนลดนี้กับรายการอื่น" (เจ้าของสั่ง 2026-09-17) ────────────────
+  //  หน่วง 650ms หลังหยุดพิมพ์แล้วค่อยเสนอ — โผล่ทุกตัวอักษรคือแถวที่กระตุกสูงต่ำใส่หน้าคน
   const [bulkOffer, setBulkOffer] = useState<BulkOffer | null>(null);
   const bulkTimer = useRef<number | null>(null);
   /** ค่าล่าสุดสำหรับตอนตัวจับเวลาเด้ง — closure ของ setTimeout ถือ rows ของตอนที่พิมพ์ตัวนั้น */
@@ -3074,14 +3182,14 @@ export const QuoteRequest: React.FC = () => {
     setBulkOffer(null);
   }, []);
 
-  const offerBulk = (key: string, el: HTMLInputElement) => {
+  const offerBulk = (key: string) => {
     if (bulkTimer.current) window.clearTimeout(bulkTimer.current);
     setBulkOffer(null);
     bulkTimer.current = window.setTimeout(() => {
       const { rows: rs, coByRow } = bulkRef.current;
       const src = rs.find((r) => r.key === key);
-      // ล้างส่วนลดทิ้งแล้วไม่ต้องเสนออะไร · ช่องที่หายไปจากจอแล้วก็ไม่มีที่ให้ป๊อปอัปเกาะ
-      if (!src || !discountable(src) || num(src.disc1) <= 0 || !el.isConnected) return;
+      // ล้างส่วนลดทิ้งแล้วไม่ต้องเสนออะไร · แถวที่ถูกลบไประหว่างรอก็ไม่มีที่ให้ชิปโผล่
+      if (!src || !discountable(src) || num(src.disc1) <= 0) return;
       const co = coOfRow(src, coByRow);
       const others = rs.filter((r) => r.key !== key && discountable(r));
       if (others.length === 0) return; // มีสินค้าบรรทัดเดียวก็ไม่มีอะไรให้ "ใช้กับทุกรายการ"
@@ -3092,7 +3200,6 @@ export const QuoteRequest: React.FC = () => {
         d2: num(src.disc2),
         inDoc: others.filter((r) => coOfRow(r, coByRow) === co).length,
         inAll: others.length,
-        anchor: el.getBoundingClientRect(),
       });
     }, 650);
   };
@@ -3126,6 +3233,10 @@ export const QuoteRequest: React.FC = () => {
     removeRow,
     pickCandidate,
     offerBulk,
+    bulkOffer,
+    multiDoc: groups.length > 1,
+    applyBulk,
+    dismissBulk,
     rowTagsOf,
     extraTagsOf,
     customerOpt,
@@ -3195,6 +3306,9 @@ export const QuoteRequest: React.FC = () => {
       <QuoteIssuerProfile
         spUserId={spUserId}
         onSpUserIdChange={setSpUserId}
+        onSpPick={onSpPick}
+        spBadge={spSource === null ? null : spSource === 'manual' ? 'manual' : 'system'}
+        spNotice={spNotice}
         onReadyChange={onReadyChange}
         onIdentityChange={onIdentityChange}
       />
@@ -3231,12 +3345,12 @@ export const QuoteRequest: React.FC = () => {
               size="md"
               icon={ArrowRight}
               busy={proposing}
-              disabled={!text.trim() || !spUserId}
+              disabled={!text.trim() || (!canPickAnySp && !spUserId)}
               onClick={propose}
             >
               {proposing ? 'กำลังสกัดคำสั่ง...' : 'สร้างร่าง'}
             </Button>
-            {!spUserId && <span className="text-xs text-amber-700">เลือกพนักงานขายที่จะออกใบในนามก่อน</span>}
+            {!canPickAnySp && !spUserId && <span className="text-xs text-amber-700">เลือกพนักงานขายที่จะออกใบในนามก่อน</span>}
             {proposing && <span className="text-xs text-slate-400">ระบบมีเวลาสกัดสูงสุด 60 วินาที</span>}
             <p className="basis-full text-[11px] text-slate-400">
               ไม่มีข้อความก็ได้ — พิมพ์รายการลงในใบด้านล่างได้เลย
@@ -3643,7 +3757,7 @@ export const QuoteRequest: React.FC = () => {
             size="md"
             icon={ArrowRight}
             busy={revising}
-            disabled={!reviseNo.trim() || !spUserId}
+            disabled={!reviseNo.trim() || (!canPickAnySp && !spUserId) || (reviseNeedsPick && spSource !== 'manual')}
             onClick={doRevise}
           >
             เตรียมใบแก้ไข
@@ -3658,14 +3772,6 @@ export const QuoteRequest: React.FC = () => {
         )}
       </div>
 
-      {bulkOffer && (
-        <BulkDiscountPopup
-          offer={bulkOffer}
-          multiDoc={groups.length > 1}
-          onApply={applyBulk}
-          onDismiss={dismissBulk}
-        />
-      )}
     </div>
   );
 };
