@@ -47,6 +47,7 @@ import { isLocalContactId } from './localContacts';
 import {
   AlertCircle,
   AlertTriangle,
+  ArrowDown,
   ArrowRight,
   BadgeCheck,
   Ban,
@@ -1201,8 +1202,13 @@ interface DocCtx {
   patchRow: (key: string, patch: Partial<Row>) => void;
   removeRow: (key: string) => void;
   pickCandidate: (key: string, c: Candidate) => void;
-  /** พิมพ์ส่วนลดเสร็จแล้วเสนอ "ใช้กับทุกรายการ" — ผู้เรียกเป็นคนหน่วงเวลาและวางตำแหน่งเอง */
-  offerBulk: (key: string, tier: 1 | 2) => void;
+  /** พิมพ์ส่วนลดเสร็จแล้วเสนอ "ใช้กับทุกรายการ" — ผู้เรียกเป็นคนหน่วงเวลาเอง */
+  offerBulk: (key: string) => void;
+  /** ข้อเสนอที่กำลังโชว์ (ชิปใต้ช่องส่วนลดของแถว `rowKey`) · null = ไม่มี */
+  bulkOffer: BulkOffer | null;
+  multiDoc: boolean;
+  applyBulk: (scope: 'doc' | 'all') => void;
+  dismissBulk: () => void;
   rowTagsOf: (r: Row, hit: PreviewItem | null) => RowTag[];
   extraTagsOf: (it: PreviewItem) => RowTag[];
   // ── หัวใบ: ลูกค้า · เครดิต · กำหนดส่ง ──
@@ -1602,43 +1608,53 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
                   </span>
                 </td>
                 <td data-k="ส่วนลด" className={cellC}>
-                  <span className={inner}>
-                    {!editable || r.isService ? (
-                      <span className="text-slate-400">—</span>
-                    ) : (
-                      <>
-                        <input
-                          value={r.disc1}
-                          /* ล้างชั้น 1 แล้วชั้น 2 ต้องหายด้วย — ไม่งั้นจะเหลือช่องที่กรอกไม่ได้แต่ยังหักเงินอยู่ */
-                          onChange={(e) => {
-                            const v = e.currentTarget.value;
-                            ctx.patchRow(r.key, num(v) > 0 ? { disc1: v } : { disc1: v, disc2: '' });
-                            ctx.offerBulk(r.key, 1);
-                          }}
-                          data-disc={`${r.key}:1`}
-                          inputMode="decimal"
-                          aria-label="ส่วนลดชั้นที่ 1 (%)"
-                          className={`${inp} w-[46px]`}
-                        />
-                        <span className="text-[11px] text-slate-400">%</span>
-                        <span className="text-[11px] text-slate-300">,</span>
-                        <input
-                          value={r.disc2}
-                          onChange={(e) => {
-                            ctx.patchRow(r.key, { disc2: e.currentTarget.value });
-                            ctx.offerBulk(r.key, 2);
-                          }}
-                          data-disc={`${r.key}:2`}
-                          inputMode="decimal"
-                          aria-label="ส่วนลดชั้นที่ 2 (%)"
-                          /* ล็อกเฉพาะตอนที่ "ไม่มีอะไรอยู่เลย" — ใบเก่าที่มีชั้น 2 มาโดยไม่มีชั้น 1
-                             (ใบเก่าจาก LINE เป็นแบบนี้ได้) ต้องแก้ไขได้ ไม่งั้นกลายเป็นเลขที่ใครก็แก้ไม่ได้ */
-                          disabled={num(r.disc1) <= 0 && num(r.disc2) <= 0}
-                          title={num(r.disc1) > 0 ? undefined : 'กรอกส่วนลดชั้นที่ 1 ก่อน'}
-                          className={`${inp} w-[46px]`}
-                        />
-                        <span className="text-[11px] text-slate-400">%</span>
-                      </>
+                  {/* ห่อไว้ตลอด ไม่ใช่เฉพาะตอนมีชิป — เปลี่ยนโครงรอบช่องกรอกเมื่อไหร่ React ถอดช่องแล้วสร้างใหม่
+                      ⇒ เคอร์เซอร์หลุดจากช่องที่กำลังพิมพ์ */}
+                  <span className="inline-flex flex-col items-end md:items-center gap-1.5">
+                    <span className={inner}>
+                      {!editable || r.isService ? (
+                        <span className="text-slate-400">—</span>
+                      ) : (
+                        <>
+                          <input
+                            value={r.disc1}
+                            /* ล้างชั้น 1 แล้วชั้น 2 ต้องหายด้วย — ไม่งั้นจะเหลือช่องที่กรอกไม่ได้แต่ยังหักเงินอยู่ */
+                            onChange={(e) => {
+                              const v = e.currentTarget.value;
+                              ctx.patchRow(r.key, num(v) > 0 ? { disc1: v } : { disc1: v, disc2: '' });
+                              ctx.offerBulk(r.key);
+                            }}
+                            inputMode="decimal"
+                            aria-label="ส่วนลดชั้นที่ 1 (%)"
+                            className={`${inp} w-[46px]`}
+                          />
+                          <span className="text-[11px] text-slate-400">%</span>
+                          <span className="text-[11px] text-slate-300">,</span>
+                          <input
+                            value={r.disc2}
+                            onChange={(e) => {
+                              ctx.patchRow(r.key, { disc2: e.currentTarget.value });
+                              ctx.offerBulk(r.key);
+                            }}
+                            inputMode="decimal"
+                            aria-label="ส่วนลดชั้นที่ 2 (%)"
+                            /* ล็อกเฉพาะตอนที่ "ไม่มีอะไรอยู่เลย" — ใบเก่าที่มีชั้น 2 มาโดยไม่มีชั้น 1
+                               (ใบเก่าจาก LINE เป็นแบบนี้ได้) ต้องแก้ไขได้ ไม่งั้นกลายเป็นเลขที่ใครก็แก้ไม่ได้ */
+                            disabled={num(r.disc1) <= 0 && num(r.disc2) <= 0}
+                            title={num(r.disc1) > 0 ? undefined : 'กรอกส่วนลดชั้นที่ 1 ก่อน'}
+                            className={`${inp} w-[46px]`}
+                          />
+                          <span className="text-[11px] text-slate-400">%</span>
+                        </>
+                      )}
+                    </span>
+                    {ctx.bulkOffer?.rowKey === r.key && (
+                      <BulkDiscountChips
+                        offer={ctx.bulkOffer}
+                        multiDoc={ctx.multiDoc}
+                        onApply={ctx.applyBulk}
+                        onDismiss={ctx.dismissBulk}
+                      />
                     )}
                   </span>
                 </td>
@@ -1915,18 +1931,19 @@ const PdfPreviewButton: React.FC<{
   );
 };
 
-// ── ป๊อปอัป "ใช้ส่วนลดนี้กับทุกรายการ" (เจ้าของสั่ง 2026-09-17) ───────────────
+// ── ชิป "ใช้ส่วนลดนี้กับรายการอื่น" (เจ้าของสั่ง 2026-09-17 · เป็นชิปใต้ช่องตั้งแต่ 2026-09-24) ──
 //
-//  **เป็นข้อเสนอ ไม่ใช่คำถามที่ต้องตอบ** จึงไม่ใช่โมดัล — พิมพ์ต่อ เลื่อนจอ กดที่อื่น หรือ Esc
+//  **เป็นข้อเสนอ ไม่ใช่คำถามที่ต้องตอบ** จึงไม่ใช่โมดัล — พิมพ์ต่อ กดที่อื่น ย้ายไปช่องอื่น หรือ Esc
 //  ก็หายไปโดยไม่มีอะไรเปลี่ยน · โมดัลที่เด้งทุกครั้งที่กรอกส่วนลดคือโมดัลที่ขวางงานมากกว่าช่วย
+//
+//  **อยู่ในเซลล์ส่วนลดเอง ไม่ใช่กล่องลอย** (เจ้าของเลือกแบบ C จาก mockup 3 แบบ 2026-09-24) — กล่องลอย
+//  เดิมสูง ~131px บังแถวถัดไปทั้งแถว และต้องคอยวางตำแหน่งตามช่องทุกครั้งที่จอขยับ (เคยแวบหายเอง
+//  เพราะแถบสถานะเหนือตารางเปลี่ยนความสูงตอนตรวจรายละเอียด) · อยู่ในเซลล์ = ไม่บังอะไรและไม่มีตำแหน่ง
+//  ให้คลาด แลกกับแถวนั้นสูงขึ้นชั่วคราวระหว่างที่ชิปโผล่
 //
 //  ขอบเขตที่มันแตะได้คือ "สินค้าที่แก้ได้" เท่านั้น — ค่าขนส่ง/ค่าบริการรับส่วนลดไม่ได้อยู่แล้ว
 //  และบรรทัดที่กฎเติมให้เองไม่ได้อยู่ใน `rows` ตั้งแต่ต้น ⇒ ถูกกันออกโดยโครงสร้าง ไม่ใช่โดยเงื่อนไข
-
-/** ขนาดของป๊อปอัป — ต้องตรงกับคลาสข้างล่าง เพราะมันคือตัวเลขที่ใช้วางตำแหน่งโดยไม่ต้องวัด DOM
- *  (`POP_H` เป็นความสูงโดยประมาณ ใช้แค่ตัดสินว่าจะเด้งขึ้นหรือลง วัดจริงได้ 131px) */
-const POP_W = 272;
-const POP_H = 150;
+//  คำอธิบายข้อนี้อยู่ใน tooltip ของชิป ไม่ได้โชว์ตลอด เพราะไม่ใช่ทางเลือกที่คนต้องตัดสินใจ
 
 interface BulkOffer {
   rowKey: string;
@@ -1936,115 +1953,73 @@ interface BulkOffer {
   /** จำนวนบรรทัดที่จะโดน — ไม่นับบรรทัดต้นทางเอง */
   inDoc: number;
   inAll: number;
-  /** ช่องที่พิมพ์ — เก็บเป็น selector ไม่ใช่ตัว element/DOMRect เพราะผลตรวจรอบใหม่ย้ายแถวข้ามใบได้
-   *  (ช่องเดิมถูกถอด ช่องใหม่ถูกสร้าง) และตำแหน่งบนจอขยับได้ทุกครั้งที่แถบสถานะเปลี่ยน */
-  anchor: string;
 }
 
-/** selector ของช่องส่วนลดชั้น 1/2 ของแถว — ต้องตรงกับ `data-disc` ที่ช่องใน QuoteDocument ติดไว้ */
-const discSel = (rowKey: string, tier: 1 | 2) => `[data-disc="${CSS.escape(`${rowKey}:${tier}`)}"]`;
+/** ชิปในตาราง สูง 24px ไม่ใช่ `btn-h` — docs/design.md 2.2 "ชิป/ป้ายกดได้ในตาราง 20–28px" */
+const CHIP =
+  'h-6 px-2 inline-flex items-center gap-1 rounded-full border text-[11px] font-bold whitespace-nowrap transition-colors';
+const CHIP_BRAND =
+  `${CHIP} border-[var(--brand-border)] bg-[var(--brand-soft)] text-[var(--brand-fg)] hover:bg-[var(--brand-soft-strong)]`;
+const CHIP_PLAIN = `${CHIP} border-slate-300 bg-slate-100 text-slate-500 hover:text-slate-800`;
 
-const BulkDiscountPopup: React.FC<{
+const BulkDiscountChips: React.FC<{
   offer: BulkOffer;
   multiDoc: boolean;
   onApply: (scope: 'doc' | 'all') => void;
   onDismiss: () => void;
 }> = ({ offer, multiDoc, onApply, onDismiss }) => {
   const ref = useRef<HTMLDivElement>(null);
-  /** วัดตอน render แรกเลย (ไม่ใช่ใน effect) ⇒ เฟรมแรกที่เห็นก็อยู่ถูกที่แล้ว ไม่กระพริบ */
-  const [anchor, setAnchor] = useState<DOMRect | null>(
-    () => document.querySelector(offer.anchor)?.getBoundingClientRect() ?? null,
-  );
 
   useEffect(() => {
+    /* "ข้างใน" = ทั้งเซลล์ส่วนลด (ช่องกรอก + ชิป) ไม่ใช่แค่ตัวชิป — คลิกกลับเข้าช่องเดิมเพื่อแก้ตัวเลข
+       ไม่ควรปิด เพราะพิมพ์ต่อเมื่อไหร่ `offerBulk` ล้างของเก่าแล้วเสนอใหม่ด้วยตัวเลขใหม่อยู่แล้ว */
+    const zone = () => ref.current?.parentElement ?? null;
+    const outside = (t: EventTarget | null) => !(t instanceof Node && zone()?.contains(t));
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onDismiss(); };
-    const onPointer = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) onDismiss();
-    };
-    /* **เลื่อนแล้วตามช่องไป ไม่ใช่ปิด** — เคยปิดทุกครั้งที่มี `scroll` แล้วป๊อปอัปแวบหายเอง
-       (เจ้าของแจ้ง 2026-09-24): มันเด้งที่ 650ms ส่วนการตรวจรายละเอียดเริ่มที่ 700ms แล้วแถบสถานะ
-       เหนือตารางเปลี่ยนความสูง ⇒ scroll anchoring ของเบราว์เซอร์ขยับจอเอง ⇒ ได้ `scroll` ที่ไม่มีใคร
-       เลื่อน · ปิดเฉพาะตอนที่ช่องหายไปจริง หรือเลื่อนจนช่องพ้นจอ
-       `scroll` ดักแบบ capture เพราะกล่องที่เลื่อนอาจไม่ใช่ตัวหน้าเว็บ */
-    let frame = 0;
-    const follow = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        const r = document.querySelector(offer.anchor)?.getBoundingClientRect();
-        if (!r || r.bottom < 0 || r.top > window.innerHeight) onDismiss();
-        else setAnchor(r);
-      });
-    };
-    window.addEventListener('scroll', follow, true);
-    window.addEventListener('resize', follow);
-    // layout ขยับได้โดยไม่มี scroll เลย (จออยู่บนสุด · ผลตรวจเติมป้ายในแถว) — ความสูงของหน้าเปลี่ยนเสมอ
-    const grow = new ResizeObserver(follow);
-    grow.observe(document.body);
+    const onPointer = (e: MouseEvent) => { if (outside(e.target)) onDismiss(); };
+    // กด Tab ไปช่องอื่น = เลิกสนใจแล้ว เหมือนคลิกที่อื่น (Tab จากช่องส่วนลดมาถึงชิปก่อนพอดี)
+    const onFocus = (e: FocusEvent) => { if (outside(e.target)) onDismiss(); };
     document.addEventListener('keydown', onKey);
     document.addEventListener('mousedown', onPointer);
+    document.addEventListener('focusin', onFocus);
     return () => {
-      cancelAnimationFrame(frame);
-      grow.disconnect();
-      window.removeEventListener('scroll', follow, true);
-      window.removeEventListener('resize', follow);
       document.removeEventListener('keydown', onKey);
       document.removeEventListener('mousedown', onPointer);
+      document.removeEventListener('focusin', onFocus);
     };
-  }, [offer.anchor, onDismiss]);
+  }, [onDismiss]);
 
-  if (!anchor) return null;
-
-  /* วางด้วย right/top-หรือ-bottom ไม่ใช่ left/top ที่คำนวณจากขนาดของตัวเอง — ไม่ต้องวัดก่อนวาด
-     (ป๊อปอัปที่ต้องวัดตัวเองก่อนถึงจะรู้ที่อยู่ = ป๊อปอัปที่กระพริบตอนเปิด)
-     แต่ความกว้างรู้ล่วงหน้าอยู่แล้วจากคลาสของตัวเอง ⇒ เอามากันขอบซ้ายได้โดยไม่ต้องวัด
-     — วัดจริงที่ 390px: ยึดขอบขวาอย่างเดียวแล้วขอบซ้ายเลยจอไป 3px */
-  const w = Math.min(POP_W, window.innerWidth - 24);
-  const style: React.CSSProperties = {
-    position: 'fixed',
-    right: Math.min(
-      Math.max(8, window.innerWidth - anchor.right),
-      Math.max(8, window.innerWidth - w - 8),
-    ),
-    // ไม่มีที่ข้างล่างก็เด้งขึ้นข้างบนแทน — ป๊อปอัปที่โผล่นอกจอเท่ากับไม่ได้โผล่
-    ...(anchor.bottom + POP_H <= window.innerHeight
-      ? { top: anchor.bottom + 6 }
-      : { bottom: Math.max(8, window.innerHeight - anchor.top + 6) }),
-  };
   const label = offer.d2 > 0 ? `${money(offer.d1)}% , ${money(offer.d2)}%` : `${money(offer.d1)}%`;
+  const hint = `ใส่ส่วนลด ${label} ให้สินค้าบรรทัดอื่นด้วย — ไม่รวมค่าขนส่ง ค่าบริการ และบรรทัดที่กฎเติมให้เอง`;
+  const doc = offer.inDoc > 0;
+  const all = multiDoc && offer.inAll > offer.inDoc;
 
-  return createPortal(
-    <div
-      ref={ref}
-      role="dialog"
-      aria-label="ใช้ส่วนลดนี้กับทุกรายการ"
-      style={style}
-      className="z-50 w-[272px] max-w-[calc(100vw-24px)] bg-card border border-slate-200 rounded-2xl shadow-xl px-3.5 py-3"
-    >
-      <p className="text-[12.5px] font-extrabold text-slate-900">ใช้ส่วนลดนี้กับทุกรายการ?</p>
-      <p className="mt-1 text-[11px] text-slate-500 leading-relaxed">
-        ลด {label} — ใส่ให้สินค้าบรรทัดอื่นด้วย (ไม่รวมค่าขนส่ง ค่าบริการ และบรรทัดที่กฎเติมให้เอง)
-      </p>
-      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-        {offer.inDoc > 0 && (
-          <Button variant="primary" onClick={() => onApply('doc')}>
-            ใช้กับใบนี้ ({offer.inDoc})
-          </Button>
-        )}
-        {multiDoc && offer.inAll > offer.inDoc && (
-          <Button variant="neutral" tone="soft" onClick={() => onApply('all')}>
-            ใช้กับทุกใบ ({offer.inAll})
-          </Button>
-        )}
-        <button
-          type="button"
-          onClick={onDismiss}
-          className="text-[11px] font-semibold text-slate-500 hover:text-slate-800 px-1.5 py-1"
-        >
-          ไม่ใช้
+  return (
+    <div ref={ref} role="group" aria-label="ใช้ส่วนลดนี้กับรายการอื่น" title={hint} className="flex flex-wrap justify-end md:justify-center gap-1">
+      {doc && !all && (
+        <button type="button" onClick={() => onApply('doc')} className={CHIP_BRAND}>
+          <ArrowDown className="w-3 h-3 shrink-0" />
+          ใช้กับอีก {offer.inDoc} รายการ
         </button>
-      </div>
-    </div>,
-    document.body,
+      )}
+      {doc && all && (
+        <>
+          <button type="button" onClick={() => onApply('doc')} className={CHIP_BRAND}>
+            <ArrowDown className="w-3 h-3 shrink-0" />
+            ใบนี้ ({offer.inDoc})
+          </button>
+          <button type="button" onClick={() => onApply('all')} className={CHIP_PLAIN}>
+            ทุกใบ ({offer.inAll})
+          </button>
+        </>
+      )}
+      {!doc && all && (
+        <button type="button" onClick={() => onApply('all')} className={CHIP_BRAND}>
+          <ArrowDown className="w-3 h-3 shrink-0" />
+          ใช้กับทุกใบ ({offer.inAll})
+        </button>
+      )}
+    </div>
   );
 };
 
@@ -3085,8 +3060,8 @@ export const QuoteRequest: React.FC = () => {
   /** มีอะไรให้ล้างไหม — การ์ดร่างที่เปิดค้างไว้เปล่า ๆ ไม่ใช่ "งานที่เริ่มแล้ว" */
   const hasWork = rows.length > 0 || text.trim().length > 0 || customerId !== null || issued || requested;
 
-  // ── ป๊อปอัป "ใช้ส่วนลดนี้กับทุกรายการ" (เจ้าของสั่ง 2026-09-17) ────────────
-  //  หน่วง 650ms หลังหยุดพิมพ์แล้วค่อยเสนอ — เด้งทุกตัวอักษรคือป๊อปอัปที่กระพริบใส่หน้าคน
+  // ── ชิป "ใช้ส่วนลดนี้กับรายการอื่น" (เจ้าของสั่ง 2026-09-17) ────────────────
+  //  หน่วง 650ms หลังหยุดพิมพ์แล้วค่อยเสนอ — โผล่ทุกตัวอักษรคือแถวที่กระตุกสูงต่ำใส่หน้าคน
   const [bulkOffer, setBulkOffer] = useState<BulkOffer | null>(null);
   const bulkTimer = useRef<number | null>(null);
   /** ค่าล่าสุดสำหรับตอนตัวจับเวลาเด้ง — closure ของ setTimeout ถือ rows ของตอนที่พิมพ์ตัวนั้น */
@@ -3103,15 +3078,14 @@ export const QuoteRequest: React.FC = () => {
     setBulkOffer(null);
   }, []);
 
-  const offerBulk = (key: string, tier: 1 | 2) => {
+  const offerBulk = (key: string) => {
     if (bulkTimer.current) window.clearTimeout(bulkTimer.current);
     setBulkOffer(null);
     bulkTimer.current = window.setTimeout(() => {
       const { rows: rs, coByRow } = bulkRef.current;
       const src = rs.find((r) => r.key === key);
-      // ล้างส่วนลดทิ้งแล้วไม่ต้องเสนออะไร · ช่องที่หายไปจากจอแล้วก็ไม่มีที่ให้ป๊อปอัปเกาะ
-      const anchor = discSel(key, tier);
-      if (!src || !discountable(src) || num(src.disc1) <= 0 || !document.querySelector(anchor)) return;
+      // ล้างส่วนลดทิ้งแล้วไม่ต้องเสนออะไร · แถวที่ถูกลบไประหว่างรอก็ไม่มีที่ให้ชิปโผล่
+      if (!src || !discountable(src) || num(src.disc1) <= 0) return;
       const co = coOfRow(src, coByRow);
       const others = rs.filter((r) => r.key !== key && discountable(r));
       if (others.length === 0) return; // มีสินค้าบรรทัดเดียวก็ไม่มีอะไรให้ "ใช้กับทุกรายการ"
@@ -3122,7 +3096,6 @@ export const QuoteRequest: React.FC = () => {
         d2: num(src.disc2),
         inDoc: others.filter((r) => coOfRow(r, coByRow) === co).length,
         inAll: others.length,
-        anchor,
       });
     }, 650);
   };
@@ -3156,6 +3129,10 @@ export const QuoteRequest: React.FC = () => {
     removeRow,
     pickCandidate,
     offerBulk,
+    bulkOffer,
+    multiDoc: groups.length > 1,
+    applyBulk,
+    dismissBulk,
     rowTagsOf,
     extraTagsOf,
     customerOpt,
@@ -3688,14 +3665,6 @@ export const QuoteRequest: React.FC = () => {
         )}
       </div>
 
-      {bulkOffer && (
-        <BulkDiscountPopup
-          offer={bulkOffer}
-          multiDoc={groups.length > 1}
-          onApply={applyBulk}
-          onDismiss={dismissBulk}
-        />
-      )}
     </div>
   );
 };
