@@ -24,6 +24,10 @@ docker compose -f docker-compose.preview.yml logs -f web      # log ของ Vi
 docker compose -f docker-compose.preview.yml down             # ปิด (ไม่แตะตัวจริง)
 ```
 
+**ทดสอบด้วย Chromium จริง 2026-09-24** (puppeteer ในกล่อง api เปิดหน้าล็อกอินค้างไว้):
+แก้ข้อความปุ่มใน `Login.tsx` ⇒ จอเปลี่ยนใน < 1 วิ **ไม่มีการโหลดหน้าใหม่** (ตัวแปรที่ตั้งไว้ใน
+`window` ยังอยู่) · `touch index.ts` ⇒ `tsx watch` รีสตาร์ต แล้วหน้าเว็บรีโหลดเอง **~3 วิ** หลังไฟล์เปลี่ยน
+
 ## ทำไมถึงเป็น "main" ไม่ใช่ worktree ของแต่ละ session
 
 ทุก session ทำงานใน worktree ของตัวเองแล้ว merge เข้า main เองได้โดยไม่ต้องถาม (กติกาเจ้าของ
