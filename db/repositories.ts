@@ -320,6 +320,36 @@ export async function getSalespersonByUserId(userId: string): Promise<any | null
 }
 
 /**
+ * เซลส์เจ้าของ "บริษัท" ตามข้อมูล Odoo — แถวแรกที่ `salesperson` ไม่ว่าง เรียงตาม `contact_id`
+ *
+ * กติกา "คนแรกที่ไม่ว่างของบริษัท" เจ้าของเคาะ 2026-09-24 (724 บริษัทที่ผู้ติดต่อแต่ละคน
+ * ผูกกับเซลส์ต่างกัน · วัดวันเดียวกัน) · กรองด้วย **ชื่อ** ไม่ใช่รหัส เพราะชื่อที่ไม่มีรหัส
+ * (`purchase_user_1` ฯลฯ) ยังเป็นคำตอบของคำถาม "ใครเป็นเจ้าของ" — ผู้เรียกต้องได้ชื่อนั้นไปบอกคน
+ * ไม่ใช่ข้ามไปหยิบผู้ติดต่อคนถัดไปที่บังเอิญมีรหัส
+ *
+ * `null` = บริษัทนี้ไม่มีชื่อเซลส์เลยสักแถว หรือ query ล้ม (ช่องนี้เป็นความสะดวก ห้าม throw)
+ */
+export async function getCompanySalesperson(
+  companyId: number
+): Promise<{ salesperson: string; salesperson_id: string | null } | null> {
+  try {
+    const { rows } = await pool.query(
+      `SELECT salesperson, salesperson_id
+         FROM customers_data_view
+        WHERE company_id = $1 AND salesperson IS NOT NULL
+        ORDER BY contact_id
+        LIMIT 1`,
+      [companyId]
+    );
+    if (!rows[0]) return null;
+    return {
+      salesperson: String(rows[0].salesperson),
+      salesperson_id: rows[0].salesperson_id ? String(rows[0].salesperson_id) : null,
+    };
+  } catch (err) { logErr('getCompanySalesperson', err); return null; }
+}
+
+/**
  * แถวพนักงานขายทั้งหมดสำหรับหน้า "จัดการพนักงานขาย" — **ตัดแถวพร็อกซีของหน้าเว็บแอดมินออก**
  *
  * `web:<admin_id>:<sp_user_id>` ไม่ใช่คน แต่ก๊อป name/salesperson_id มาจากเซลส์ตัวจริง

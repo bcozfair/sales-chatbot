@@ -148,6 +148,7 @@ import {
   previewDraft as previewWebQuoteDraft,
   previewQuotePdf as previewWebQuotePdf,
   reviseQuotation as reviseWebQuotation,
+  getCustomerSalesOwner,
 } from './services/webQuoteService.js';
 import {
   getClientIp,
@@ -2927,6 +2928,22 @@ app.get('/api/admin/webquote/salespersons', adminAuthMiddleware, requireCapabili
     res.json({ salespersons: await listSalespersonsForWeb() });
   } catch (err: any) {
     sendWebQuoteError(res, 'GET /api/admin/webquote/salespersons', err);
+  }
+});
+
+/**
+ * เซลส์เจ้าของลูกค้ารายนี้ — ให้ช่อง "ออกในนาม" (เริ่มต้นว่าง) เติมเองเมื่อรู้ลูกค้าแล้ว
+ * แผน: docs/plan-web-quote-auto-salesperson.md · ตรรกะอยู่ที่ services/customerSalesOwner.ts
+ *
+ * คร่อมด้วย `quote.act_as_any_salesperson` เพิ่ม เพราะคำตอบคือ "ใบนี้ควรออกในนามคนอื่น" ซึ่งมีความหมาย
+ * เฉพาะบัญชีที่เลือกเซลส์ได้ · บัญชีที่ออกในนามตัวเองเท่านั้นไม่มีอะไรให้เติม
+ * ไม่ใช่ด่านสิทธิ์ของการออกใบ — ตอนสร้างร่างยังผ่าน assertMayActAs() ตามเดิม
+ */
+app.get('/api/admin/webquote/sales-owner', adminAuthMiddleware, requireCapability('quote.create'), requireCapability('quote.act_as_any_salesperson'), async (req: any, res: any) => {
+  try {
+    res.json({ owner: await getCustomerSalesOwner(req.query?.customer_id) });
+  } catch (err: any) {
+    sendWebQuoteError(res, 'GET /api/admin/webquote/sales-owner', err);
   }
 });
 

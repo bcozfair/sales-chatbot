@@ -360,7 +360,10 @@ SELECT to_regclass('public.customers_data_view')  AS matview,
               WHERE table_name='messages' AND column_name='meta')                             AS msg_meta,
        EXISTS(SELECT 1 FROM information_schema.columns
               WHERE table_name='quotations' AND column_name='odoo_manual_review')             AS q_manual_review,
-       to_regclass('public.pricing_models')                                                   AS pricing_models;"
+       to_regclass('public.pricing_models')                                                   AS pricing_models,
+       (pg_get_viewdef('public.customers_data_build'::regclass) LIKE '%sp_code%')             AS cdv_sp_view,
+       EXISTS(SELECT 1 FROM information_schema.columns
+              WHERE table_name='customers_data_view' AND column_name='salesperson_id')        AS cdv_sp_id;"
 ```
 > ⚠️ **`sp_employee_qid` กับ `admin_maker` เป็นคนละตาราง ชื่อคอลัมน์บังเอิญเหมือนกัน** —
 > `salesperson.employee_quotation_id` (ใบจาก LINE) กับ `admin_users.employee_quotation_id`
@@ -430,6 +433,15 @@ done
   สร้างสามตารางใหม่ล้วนของสมุดราคา (`pricing_book_revisions` · `pricing_models` · `pricing_model_history`)
   ไม่ล็อกตารางเดิมสักตัว · โค้ดที่ยังไม่เจอตารางตอบ "ยังไม่มีสมุดราคาในระบบ" แทน 500
   ⇒ migration อย่างเดียวไม่ทำให้มีราคา — ต้องนำเข้าเล่มแรกตาม **ขั้น 4.11** อีกครั้งเดียว
+- **ข้อยกเว้น: `2026-09-24_01_customers_data_salesperson_id.sql` รันได้ทุกเวลา และ "ต้อง" รันก่อน deploy โค้ดใหม่**
+  `CREATE OR REPLACE VIEW` อย่างเดียว (แก้ catalog) ต่อคอลัมน์ `salesperson_id` ท้ายสุด — ตารางจริงยังไม่มี
+  คอลัมน์จนกว่าจะ refresh ⇒ รันต่อทันที (ในกล่อง app ตัวเก่าได้ ตัว refresh ไม่ได้แก้):
+  `docker compose exec -T app npx tsx -e "import('./scripts/sync/refreshCustomerDirectory.js').then(m=>m.refreshCustomerDataView({force:true}).then(console.log))"`
+  (build+swap ~2.5 วิ ไม่มีช่วงค้นหาพัง) · ตรวจ: `cdv_sp_view` และ `cdv_sp_id` ในคำสั่งข้างบนต้องเป็น `t`
+  ทั้งคู่ แล้ว `npm run diag:web-sales-owner` ต้องเขียวหมด
+  ⚠️ **ห้ามสลับลำดับ** — โค้ดใหม่ขึ้นก่อนตารางมีคอลัมน์ ⇒ `ensureDirectoryRow()` INSERT เกินจำนวนคอลัมน์
+  = **เพิ่มผู้ติดต่อใหม่จากหน้าเว็บไม่ได้** · ส่วนตารางมีคอลัมน์แต่โค้ดยังเก่าปลอดภัย (INSERT ขาดท้ายได้ NULL)
+  รายละเอียด: `docs/plan-web-quote-auto-salesperson.md` §6
 - **ข้อยกเว้น: `2026-09-02_03_quotations_odoo_import_link.sql` รันได้ทุกเวลา และรัน "ก่อน" deploy โค้ดใหม่ได้**
   เพิ่ม `quotations.odoo_imported_at` / `odoo_so_id` = สถานะ "นำเข้า Odoo แล้ว" ของหน้าประวัติใบเสนอราคา
   `ADD COLUMN` nullable ไม่มี DEFAULT บนตาราง ~1.3k แถว จบในไม่กี่ ms

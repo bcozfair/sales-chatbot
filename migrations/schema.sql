@@ -682,6 +682,36 @@ ent_last AS (
     FROM ent_keys ek
     JOIN key_last kl ON kl.kind = ek.kind AND kl.k = ek.k
    GROUP BY ek.company_id
+),
+-- ════════════════════════════════════════════════════════════════════
+-- salesperson_id — รหัสพนักงานขายของชื่อในคอลัมน์ salesperson (2026-09-24)
+--
+-- มีเพราะชื่อที่ Odoo ส่งมากับลูกค้าเป็นรูป 'คุณจิรายุ(PM)' ส่วนตาราง salesperson เก็บ
+-- 'คุณจิรายุ' ⇒ เทียบชื่อตรงตัวได้ 0 จาก 123 ชื่อ (วัด 2026-09-24) · ตัด '(PM)' ทิ้งแล้วเทียบก็ไม่ได้
+-- เพราะคนเดียวกันมีรหัสฝั่ง PM กับ THT คนละตัว (คุณสมิตานันท์ 671/672) และตรงได้แค่ 63/123
+-- ⇒ ใช้ sale_orders ซึ่งเก็บ "ชื่อรูปเดียวกัน" คู่กับ salesperson_id (= รหัสในตาราง salesperson)
+--   วัด 2026-09-24: 132 ชื่อ ทุกชื่อมีรหัสเดียว · ถ้าวันหน้าชื่อหนึ่งมีสองรหัส ใช้รหัสของใบล่าสุด
+--
+-- ⚠️ customers ที่ sync จาก Odoo ไม่มีรหัสเซลส์มาให้ (gateway ส่งแค่ชื่อ) — ถ้าวันหนึ่ง gateway
+--    ส่งรหัสมา ให้เปลี่ยนต้นทางที่นี่ที่เดียว คนอ่านคอลัมน์นี้ไม่ต้องรู้
+-- ⚠️ ขั้นในสุดต้องเรียง/DISTINCT ด้วยค่าดิบ ไม่ใช่ clean_text() — ไม่งั้นใช้ลำดับของ
+--    idx_so_salesperson_cover ไม่ได้ (วัด 2026-09-24: index-only scan 255ms) · clean_text ทำที่ชั้นนอก
+--    กับแค่ ~132 แถวแทน
+-- ⚠️ ผู้อ่านคอลัมน์นี้เพื่อ "เลือกเซลส์ของบริษัท" ต้องยึดแถวแรกที่ salesperson ไม่ว่าง เรียงตาม
+--    contact_id (เจ้าของเคาะ 2026-09-24) — ดู services/customerSalesOwner.ts
+-- ════════════════════════════════════════════════════════════════════
+sp_code AS (
+  SELECT DISTINCT ON (public.clean_text(r.salesperson))
+         public.clean_text(r.salesperson) AS salesperson,
+         r.salesperson_id::text           AS salesperson_id
+    FROM (
+      SELECT DISTINCT ON (salesperson) salesperson, salesperson_id, order_date
+        FROM public.sale_orders
+       WHERE salesperson IS NOT NULL AND salesperson_id IS NOT NULL
+       ORDER BY salesperson, order_date DESC NULLS LAST
+    ) r
+   WHERE public.clean_text(r.salesperson) IS NOT NULL
+   ORDER BY public.clean_text(r.salesperson), r.order_date DESC NULLS LAST
 )
 SELECT
   b.company_id, b.contact_id, b.source,
@@ -698,12 +728,16 @@ SELECT
   -- GREATEST ข้าม NULL ให้เอง
   CASE WHEN COALESCE(ent_last.c, own_credit.c, false)
        THEN GREATEST(own_last.d, ent_last.d)
-  END                                                            AS last_order_at
+  END                                                            AS last_order_at,
+  -- ⚠️ ต้องอยู่ท้ายสุดเสมอ — CREATE OR REPLACE VIEW เพิ่มคอลัมน์ได้แค่ต่อท้าย และ
+  --    ensureDirectoryRow() (db/localContactsRepo.ts) INSERT ตามตำแหน่งโดยไม่ระบุชื่อคอลัมน์
+  sp_code.salesperson_id                                         AS salesperson_id
 FROM all_rows b
 LEFT JOIN comp       ON comp.company_id       = b.company_id
 LEFT JOIN own_last   ON own_last.company_id   = b.company_id
 LEFT JOIN own_credit ON own_credit.company_id = b.company_id
-LEFT JOIN ent_last   ON ent_last.company_id   = b.company_id;
+LEFT JOIN ent_last   ON ent_last.company_id   = b.company_id
+LEFT JOIN sp_code    ON sp_code.salesperson   = b.salesperson;
 
 -- ════════════════════════════════════════════════════════════════════
 -- แปลง customers_data_view: MATERIALIZED VIEW -> ตารางจริง

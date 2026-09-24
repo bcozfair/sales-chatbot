@@ -580,7 +580,7 @@ TS ไต่ `node_modules` ขึ้นไปตามลำดับ ⇒ `<ท
 | กฎเครดิต | `npm run diag:credit-hold` (read-only รันกับ prod ได้) |
 | นิยาม `customers_data_build` / ผู้ติดต่อที่แอดมินเพิ่มเอง | `npm run diag:local-contacts` — **บวก `diag:credit-hold` · `diag:data-directory` · `diag:customer-search` ทุกครั้งที่แตะนิยาม view** เพราะทั้งสามอ่านตารางที่ view สร้าง · ด่านนี้เขียน `local_contacts` และ `customers_data_view` ของจริงใน transaction ที่ **ROLLBACK เสมอ** ห้ามเปลี่ยนเป็น COMMIT |
 | `prompt` ของการสกัด / Flex | `npm run diag:line-parity` |
-| หน้าเว็บขอใบเสนอราคา | `npm run diag:web-quote` · `diag:pdf-issuer` · `diag:sp-dedupe` |
+| หน้าเว็บขอใบเสนอราคา | `npm run diag:web-quote` · `diag:pdf-issuer` · `diag:sp-dedupe` · `diag:web-sales-owner` (เติม "ออกในนาม" จากลูกค้า/ใบเดิม · อ่านอย่างเดียว) |
 | คิวอนุมัติราคา / role `approver` | `npm run diag:price-approval` — **ข้อ 1 ห้ามล้มเด็ดขาด** (ใบจาก LINE ที่ติดราคาขั้นต่ำต้องยังออกไม่ได้) · ต้องรัน migration `2026-09-15_02_*` ก่อน ไม่งั้น `admin_users_role_check` ปฏิเสธตั้งแต่ setup |
 | ชั้นตัดสินใจ "ต้องให้คนเลือกไหม" | `npm run diag:web-decision` (`--ai` = pipeline เต็ม) — กฎ auto-select มี **สองสำเนาโดยตั้งใจ** (`quotationService.ts` ของ LINE ห้ามแตะ · `decideCustomerSelection()` ของเว็บ) ด่านนี้อ่านซอร์สมาเทียบให้ว่ายังตรงกัน |
 | สินค้าพ่วง / กฎบล็อก | `npm run diag:optional-pair` · `diag:block-rule` · `diag:block-parity` |

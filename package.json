@@ -75,6 +75,7 @@
     "diag:web-decision": "tsx scripts/diag/webDecisionParity.ts",
     "diag:local-contacts": "tsx scripts/diag/localContactsSmoke.ts",
     "diag:sp-dedupe": "tsx scripts/diag/salespersonDedupeSmoke.ts",
+    "diag:web-sales-owner": "tsx scripts/diag/webSalesOwnerSmoke.ts",
     "diag:product-candidates": "tsx scripts/diag/productCandidateEval.ts",
     "diag:migrations": "node scripts/diag/migrationsAudit.mjs",
     "diag:backup": "node scripts/diag/backupHealth.mjs",

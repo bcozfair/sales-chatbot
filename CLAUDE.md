@@ -524,6 +524,7 @@ chatbot/
 - **`docs/plan-local-contacts.md`** — เพิ่มผู้ติดต่อใหม่ (`local_contacts` + Arm 3) เฟส I · แบบของโมดูล
 - **`docs/plan-local-products.md`** — เพิ่มสินค้าใหม่ (`local_products`) เฟส J · **รูปแบบ `internal_reference` ถอดจากข้อมูลจริง + อัลกอริทึมออกรหัสต่อจากรหัสเดิม** · ยังไม่เริ่มเขียนโค้ด (เจ้าของเคาะ §2 ครบแล้ว 2026-09-21)
 - **`docs/plan-quote-price-approval.md`** — คิวอนุมัติราคาต่ำกว่าขั้นต่ำ + role `approver`
+- **`docs/plan-web-quote-auto-salesperson.md`** — ช่อง "ออกในนาม" เริ่มว่างแล้วเติมเองจากเซลส์ของบริษัท (ใบใหม่) / ของใบต้นทาง (แก้ใบเดิม) · `customers_data_view.salesperson_id` หารหัสจากชื่อผ่าน `sale_orders` เพราะชื่อใน Odoo (`คุณจิรายุ(PM)`) ไม่ตรงกับตาราง `salesperson` สักชื่อ · **คอลัมน์นี้ต้องอยู่ท้ายสุดของ view เสมอ** (`ensureDirectoryRow()` INSERT ตามตำแหน่ง) · หาไม่เจอ = ให้คนเลือก ห้ามเดา
 - **`docs/plan-web-quote-logging.md`** — ประวัตของหน้าเว็บใน `messages` (`web_*` + `meta`) และวิธีวัด `chosen_rank`
 - **`docs/plan-product-block-rules.md`** — กฎบล็อกสินค้า
 - **`docs/plan-pricing-subcodes.md`** — พิมพ์รหัสสินค้าสั่งทำแล้วได้ราคา + ตารางรหัสย่อยที่แอดมินตั้งราคา/กฎเองได้ (เฟส A–C ทำแล้ว · **อยู่ในแอดมินจริงแล้วเป็นโมดูลที่ถอดออกได้** — ดู `services/pricingLab/README.md` · สมุดราคาครอบ 14 รุ่น / 11 ชีต = 80.1% ของรหัสจริง · เฟส D ยังเป็นแบบที่เสนอ)

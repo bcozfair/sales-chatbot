@@ -41,6 +41,18 @@ export function buildWebUserId(adminId: number, spUserId: string): string {
   return `web:${adminId}:${spUserId}`;
 }
 
+/**
+ * คีย์ของขั้น "วางข้อความ" ที่ยังไม่ได้เลือกเซลส์ (ช่องเริ่มต้นว่าง · 2026-09-24)
+ *
+ * ใช้เป็น key ของคิวและ `messages.user_id` ของแถว `web_propose` **เท่านั้น** — ไม่มีแถว
+ * `salesperson` รองรับ ⇒ ห้ามใช้เป็น `quotations.user_id` (ติด FK) ร่างจริงยังเกิดที่
+ * `buildWebUserId()` ตอนรู้เซลส์แล้วเสมอ · รูปยังเป็น `web:<admin>:…` ให้ตัวกรองช่องทางเว็บ
+ * (`user_id LIKE 'web:%'`) เห็นแถวนี้เหมือนแถวอื่นของหน้าเว็บ
+ */
+export function buildWebProposeKey(adminId: number): string {
+  return buildWebUserId(adminId, 'auto');
+}
+
 /** แยกส่วนกลับจาก user_id พร็อกซี — ไม่ใช่รูปแบบนี้คืน null (ใบจาก LINE จะได้ null เสมอ) */
 export function parseWebUserId(userId: string | null | undefined): { adminId: number; spUserId: string } | null {
   const m = /^web:(\d+):(.+)$/.exec(String(userId ?? ''));
