@@ -7,7 +7,7 @@
 //    … --data <dir> --apply --by <username>                                    เล่มแรกของฐาน
 //    … --data <dir> --apply --replace-all --by <username>                      แทนทั้งเล่ม (ย้อนได้จากหน้าจอ)
 //    … --from-json pricebook/book.json --apply [--replace-all]                  ย้ายเล่มของยุคไฟล์เข้าฐาน
-//    … --data <dir> --layout-only [--apply --by <username>]                      เติมหน้าตาของชีต (ข้อความ/ไฮไลต์) ลงเล่มปัจจุบัน ไม่แตะราคา
+//    … --data <dir> --extras-only [--apply --by <username>]                      เติมของรอบตาราง (ชนิดสายรุ่นเริ่มต้น · หน้าตา) ลงเล่มปัจจุบัน ไม่แตะตัวเลขราคา
 //    … --data <dir> --out <ไฟล์.json>                                           เขียนเป็นไฟล์ (ไม่แตะฐาน)
 //
 //  **`--data` ไม่มีค่าเริ่มต้นโดยตั้งใจ** — ยุคไฟล์ตั้งต้นที่ `data/` ซึ่งถูกเสิร์ฟออกเว็บโดยไม่ตรวจสิทธิ์
@@ -32,7 +32,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { basename, join, dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Adder, Band, Constraint, DerivedDim, ModelVariant, PriceBook, PriceModel, SheetLayout, SubCode } from '../../services/pricingLab/types.js';
+import type { Adder, Band, Constraint, DerivedDim, ModelVariant, PriceBook, PriceModel, SheetLayout, SubCode, AxisDefaultBy } from '../../services/pricingLab/types.js';
 import { pool } from '../../config/db.js';
 import { readBookState } from '../../services/pricingLab/bookStore.js';
 import { BookConflict, BookRejected, commitBookChange, seedBook } from '../../services/pricingLab/bookUpdate.js';
@@ -118,6 +118,18 @@ interface LayoutSpec {
   highlight?: boolean;
 }
 
+/**
+ * ค่าเริ่มต้นที่ขึ้นกับแกนแถว (`PriceModel.axisDefaultsBy`) — อ่านจากคอลัมน์ข้อความข้างตาราง
+ * เช่น TS-01!G "ชนิดสาย รุ่นเริ่มต้น": แถว TSK/TSJ เขียน "สาย ถักสแตนเลส"
+ * `names` แปลข้อความในชีตเป็นคีย์ที่กฎราคาใช้ (`สายสแตนเลสถัก` ใน TS-21+22+25) — เทียบแบบตัดช่องว่างและคำว่า "สาย"
+ * นำหน้า เพราะชีตเขียนสองแบบในไฟล์เดียว ("สาย ถักสแตนเลส" · "สายถักสแตนเลส")
+ * **ข้อความที่ `names` ไม่รู้จัก = นำเข้าล้ม** ไม่ใช่ข้ามเงียบ ๆ — ข้ามแล้วรหัสแถวนั้นจะกลับไปคิดไม่ได้โดยไม่มีใครรู้
+ */
+interface AxisDefaultBySpec {
+  col: string;
+  names: Record<string, string>;
+}
+
 interface SheetMap {
   file: string;
   sheet: string;
@@ -132,6 +144,8 @@ interface SheetMap {
   adders: AdderSpec[];
   constraints: Constraint[];
   layout?: LayoutSpec;
+  /** แกนที่เติม → คอลัมน์ในชีต (แกนที่ตัดสินคือแกนแถวของตารางเสมอ) */
+  axisDefaultsBy?: Record<string, AxisDefaultBySpec>;
 }
 
 // ── ตัวช่วยอ่านเซลล์ ─────────────────────────────────────────────────────────
@@ -234,6 +248,7 @@ function importSheet(
   // ── ฐานราคา ───────────────────────────────────────────────────────────────
   let base: PriceModel['base'];
   let layout: SheetLayout | undefined;
+  let defaultsBy: Record<string, AxisDefaultBy> | undefined;
 
   if (map.base.kind === 'matrix') {
     const spec = map.base;
@@ -264,6 +279,7 @@ function importSheet(
     }
     base = { kind: 'matrix', axes: spec.axes, cells };
     layout = readLayout(map, ws, spec, colHeaders);
+    defaultsBy = readDefaultsBy(map, ws, spec);
   } else if (map.base.kind === 'banded') {
     const spec = map.base;
     const bands: Band[] = [];
@@ -337,6 +353,14 @@ function importSheet(
     variant = { ...rest, adderPrices: prices };
   }
 
+  // ค่าที่เติมต้องเป็นคีย์ที่กฎราคาใช้จริง — ไม่งั้นเติมแล้วก็ยังหาราคาไม่เจอ (เงียบ ๆ)
+  for (const [axis, d] of Object.entries(defaultsBy ?? {})) {
+    const keys = new Set(adders.filter((a) => a.byAxis === axis).flatMap((a) => Object.keys(a.rates ?? {})));
+    for (const v of Object.values(d.values)) {
+      if (!keys.has(v)) throw new Error(`${map.code}: ค่าเริ่มต้นของ ${axis} = "${v}" ไม่มีในราคาของกฎที่แยกตาม ${axis} (${[...keys].join(' · ')})`);
+    }
+  }
+
   const model: PriceModel & { importStats?: ImportReport } = {
     code: map.code,
     label: map.label,
@@ -344,6 +368,7 @@ function importSheet(
     aliases: map.aliases,
     standard: map.standard,
     axisDefaults: map.axisDefaults,
+    axisDefaultsBy: defaultsBy,
     derivedDims: map.derivedDims,
     base,
     adders,
@@ -357,6 +382,34 @@ function importSheet(
   };
 
   return { model, report };
+}
+
+function readDefaultsBy(map: SheetMap, ws: ExcelJS.Worksheet, spec: MatrixSpec): Record<string, AxisDefaultBy> | undefined {
+  if (!map.axisDefaultsBy) return undefined;
+  const norm = (t: string) => t.replace(/\s+/g, '').replace(/^สาย/, '');
+  const headerRows = Array.isArray(spec.colHeaderRow) ? spec.colHeaderRow : [spec.colHeaderRow];
+  const out: Record<string, AxisDefaultBy> = {};
+  for (const [axis, d] of Object.entries(map.axisDefaultsBy)) {
+    const names = new Map(Object.entries(d.names).map(([k, v]) => [norm(k), v]));
+    const values: Record<string, string> = {};
+    for (let r = spec.rows[0]; r <= spec.rows[1]; r++) {
+      const key = cellText(ws, r, spec.rowHeaderCol);
+      const text = cellText(ws, r, d.col);
+      if (!key || !text) continue;
+      const v = names.get(norm(text));
+      if (!v) throw new Error(`${map.code}: ${map.sheet}!${d.col}${r} "${text}" — แมปไม่รู้ว่าคือค่าไหนของ ${axis} (เพิ่มใน names)`);
+      values[key] = v;
+    }
+    if (!Object.keys(values).length) continue;
+    const label = cellText(ws, headerRows[headerRows.length - 1]!, d.col);
+    out[axis] = {
+      ...(label ? { label } : {}),
+      by: spec.axes[0]!,
+      values,
+      source: `${map.sheet}!${d.col}${spec.rows[0]}:${d.col}${spec.rows[1]}`
+    };
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 /**
@@ -470,59 +523,78 @@ function servedPath(out: string): boolean {
   return ['public', 'data'].some((d) => rel === d || rel.startsWith(d + sep));
 }
 
-/** ใส่ `layout` ไว้ตำแหน่งเดียวกับที่ `importSheet` เขียน (ก่อน `importStats`) — ลำดับคีย์คือลำดับในแม่แบบ */
-function withLayout(m: PriceModel, layout: SheetLayout): PriceModel {
+/** ใส่ช่องหนึ่งไว้ตำแหน่งเดียวกับที่ `importSheet` เขียน — ลำดับคีย์คือลำดับในแม่แบบ */
+const FIELD_ORDER = ['code', 'label', 'sheet', 'aliases', 'standard', 'axisDefaults', 'axisDefaultsBy', 'derivedDims',
+  'base', 'adders', 'constraints', 'variant', 'layout', 'importStats'];
+function withFields(m: PriceModel, patch: Partial<PriceModel>): PriceModel {
+  const merged: Record<string, unknown> = { ...m, ...patch };
   const out: Record<string, unknown> = {};
-  let placed = false;
-  for (const [k, v] of Object.entries(m)) {
-    if (k === 'layout') continue;
-    if (k === 'importStats' && !placed) { out.layout = layout; placed = true; }
-    out[k] = v;
-  }
-  if (!placed) out.layout = layout;
+  for (const k of FIELD_ORDER) if (merged[k] !== undefined) out[k] = merged[k];
+  for (const k of Object.keys(merged)) if (!(k in out) && merged[k] !== undefined) out[k] = merged[k];
   return out as unknown as PriceModel;
 }
 
 /**
- * `--layout-only` — เติม "หน้าตาในไฟล์ราคา" (`SheetLayout`: ข้อความท้ายแถว · ตัวหนังสือใต้คอลัมน์ · คอลัมน์ไฮไลต์เหลือง)
- * จากไฟล์ Excel ลงเล่มปัจจุบันในฐาน **โดยไม่แตะราคาสักช่อง**
+ * `--extras-only` (ชื่อเดิม `--layout-only` ยังใช้ได้) — เติม "ของรอบตาราง" จากไฟล์ Excel ลงเล่มปัจจุบันในฐาน
+ * **โดยไม่แตะตัวเลขราคาสักช่อง** (ราคาตั้ง · อัตรา · จำนวนเงิน · เงื่อนไข คงเดิมทุกไบต์):
+ *   · `layout`          ตัวหนังสือแดงใต้คอลัมน์ · คอลัมน์ไฮไลต์เหลือง (แสดงผลอย่างเดียว)
+ *   · `axisDefaultsBy`  ชนิดสายรุ่นเริ่มต้นตาม TYPE — รหัสที่ไม่บอกชนิดสายจึงคิดได้ (ไม่เปลี่ยนราคาของรหัสที่คิดได้อยู่แล้ว)
+ *   · ชื่อ/ที่มาของกฎบวกเพิ่ม (`label` · `source`) ของกฎ id เดิม — ข้อความ ไม่ใช่ตัวเลข
  *
- * มีเพราะเล่มในฐานบูตก่อนที่ตัวนำเข้าจะอ่านสามอย่างนี้ (เจ้าของสั่งเพิ่ม 2026-09-24) และการนำเข้าทั้งเล่มซ้ำ
- * (`--replace-all`) จะทับราคาที่แอดมินแก้จากจอไปแล้ว ⇒ ทางนี้แตะเฉพาะช่อง `layout` ของรุ่นที่แมปมี `layout`
- * ไม่ใส่ `--apply` = รายงานอย่างเดียว · ใส่ = การบันทึกหนึ่งครั้ง (ย้อนได้จากปุ่มย้อนเล่มเหมือนทุกการบันทึก)
+ * มีเพราะเล่มในฐานบูตก่อนที่ตัวนำเข้าจะอ่านของพวกนี้ และ `--replace-all` จะทับราคาที่แอดมินแก้จากจอไปแล้ว
+ * แตะเฉพาะรุ่นที่แมปมีของพวกนี้ · ไม่ใส่ `--apply` = รายงานอย่างเดียว · ใส่ = การบันทึกหนึ่งครั้ง (ย้อนได้จากจอ)
  */
-async function applyLayoutOnly(fromFile: PriceBook, opts: { apply: boolean; by: string | null }): Promise<number> {
+async function applyExtrasOnly(fromFile: PriceBook, opts: { apply: boolean; by: string | null }): Promise<number> {
   const state = await readBookState();
   if (!state) {
-    console.error('ยังไม่มีสมุดราคาในฐาน — --layout-only เติมได้เฉพาะเล่มที่มีอยู่แล้ว');
+    console.error('ยังไม่มีสมุดราคาในฐาน — --extras-only เติมได้เฉพาะเล่มที่มีอยู่แล้ว');
     return 1;
   }
   const models = { ...state.book.models };
   const changed: string[] = [];
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
   for (const [code, m] of Object.entries(state.book.models)) {
-    const want = fromFile.models[code]?.layout;
-    if (!want) continue; // แมปของรุ่นนี้ไม่ได้บอกให้อ่านหน้าตา ⇒ ไม่แตะ (รวมถึงของที่คนตั้งจากจอ)
-    if (JSON.stringify(m.layout) === JSON.stringify(want)) continue;
-    models[code] = withLayout(m, want);
+    const f = fromFile.models[code];
+    if (!f || (!f.layout && !f.axisDefaultsBy)) continue; // แมปของรุ่นนี้ไม่ได้บอกให้อ่าน ⇒ ไม่แตะ
+    const patch: Partial<PriceModel> = {};
+    const notes: string[] = [];
+    if (!same(m.layout, f.layout)) { patch.layout = f.layout; notes.push(`หน้าตา: ${JSON.stringify(f.layout ?? null)}`); }
+    if (!same(m.axisDefaultsBy, f.axisDefaultsBy)) {
+      patch.axisDefaultsBy = f.axisDefaultsBy;
+      for (const [axis, d] of Object.entries(f.axisDefaultsBy ?? {})) {
+        notes.push(`${d.label ?? axis} (ตาม ${d.by}): ${Object.entries(d.values).map(([k, v]) => `${k} → ${v}`).join(' · ')}`);
+      }
+    }
+    // ข้อความของกฎเดิม — ตัวเลขทุกช่องของกฎต้องตรงกันก่อน ไม่งั้นไม่แตะ (กันเอาข้อความไปแปะกฎที่ถูกแก้ไปแล้ว)
+    const priceOf = (a: Adder) => JSON.stringify({ ...a, label: undefined, source: undefined });
+    let textChanged = false;
+    const adders = m.adders.map((a) => {
+      const g = f.adders.find((x) => x.id === a.id);
+      if (!g || priceOf(g) !== priceOf(a) || (g.label === a.label && g.source === a.source)) return a;
+      textChanged = true;
+      notes.push(`ชื่อกฎ ${a.id}: "${a.label}" → "${g.label}"`);
+      return { ...a, label: g.label, ...(g.source !== undefined ? { source: g.source } : {}) };
+    });
+    if (textChanged) patch.adders = adders;
+    if (!Object.keys(patch).length) continue;
+    models[code] = withFields(m, patch);
     changed.push(code);
     console.log(`\n${code}:`);
-    if (want.rowNote) console.log(`  ${want.rowNote.label}: ${Object.entries(want.rowNote.values).map(([k, v]) => `${k} = ${v}`).join(' · ')}`);
-    if (want.colNotes) console.log(`  ข้อความใต้คอลัมน์: ${Object.entries(want.colNotes).map(([k, v]) => `${k} → ${v}`).join(' · ')}`);
-    if (want.highlightCols) console.log(`  คอลัมน์ไฮไลต์เหลือง: ${want.highlightCols.join(', ')}`);
+    for (const n of notes) console.log(`  ${n}`);
   }
   if (changed.length === 0) {
-    console.log('\nเล่มในฐานมีหน้าตาตรงกับไฟล์ทุกรุ่นแล้ว — ไม่มีอะไรต้องเขียน');
+    console.log('\nเล่มในฐานตรงกับไฟล์ทุกรุ่นแล้ว — ไม่มีอะไรต้องเขียน');
     return 0;
   }
   if (!opts.apply) {
-    console.log(`\n(ยังไม่ได้เขียนลงฐาน — ${changed.length} รุ่น · ใส่ --apply --by <username> เพื่อบันทึก · ไม่แตะราคา)`);
+    console.log(`\n(ยังไม่ได้เขียนลงฐาน — ${changed.length} รุ่น · ใส่ --apply --by <username> เพื่อบันทึก · ไม่แตะตัวเลขราคา)`);
     return 0;
   }
   const at = new Date().toISOString();
   const revision = await commitBookChange({
     parent: state.revision,
     kind: 'model',
-    next: { ...state.book, models, edited: { at, by: opts.by ?? undefined, note: 'เติมหน้าตาของชีตจากไฟล์ราคา (ไม่แตะราคา)' } },
+    next: { ...state.book, models, edited: { at, by: opts.by ?? undefined, note: 'เติมของรอบตารางจากไฟล์ราคา (ชนิดสายรุ่นเริ่มต้น · หน้าตา) — ไม่แตะตัวเลขราคา' } },
     changed,
     by: opts.by,
   });
@@ -542,7 +614,7 @@ async function main(): Promise<number> {
   const by = val('--by') ?? null;
   const apply = args.includes('--apply');
   const replaceAll = args.includes('--replace-all');
-  const layoutOnly = args.includes('--layout-only');
+  const extrasOnly = args.includes('--extras-only') || args.includes('--layout-only');
 
   if (!dataDir === !fromJson) {
     console.error('ต้องบอกที่มาของสมุดราคาอย่างใดอย่างหนึ่ง:');
@@ -584,7 +656,7 @@ async function main(): Promise<number> {
     }
   }
 
-  if (layoutOnly) return applyLayoutOnly(book, { apply, by });
+  if (extrasOnly) return applyExtrasOnly(book, { apply, by });
 
   if (outFile) {
     writeFileSync(resolve(outFile), JSON.stringify(book, null, 2), 'utf8');

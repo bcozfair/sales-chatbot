@@ -132,6 +132,7 @@ const SHEET = {
   variants: 'ตัวเลือกท้ายรหัส',
   derived: 'ค่าที่คำนวณเอง',
   layout: 'หน้าตาในไฟล์ราคา',
+  defaultsBy: 'ค่าเริ่มต้นตามแกน',
   subCodes: 'รหัสย่อย',
   basePrefix: 'ฐาน-'
 } as const;
@@ -351,6 +352,7 @@ const README_LINES = [
   `${SHEET.constraints}    ข้อห้าม/ข้อควรระวัง — ไม่รับผลิต · ต้องขอราคา · เตือน`,
   `${SHEET.variants}        ตัวอักษรท้ายเลขรุ่นที่คิดเพิ่มจากรุ่นหลัก (ซีรีส์ BH = ตัว C)`,
   `${SHEET.derived}       ค่าที่ระบบคิดให้เอง เช่น พื้นที่ผิว`,
+  `${SHEET.defaultsBy}     ค่าที่ใช้เมื่อรหัสไม่ได้บอก แต่ขึ้นกับอีกค่า (ชนิดสายตาม TYPE ของ TS-01) — มีผลกับราคา`,
   `${SHEET.layout}     ข้อความ/ไฮไลต์รอบตารางแบบในไฟล์ราคาเดิม — แสดงผลอย่างเดียว ไม่มีผลกับราคา`,
   `${SHEET.subCodes}                ความหมายของตัวอักษรในรหัสสินค้า และผลกับราคา`,
   '',
@@ -771,6 +773,76 @@ function variantsSheet(book: PriceBook): SheetTable {
   };
 }
 
+// ── ค่าเริ่มต้นตามแกน (`axisDefaultsBy`) ─────────────────────────────────────
+//
+// หนึ่งแถว = "ถ้ารหัสไม่บอก <แกนที่เติม> และ <ดูจากแกน> = <ค่าของแกนนั้น> ให้ใช้ <ใช้ค่า>"
+// หัวคอลัมน์/ที่มาเขียนซ้ำทุกแถวของแกนเดียวกัน (อ่านกลับจากแถวแรกที่มีค่า)
+
+function defaultsBySheet(book: PriceBook): SheetTable {
+  const rows: CellValue[][] = [];
+  for (const m of Object.values(book.models)) {
+    for (const [axis, d] of Object.entries(m.axisDefaultsBy ?? {})) {
+      for (const [k, v] of Object.entries(d.values)) rows.push([m.code, axis, d.by, k, v, d.label ?? '', d.source ?? '']);
+    }
+  }
+  return {
+    name: SHEET.defaultsBy,
+    title: 'ค่าที่ระบบใช้เมื่อรหัสสินค้าไม่ได้บอก แต่ขึ้นกับอีกค่า — เช่น ชนิดสายของ TS-01 ขึ้นกับ TYPE · "ใช้ค่า" ต้องสะกดตรงกับชีตอัตราตามแกน',
+    columns: [
+      { label: 'รหัสรุ่น', width: 12 },
+      { label: 'แกนที่เติม', width: 12 },
+      { label: 'ดูจากแกน', width: 12 },
+      { label: 'ค่าของแกนนั้น', width: 14 },
+      { label: 'ใช้ค่า', width: 18 },
+      { label: 'หัวคอลัมน์ในไฟล์', width: 22 },
+      { label: 'ที่มาในไฟล์ราคา', width: 28 }
+    ],
+    rows,
+    freeze: true
+  };
+}
+
+/** ไฟล์ที่ไม่มีชีตนี้ = ไม่รู้ ไม่ใช่ลบ (`applyModels` คงของเดิม) — เหตุผลเดียวกับชีตหน้าตา */
+function readDefaultsBy(grid: CellValue[][] | undefined, models: Record<string, PriceModel>, R: Reader): void {
+  const name = SHEET.defaultsBy;
+  if (!grid) return;
+  const h = findHeader(grid, ['รหัสรุ่น', 'แกนที่เติม', 'ดูจากแกน', 'ใช้ค่า']);
+  if (!h) {
+    R.err(name, 'ไม่พบแถวหัวตาราง (ต้องมี "รหัสรุ่น" · "แกนที่เติม" · "ดูจากแกน" · "ใช้ค่า")');
+    return;
+  }
+  for (let r = h.at + 1; r < grid.length; r++) {
+    const row = grid[r] ?? [];
+    if (isEmptyRow(row)) continue;
+    const line = r + 1;
+    const code = toText(cell(row, h.index, 'รหัสรุ่น'));
+    const model = models[code];
+    if (!model) {
+      R.err(name, `ไม่รู้จักรุ่น "${code}"`, line);
+      continue;
+    }
+    const axis = toText(cell(row, h.index, 'แกนที่เติม'));
+    const byAxis = toText(cell(row, h.index, 'ดูจากแกน'));
+    const key = toText(cell(row, h.index, 'ค่าของแกนนั้น'));
+    const value = toText(cell(row, h.index, 'ใช้ค่า'));
+    if (!axis || !byAxis || !key || !value) {
+      R.err(name, 'แถวนี้กรอกไม่ครบ (ต้องมี แกนที่เติม · ดูจากแกน · ค่าของแกนนั้น · ใช้ค่า)', line);
+      continue;
+    }
+    const all = (model.axisDefaultsBy = model.axisDefaultsBy ?? {});
+    let d = all[axis];
+    if (!d) {
+      const label = toText(cell(row, h.index, 'หัวคอลัมน์ในไฟล์'));
+      const source = toText(cell(row, h.index, 'ที่มาในไฟล์ราคา'));
+      d = all[axis] = { ...(label ? { label } : {}), by: byAxis, values: {}, ...(source ? { source } : {}) };
+    } else if (d.by !== byAxis) {
+      R.err(name, `แกน ${axis} ของ ${code} ดูจากแกนสองแบบ (${d.by} · ${byAxis}) — ใช้แบบแรก`, line);
+      continue;
+    }
+    d.values[key] = value;
+  }
+}
+
 // ── หน้าตาในไฟล์ราคา (`SheetLayout`) ─────────────────────────────────────────
 //
 // หนึ่งแถว = หนึ่งชิ้นของหน้าตา · สี่ชนิด (คำในคอลัมน์ "ส่วน" เป็นรายการปิด):
@@ -893,6 +965,7 @@ export function bookToSheets(book: PriceBook, opts?: { exportedAt?: string }): S
     constraintsSheet(book),
     variantsSheet(book),
     derivedSheet(book),
+    defaultsBySheet(book),
     layoutSheet(book),
     subCodesSheet(book),
     ...Object.values(book.models).map(baseSheet)
@@ -1025,6 +1098,7 @@ export function sheetsToBook(grids: RawSheet[]): { book: PriceBook | null; issue
   readConstraints(by.get(SHEET.constraints), models, R);
   readVariants(by.get(SHEET.variants), models, R);
   readDerived(by.get(SHEET.derived), models, R);
+  readDefaultsBy(by.get(SHEET.defaultsBy), models, R);
   readLayout(by.get(SHEET.layout), models, R);
   const subCodes = readSubCodes(by.get(SHEET.subCodes), R);
 

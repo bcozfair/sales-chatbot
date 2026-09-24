@@ -18,8 +18,9 @@ import type { EditorAdder, EditorView } from './types';
  * กติกาเดียวกับหน้าแก้ทีละรุ่น (อย่าแก้กลับ):
  *   · **ช่องว่าง = ไม่รับผลิต / ต้องขอราคา ไม่ใช่ 0** — ลบเลขได้ แต่ขึ้นเตือนในหน้าตรวจ
  *   · **ก่อนบันทึกต้องเห็นส่วนต่าง (เดิม → ใหม่) ทุกช่อง** — ใช้ `ReviewModal` ตัวเดียวกัน
- *   · สามอย่างที่ไฟล์เขียน/ระบายรอบตาราง (คอลัมน์ "ชนิดสาย รุ่นเริ่มต้น" · ตัวหนังสือแดงใต้คอลัมน์ · คอลัมน์
- *     พื้นเหลือง) มาจาก `PriceModel.layout` — แสดงผลอย่างเดียว ไม่มีผลกับราคา (เจ้าของสั่งเพิ่ม 2026-09-24)
+ *   · ของรอบตาราง (เจ้าของสั่งเพิ่ม 2026-09-24):
+ *       คอลัมน์ "ชนิดสาย รุ่นเริ่มต้น" = `axisDefaultsBy` — **มีผลกับราคา** (สายของรหัสที่ไม่บอกชนิดสาย · เจ้าของยืนยัน)
+ *       ตัวหนังสือแดงใต้คอลัมน์ · คอลัมน์พื้นเหลือง = `layout` — แสดงผลอย่างเดียว
  *   · เพิ่ม/ลบแถวหรือคอลัมน์ไม่ได้จากจอนี้ (แม่แบบ Excel) — จอแก้ได้แค่ตัวเลขในช่องที่ชีตมี
  * บันทึกทั้งชีตเป็นครั้งเดียว (`PUT /api/admin/pricebook/sheet/:sheet`) — เหตุผลที่หัว routes/pricingLab.ts
  *
@@ -50,6 +51,8 @@ interface Draft {
   rowNote: string[];
   colNotes: string[];
   highlight: boolean[];
+  /** แกนที่เติม → ค่าของแต่ละแถว (ตามลำดับแถว) · '' = ไม่มีค่าเริ่มต้น */
+  defaults: Record<string, string[]>;
 }
 
 function toDraft(v: EditorView): Draft {
@@ -60,6 +63,7 @@ function toDraft(v: EditorView): Draft {
     rowNote: rows.map((r) => L.rowNote?.values[r] ?? ''),
     colNotes: cols.map((c) => L.colNotes[c] ?? ''),
     highlight: cols.map((c) => L.highlightCols.includes(c)),
+    defaults: Object.fromEntries(v.defaultsBy.map((d) => [d.axis, rows.map((r) => d.values[r] ?? '')])),
     cells: v.base.kind === 'matrix' && v.base.cells ? v.base.cells.map((row) => row.map(str)) : [],
     rates: Object.fromEntries(
       v.adders.filter((a) => a.rates).map((a) => [a.id, Object.fromEntries(a.rates!.map((r) => [r.value, str(r.rate)]))]),
@@ -100,6 +104,20 @@ function buildDiff(models: EditorView[], drafts: Record<string, Draft>): DiffRow
     if (v.base.kind === 'matrix') {
       const { rows: rs, cols } = v.base;
       const L = v.layout;
+      for (const df of v.defaultsBy) {
+        rs.forEach((r, i) => {
+          const was = df.values[r] ?? '';
+          const now = d.defaults[df.axis]?.[i] ?? '';
+          if (was !== now) {
+            rows.push({
+              what: `${v.title} · ${df.label} ${r} (มีผลกับราคา)`,
+              was: was || 'ไม่มี',
+              now: now || 'ไม่มี — รหัสที่ไม่บอกต้องระบุเอง',
+              warn: !now,
+            });
+          }
+        });
+      }
       rs.forEach((r, i) => {
         const was = L.rowNote?.values[r] ?? '';
         const now = d.rowNote[i]!.trim();
@@ -139,6 +157,7 @@ function buildBody(models: EditorView[], drafts: Record<string, Draft>) {
     cells: Record<string, number | null>;
     adderRates: Record<string, { value: string; rate: number | null }[]>;
     layout?: Layout;
+    defaultsBy?: Record<string, Record<string, string>>;
   }> = {};
   for (const v of models) {
     const d = drafts[v.code];
@@ -173,8 +192,18 @@ function buildBody(models: EditorView[], drafts: Record<string, Draft>) {
         && JSON.stringify(next.highlightCols) === JSON.stringify(L.highlightCols);
       if (!same) layout = next;
     }
-    if (Object.keys(cells).length || Object.keys(adderRates).length || layout) {
-      out[v.code] = { cells, adderRates, ...(layout ? { layout } : {}) };
+    let defaultsBy: Record<string, Record<string, string>> | undefined;
+    if (v.base.kind === 'matrix') {
+      const rs = v.base.rows;
+      for (const df of v.defaultsBy) {
+        const now = d.defaults[df.axis] ?? [];
+        if (rs.some((r, i) => (df.values[r] ?? '') !== (now[i] ?? ''))) {
+          defaultsBy = { ...defaultsBy, [df.axis]: Object.fromEntries(rs.map((r, i) => [r, now[i] ?? ''])) };
+        }
+      }
+    }
+    if (Object.keys(cells).length || Object.keys(adderRates).length || layout || defaultsBy) {
+      out[v.code] = { cells, adderRates, ...(layout ? { layout } : {}), ...(defaultsBy ? { defaultsBy } : {}) };
     }
   }
   return out;
@@ -224,7 +253,8 @@ const SheetTable: React.FC<{
   onRowNote: (i: number, val: string) => void;
   onColNote: (j: number, val: string) => void;
   onHighlight: (j: number) => void;
-}> = ({ v, d, products, onCell, onRate, onRowNote, onColNote, onHighlight }) => {
+  onDefault: (axis: string, i: number, val: string) => void;
+}> = ({ v, d, products, onCell, onRate, onRowNote, onColNote, onHighlight, onDefault }) => {
   if (v.base.kind !== 'matrix' || !v.base.cells) return null;
   const { rows, cols, cells, axes, axesTh } = v.base;
   const L = v.layout;
@@ -266,6 +296,13 @@ const SheetTable: React.FC<{
                     className="border border-slate-200 bg-emerald-100 px-3 py-1.5 text-center font-bold text-emerald-800">
                   {head(1)}
                 </th>
+                {v.defaultsBy.map((df) => (
+                  <th key={df.axis} rowSpan={2}
+                      title={`มีผลกับราคา — รหัสที่ไม่ได้บอก${df.axisTh} ใช้ค่าในคอลัมน์นี้`}
+                      className="border border-slate-200 bg-emerald-100 px-3 py-2 text-center font-bold text-emerald-800 min-w-[160px]">
+                    {df.label}
+                  </th>
+                ))}
                 {L.rowNote && (
                   <th rowSpan={2}
                       className="border border-slate-200 bg-emerald-100 px-3 py-2 text-center font-bold text-emerald-800 min-w-[150px]">
@@ -307,6 +344,25 @@ const SheetTable: React.FC<{
                       onChange={(val) => onCell(i, j, val)}
                     />
                   ))}
+                  {v.defaultsBy.map((df) => {
+                    const cur = d.defaults[df.axis]?.[i] ?? '';
+                    const changed = cur !== (df.values[r] ?? '');
+                    return (
+                      <td key={df.axis} className={`border border-slate-200 p-0 ${changed ? 'bg-blue-50' : ''}`}>
+                        <select
+                          aria-label={`${v.title} ${df.label} ${r}`}
+                          value={cur}
+                          onChange={(e) => onDefault(df.axis, i, e.target.value)}
+                          className={`block w-full bg-transparent px-2.5 py-2 text-[13px] outline-none focus:ring-2 focus:ring-inset focus:ring-[var(--brand-border-strong)] ${
+                            changed ? 'font-bold text-blue-700' : cur ? 'text-slate-800' : 'text-amber-700'
+                          }`}
+                        >
+                          <option value="">— ไม่มี (รหัสต้องระบุเอง) —</option>
+                          {df.options.map((o) => <option key={o} value={o}>{o}</option>)}
+                        </select>
+                      </td>
+                    );
+                  })}
                   {L.rowNote && (
                     <td className={`border border-slate-200 p-0 ${d.rowNote[i]!.trim() !== (L.rowNote.values[r] ?? '') ? 'bg-blue-50' : ''}`}>
                       <input
@@ -337,6 +393,7 @@ const SheetTable: React.FC<{
                       />
                     </td>
                   ))}
+                  {v.defaultsBy.map((df) => <td key={df.axis} />)}
                   {L.rowNote && <td />}
                 </tr>
               )}
@@ -346,6 +403,11 @@ const SheetTable: React.FC<{
         <p className="mt-1.5 text-[11px] text-slate-400">
           หน่วย บาท · ช่องว่าง = ไม่รับผลิตแบบนั้น (ไม่ใช่ราคา 0) · พื้นเหลือง = คอลัมน์ที่ไฟล์ราคาไฮไลต์ไว้
           (คลิกหัวคอลัมน์เพื่อเปลี่ยน) · พื้นฟ้า = ช่องที่แก้แล้วยังไม่บันทึก
+          {v.defaultsBy.map((df) => (
+            <React.Fragment key={df.axis}>
+              {' · '}<b className="text-slate-600">คอลัมน์ “{df.label}” มีผลกับราคา</b> — รหัสที่ไม่ได้บอก{df.axisTh} ใช้ค่าในคอลัมน์นี้คิด
+            </React.Fragment>
+          ))}
           {(L.rowNote || hasColNotes) && <> · {[L.rowNote && `คอลัมน์ “${L.rowNote.label}”`, hasColNotes && 'ตัวหนังสือแดง'].filter(Boolean).join(' และ ')} เป็นข้อความกำกับ ไม่มีผลกับราคา</>}
         </p>
 
@@ -521,6 +583,10 @@ export const SheetEditor: React.FC<{
           onRowNote={(i, val) => patch(v.code, (d) => ({ ...d, rowNote: d.rowNote.map((t, k) => (k === i ? val : t)) }))}
           onColNote={(j, val) => patch(v.code, (d) => ({ ...d, colNotes: d.colNotes.map((t, k) => (k === j ? val : t)) }))}
           onHighlight={(j) => patch(v.code, (d) => ({ ...d, highlight: d.highlight.map((h, k) => (k === j ? !h : h)) }))}
+          onDefault={(axis, i, val) => patch(v.code, (d) => ({
+            ...d,
+            defaults: { ...d.defaults, [axis]: (d.defaults[axis] ?? []).map((x, k) => (k === i ? val : x)) },
+          }))}
         />
       ))}
 

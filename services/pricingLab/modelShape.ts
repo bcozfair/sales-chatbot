@@ -199,6 +199,21 @@ export function checkPriceModel(spec: unknown, code?: string): string[] {
   out.strArr(spec, 'aliases', 'aliases');
   out.numMap(spec, 'standard', 'standard', true);
   out.strMap(spec, 'axisDefaults', 'axisDefaults');
+  // ค่าเริ่มต้นที่ขึ้นกับอีกแกน — engine อ่านช่องนี้ ⇒ ต้องตรวจ (ต่างจาก `layout` ที่ปล่อยผ่าน)
+  if (spec.axisDefaultsBy !== undefined) {
+    if (!isObj(spec.axisDefaultsBy)) out.add('axisDefaultsBy', 'ต้องเป็นตาราง แกน → ค่าเริ่มต้น');
+    else {
+      for (const [axis, d] of Object.entries(spec.axisDefaultsBy)) {
+        const path = `axisDefaultsBy.${axis}`;
+        if (!isObj(d)) { out.add(path, 'ต้องเป็น object'); continue; }
+        out.str(d, 'by', path, true);
+        out.str(d, 'label', path);
+        out.str(d, 'source', path);
+        if (!isObj(d.values)) out.add(`${path}.values`, 'ต้องมี และต้องเป็นตาราง ค่า → ค่า');
+        else out.strMap(d, 'values', path);
+      }
+    }
+  }
   if (spec.importStats !== undefined && !isObj(spec.importStats)) out.add('importStats', 'ต้องเป็น object');
 
   if (spec.derivedDims !== undefined) {

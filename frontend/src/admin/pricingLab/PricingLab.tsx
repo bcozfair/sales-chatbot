@@ -240,7 +240,14 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
               ) : (
                 <EmptyState
                   icon={AlertTriangle}
-                  title={result.outcome?.status === 'notManufacturable' ? 'ไม่รับผลิตขนาดนี้' : 'ยังคิดราคาไม่ได้'}
+                  // "รหัสบอกไม่ครบ" ≠ "ไม่รับผลิต" — เดิมขึ้นอย่างหลังกับ TSJ-01 4.8+2M ที่แค่ไม่มีวงเล็บเกลียว (2026-09-24)
+                  title={
+                    result.outcome?.violations.some((v) => v.level === 'block' && !v.missing)
+                      ? 'ไม่รับผลิตขนาดนี้'
+                      : result.outcome?.violations.some((v) => v.missing)
+                        ? 'รหัสยังบอกข้อมูลไม่ครบ'
+                        : 'ยังคิดราคาไม่ได้'
+                  }
                   hint={
                     result.outcome?.violations.map((v) => v.message).join(' · ')
                     || result.parsed.problems.join(' · ')

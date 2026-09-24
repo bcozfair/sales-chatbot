@@ -97,6 +97,11 @@ export interface EditorView {
    * ปล่อยช่องนี้ผ่านโดยไม่ตรวจ (engine ไม่อ่าน) ⇒ ของเสียในฐานต้องไม่ทำให้จอพัง
    */
   layout: { rowNote: { label: string; values: Record<string, string> } | null; colNotes: Record<string, string>; highlightCols: string[] };
+  /**
+   * ค่าเริ่มต้นที่ขึ้นกับอีกแกน (`axisDefaultsBy`) — **มีผลกับราคา** · หน้าสมุดรายชีตวางเป็นคอลัมน์ท้ายตาราง
+   * `options` = ค่าที่เลือกได้ (คีย์ของอัตราตามแกนนั้น) — เลือกนอกรายการไม่ได้ เพราะเติมแล้วจะหาราคาไม่เจอ
+   */
+  defaultsBy: { axis: string; axisTh: string; by: string; label: string; values: Record<string, string>; options: string[] }[];
   variant: (ModelVariant & { covers: string[] }) | null;
   adders: EditorAdder[];
   constraints: { id: string; level: string; levelTh: string; message: string; whenTh: string; disabled: boolean }[];
@@ -206,6 +211,8 @@ export function excelReady(m: PriceModel): boolean {
   if (m.base.kind !== 'matrix' || m.base.axes.length !== 2) return false;
   const axes = m.base.axes;
   if (m.constraints.length || m.variant || m.derivedDims?.length) return false;
+  // ค่าเริ่มต้นตามแกน = คอลัมน์ท้ายตาราง ⇒ ต้องขึ้นกับแกนแถวเท่านั้น (ไม่งั้นไม่มีที่วางบนจอ)
+  if (Object.values(m.axisDefaultsBy ?? {}).some((d) => d.by !== axes[0])) return false;
   return m.adders.every(
     (a) => a.kind === 'perUnit' && !a.when && !!a.byAxis && !axes.includes(a.byAxis) && !!a.rates,
   );
@@ -225,6 +232,11 @@ function layoutView(L: SheetLayout | undefined): EditorView['layout'] {
     colNotes: strMap(L?.colNotes),
     highlightCols: Array.isArray(L?.highlightCols) ? L!.highlightCols.filter((x) => typeof x === 'string') : []
   };
+}
+
+/** ค่าที่ `axisDefaultsBy[axis]` เลือกได้ = คีย์ของอัตราในกฎที่แยกตามแกนนั้น (รุ่นแบบชีตรวมทั้งเล่ม — ดู `knownRateKeys`) */
+function defaultOptions(book: PriceBook | undefined, m: PriceModel, axis: string): string[] {
+  return [...new Set(m.adders.filter((a) => a.byAxis === axis).flatMap((a) => knownRateKeys(book, m, a)))];
 }
 
 /** `TSK-01` + ชื่อพ้อง `TS-01` → `TS_-01` (แบบที่หัวชีตเขียน) */
@@ -276,6 +288,14 @@ export function modelEditorView(book: PriceBook, m: PriceModel): EditorView {
     title: sheetTitle(m, name),
     excel: excelReady(m),
     layout: layoutView(m.layout),
+    defaultsBy: Object.entries(m.axisDefaultsBy ?? {}).map(([axis, d]) => ({
+      axis,
+      axisTh: axisLabel(axis),
+      by: d.by,
+      label: d.label ?? `${axisLabel(axis)}เริ่มต้น`,
+      values: { ...d.values },
+      options: defaultOptions(book, m, axis)
+    })),
     label: m.label,
     sheet: m.sheet ?? '',
     aliases: m.aliases ?? [],
@@ -697,6 +717,35 @@ export function applyModelEdit(current: PriceModel, body: unknown, book?: PriceB
     constraints,
     variant: readVariant(b.variant, adders, current.variant)
   };
+  // ค่าเริ่มต้นตามแกน — แก้ได้แค่ "ค่าไหนใช้อะไร" ของแกนที่มีอยู่แล้ว (เพิ่มแกนใหม่ทางแม่แบบ Excel)
+  if (b.defaultsBy !== undefined) {
+    const raw = b.defaultsBy as Record<string, unknown>;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) reject('ค่าเริ่มต้นตามแกน: รูปแบบไม่ถูกต้อง');
+    const cur = current.axisDefaultsBy ?? {};
+    const out: Record<string, NonNullable<PriceModel['axisDefaultsBy']>[string]> = {};
+    for (const axis of Object.keys(raw)) if (!(axis in cur)) reject(`ค่าเริ่มต้นตามแกน: รุ่นนี้ไม่มีค่าเริ่มต้นของ "${axis}"`);
+    for (const [axis, d] of Object.entries(cur)) {
+      const sent = raw[axis];
+      if (sent === undefined) { out[axis] = d; continue; }
+      if (!sent || typeof sent !== 'object' || Array.isArray(sent)) reject(`ค่าเริ่มต้นของ ${axis}: รูปแบบไม่ถูกต้อง`);
+      const opts = new Set(defaultOptions(book, current, axis));
+      const byValues = current.base.kind === 'matrix' && current.base.axes[0] === d.by
+        ? matrixValues(current.base.cells, current.base.axes.length)[0]!
+        : Object.keys(d.values);
+      const m = sent as Record<string, unknown>;
+      for (const k of Object.keys(m)) if (!byValues.includes(k)) reject(`ค่าเริ่มต้นของ ${axis}: ไม่มี "${k}" ในตาราง`);
+      const values: Record<string, string> = {};
+      for (const k of byValues) {
+        const v = text(m[k], `ค่าเริ่มต้นของ ${axis} ${k}`, 60, false);
+        if (!v) continue; // ว่าง = ไม่มีค่าเริ่มต้น ⇒ รหัสที่ไม่บอกค่านี้คิดไม่ได้ (ไม่ใช่เดา)
+        if (!opts.has(v)) reject(`ค่าเริ่มต้นของ ${axis} ${k}: "${v}" ไม่มีในราคา (${[...opts].join(' · ')})`);
+        values[k] = v;
+      }
+      out[axis] = { ...d, values };
+    }
+    if (Object.keys(out).length) next.axisDefaultsBy = out;
+    else delete next.axisDefaultsBy;
+  }
   // ไม่ส่ง `layout` มา = คงเดิม (หน้าแก้ทีละรุ่นไม่มีช่องพวกนี้) · ส่งมาแล้วว่างทั้งหมด = ลบ
   if (b.layout !== undefined) {
     const layout = readLayout(b.layout, current);

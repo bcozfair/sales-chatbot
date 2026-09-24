@@ -350,7 +350,7 @@ function readTsGeneric(c: Ctx, rest: string, prefix: string): void {
     }
     rest = rest.slice(paren[0].length);
   } else if (hasThread) {
-    c.warnings.push('รหัสนี้ไม่มีวงเล็บบอกขนาดเกลียว — ต้องเลือกเกลียวเองในช่องข้างล่าง');
+    c.warnings.push('รหัสนี้ไม่มีวงเล็บบอกขนาดเกลียว — ใส่เกลียวต่อท้ายเลขรุ่นแล้วคิดใหม่ เช่น TSK-01(M6)');
   }
 
   const core = rest.match(/^([0-9.]+[A-WYZ]*)(?:x([0-9.]+))?/i);
@@ -525,7 +525,7 @@ function readBh(c: Ctx, rest: string): void {
     add(c, { text: `${core[1]}x${core[2]}`, reads: `เส้นผ่านศูนย์กลาง ${core[1]} mm × ความกว้าง ${core[2]} mm`, kind: 'dim' });
     rest = rest.slice(core[0].length);
   } else {
-    c.warnings.push('อ่านขนาด (กว้าง × ยาว) จากรหัสไม่ได้ — กรอกเองในช่องข้างล่าง');
+    c.warnings.push('อ่านขนาด (กว้าง × ยาว) จากรหัสไม่ได้ — ใส่ขนาดต่อท้ายเลขรุ่นแล้วคิดใหม่ เช่น BH-01-600x150');
   }
 
   for (const token of leftovers(c, rest)) {

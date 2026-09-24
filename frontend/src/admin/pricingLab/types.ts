@@ -91,7 +91,8 @@ export interface PriceOutcome {
   model: string;
   unitPrice: number;
   breakdown: BreakdownLine[];
-  violations: { type: string; message: string }[];
+  /** `missing` = คิดไม่ได้เพราะรหัสไม่ได้บอกค่า (ไม่ใช่ไม่รับผลิต) — ดู `Violation` ฝั่ง backend */
+  violations: { id: string; level: 'block' | 'quoteOnRequest' | 'warn'; message: string; missing?: boolean }[];
   bookVersion: string;
 }
 
@@ -272,6 +273,8 @@ export interface EditorView {
     colNotes: Record<string, string>;
     highlightCols: string[];
   };
+  /** ค่าเริ่มต้นที่ขึ้นกับอีกแกน (ชนิดสายตาม TYPE) — **มีผลกับราคา** · `options` = ค่าที่เลือกได้ */
+  defaultsBy: { axis: string; axisTh: string; by: string; label: string; values: Record<string, string>; options: string[] }[];
   label: string;
   sheet: string;
   aliases: string[];

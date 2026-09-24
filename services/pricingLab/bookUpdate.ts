@@ -173,8 +173,12 @@ export function applyModels(
     if (!next) continue;
     // หน้าตาของชีต (`layout` — แสดงผลอย่างเดียว) ที่ไฟล์ไม่ได้ส่งมา = แม่แบบรุ่นก่อน 2026-09-24 ที่ยังไม่มีชีต
     // "หน้าตาในไฟล์ราคา" ⇒ คงของเดิมไว้ ไม่ใช่ลบทิ้งเงียบ ๆ (ลบได้จากหน้าสมุดรายชีต)
-    const keep = !next.layout && current.models[code]?.layout;
-    models[code] = keep ? { ...next, layout: current.models[code]!.layout } : next;
+    // ค่าเริ่มต้นตามแกน (`axisDefaultsBy`) เหตุผลเดียวกัน — ชีต "ค่าเริ่มต้นตามแกน" เพิ่งมีในแม่แบบ 2026-09-24
+    const cur = current.models[code];
+    let merged = next;
+    if (!next.layout && cur?.layout) merged = { ...merged, layout: cur.layout };
+    if (!next.axisDefaultsBy && cur?.axisDefaultsBy) merged = { ...merged, axisDefaultsBy: cur.axisDefaultsBy };
+    models[code] = merged;
   }
   return {
     ...current,

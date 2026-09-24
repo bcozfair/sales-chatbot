@@ -122,6 +122,8 @@ interface BaseResult {
   label: string;
   detail?: string;
   reason?: string;
+  /** คิดไม่ได้เพราะรหัสไม่ได้บอกค่าแกนของตาราง (ไม่ใช่ไม่รับผลิต) */
+  missing?: boolean;
 }
 
 function computeBase(
@@ -150,6 +152,17 @@ function computeBase(
     const key = matrixKey(base.axes, axes);
     const cell = base.cells[key];
     if (cell === undefined) {
+      // รหัสไม่ได้บอกค่าของแกนในตาราง (เช่นไม่มีวงเล็บเกลียว) ≠ ชีตเว้นช่องไว้ — คนละคำตอบกับลูกค้า
+      const unknown = base.axes.filter((a) => !axes[a]);
+      if (unknown.length) {
+        return {
+          ok: false,
+          amount: 0,
+          label: 'ฐานราคา',
+          missing: true,
+          reason: `รหัสไม่ได้บอก${unknown.map(axisLabel).join(' และ ')} — ตารางราคาตั้งต้องรู้ค่านี้ก่อน`
+        };
+      }
       return {
         ok: false,
         amount: 0,
@@ -205,6 +218,8 @@ interface AdderResult {
   detail?: string;
   /** ชีตเว้นราคาของแกนนี้ไว้ = ไม่รับทำ */
   blocked?: string;
+  /** `blocked` เพราะรหัสไม่ได้บอกค่าแกน ไม่ใช่เพราะไม่รับทำ */
+  missing?: boolean;
   skip?: boolean;
 }
 
@@ -240,7 +255,9 @@ function computeAdder(
     rate = a.rates?.[axisValue];
     if (rate === undefined) {
       if (a.skipIfNoRate) return { amount: 0, skip: true };
-      return { amount: 0, blocked: `${a.label}: ไม่มีราคาสำหรับ ${a.byAxis}=${axisValue || '-'}` };
+      // ไม่มีค่าแกนเลย = รหัสไม่ได้บอก (ต่างจาก "บอกแล้วแต่ไม่มีราคา" ซึ่งแปลว่าไม่รับทำ)
+      if (!axisValue) return { amount: 0, missing: true, blocked: `${a.label}: รหัสไม่ได้บอก${axisLabel(a.byAxis)}` };
+      return { amount: 0, blocked: `${a.label}: ไม่มีราคาสำหรับ ${axisLabel(a.byAxis)} ${axisValue}` };
     }
   }
 
@@ -360,6 +377,15 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
   // ไม่งั้นช่อง "— ไม่มี —" บนหน้าจอจะลบค่ามาตรฐานของแกนนั้นไปเงียบ ๆ
   const given = Object.fromEntries(Object.entries(cfg.axes ?? {}).filter(([, v]) => v !== ''));
   const axes = { ...(model.axisDefaults ?? {}), ...given };
+  // ค่าเริ่มต้นที่ขึ้นกับอีกแกน (สายของ TS-01 ขึ้นกับ TYPE) — แพ้ค่าที่รหัสบอกเอง ชนะ `axisDefaults`
+  const defaultedBy: Record<string, string> = {};
+  for (const [axis, d] of Object.entries(model.axisDefaultsBy ?? {})) {
+    if (axis in given) continue;
+    const v = d.values[axes[d.by] ?? ''];
+    if (v === undefined) continue;
+    axes[axis] = v;
+    defaultedBy[axis] = `${d.label ?? axisLabel(axis)}ของ ${axes[d.by]}`;
+  }
   // รหัสย่อยที่ "เซ็ตค่าให้ช่อง" ต้องมีผลก่อนหาราคาตั้ง ไม่งั้นตารางจะถูกค้นด้วยค่าเก่า
   const subCodes = matchedSubCodes(book, model, cfg.options ?? []);
   for (const sc of subCodes) {
@@ -406,7 +432,10 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
       }
     : computeBase(model, book, axes, dims, new Set([model.code]));
   if (!base.ok) {
-    violations.push({ id: 'NO_BASE_PRICE', level: 'block', message: base.reason ?? 'ไม่มีราคาฐาน' });
+    violations.push({
+      id: 'NO_BASE_PRICE', level: 'block', message: base.reason ?? 'ไม่มีราคาฐาน',
+      ...(base.missing ? { missing: true } : {}),
+    });
   } else {
     running = base.amount;
     breakdown.push({ step: 'base', label: base.label, detail: base.detail, amount: base.amount, running });
@@ -429,12 +458,17 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
       if (a.when && !evalPredicate(a.when, axes, dims, options)) continue;
       const r = computeAdder(a, model, running, axes, dims);
       if (r.blocked) {
-        violations.push({ id: a.id, level: 'block', message: r.blocked });
+        violations.push({ id: a.id, level: 'block', message: r.blocked, ...(r.missing ? { missing: true } : {}) });
         continue;
       }
       if (r.skip || r.amount === 0) continue;
       running = money(running + r.amount);
-      breakdown.push({ step: a.kind, label: a.label, detail: r.detail, amount: r.amount, running });
+      // บอกให้เห็นว่าอัตรานี้มาจากค่าเริ่มต้น ไม่ใช่จากรหัส — "ทำไมคิดสายสแตนเลส" ต้องตอบได้จากหน้าจอ
+      const from = a.byAxis && defaultedBy[a.byAxis]
+        ? `${axes[a.byAxis]} (${defaultedBy[a.byAxis]} — รหัสไม่ได้ระบุ)`
+        : '';
+      const detail = from ? [r.detail, from].filter(Boolean).join(' · ') : r.detail;
+      breakdown.push({ step: a.kind, label: a.label, detail, amount: r.amount, running });
     }
   }
 

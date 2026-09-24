@@ -18,6 +18,7 @@ import { EditRejected, applyModelEdit, excelReady, modelEditorView } from '../..
 import type { PriceBook, PriceModel, SheetLayout } from '../../services/pricingLab/types.js';
 import { makeTemplate, readUploaded } from '../../services/pricingLab/bookFile.js';
 import { applyModels } from '../../services/pricingLab/bookUpdate.js';
+import { checkPriceModel } from '../../services/pricingLab/modelShape.js';
 
 let pass = 0;
 const fails: string[] = [];
@@ -403,6 +404,85 @@ if (ts01 && ts01.base.kind === 'matrix') {
   const oldFile: PriceBook = { ...bookL, models: { ...bookL.models, 'TSK-01': { ...withL, layout: undefined } } };
   const merged = applyModels(bookL, oldFile, ['TSK-01'], { at: '2026-09-24T00:00:00.000Z' });
   check('อัปแม่แบบรุ่นก่อนที่ไม่มีชีตหน้าตา ⇒ หน้าตาเดิมยังอยู่', JSON.stringify(merged.models['TSK-01']?.layout) === JSON.stringify(LAY));
+}
+
+console.log('\n── 8. ชนิดสายรุ่นเริ่มต้นตาม TYPE (axisDefaultsBy) — มีผลกับราคา ─────────────\n');
+
+// เจ้าของยืนยัน 2026-09-24 (ชี้คอลัมน์ G): "มันก็บอกอยู่แล้วนี้ไงครับ เรื่องสาย" — ชนิดสายผูกกับ TYPE
+// เดิม TSJ-01 4.8+2M คิดไม่ได้ และหน้าจอขึ้น "ไม่รับผลิตขนาดนี้" ทั้งที่แค่รหัสไม่บอกเกลียว/สาย
+if (ts01 && ts01.base.kind === 'matrix') {
+  const DEF = { cable: { label: 'ชนิดสาย รุ่นเริ่มต้น', by: 'sensor', values: {
+    'TSK/TSJ': 'สายสแตนเลสถัก', TST: 'สายเทปล่อน', TSP: 'สายพีวีซี', TSPA: 'สายพีวีซี', TSZ: 'สายพีวีซี' },
+    source: 'TS-01+TS-01-0!G11:G15' } };
+  const m8: PriceModel = { ...ts01, axisDefaultsBy: DEF };
+  const b8 = withModel(m8);
+  const q = (axes: Record<string, string>, cable_m: number, b: PriceBook = b8) =>
+    computePrice({ model: 'TSK-01', axes, dims: { cable_m } }, b);
+
+  const tsj = q({ sensor: 'TSK/TSJ', thread: '1/4”' }, 2);
+  check('TSJ-01(1/4”)4.8+2M = 160 + สายสแตนเลสถัก 80 = 240', tsj.status === 'priced' && tsj.unitPrice === 240,
+    `${tsj.status} ${tsj.unitPrice} ${tsj.violations.map((v) => v.message).join('|')}`);
+  check('  บรรทัดค่าสายบอกว่าใช้สายรุ่นเริ่มต้นเพราะรหัสไม่ได้ระบุ',
+    tsj.breakdown.some((l) => /สายสแตนเลสถัก.*รหัสไม่ได้ระบุ/.test(l.detail ?? '')), tsj.breakdown.map((l) => l.detail).join(' / '));
+  const tst = q({ sensor: 'TST', thread: 'M6x1.0' }, 3);
+  check('TST +3M = 220 + เทปล่อน 180 × 2 = 580 (สายตาม TYPE ไม่ใช่ค่าเดียวทั้งรุ่น)', tst.unitPrice === 580, String(tst.unitPrice));
+  const tsz = q({ sensor: 'TSZ', thread: 'M6x1.0' }, 2);
+  check('TSZ +2M = 1,740 + PVC 100 = 1,840', tsz.unitPrice === 1840, String(tsz.unitPrice));
+  const own = q({ sensor: 'TSK/TSJ', thread: '1/4”', cable: 'สายเทปล่อน' }, 2);
+  check('รหัสที่บอกชนิดสายเอง ชนะค่าเริ่มต้น (160 + 180 = 340)', own.unitPrice === 340, String(own.unitPrice));
+  const rows = ['TSK/TSJ', 'TST', 'TSP', 'TSPA', 'TSZ'];
+  const cols = (ts01.base as { cells: Record<string, number> }).cells;
+  const allSame = rows.every((r) => Object.keys(cols).filter((k) => k.startsWith(r + ' |')).every((k) => {
+    const t = k.split(' | ')[1]!;
+    return q({ sensor: r, thread: t }, 1).unitPrice === q({ sensor: r, thread: t }, 1, withModel({ ...ts01, axisDefaultsBy: undefined })).unitPrice;
+  }));
+  check('สายไม่เกิน 1 เมตร ⇒ ราคาเท่าเดิมทุกช่อง (ค่าเริ่มต้นไม่แตะรหัสที่คิดได้อยู่แล้ว)', allSame);
+
+  const noThread = q({ sensor: 'TSK/TSJ' }, 2);
+  check('ไม่มีเกลียวในรหัส ⇒ ขึ้นว่า "รหัสไม่ได้บอก" ไม่ใช่ "ไม่รับผลิต"',
+    noThread.violations.some((v) => v.missing && /รหัสไม่ได้บอก/.test(v.message))
+      && !noThread.violations.some((v) => /ไม่รับผลิต/.test(v.message)), noThread.violations.map((v) => v.message).join('|'));
+  const bare = withModel({ ...ts01, axisDefaultsBy: undefined }); // เล่มจาก --data มีค่าเริ่มต้นติดมาแล้ว — ตัดทิ้งให้ข้อนี้ทดสอบกรณีไม่มีจริง
+  const noCable = q({ sensor: 'TSK/TSJ', thread: '1/4”' }, 2, bare);
+  check('ไม่มีค่าเริ่มต้นและรหัสไม่บอกสาย ⇒ "รหัสไม่ได้บอกชนิดสาย" (missing)',
+    noCable.violations.some((v) => v.missing && /รหัสไม่ได้บอกชนิดสาย/.test(v.message)), noCable.violations.map((v) => v.message).join('|'));
+  const realGap = q({ sensor: 'TSK/TSJ', thread: 'M99' }, 1);
+  check('ช่องที่ไม่มีจริงในตาราง ⇒ ยังเป็น "ไม่รับผลิต" (ไม่ใช่ missing)',
+    realGap.violations.some((v) => !v.missing && /ไม่รับผลิต/.test(v.message)));
+
+  check('รุ่นที่มีค่าเริ่มต้นตาม TYPE ยังเปิดแบบชีต Excel ได้', excelReady(m8));
+  check('ค่าเริ่มต้นที่ขึ้นกับแกนคอลัมน์ ⇒ ไม่เปิดแบบชีต (ไม่มีที่วาง)',
+    !excelReady({ ...m8, axisDefaultsBy: { cable: { ...DEF.cable, by: 'thread' } } }));
+  check('ตัวตรวจรูปรับของดี', checkPriceModel(m8, 'TSK-01').length === 0, checkPriceModel(m8, 'TSK-01').join('|'));
+  check('ตัวตรวจรูปปฏิเสธของเสีย (engine อ่านช่องนี้ — ต่างจาก layout)',
+    checkPriceModel({ ...m8, axisDefaultsBy: { cable: { by: 1, values: 'x' } } }, 'TSK-01').length > 0);
+
+  const v8 = modelEditorView(b8, m8);
+  const df = v8.defaultsBy[0];
+  check('จอได้คอลัมน์ค่าเริ่มต้น + ตัวเลือก = ชนิดสายที่มีราคา',
+    df?.label === 'ชนิดสาย รุ่นเริ่มต้น' && df.options.length === 4 && df.values.TST === 'สายเทปล่อน', JSON.stringify(df));
+  check('บันทึกค่าเดิมกลับไป ⇒ JSON เดิมทุกไบต์',
+    JSON.stringify(applyModelEdit(m8, { defaultsBy: { cable: DEF.cable.values } }, b8)) === JSON.stringify(m8));
+  const ch8 = applyModelEdit(m8, { defaultsBy: { cable: { ...DEF.cable.values, TSZ: 'สายไฟเบอร์กลาส' } } }, b8);
+  check('เปลี่ยน TSZ เป็นไฟเบอร์กลาส ⇒ TSZ +2M = 1,740 + 95', q({ sensor: 'TSZ', thread: 'M6x1.0' }, 2, withModel(ch8)).unitPrice === 1835);
+  check('  label · by · source ไม่เปลี่ยน', JSON.stringify({ ...ch8.axisDefaultsBy!.cable, values: undefined })
+    === JSON.stringify({ ...DEF.cable, values: undefined }));
+  expectReject('ชนิดสายที่ไม่มีราคา ถูกปฏิเสธ',
+    () => applyModelEdit(m8, { defaultsBy: { cable: { TSZ: 'สายทองคำ' } } }, b8), /ไม่มีในราคา/);
+  expectReject('แถวที่ไม่มีในตาราง ถูกปฏิเสธ',
+    () => applyModelEdit(m8, { defaultsBy: { cable: { TSX: 'สายพีวีซี' } } }, b8), /ไม่มี "TSX"/);
+  expectReject('แกนที่รุ่นไม่มีค่าเริ่มต้น ถูกปฏิเสธ (เพิ่มใหม่ทางแม่แบบ)',
+    () => applyModelEdit(m8, { defaultsBy: { thread: {} } }, b8), /ไม่มีค่าเริ่มต้น/);
+  const cl8 = applyModelEdit(m8, { defaultsBy: { cable: { ...DEF.cable.values, TSZ: '' } } }, b8);
+  check('ล้างค่าของ TSZ ⇒ TSZ +2M กลับไปคิดไม่ได้ (ไม่ใช่เดา)',
+    q({ sensor: 'TSZ', thread: 'M6x1.0' }, 2, withModel(cl8)).status !== 'priced' && !('TSZ' in cl8.axisDefaultsBy!.cable!.values));
+
+  const { book: back8 } = await readUploaded(Buffer.from(makeTemplate(b8, '2026-09-24')));
+  check('แม่แบบ .xlsx ไป-กลับ ⇒ ค่าเริ่มต้นเท่าเดิมทุกไบต์',
+    JSON.stringify(back8?.models['TSK-01']?.axisDefaultsBy) === JSON.stringify(DEF), JSON.stringify(back8?.models['TSK-01']?.axisDefaultsBy));
+  const old8: PriceBook = { ...b8, models: { ...b8.models, 'TSK-01': { ...m8, axisDefaultsBy: undefined } } };
+  check('อัปแม่แบบรุ่นก่อน (ไม่มีชีตค่าเริ่มต้น) ⇒ ค่าเดิมยังอยู่',
+    JSON.stringify(applyModels(b8, old8, ['TSK-01'], { at: '2026-09-24T00:00:00.000Z' }).models['TSK-01']?.axisDefaultsBy) === JSON.stringify(DEF));
 }
 
 console.log(`\n${'─'.repeat(70)}`);
