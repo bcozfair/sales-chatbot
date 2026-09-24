@@ -1202,7 +1202,7 @@ interface DocCtx {
   removeRow: (key: string) => void;
   pickCandidate: (key: string, c: Candidate) => void;
   /** พิมพ์ส่วนลดเสร็จแล้วเสนอ "ใช้กับทุกรายการ" — ผู้เรียกเป็นคนหน่วงเวลาและวางตำแหน่งเอง */
-  offerBulk: (key: string, el: HTMLInputElement) => void;
+  offerBulk: (key: string, tier: 1 | 2) => void;
   rowTagsOf: (r: Row, hit: PreviewItem | null) => RowTag[];
   extraTagsOf: (it: PreviewItem) => RowTag[];
   // ── หัวใบ: ลูกค้า · เครดิต · กำหนดส่ง ──
@@ -1611,11 +1611,11 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
                           value={r.disc1}
                           /* ล้างชั้น 1 แล้วชั้น 2 ต้องหายด้วย — ไม่งั้นจะเหลือช่องที่กรอกไม่ได้แต่ยังหักเงินอยู่ */
                           onChange={(e) => {
-                            const el = e.currentTarget;
-                            const v = el.value;
+                            const v = e.currentTarget.value;
                             ctx.patchRow(r.key, num(v) > 0 ? { disc1: v } : { disc1: v, disc2: '' });
-                            ctx.offerBulk(r.key, el);
+                            ctx.offerBulk(r.key, 1);
                           }}
+                          data-disc={`${r.key}:1`}
                           inputMode="decimal"
                           aria-label="ส่วนลดชั้นที่ 1 (%)"
                           className={`${inp} w-[46px]`}
@@ -1625,10 +1625,10 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
                         <input
                           value={r.disc2}
                           onChange={(e) => {
-                            const el = e.currentTarget;
-                            ctx.patchRow(r.key, { disc2: el.value });
-                            ctx.offerBulk(r.key, el);
+                            ctx.patchRow(r.key, { disc2: e.currentTarget.value });
+                            ctx.offerBulk(r.key, 2);
                           }}
+                          data-disc={`${r.key}:2`}
                           inputMode="decimal"
                           aria-label="ส่วนลดชั้นที่ 2 (%)"
                           /* ล็อกเฉพาะตอนที่ "ไม่มีอะไรอยู่เลย" — ใบเก่าที่มีชั้น 2 มาโดยไม่มีชั้น 1
@@ -1936,8 +1936,13 @@ interface BulkOffer {
   /** จำนวนบรรทัดที่จะโดน — ไม่นับบรรทัดต้นทางเอง */
   inDoc: number;
   inAll: number;
-  anchor: DOMRect;
+  /** ช่องที่พิมพ์ — เก็บเป็น selector ไม่ใช่ตัว element/DOMRect เพราะผลตรวจรอบใหม่ย้ายแถวข้ามใบได้
+   *  (ช่องเดิมถูกถอด ช่องใหม่ถูกสร้าง) และตำแหน่งบนจอขยับได้ทุกครั้งที่แถบสถานะเปลี่ยน */
+  anchor: string;
 }
+
+/** selector ของช่องส่วนลดชั้น 1/2 ของแถว — ต้องตรงกับ `data-disc` ที่ช่องใน QuoteDocument ติดไว้ */
+const discSel = (rowKey: string, tier: 1 | 2) => `[data-disc="${CSS.escape(`${rowKey}:${tier}`)}"]`;
 
 const BulkDiscountPopup: React.FC<{
   offer: BulkOffer;
@@ -1946,24 +1951,48 @@ const BulkDiscountPopup: React.FC<{
   onDismiss: () => void;
 }> = ({ offer, multiDoc, onApply, onDismiss }) => {
   const ref = useRef<HTMLDivElement>(null);
+  /** วัดตอน render แรกเลย (ไม่ใช่ใน effect) ⇒ เฟรมแรกที่เห็นก็อยู่ถูกที่แล้ว ไม่กระพริบ */
+  const [anchor, setAnchor] = useState<DOMRect | null>(
+    () => document.querySelector(offer.anchor)?.getBoundingClientRect() ?? null,
+  );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onDismiss(); };
     const onPointer = (e: MouseEvent) => {
       if (!ref.current?.contains(e.target as Node)) onDismiss();
     };
-    // `scroll` ต้องดักแบบ capture เพราะกล่องที่เลื่อนอาจไม่ใช่ตัวหน้าเว็บ
-    window.addEventListener('scroll', onDismiss, true);
-    window.addEventListener('resize', onDismiss);
+    /* **เลื่อนแล้วตามช่องไป ไม่ใช่ปิด** — เคยปิดทุกครั้งที่มี `scroll` แล้วป๊อปอัปแวบหายเอง
+       (เจ้าของแจ้ง 2026-09-24): มันเด้งที่ 650ms ส่วนการตรวจรายละเอียดเริ่มที่ 700ms แล้วแถบสถานะ
+       เหนือตารางเปลี่ยนความสูง ⇒ scroll anchoring ของเบราว์เซอร์ขยับจอเอง ⇒ ได้ `scroll` ที่ไม่มีใคร
+       เลื่อน · ปิดเฉพาะตอนที่ช่องหายไปจริง หรือเลื่อนจนช่องพ้นจอ
+       `scroll` ดักแบบ capture เพราะกล่องที่เลื่อนอาจไม่ใช่ตัวหน้าเว็บ */
+    let frame = 0;
+    const follow = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const r = document.querySelector(offer.anchor)?.getBoundingClientRect();
+        if (!r || r.bottom < 0 || r.top > window.innerHeight) onDismiss();
+        else setAnchor(r);
+      });
+    };
+    window.addEventListener('scroll', follow, true);
+    window.addEventListener('resize', follow);
+    // layout ขยับได้โดยไม่มี scroll เลย (จออยู่บนสุด · ผลตรวจเติมป้ายในแถว) — ความสูงของหน้าเปลี่ยนเสมอ
+    const grow = new ResizeObserver(follow);
+    grow.observe(document.body);
     document.addEventListener('keydown', onKey);
     document.addEventListener('mousedown', onPointer);
     return () => {
-      window.removeEventListener('scroll', onDismiss, true);
-      window.removeEventListener('resize', onDismiss);
+      cancelAnimationFrame(frame);
+      grow.disconnect();
+      window.removeEventListener('scroll', follow, true);
+      window.removeEventListener('resize', follow);
       document.removeEventListener('keydown', onKey);
       document.removeEventListener('mousedown', onPointer);
     };
-  }, [onDismiss]);
+  }, [offer.anchor, onDismiss]);
+
+  if (!anchor) return null;
 
   /* วางด้วย right/top-หรือ-bottom ไม่ใช่ left/top ที่คำนวณจากขนาดของตัวเอง — ไม่ต้องวัดก่อนวาด
      (ป๊อปอัปที่ต้องวัดตัวเองก่อนถึงจะรู้ที่อยู่ = ป๊อปอัปที่กระพริบตอนเปิด)
@@ -1973,13 +2002,13 @@ const BulkDiscountPopup: React.FC<{
   const style: React.CSSProperties = {
     position: 'fixed',
     right: Math.min(
-      Math.max(8, window.innerWidth - offer.anchor.right),
+      Math.max(8, window.innerWidth - anchor.right),
       Math.max(8, window.innerWidth - w - 8),
     ),
     // ไม่มีที่ข้างล่างก็เด้งขึ้นข้างบนแทน — ป๊อปอัปที่โผล่นอกจอเท่ากับไม่ได้โผล่
-    ...(offer.anchor.bottom + POP_H <= window.innerHeight
-      ? { top: offer.anchor.bottom + 6 }
-      : { bottom: Math.max(8, window.innerHeight - offer.anchor.top + 6) }),
+    ...(anchor.bottom + POP_H <= window.innerHeight
+      ? { top: anchor.bottom + 6 }
+      : { bottom: Math.max(8, window.innerHeight - anchor.top + 6) }),
   };
   const label = offer.d2 > 0 ? `${money(offer.d1)}% , ${money(offer.d2)}%` : `${money(offer.d1)}%`;
 
@@ -3074,14 +3103,15 @@ export const QuoteRequest: React.FC = () => {
     setBulkOffer(null);
   }, []);
 
-  const offerBulk = (key: string, el: HTMLInputElement) => {
+  const offerBulk = (key: string, tier: 1 | 2) => {
     if (bulkTimer.current) window.clearTimeout(bulkTimer.current);
     setBulkOffer(null);
     bulkTimer.current = window.setTimeout(() => {
       const { rows: rs, coByRow } = bulkRef.current;
       const src = rs.find((r) => r.key === key);
       // ล้างส่วนลดทิ้งแล้วไม่ต้องเสนออะไร · ช่องที่หายไปจากจอแล้วก็ไม่มีที่ให้ป๊อปอัปเกาะ
-      if (!src || !discountable(src) || num(src.disc1) <= 0 || !el.isConnected) return;
+      const anchor = discSel(key, tier);
+      if (!src || !discountable(src) || num(src.disc1) <= 0 || !document.querySelector(anchor)) return;
       const co = coOfRow(src, coByRow);
       const others = rs.filter((r) => r.key !== key && discountable(r));
       if (others.length === 0) return; // มีสินค้าบรรทัดเดียวก็ไม่มีอะไรให้ "ใช้กับทุกรายการ"
@@ -3092,7 +3122,7 @@ export const QuoteRequest: React.FC = () => {
         d2: num(src.disc2),
         inDoc: others.filter((r) => coOfRow(r, coByRow) === co).length,
         inAll: others.length,
-        anchor: el.getBoundingClientRect(),
+        anchor,
       });
     }, 650);
   };
