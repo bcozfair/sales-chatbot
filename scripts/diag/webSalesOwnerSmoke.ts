@@ -3,11 +3,12 @@
 //  รัน:  npm run diag:web-sales-owner     (ไม่ต้องเปิดเซิร์ฟเวอร์ · อ่าน DB อย่างเดียว)
 //  แผน: docs/plan-web-quote-auto-salesperson.md §6
 //
-//  1. matchOption() — ฟังก์ชันบริสุทธิ์ ข้อมูลประกอบเอง
+//  1. matchOption() / pickSalesOwner() — ฟังก์ชันบริสุทธิ์ ข้อมูลประกอบเอง
+//     + อ่านซอร์ส: query ใบสั่งขายต้องเชื่อมด้วย contact_id ห้ามแตะ sale_orders.company_id
 //  2. customers_data_view.salesperson_id — อยู่ท้ายสุด · ตรงกับชื่อ→รหัสใน sale_orders ทุกชื่อ
 //     · ensureDirectoryRow() ลอกคอลัมน์นี้ไว้ท้ายสุดเหมือนกัน
-//  3. resolveCustomerSalesOwner() กับบริษัทจริง — resolved / inactive / none / คนแรกที่ไม่ว่าง
-//     / PM-THT คนละรหัส · คำตอบเป็นตัวเลือกของ dropdown เสมอ
+//  3. resolveCustomerSalesOwner() กับบริษัทจริง — ครบ 4 ขั้นของการถอย (customer · contact ·
+//     last_order · older_order) + inactive / none · คำตอบเป็นตัวเลือกของ dropdown เสมอ
 //  4. resolveQuotationSalesOwner() กับใบจริง — ใบจาก LINE และใบจากเว็บ (แถวพร็อกซี)
 //  5. ไม่เขียน DB สักแถว · ไม่มีแถว salesperson ของคีย์ `web:<admin>:auto`
 //
@@ -19,8 +20,10 @@ import { pool } from '../../config/db.js';
 import { listSalespersonsForWeb } from '../../services/webQuoteService.js';
 import {
   matchOption,
+  pickSalesOwner,
   resolveCustomerSalesOwner,
   resolveQuotationSalesOwner,
+  type SalesOwner,
 } from '../../services/customerSalesOwner.js';
 import type { PickedSalesperson } from '../../services/salespersonPicker.js';
 import { buildWebProposeKey } from '../../services/webIdentity.js';
@@ -49,6 +52,40 @@ async function main() {
   ok('1f. user_id แปลกหน้า แต่รหัสตรง → ตามรหัส (ใบจากเว็บ = แถวพร็อกซี)',
     matchOption(opts, '431', 'web:7:Uc')?.user_id === 'Uc');
   ok('1g. ช่องว่างหัวท้ายของรหัสไม่ทำให้หาไม่เจอ', matchOption(opts, ' 422 ')?.user_id === 'Ua');
+
+
+  console.log(`\n${BOLD}1b) pickSalesOwner — ลำดับการถอย${RESET}`);
+  {
+    const inactiveCode = '777';   // ไม่อยู่ใน opts = เซลส์ที่ไม่ active
+    const r1 = pickSalesOwner([
+      { source: 'customer', code: inactiveCode, name: 'คนเก่า(PM)' },
+      { source: 'contact', code: null, name: 'purchase_user_1' },
+      { source: 'last_order', code: '431', name: 'คุณคัมภีร์(PM)', order_date: '2026-01-01T00:00:00.000Z' },
+      { source: 'older_order', code: '422', name: 'คุณจิรายุ(PM)' },
+    ], opts);
+    ok('1h. ขั้น 1–2 ไม่ active → ได้ขั้น 3 (ใบล่าสุด) พร้อมวันที่',
+      r1.status === 'resolved' && r1.source === 'last_order' && r1.user_id === 'Uc' && r1.order_date !== null,
+      r1.status === 'resolved' ? `${r1.source} → ${r1.user_id}` : r1.status);
+    const r2 = pickSalesOwner([
+      { source: 'customer', code: '422', name: 'คุณจิรายุ(PM)' },
+      { source: 'last_order', code: '431', name: 'คุณคัมภีร์(PM)' },
+    ], opts);
+    ok('1i. ขั้น 1 active → ใช้ขั้น 1 ไม่ดูใบสั่งขาย', r2.status === 'resolved' && r2.source === 'customer');
+    const r3 = pickSalesOwner([
+      { source: 'customer', code: null, name: 'purchase_user_1' },
+      { source: 'last_order', code: inactiveCode, name: 'คนเก่า(PM)' },
+    ], opts);
+    ok('1j. ไม่มีใคร active → inactive พร้อมชื่อของขั้นแรก (ไม่เดาคนอื่น)',
+      r3.status === 'inactive' && r3.odoo_name === 'purchase_user_1');
+    ok('1k. ไม่มีผู้สมัครเลย → none', pickSalesOwner([], opts).status === 'none');
+  }
+
+  // query ใบสั่งขายต้องเชื่อมลูกค้าด้วย contact_id — sale_orders.company_id คือบริษัทผู้ขาย (1/2)
+  const repoAll = readFileSync(new URL('../../db/repositories.ts', import.meta.url), 'utf-8');
+  const fnStart = repoAll.indexOf('export async function getCompanyOrderSalespersons');
+  const fnSrc = fnStart >= 0 ? repoAll.slice(fnStart, repoAll.indexOf('\n}\n', fnStart)) : '';
+  ok('1l. getCompanyOrderSalespersons() เชื่อมด้วย s.contact_id และไม่แตะ s.company_id',
+    fnSrc !== '' && /s\.contact_id IN/.test(fnSrc) && !/s\.company_id/.test(fnSrc));
 
   const before = (await pool.query(`SELECT count(*)::int c FROM salesperson`)).rows[0].c;
 
@@ -92,52 +129,67 @@ async function main() {
     /v\.last_order_at,[\s\S]{0,300}?v\.salesperson_id\s*\n\s*FROM public\.customers_data_view v/.test(repoSrc));
 
   // ── 3. บริษัทจริง ───────────────────────────────────────────────────────────
-  console.log(`\n${BOLD}3) resolveCustomerSalesOwner — บริษัทจริง${RESET}`);
+  console.log(`\n${BOLD}3) resolveCustomerSalesOwner — บริษัทจริง ครบ 4 ขั้น${RESET}`);
   const options = await listSalespersonsForWeb();
   const activeCodes = options.map((o) => String(o.salesperson_id ?? '')).filter((c) => c !== '');
+  const inOptions = (o: SalesOwner) => o.status !== 'resolved' || options.some((x) => x.user_id === o.user_id);
+  const show = (o: SalesOwner) =>
+    o.status === 'resolved' ? `${o.source} → ${o.name} (${o.salesperson_id})${o.order_date ? ' ' + o.order_date.slice(0, 10) : ''}` : o.status;
 
-  const firstOf = `SELECT DISTINCT ON (company_id) company_id, salesperson, salesperson_id
-                     FROM customers_data_view WHERE salesperson IS NOT NULL ORDER BY company_id, contact_id`;
-  const pick = async (where: string, params: unknown[] = []) =>
-    (await pool.query(`SELECT * FROM (${firstOf}) f WHERE ${where} ORDER BY company_id LIMIT 1`, params)).rows[0];
+  // สถานะของแต่ละบริษัทคำนวณด้วย SQL แยกจากโค้ดที่ถูกทดสอบ — แล้วดูว่าโค้ดเลือกขั้นเดียวกันไหม
+  //  ⚠️ ใบสั่งขายเชื่อมด้วย contact_id เหมือนกัน (ไม่ใช่ sale_orders.company_id)
+  const facts = `
+    WITH act AS (SELECT unnest($1::text[]) AS code),
+    m1 AS (SELECT DISTINCT ON (company_id) company_id, salesperson_id FROM customers_data_view
+            WHERE salesperson IS NOT NULL ORDER BY company_id, contact_id),
+    mact AS (SELECT DISTINCT company_id FROM customers_data_view v JOIN act ON act.code = v.salesperson_id),
+    cc AS (SELECT DISTINCT company_id, contact_id FROM customers_data_view WHERE contact_id > 0),
+    o AS (SELECT cc.company_id, s.salesperson_id::text code, s.order_date FROM cc
+            JOIN sale_orders s ON s.contact_id = cc.contact_id WHERE s.salesperson_id IS NOT NULL),
+    olast AS (SELECT DISTINCT ON (company_id) company_id, code FROM o ORDER BY company_id, order_date DESC NULLS LAST),
+    oact AS (SELECT DISTINCT o.company_id FROM o JOIN act ON act.code = o.code)
+    SELECT c.company_id,
+           (m1.salesperson_id IN (SELECT code FROM act)) AS s1,
+           (mact.company_id IS NOT NULL)                 AS s2,
+           (olast.code IN (SELECT code FROM act))        AS s3,
+           (oact.company_id IS NOT NULL)                 AS s4,
+           (m1.company_id IS NOT NULL OR olast.company_id IS NOT NULL) AS any_info
+      FROM (SELECT DISTINCT company_id FROM customers_data_view) c
+      LEFT JOIN m1 USING (company_id) LEFT JOIN mact USING (company_id)
+      LEFT JOIN olast USING (company_id) LEFT JOIN oact USING (company_id)`;
+  const pickCo = async (cond: string) =>
+    (await pool.query(`SELECT company_id FROM (${facts}) f WHERE ${cond} ORDER BY company_id LIMIT 1`, [activeCodes])).rows[0]?.company_id as number | undefined;
 
-  const r1 = await pick(`salesperson_id = ANY($1::text[])`, [activeCodes]);
-  if (r1) {
-    const o = await resolveCustomerSalesOwner(r1.company_id, options);
-    ok('3a. เซลส์ active → resolved และรหัสตรง', o.status === 'resolved' && o.salesperson_id === r1.salesperson_id,
-      `บริษัท ${r1.company_id} ${r1.salesperson} → ${o.status === 'resolved' ? `${o.name} (${o.salesperson_id})` : o.status}`);
-    ok('3b.   คำตอบเป็นตัวเลือกใน dropdown', o.status === 'resolved' && options.some((x) => x.user_id === o.user_id));
-  } else ok('3a. มีบริษัทตัวอย่างที่เซลส์ active', false);
-
-  const r2 = await pick(`salesperson = 'purchase_user_1'`);
-  if (r2) {
-    const o = await resolveCustomerSalesOwner(r2.company_id, options);
-    ok('3c. บัญชีระบบ (purchase_user_1) → inactive พร้อมชื่อ ไม่ใช่คนอื่น',
-      o.status === 'inactive' && o.odoo_name === 'purchase_user_1', `บริษัท ${r2.company_id} → ${o.status}`);
-  } else console.log(`  ${DIM}   (ข้าม 3c — ไม่มีบริษัทของ purchase_user_1)${RESET}`);
-
-  const r3 = (await pool.query(
-    `SELECT company_id FROM customers_data_view GROUP BY company_id
-      HAVING bool_and(salesperson IS NULL) ORDER BY company_id LIMIT 1`)).rows[0];
-  if (r3) {
-    const o = await resolveCustomerSalesOwner(r3.company_id, options);
-    ok('3d. บริษัทที่ไม่มีเซลส์เลย → none', o.status === 'none', `บริษัท ${r3.company_id}`);
+  const cases: { label: string; cond: string; expect: SalesOwner['status']; source?: string }[] = [
+    { label: '3a. ขั้น 1 เซลส์ในข้อมูลลูกค้า active → customer', cond: 's1', expect: 'resolved', source: 'customer' },
+    { label: '3b. ขั้น 1 ไม่ได้ แต่ผู้ติดต่อคนอื่นได้ → contact', cond: 'NOT coalesce(s1,false) AND s2', expect: 'resolved', source: 'contact' },
+    { label: '3c. ข้อมูลลูกค้าไม่ได้ ใบล่าสุดได้ → last_order', cond: 'NOT coalesce(s1,false) AND NOT s2 AND s3', expect: 'resolved', source: 'last_order' },
+    { label: '3d. ใบล่าสุดก็ไม่ได้ ใบเก่ากว่าได้ → older_order', cond: 'NOT coalesce(s1,false) AND NOT s2 AND NOT coalesce(s3,false) AND s4', expect: 'resolved', source: 'older_order' },
+    { label: '3e. มีข้อมูลแต่ไม่มีใคร active เลย → inactive (ไม่เดา)', cond: 'any_info AND NOT coalesce(s1,false) AND NOT s2 AND NOT coalesce(s3,false) AND NOT s4', expect: 'inactive' },
+    { label: '3f. ไม่มีข้อมูลเซลส์เลย → none', cond: 'NOT any_info', expect: 'none' },
+  ];
+  for (const k of cases) {
+    const id = await pickCo(k.cond);
+    if (id === undefined) { console.log(`  ${DIM}   (ข้าม ${k.label.slice(0, 3)} — ไม่มีบริษัทตัวอย่าง)${RESET}`); continue; }
+    const o = await resolveCustomerSalesOwner(id, options);
+    const good = o.status === k.expect && (k.source === undefined || (o.status === 'resolved' && o.source === k.source));
+    ok(k.label, good && inOptions(o), `บริษัท ${id} → ${show(o)}`);
   }
-  ok('3e. company_id ไม่ถูกต้อง → none ไม่ throw', (await resolveCustomerSalesOwner(0, options)).status === 'none');
+  ok('3g. company_id ไม่ถูกต้อง → none ไม่ throw', (await resolveCustomerSalesOwner(0, options)).status === 'none');
 
-  // คนแรกที่ไม่ว่าง: ผู้ติดต่อคนแรกไม่มีเซลส์ แต่คนถัดไปมี (เจ้าของเคาะ 2026-09-24)
-  const r4 = (await pool.query(`
-    WITH f AS (SELECT DISTINCT ON (company_id) company_id, salesperson FROM customers_data_view ORDER BY company_id, contact_id)
-    SELECT f.company_id, n.salesperson
-      FROM f JOIN LATERAL (SELECT salesperson FROM customers_data_view v
-                            WHERE v.company_id = f.company_id AND v.salesperson IS NOT NULL
-                            ORDER BY contact_id LIMIT 1) n ON true
-     WHERE f.salesperson IS NULL ORDER BY f.company_id LIMIT 1`)).rows[0];
-  if (r4) {
-    const o = await resolveCustomerSalesOwner(r4.company_id, options);
-    const got = o.status === 'none' ? null : o.odoo_name;
-    ok('3f. ผู้ติดต่อคนแรกว่าง → ใช้คนแรกที่ไม่ว่าง', got === r4.salesperson, `บริษัท ${r4.company_id} → ${got}`);
+  // กวาดตัวอย่าง 300 บริษัทที่มีออเดอร์ใน 365 วัน: คำตอบต้องเป็นตัวเลือกของ dropdown ทุกราย
+  const { rows: sampleCos } = await pool.query(
+    `SELECT DISTINCT v.company_id FROM sale_orders s JOIN customers_data_view v ON v.contact_id = s.contact_id AND v.contact_id > 0
+      WHERE s.order_date > now() - interval '365 days' ORDER BY v.company_id LIMIT 300`);
+  let resolvedN = 0, notInOptions = 0;
+  const bySource: Record<string, number> = {};
+  for (const r of sampleCos) {
+    const o = await resolveCustomerSalesOwner(r.company_id, options);
+    if (o.status === 'resolved') { resolvedN++; bySource[o.source] = (bySource[o.source] ?? 0) + 1; }
+    if (!inOptions(o)) notInOptions++;
   }
+  ok(`3h. ตัวอย่าง ${sampleCos.length} บริษัท: คำตอบเป็นตัวเลือกของ dropdown ทุกราย`, notInOptions === 0,
+    `เติมให้ได้ ${resolvedN} · ${Object.entries(bySource).map(([k, v]) => `${k} ${v}`).join(' · ')}`);
 
   // PM/THT คนเดียวกันคนละรหัส — ชื่อใน Odoo บอกฝั่งอยู่แล้ว ห้ามตัด (PM)/(THT) ทิ้งแล้วเทียบ
   const { rows: sides } = await pool.query(
@@ -145,7 +197,7 @@ async function main() {
       WHERE salesperson IN ('คุณคัมภีร์(PM)', 'คุณคัมภีร์(THT)')`);
   const pm = sides.find((r: any) => r.salesperson.endsWith('(PM)'))?.salesperson_id;
   const tht = sides.find((r: any) => r.salesperson.endsWith('(THT)'))?.salesperson_id;
-  if (pm && tht) ok('3g. PM กับ THT ของคนเดียวกันได้คนละรหัส', pm !== tht, `PM ${pm} · THT ${tht}`);
+  if (pm && tht) ok('3i. PM กับ THT ของคนเดียวกันได้คนละรหัส', pm !== tht, `PM ${pm} · THT ${tht}`);
 
   // ── 4. ใบเดิม ───────────────────────────────────────────────────────────────
   console.log(`\n${BOLD}4) resolveQuotationSalesOwner — ใบจริง${RESET}`);
@@ -156,7 +208,7 @@ async function main() {
       ORDER BY q.updated_at DESC LIMIT 1`, [activeCodes])).rows[0];
   if (lineQ) {
     const o = await resolveQuotationSalesOwner(lineQ.user_id, options);
-    ok('4a. ใบจาก LINE → เซลส์คนเดิม', o.status === 'resolved' && o.salesperson_id === lineQ.salesperson_id,
+    ok('4a. ใบจาก LINE → เซลส์คนเดิม', o.status === 'resolved' && o.source === 'quotation' && o.salesperson_id === lineQ.salesperson_id,
       `${lineQ.quotation_no} → ${o.status === 'resolved' ? `${o.name} (${o.salesperson_id})` : o.status}`);
   } else ok('4a. มีใบจาก LINE ตัวอย่าง', false);
 
