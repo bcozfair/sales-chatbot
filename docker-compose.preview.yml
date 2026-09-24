@@ -55,7 +55,7 @@ services:
     # uid ของ app_sales — ไม่ให้กล่องสร้างไฟล์ของ root ทิ้งไว้ในรีโป (ซึ่งเมานต์อ่านอย่างเดียวอยู่แล้ว)
     user: "1000:1000"
     working_dir: /app/frontend
-    command: ["node", "node_modules/.bin/vite", "--configLoader", "runner",
+    command: ["node", "node_modules/.bin/vite",
               "--config", "/app/scripts/preview/vite.config.mjs", "--host", "0.0.0.0"]
     logging:
       driver: json-file
@@ -67,6 +67,14 @@ services:
     volumes:
       # frontend/node_modules มาจากโฮสต์ (`npm --prefix frontend install`) — แพ็กเกจเปลี่ยนต้องลงบนโฮสต์ก่อน
       - ./:/app:ro
+      # Vite คอมไพล์ config แล้วเขียนไฟล์ชั่วคราวลง `node_modules/.vite-temp` ที่ใกล้ไฟล์ config ที่สุด
+      # = /app/node_modules (รากรีโป · อ่านอย่างเดียว) ⇒ วาง tmpfs ทับให้เขียนได้
+      # ทางที่ไม่ได้เลือก: `--configLoader runner` ไม่ต้องเขียนไฟล์ แต่ไม่มี `__dirname` ให้
+      # frontend/vite.config.ts ⇒ ล้มตั้งแต่โหลด config (ลองแล้ว 2026-09-24)
+      - type: tmpfs
+        target: /app/node_modules
+        tmpfs:
+          mode: 01777
     ports:
       - "127.0.0.1:5180:5180"
     depends_on: [api]
