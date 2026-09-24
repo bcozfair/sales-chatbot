@@ -714,6 +714,11 @@ docker compose run --rm --no-deps -v "$PWD/backup:/seed:ro" app \
 docker compose run --rm --no-deps -v "$PWD/backup:/seed:ro" app \
   npx tsx scripts/pricebook/importer.ts --data /seed --layout-only --apply --by <username>
 ```
+**ฐานของ PMSV ทำแล้ว 2026-09-24** (เจ้าของสั่ง · การบันทึกครั้งที่ 4 · สำรองก่อนเขียนที่ `backup/pricing-before-layout-2026-09-24-0909.dump`)
+⇒ deploy บนเครื่องนี้ **ไม่ต้องทำขั้นนี้ซ้ำ** (รันซ้ำก็ได้แค่ "ไม่มีอะไรต้องเขียน") — ขั้นนี้เหลือไว้สำหรับฐานใหม่
+· ⚠️ ตอนนั้น image ที่ deploy อยู่ยังไม่มี `--layout-only` ⇒ รันด้วยโค้ดของ main ที่ mount เข้าไปแบบอ่านอย่างเดียว
+(`docker compose run --rm --no-deps -v "$PWD:/src:ro" … --entrypoint sh app -c "คัด /src ไป /work แล้วรัน"`)
+
 ตรวจ: หน้า "สมุดราคา" → เปิดชีต TS-01+TS-01-0 ต้องเห็นคอลัมน์ "ชนิดสาย รุ่นเริ่มต้น" · `*M8x1.25` `*M10x1.5` สีแดง ·
 คอลัมน์ 1/4” (TS-01) และ M5 (TS-01-0) พื้นเหลือง · รันซ้ำต้องได้ "ไม่มีอะไรต้องเขียน"
 
