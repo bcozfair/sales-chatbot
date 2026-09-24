@@ -109,7 +109,7 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
     <div className="space-y-3.5">
       <PageHeader
         icon={CircleDollarSign}
-        title="คิดราคาสินค้า"
+        title="คำนวณราคา"
         description={
           overview?.book.ok
             ? `สมุดราคา ${overview.book.models} รุ่น · ${overview.edited ? `แก้ล่าสุด ${formatDateTime(overview.edited.at)}` : (overview.version ?? '')} · ยังไม่ต่อกับใบเสนอราคา`

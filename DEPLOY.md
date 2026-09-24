@@ -692,7 +692,7 @@ docker compose exec app npm run diag:pricing
 docker compose exec app npm run diag:pricing-coverage     # ≥ 75%
 ```
 
-แล้วเปิดหน้า "คิดราคาสินค้า" การ์ดต้องขึ้น 13 รุ่น และคิดราคา `TSK-14 6x200+150-BU` ได้ 5,030 (เฉลยของชีต)
+แล้วเปิดหน้า "คำนวณราคา" (ชื่อเดิม "คิดราคาสินค้า") การ์ดต้องขึ้น 13 รุ่น และคิดราคา `TSK-14 6x200+150-BU` ได้ 5,030 (เฉลยของชีต)
 · เช้าวันถัดไป `npm run diag:backup -- --deep` ต้องเห็นตาราง `pricing_*` ใน TOC ของ dump
 
 ถ้าไม่อยากให้คอนเทนเนอร์ครั้งเดียวเห็นไฟล์ dump ใน `backup/`: `install -d -m 700 /tmp/pbseed && cp backup/*.xlsx /tmp/pbseed/`
@@ -721,7 +721,7 @@ docker compose run --rm --no-deps -v "$PWD/backup:/seed:ro" app \
 (`docker compose run --rm --no-deps -v "$PWD:/src:ro" … --entrypoint sh app -c "คัด /src ไป /work แล้วรัน"`)
 
 ตรวจ: หน้า "สมุดราคา" → เปิดชีต TS-01+TS-01-0 ต้องเห็นคอลัมน์ "ชนิดสาย รุ่นเริ่มต้น" เป็นช่องเลือก · `*M8x1.25` `*M10x1.5` สีแดง ·
-คอลัมน์ 1/4” (TS-01) และ M5 (TS-01-0) พื้นเหลือง · หน้าคิดราคา `TSJ-01(1/4")4.8+2M` = 240 บาท ·
+คอลัมน์ 1/4” (TS-01) และ M5 (TS-01-0) พื้นเหลือง · หน้าคำนวณราคา `TSJ-01(1/4")4.8+2M` = 240 บาท ·
 รันซ้ำต้องได้ "ไม่มีอะไรต้องเขียน"
 
 **ถอยกลับ** (หลัง dump): `TRUNCATE pricing_model_history, pricing_models, pricing_book_revisions;` — หน้าจอกลับไปขึ้น

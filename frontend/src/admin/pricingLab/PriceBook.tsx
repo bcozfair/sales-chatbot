@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { BookOpen, Download, FileSpreadsheet, Info, Pencil, Plus, Tag, Undo2, Upload } from 'lucide-react';
+import { BookOpen, CircleDollarSign, Download, FileSpreadsheet, Info, Pencil, Plus, Tag, Undo2, Upload } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { PageHeader } from '../PageHeader';
 import { Button } from '../Button';
@@ -75,7 +75,14 @@ function compactCodes(codes: string[]): string {
   return [...groups].map(([tail, heads]) => `${heads.join('/')}${tail}`).join(' · ');
 }
 
-export const PriceBook: React.FC = () => {
+interface Props {
+  /** คนนี้เปิดหน้า "คำนวณราคา" ได้ไหม (มาจากเมนูที่เขาเห็นจริง = ช่อง `page.pricing`)
+   *  — สองสิทธิ์แยกกัน ⇒ คนแก้ราคาได้อาจเปิดหน้าคำนวณไม่ได้ ปุ่มต้องหายไปด้วย ไม่ใช่กดแล้วเจอหน้าที่ยิง API ไม่ผ่าน */
+  canQuote: boolean;
+  onOpenQuote: () => void;
+}
+
+export const PriceBook: React.FC<Props> = ({ canQuote, onOpenQuote }) => {
   const { token } = useAuth();
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const jsonHeaders = useMemo(
@@ -233,10 +240,18 @@ export const PriceBook: React.FC = () => {
       <PageHeader
         icon={BookOpen}
         title="สมุดราคา"
-        description="ราคาตั้งของสินค้าสั่งทำ — หน้าคิดราคาสินค้าคิดจากเล่มนี้"
+        description="ราคาตั้งของสินค้าสั่งทำ — หน้าคำนวณราคาคิดจากเล่มนี้"
       >
         {/* จอแคบใช้คำสั้น — แถบบนเป็นที่ร่วมกับชื่อหน้า สองปุ่มคำเต็มเบียดจนชื่อหน้าเหลือตัวเดียว
             (ไม่ใช้ปุ่มไอคอนล้วน เพราะ ↓ กับ ↑ สองตัวติดกันแยกไม่ออกว่าอันไหนเข้าอันไหนออก) */}
+        {/* คู่กับปุ่ม "แก้ราคาในสมุดราคา" บนหน้าคำนวณราคา (เจ้าของสั่ง 2026-09-24) — แก้ราคาแล้วไปลองคิดได้ทันที
+            จอแคบเหลือไอคอนล้วน: สามปุ่มมีคำเบียดชื่อหน้าเหลือ "ส" ตัวเดียว (วัดที่ 390px) · ไอคอน $
+            ไม่มีคู่ที่หน้าตาเหมือนกันให้สับสนแบบ ↓/↑ และเป็นไอคอนเดียวกับเมนู */}
+        {canQuote && (
+          <Button icon={CircleDollarSign} onClick={onOpenQuote} aria-label="คำนวณราคา" title="คำนวณราคา">
+            <span className="hidden sm:inline">คำนวณราคา</span>
+          </Button>
+        )}
         <Button icon={Download} busy={downloading} onClick={() => void downloadTemplate()}>
           <span className="sm:hidden">แม่แบบ</span>
           <span className="hidden sm:inline">ดาวน์โหลดแม่แบบราคา</span>
@@ -258,7 +273,7 @@ export const PriceBook: React.FC = () => {
         <div className="bg-card border border-slate-200 rounded-2xl overflow-hidden">
           <div className="px-5 py-3 border-b border-slate-200">
             <h3 className="text-sm font-bold text-slate-900">สมุดราคาที่ระบบใช้อยู่</h3>
-            <p className="text-[11px] text-slate-500 mt-0.5">ราคาทุกบาทในหน้าคิดราคาสินค้าคิดจากเล่มนี้</p>
+            <p className="text-[11px] text-slate-500 mt-0.5">ราคาทุกบาทในหน้าคำนวณราคาคิดจากเล่มนี้</p>
           </div>
           <div className="px-5 py-3.5 flex gap-4 items-start flex-wrap">
             <div className="flex gap-6 flex-wrap flex-1 min-w-[220px]">
@@ -419,7 +434,7 @@ export const PriceBook: React.FC = () => {
       {/* ── รหัสย่อยที่ตั้งค่าไว้ ───────────────────────────────────────── */}
       <TableCard title="รหัสย่อยที่ตั้งค่าไว้" hint={`${allSet.length} ตัว`}>
         {allSet.length === 0 ? (
-          <EmptyState icon={Tag} title="ยังไม่มีรหัสย่อยที่ตั้งไว้" hint="กดตัวอักษรในรายการ “ยังไม่ได้ตั้งค่า” ข้างล่าง หรือกด ＋ เพิ่ม จากหน้าคิดราคาสินค้า" />
+          <EmptyState icon={Tag} title="ยังไม่มีรหัสย่อยที่ตั้งไว้" hint="กดตัวอักษรในรายการ “ยังไม่ได้ตั้งค่า” ข้างล่าง หรือกด ＋ เพิ่ม จากหน้าคำนวณราคา" />
         ) : (
           <>
             {/* ตารางเต็มบนจอกว้าง */}

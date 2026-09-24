@@ -25,7 +25,7 @@
 | `frontend/src/admin/pricingLab/` | หน้าจอ (รวมหน้าแก้ราคาทีละรุ่น และหน้าสมุดรายชีต) |
 | 3 บรรทัดใน `index.ts` | `import` + `app.use('/api/admin/pricing', …)` + `app.use('/api/admin/pricebook', …)` |
 | 2 ช่องใน `config/capabilities.ts` | `page.pricing` · `page.pricebook` (+ 2 แถวใน `scripts/diag/rolePermissions.ts`) |
-| 2 เมนูใน `frontend/src/admin/AdminApp.tsx` | `คิดราคาสินค้า` · `สมุดราคา` |
+| 2 เมนูใน `frontend/src/admin/AdminApp.tsx` | `คำนวณราคา` (เดิมชื่อ "คิดราคาสินค้า" · เปลี่ยน 2026-09-24) · `สมุดราคา` |
 | `DROP TABLE pricing_subcodes, pricing_model_history, pricing_models, pricing_book_revisions` | สี่ตาราง ไม่มี FK จากตารางอื่นของระบบชี้เข้า (สามตัวหลังชี้กันเอง) |
 
 **สิ่งเดียวที่ทำให้ข้อนี้เป็นจริง ไม่ใช่แค่ความตั้งใจ: การพึ่งพาเป็นทางเดียว** —
@@ -125,8 +125,8 @@ npm run pricebook:calc -- --subcodes
 
 | หน้า | API | ด่าน | มีอะไร |
 | --- | --- | --- | --- |
-| คิดราคาสินค้า | `/api/admin/pricing` — `GET /overview` · `POST /quote` **แค่สองเส้น** | `page.pricing` | ช่องพิมพ์รหัส · ผลคิดราคา · ปุ่ม ＋ เพิ่ม (โผล่เฉพาะคนที่มี `page.pricebook`) |
-| สมุดราคา | `/api/admin/pricebook` — ที่เหลือทั้งหมด | `page.pricebook` | เล่มที่ใช้อยู่ + ย้อน · แม่แบบ · ตารางรุ่น + แก้ทีละรุ่น · รหัสย่อย |
+| คำนวณราคา | `/api/admin/pricing` — `GET /overview` · `POST /quote` **แค่สองเส้น** | `page.pricing` | ช่องพิมพ์รหัส · ผลคิดราคา · ปุ่ม ＋ เพิ่ม (โผล่เฉพาะคนที่มี `page.pricebook`) |
+| สมุดราคา | `/api/admin/pricebook` — ที่เหลือทั้งหมด | `page.pricebook` | ปุ่มไปหน้าคำนวณราคา (โผล่เฉพาะคนที่มี `page.pricing`) · เล่มที่ใช้อยู่ + ย้อน · แม่แบบ · ตารางรุ่น + แก้ทีละรุ่น · รหัสย่อย |
 
 ⚠️ **เส้นที่เขียนหรือคืนราคาเกิน "ผลของรหัสที่พิมพ์" ห้ามอยู่ใน `pricingLabRouter`** — `diag:role-permissions`
 อ่านซอร์สมาเทียบว่าฝั่งคิดราคามีแค่สองเส้นข้างบน เพิ่มเส้นที่สามเมื่อไหร่ด่านล้ม

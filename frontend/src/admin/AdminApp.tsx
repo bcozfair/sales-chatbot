@@ -146,7 +146,7 @@ const NAV_GROUPS: { key: string; label: string; icon: typeof LayoutDashboard; it
       // เหลือเป็นกล่องสี่เหลี่ยมเปล่า** — ตัวแทนต้องเป็นทรงที่ยังอ่านออกตอนย่อ
       // (เจ้าของเลือกจาก mockup/ic-index.html · ขนาดจริง 16px ยืนยันด้วย mockup/_pl-live.mjs)
       // ส่วน `Calculator` ย้ายไปอยู่บนปุ่ม "คิดราคา" ในหน้านั้นแทน ซึ่งใหญ่พอให้เห็นลายจริง
-      { tab: 'pricing', label: 'คิดราคาสินค้า', icon: CircleDollarSign, roles: ['admin'], cap: 'page.pricing' },
+      { tab: 'pricing', label: 'คำนวณราคา', icon: CircleDollarSign, roles: ['admin'], cap: 'page.pricing' },
     ],
   },
   {
@@ -233,7 +233,7 @@ const PAGE_TITLES: Record<MainTab, string> = {
   users: 'จัดการผู้ใช้งานระบบ',
   rolepermissions: 'สิทธิ์ตามบทบาท',
   blacklist: 'บัญชีห้ามเสนอราคา',
-  pricing: 'คิดราคาสินค้า',
+  pricing: 'คำนวณราคา',
   pricebook: 'สมุดราคา',
   productsdata: 'ข้อมูลสินค้า',
   customersdata: 'ข้อมูลลูกค้า & ผู้ติดต่อ',
@@ -830,7 +830,10 @@ function AdminContent() {
             </div>
           ) : effectiveTab === 'pricebook' ? (
             <div className="animate-fade-in">
-              <PriceBook />
+              <PriceBook
+                canQuote={visibleTabs.includes('pricing')}
+                onOpenQuote={() => goTo('pricing')}
+              />
             </div>
           ) : effectiveTab === 'productsdata' ? (
             <div className="animate-fade-in">
