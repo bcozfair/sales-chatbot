@@ -47,6 +47,8 @@ export interface ModelBrief {
   others: string[];
   /** จำนวนสินค้าในฐานที่หัวรหัสตกรุ่นนี้ · `null` = นับไม่สำเร็จ · ไม่มีช่องนี้ = หน้าคิดราคา (ไม่ได้นับ) */
   products?: number | null;
+  /** true = เปิดแบบชีต Excel ได้ (หน้าสมุดรายชีต `SheetEditor`) — เกณฑ์อยู่ที่ `excelReady()` ฝั่ง backend */
+  excel?: boolean;
 }
 
 /** `GET /api/admin/pricing/overview` — หน้าคิดราคาได้แค่นี้ ของงานแก้ราคาอยู่ที่ `Overview` */
@@ -260,13 +262,26 @@ export interface EditorView {
   code: string;
   /** ชื่อที่ขึ้นจอ (`BH-01,02`) */
   name: string;
+  /** หัวตารางแบบที่ชีตเขียน (`TS_-01`) */
+  title: string;
+  /** เปิดแบบชีต Excel ได้ครบทุกช่อง */
+  excel: boolean;
   label: string;
   sheet: string;
   aliases: string[];
   standardTh: string;
   base:
     | { kind: 'banded'; quantity: string; quantityTh: string; unit: string; bands: EditorBand[] }
-    | { kind: 'matrix'; note: string }
+    | {
+        kind: 'matrix';
+        note: string;
+        axes: string[];
+        axesTh: string[];
+        rows: string[];
+        cols: string[];
+        /** `cells[แถว][คอลัมน์]` · `null` = ช่องว่าง = ไม่รับผลิต · ตารางสามแกน = `null` */
+        cells: (number | null)[][] | null;
+      }
     | { kind: 'ref'; model: string };
   variant: EditorVariant | null;
   adders: EditorAdder[];

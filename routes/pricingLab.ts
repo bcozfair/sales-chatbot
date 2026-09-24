@@ -11,7 +11,9 @@ import { computePrice } from '../services/pricingLab/engine.js';
 import { parseProductCode } from '../services/pricingLab/code.js';
 import { displayName } from '../services/pricingLab/labels.js';
 import { productsPerModel } from '../services/pricingLab/bookCoverage.js';
-import { EditRejected, applyModelEdit, modelEditorView } from '../services/pricingLab/modelEditor.js';
+import {
+  EditRejected, applyModelEdit, applySheetEdit, excelReady, modelEditorView, sheetModels,
+} from '../services/pricingLab/modelEditor.js';
 import { makeTemplate, readUploaded, templateFileName } from '../services/pricingLab/bookFile.js';
 import {
   BookConflict, BookRejected, RevisionNotFound, KEEP_BACKUPS,
@@ -333,7 +335,8 @@ function modelBriefs(book: PriceBook | undefined) {
   if (!book) return [];
   return Object.values(book.models).map((m) => {
     const { name, others } = displayName(m.code, m.aliases ?? []);
-    return { code: m.code, name, label: m.label, sheet: m.sheet, aliases: m.aliases ?? [], others };
+    // `excel` = รุ่นนี้เปิดแบบชีต Excel ได้ (หน้าสมุดรายชีต) — เป็นธงจริง/เท็จ ไม่มีราคาติดไปด้วย
+    return { code: m.code, name, label: m.label, sheet: m.sheet, aliases: m.aliases ?? [], others, excel: excelReady(m) };
   });
 }
 
@@ -422,7 +425,7 @@ pricebookRouter.put('/model/:code', async (req: AdminRequest, res: Response) => 
 
   let next;
   try {
-    next = applyModelEdit(current, req.body);
+    next = applyModelEdit(current, req.body, book);
   } catch (e) {
     if (e instanceof EditRejected) return res.status(400).json({ error: e.message });
     throw e;
@@ -456,6 +459,83 @@ pricebookRouter.put('/model/:code', async (req: AdminRequest, res: Response) => 
   }
 
   res.json({ ok: true, at, fingerprint: tokenOf(revision), model: modelEditorView(book, next) });
+});
+
+/**
+ * "สมุดรายชีต" — ทุกรุ่นที่มาจากชีต Excel เดียวกัน เปิด/บันทึกพร้อมกัน
+ *
+ * เจ้าของสั่ง 2026-09-24: **"1 ชีท / 1 สมุด"** และหน้าแก้ต้อง "ใกล้เคียง format เดิมใน excel มากที่สุด"
+ * ชีต `TS-01+TS-01-0` มีสองตารางในหน้าเดียว (สองรุ่นในสมุด) ⇒ คนแก้ต้องเห็นทั้งสองตารางเรียงกัน
+ * เหมือนในไฟล์ ไม่ใช่เปิดทีละรุ่น
+ *
+ * บันทึกทั้งชีตเป็น **การบันทึกครั้งเดียว** (ประวัติหนึ่งแถว · ย้อนทีเดียวกลับครบ) — ถ้ายิง
+ * `PUT /model/:code` ทีละรุ่น รุ่นที่สองจะชนด่าน `fingerprint` ของรุ่นแรกเสมอ และถ้าพังกลางทาง
+ * ชีตจะค้างครึ่งเดียว
+ * ใช้ `applyModelEdit` ตัวเดียวกับหน้าแก้ทีละรุ่น (ผ่าน `applySheetEdit`) — ด่านตรวจค่าจึงมีชุดเดียว
+ */
+
+pricebookRouter.get('/sheet/:sheet', async (req: AdminRequest, res: Response) => {
+  const state = await loadBookState();
+  if (!state) return noBook(res);
+  const sheet = String(req.params.sheet ?? '');
+  const models = sheetModels(state.book, sheet);
+  if (models.length === 0) return res.status(404).json({ error: `ไม่มีชีต ${sheet} ในสมุดราคา` });
+  res.json({
+    sheet,
+    models: models.map((m) => modelEditorView(state.book, m)),
+    fingerprint: state.token,
+    version: state.book.version,
+  });
+});
+
+pricebookRouter.put('/sheet/:sheet', async (req: AdminRequest, res: Response) => {
+  const state = await loadBookState();
+  if (!state) return noBook(res);
+  const { book } = state;
+  const sheet = String(req.params.sheet ?? '');
+  if (sheetModels(book, sheet).length === 0) return res.status(404).json({ error: `ไม่มีชีต ${sheet} ในสมุดราคา` });
+
+  if (staleToken(req, res, state, MODEL_CONFLICT)) return;
+
+  let nextModels: PriceBook['models'];
+  let changed: string[];
+  try {
+    ({ models: nextModels, changed } = applySheetEdit(book, sheet, req.body?.models));
+  } catch (e) {
+    if (e instanceof EditRejected) return res.status(400).json({ error: e.message });
+    throw e;
+  }
+  if (changed.length === 0) return res.status(400).json({ error: 'ไม่มีราคาไหนเปลี่ยน — ไม่ได้บันทึก' });
+
+  const at = nowIso();
+  const note = typeof req.body?.note === 'string' ? req.body.note.trim().slice(0, 200) : '';
+  let revision: number;
+  try {
+    revision = await commitBookChange({
+      parent: state.revision,
+      kind: 'model',
+      next: {
+        ...book,
+        models: nextModels,
+        edited: { at, by: req.admin?.username, note: note ? `แก้ชีต ${sheet}: ${note}` : `แก้ราคาชีต ${sheet} จากหน้าจอ` },
+      },
+      changed,
+      by: req.admin?.username ?? null,
+    });
+  } catch (e) {
+    if (e instanceof BookConflict) return res.status(409).json({ error: MODEL_CONFLICT });
+    if (e instanceof BookRejected) return res.status(400).json({ error: e.message });
+    throw e;
+  }
+
+  const saved = { ...book, models: nextModels };
+  res.json({
+    ok: true,
+    at,
+    changed,
+    fingerprint: tokenOf(revision),
+    models: sheetModels(saved, sheet).map((m) => modelEditorView(saved, m)),
+  });
 });
 
 /**

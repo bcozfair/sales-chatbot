@@ -52,7 +52,8 @@ export interface EditorAdder {
   /** อัตราที่ต่างกันตามค่าแกน — หน้าจอแก้ได้ทีละค่า แต่เพิ่ม/ลบค่าแกนไม่ได้ */
   byAxis: string | null;
   byAxisTh: string | null;
-  rates: { value: string; rate: Money }[] | null;
+  /** `rate: null` = ค่าแกนที่สมุดรู้จักแต่ยังไม่มีราคา (ช่องว่างในชีต) — ใส่เลขแล้วบันทึกได้ */
+  rates: { value: string; rate: Money | null }[] | null;
   disabled: boolean;
   custom: boolean;
   note: string;
@@ -69,8 +70,28 @@ export interface EditorView {
   standardTh: string;
   base:
     | { kind: 'banded'; quantity: string; quantityTh: string; unit: string; bands: EditorBand[] }
-    | { kind: 'matrix'; note: string }
+    | {
+        kind: 'matrix';
+        note: string;
+        axes: string[];
+        axesTh: string[];
+        /** ค่าแกนแรก (แถว) / แกนที่สอง (คอลัมน์) ตามลำดับในชีต — มีเฉพาะตารางสองแกน */
+        rows: string[];
+        cols: string[];
+        /** `cells[แถว][คอลัมน์]` · `null` = ช่องว่างในชีต = ไม่รับผลิต (ไม่ใช่ 0) · ตารางสามแกน = `null` ทั้งก้อน */
+        cells: (Money | null)[][] | null;
+      }
     | { kind: 'ref'; model: string };
+  /**
+   * ชื่อหัวตารางแบบที่ชีตเขียน (`TS_-01`) — ชีตใช้ `_` แทนตัวอักษรหัววัด เพราะหนึ่งตารางครอบ TSK/TSJ/TST/…
+   * ไม่มีชื่อพ้องแบบนั้น = ใช้ `name`
+   */
+  title: string;
+  /**
+   * true = รุ่นนี้วางบนจอแบบชีต Excel ได้ครบทุกช่อง (หน้า "สมุดรายชีต" · `SheetEditor.tsx`)
+   * เกณฑ์อยู่ที่ `excelReady()` ที่เดียว
+   */
+  excel: boolean;
   variant: (ModelVariant & { covers: string[] }) | null;
   adders: EditorAdder[];
   constraints: { id: string; level: string; levelTh: string; message: string; whenTh: string; disabled: boolean }[];
@@ -118,6 +139,79 @@ function variantCovers(m: PriceModel, v: ModelVariant): string[] {
   return [m.code, ...(m.aliases ?? [])].map((c) => c + v.suffix);
 }
 
+// ── ตารางสองแกน (ซีรีส์ TS) ─────────────────────────────────────────────────
+
+/** ตัวคั่นคีย์ของ `cells` — ต้องเป็นตัวเดียวกับที่ engine.ts ประกอบคีย์ */
+const SEP = ' | ';
+
+/**
+ * ค่าของแต่ละแกนตามลำดับที่ปรากฏในคีย์ — คอลัมน์ `spec` เป็น `json` (ไม่ใช่ jsonb) ลำดับคีย์จึงเป็น
+ * ลำดับที่ตัวนำเข้าอ่านจากชีต (ซ้ายไปขวา บนลงล่าง)
+ * ⚠️ แถวที่ว่างทั้งแถวในชีต (เช่น D = "7TN" ของ TS-04) ไม่มีคีย์สักตัว ⇒ ไม่โผล่ที่นี่ และเพิ่มจากจอไม่ได้
+ *    (ต้องไปทางแม่แบบ Excel) ซึ่งตรงกับกติกาเดิมว่า "เพิ่ม/ลบค่าแกนไม่ใช่งานของหน้าจอ"
+ */
+function matrixValues(cells: Record<string, Money>, axisCount: number): string[][] {
+  const out: string[][] = Array.from({ length: axisCount }, () => []);
+  const seen = out.map(() => new Set<string>());
+  for (const k of Object.keys(cells)) {
+    const parts = k.split(SEP);
+    parts.forEach((v, i) => {
+      if (i < axisCount && !seen[i]!.has(v)) {
+        seen[i]!.add(v);
+        out[i]!.push(v);
+      }
+    });
+  }
+  return out;
+}
+
+/**
+ * ค่าแกนที่ "ช่องราคาแยกตามแกน" ของกฎหนึ่งข้อควรมี — ใช้ทั้งตอนแสดง (ช่องว่างให้กรอก) และตอนรับ
+ *
+ * เหตุที่ต้องมี: ช่องที่ลบเลขทิ้งแล้วบันทึก = คีย์หายจากสมุด (ถูก — ว่าง ≠ 0) แต่ถ้ารับเฉพาะคีย์ที่
+ * "มีอยู่แล้ว" ช่องนั้นจะหายจากจอถาวร ใส่ราคาคืนไม่ได้อีกเลย ⇒ รุ่นที่เปิดแบบชีต (`excelReady`)
+ * รู้จักค่าแกนจากกฎที่แยกตามแกนเดียวกันทั้งเล่ม (ชนิดสาย 4 ชนิดของ TS-21+22+25 ใช้ร่วมกันทุกรุ่น)
+ *
+ * **รุ่นอื่นยังรู้จักแค่คีย์ของตัวเอง** — ลองขยายแบบเดียวกันแล้ว (2026-09-24) กฎที่ใช้กับบางขนาดแกน
+ * อย่าง "เคลือบเทฟลอน" ได้ช่องว่างเพิ่มถึง 32 ช่อง และหน้าแปลนสองมาตรฐานของ TS-18 ปนกัน
+ * ⇒ จอยาวขึ้นและอ่านยากขึ้น ซึ่งคือสิ่งที่เจ้าของเพิ่งบอกว่า "งง"
+ */
+function knownRateKeys(book: PriceBook | undefined, m: PriceModel, a: Adder): string[] {
+  const own = Object.keys(a.rates ?? {});
+  if (!a.byAxis || !book || !excelReady(m)) return own;
+  const keys = new Set(own);
+  for (const other of Object.values(book.models)) {
+    for (const x of other.adders) {
+      if (x.byAxis === a.byAxis) for (const k of Object.keys(x.rates ?? {})) keys.add(k);
+    }
+  }
+  return [...keys];
+}
+
+/**
+ * รุ่นที่หน้า "สมุดรายชีต" วางแบบ Excel ได้ครบ — **ทุกอย่างที่รุ่นมีต้องมีที่อยู่บนจอนั้น**
+ * ไม่งั้นจอจะดูครบทั้งที่มีกฎซ่อนอยู่ที่แก้ไม่ได้และมองไม่เห็น
+ *   · ราคาตั้งเป็นตารางสองแกน
+ *   · กฎบวกเพิ่มทุกข้อเป็น "ตามส่วนที่เกิน + ราคาแยกตามแกนที่ไม่ใช่แกนของตาราง" ไม่มีเงื่อนไข
+ *     (= แถบหมายเหตุ "สายยาวกว่า 1 M บวกเพิ่มตามราคาสาย" ใต้ตาราง)
+ *   · ไม่มีข้อจำกัด / ตัวเลือกท้ายรหัส / สูตรคำนวณ
+ * เจ้าของสั่ง 2026-09-24 ให้เริ่มที่ชีต TS-01+TS-01-0 — ชีตอื่นขยายเกณฑ์นี้ทีละแบบ
+ */
+export function excelReady(m: PriceModel): boolean {
+  if (m.base.kind !== 'matrix' || m.base.axes.length !== 2) return false;
+  const axes = m.base.axes;
+  if (m.constraints.length || m.variant || m.derivedDims?.length) return false;
+  return m.adders.every(
+    (a) => a.kind === 'perUnit' && !a.when && !!a.byAxis && !axes.includes(a.byAxis) && !!a.rates,
+  );
+}
+
+/** `TSK-01` + ชื่อพ้อง `TS-01` → `TS_-01` (แบบที่หัวชีตเขียน) */
+function sheetTitle(m: PriceModel, name: string): string {
+  const generic = (m.aliases ?? []).find((a) => /^TS-/.test(a));
+  return generic ? generic.replace(/^TS-/, 'TS_-') : name;
+}
+
 export function modelEditorView(book: PriceBook, m: PriceModel): EditorView {
   const base: EditorView['base'] =
     m.base.kind === 'banded'
@@ -136,15 +230,30 @@ export function modelEditorView(book: PriceBook, m: PriceModel): EditorView {
         }
       : m.base.kind === 'ref'
         ? { kind: 'ref', model: m.base.model }
-        : {
-            kind: 'matrix',
-            // ซีรีส์ TS ยังไม่เปิดให้แก้จากจอนี้ (เจ้าของสั่งทำทีละซีรีส์ เริ่มที่ BH)
-            note: 'ตารางราคาแบบสองแกนยังแก้จากหน้านี้ไม่ได้ — ใช้ปุ่มดาวน์โหลดแม่แบบ Excel ไปก่อน'
-          };
+        : (() => {
+            const { axes, cells } = m.base;
+            const vals = matrixValues(cells, axes.length);
+            const two = axes.length === 2;
+            return {
+              kind: 'matrix' as const,
+              // หน้าแก้ทีละรุ่นยังไม่แก้ตารางนี้ — ชีตที่ `excel` เป็นจริงแก้ได้ที่หน้าสมุดรายชีต
+              note: 'ตารางราคาแบบสองแกนยังแก้จากหน้านี้ไม่ได้ — ใช้ปุ่มดาวน์โหลดแม่แบบ Excel ไปก่อน',
+              axes,
+              axesTh: axes.map(axisLabel),
+              rows: two ? vals[0]! : [],
+              cols: two ? vals[1]! : [],
+              cells: two
+                ? vals[0]!.map((r) => vals[1]!.map((c) => cells[r + SEP + c] ?? null))
+                : null
+            };
+          })();
+  const name = displayName(m.code, m.aliases ?? []).name;
 
   return {
     code: m.code,
-    name: displayName(m.code, m.aliases ?? []).name,
+    name,
+    title: sheetTitle(m, name),
+    excel: excelReady(m),
     label: m.label,
     sheet: m.sheet ?? '',
     aliases: m.aliases ?? [],
@@ -174,7 +283,9 @@ export function modelEditorView(book: PriceBook, m: PriceModel): EditorView {
         unit: a.unit ?? '',
         byAxis: a.byAxis ?? null,
         byAxisTh: a.byAxis ? axisLabel(a.byAxis) : null,
-        rates: a.rates ? Object.entries(a.rates).map(([value, rate]) => ({ value, rate })) : null,
+        rates: a.rates
+          ? knownRateKeys(book, m, a).map((value) => ({ value, rate: a.rates![value] ?? null }))
+          : null,
         disabled: !!a.disabled,
         custom: !!a.custom,
         note: a.note ?? '',
@@ -203,7 +314,6 @@ export function modelEditorView(book: PriceBook, m: PriceModel): EditorView {
       kinds: (['flat', 'percent', 'perUnit'] as const).map((key) => ({ key, label: KIND_TH[key] ?? key }))
     }
   };
-  void book;
 }
 
 // ── ที่หน้าจอส่งกลับมา ───────────────────────────────────────────────────────
@@ -334,7 +444,7 @@ function readId(raw: unknown, used: Set<string>): string {
   return s;
 }
 
-function readAdders(raw: unknown, before: Adder[]): Adder[] {
+function readAdders(raw: unknown, before: Adder[], known: (a: Adder) => Set<string>): Adder[] {
   if (!Array.isArray(raw)) reject('กฎบวกเพิ่ม: รูปแบบไม่ถูกต้อง');
   if ((raw as unknown[]).length > 100) reject('กฎบวกเพิ่ม: มากเกิน 100 ข้อ');
   const used = new Set<string>();
@@ -376,16 +486,9 @@ function readAdders(raw: unknown, before: Adder[]): Adder[] {
       out.times = optMoney(a.times, `กฎ ${id} — ตัวคูณ`);
       out.round = prev?.round;
     }
-    // อัตราตามแกนแก้ได้แค่ตัวเลขของค่าที่มีอยู่แล้ว — เพิ่ม/ลบค่าแกนต้องไปทำที่ไฟล์ Excel
+    // อัตราตามแกนแก้ได้แค่ตัวเลขของค่าแกนที่สมุดรู้จัก (`knownRateKeys`) — เพิ่มค่าแกนใหม่ต้องไปทำที่ไฟล์ Excel
     if (prev?.rates && Array.isArray(a.rates)) {
-      const rates: Record<string, Money> = {};
-      for (const r of a.rates as Record<string, unknown>[]) {
-        const key = typeof r.value === 'string' ? r.value : '';
-        if (!(key in prev.rates)) continue;
-        const v = optMoney(r.rate, `กฎ ${id} — อัตราของ ${key || '(ว่าง)'}`);
-        if (v !== undefined) rates[key] = v;
-      }
-      out.rates = rates;
+      out.rates = readRates(a.rates, known(prev), `กฎ ${id}`);
       out.byAxis = prev.byAxis;
       out.skipIfNoRate = prev.skipIfNoRate;
     } else if (prev?.rates) {
@@ -403,6 +506,57 @@ function readAdders(raw: unknown, before: Adder[]): Adder[] {
     .map((a, i) => ({ a, k: pos.get(a.id) ?? before.length + i }))
     .sort((x, y) => x.k - y.k)
     .map((x) => x.a);
+}
+
+/**
+ * `[{ value, rate }]` → `{ ค่าแกน: ราคา }` · ช่องว่าง = ไม่เก็บคีย์ (ไม่มีราคา = ต้องขอราคา ไม่ใช่ 0)
+ * ค่าแกนที่ไม่อยู่ใน `allowed` ถูกทิ้ง — ยิง API ตรงก็สร้างค่าแกนใหม่ไม่ได้
+ */
+function readRates(raw: unknown[], allowed: Set<string>, what: string): Record<string, Money> {
+  const rates: Record<string, Money> = {};
+  for (const r of raw as Record<string, unknown>[]) {
+    const key = typeof r?.value === 'string' ? r.value : '';
+    if (!allowed.has(key)) continue;
+    const v = optMoney(r.rate, `${what} — อัตราของ ${key || '(ว่าง)'}`);
+    if (v !== undefined) rates[key] = v;
+  }
+  return rates;
+}
+
+/**
+ * ตารางราคาตั้งสองแกน — รับ `{ "แถว | คอลัมน์": ราคา | null }` เฉพาะช่องที่จอแก้
+ *
+ * · ช่องที่ไม่ได้ส่งมา = คงเดิม · `null`/ว่าง = ลบช่องนั้น (ไม่รับผลิต — **ไม่ใช่ราคา 0** กติกาเดียวกับชีต)
+ * · คีย์ต้องอยู่ในตาราง แถว × คอลัมน์ ที่มีอยู่แล้ว — เพิ่มแถว/คอลัมน์ใหม่ไม่ใช่งานของหน้าจอ
+ * · **ลำดับคีย์เดิมคงที่** ช่องที่เพิ่งกรอกต่อท้าย ⇒ บันทึกโดยไม่แก้อะไรได้สมุดเดิมทุกไบต์
+ *   (คอลัมน์ `spec` เป็น json ลำดับคีย์คือลำดับของแม่แบบ .xlsx — เหตุผลเดียวกับ `readBands`)
+ */
+function readCells(raw: unknown, base: Extract<PriceModel['base'], { kind: 'matrix' }>): Record<string, Money> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) reject('ตารางราคาตั้ง: รูปแบบไม่ถูกต้อง');
+  if (base.axes.length !== 2) reject('ตารางราคาตั้งของรุ่นนี้มีมากกว่าสองแกน — แก้ผ่านแม่แบบ Excel');
+  const [rows, cols] = matrixValues(base.cells, 2) as [string[], string[]];
+  const grid = new Set(rows.flatMap((r) => cols.map((c) => r + SEP + c)));
+  const edits = raw as Record<string, unknown>;
+  for (const k of Object.keys(edits)) {
+    if (!grid.has(k)) reject(`ตารางราคาตั้ง: ไม่มีช่อง "${k}" ในตาราง`);
+  }
+  // เขียนตามลำดับเดิมของคีย์ — ช่องที่เคยมีอยู่ในตำแหน่งเดิม ช่องใหม่ต่อท้ายตามลำดับ แถว → คอลัมน์
+  const ordered: Record<string, Money> = {};
+  const read = (k: string) => optMoney(edits[k], `ราคาตั้ง ${k.split(SEP).join(' × ')}`);
+  for (const [k, was] of Object.entries(base.cells)) {
+    const v = k in edits ? read(k) : was;
+    if (v !== undefined) ordered[k] = v;
+  }
+  for (const r of rows) {
+    for (const c of cols) {
+      const k = r + SEP + c;
+      if (k in base.cells || !(k in edits)) continue;
+      const v = read(k);
+      if (v !== undefined) ordered[k] = v;
+    }
+  }
+  if (Object.keys(ordered).length === 0) reject('ตารางราคาตั้ง: ว่างทั้งตาราง — รุ่นนี้จะคิดราคาไม่ได้เลย');
+  return ordered;
 }
 
 function readVariant(raw: unknown, adders: Adder[], prev?: ModelVariant): ModelVariant | undefined {
@@ -435,14 +589,42 @@ function readVariant(raw: unknown, adders: Adder[], prev?: ModelVariant): ModelV
  * ช่องที่หน้าจอไม่ได้เปิดให้แก้ (`standard` · `derivedDims` · `aliases` · ข้อความของ
  * `constraints`) ต้องเดินทางมาจากเล่มปัจจุบัน ไม่ใช่จาก body ⇒ ยิง API ตรงก็ลบมันไม่ได้
  */
-export function applyModelEdit(current: PriceModel, body: unknown): PriceModel {
+export function applyModelEdit(current: PriceModel, body: unknown, book?: PriceBook): PriceModel {
   const b = (body ?? {}) as Record<string, unknown>;
-  const adders = readAdders(b.adders, current.adders);
+  const known = (a: Adder) => new Set(knownRateKeys(book, current, a));
+
+  // ไม่ส่ง `adders` มา = กฎคงเดิมทั้งชุด แก้ได้แค่ตัวเลขใน `adderRates` (หน้าสมุดรายชีตใช้ทางนี้ —
+  // จอนั้นไม่มีช่องชื่อ/เงื่อนไข/วิธีคิด จึงไม่ควรต้องส่งของที่ตัวเองไม่ได้แสดงกลับมาทั้งก้อน)
+  let adders: Adder[];
+  if (b.adders === undefined) {
+    const patch = (b.adderRates ?? {}) as Record<string, unknown>;
+    if (typeof patch !== 'object' || Array.isArray(patch)) reject('ราคาแยกตามแกน: รูปแบบไม่ถูกต้อง');
+    for (const id of Object.keys(patch)) {
+      if (!current.adders.some((a) => a.id === id && a.rates)) reject(`ไม่มีกฎ "${id}" ที่ราคาแยกตามแกนในรุ่นนี้`);
+    }
+    adders = current.adders.map((a) => {
+      const p = patch[a.id];
+      if (!a.rates || !Array.isArray(p)) return a;
+      // ค่าที่ไม่ได้ส่งมาคงเดิม · ลำดับ = คีย์เดิมก่อน แล้วค่าแกนที่เพิ่งกรอกต่อท้าย (เหตุผลเดียวกับ `readCells`)
+      const sent = new Map((p as Record<string, unknown>[]).map((r) => [typeof r?.value === 'string' ? r.value : '', r]));
+      const allowed = known(a);
+      const merged = [...new Set([...Object.keys(a.rates), ...allowed])]
+        .map((k) => sent.get(k) ?? (k in a.rates! ? { value: k, rate: a.rates![k] } : undefined))
+        .filter((r): r is Record<string, unknown> => !!r);
+      return { ...a, rates: readRates(merged, allowed, `กฎ ${a.id}`) };
+    });
+  } else {
+    adders = readAdders(b.adders, current.adders, known);
+  }
 
   let base = current.base;
   if (b.bands !== undefined) {
     if (current.base.kind !== 'banded') reject('รุ่นนี้ไม่ได้ใช้ตารางราคาแบบช่วงขนาด');
     else base = { ...current.base, bands: readBands(b.bands) };
+  }
+  if (b.cells !== undefined) {
+    if (current.base.kind !== 'matrix') reject('รุ่นนี้ไม่ได้ใช้ตารางราคาแบบสองแกน');
+    else base = { ...current.base, cells: readCells(b.cells, current.base) };
   }
 
   // สวิตช์ของข้อจำกัดเป็นสิ่งเดียวที่แก้ได้ — ข้อความและเงื่อนไขมาจากเล่มปัจจุบันเสมอ
@@ -458,4 +640,36 @@ export function applyModelEdit(current: PriceModel, body: unknown): PriceModel {
     constraints,
     variant: readVariant(b.variant, adders, current.variant)
   };
+}
+
+/**
+ * "สมุดรายชีต" — แก้ทุกรุ่นของชีตเดียวพร้อมกัน (`PUT /api/admin/pricebook/sheet/:sheet`)
+ *
+ * แยกออกมาจาก route เพื่อให้ด่าน (`diag:pricing-db`) เรียกตัวเดียวกับที่ API ใช้ ไม่ใช่สำเนา
+ * · รุ่นที่ไม่ได้อยู่ในชีตนั้นถูกปฏิเสธ — ยิง API ตรงแล้วแก้รุ่นอื่นผ่านเส้นของชีตไม่ได้
+ * · `changed` = รุ่นที่ JSON เปลี่ยนจริง ⇒ บันทึกเปล่าไม่เพิ่มแถวประวัติ
+ */
+export function sheetModels(book: PriceBook, sheet: string): PriceModel[] {
+  return Object.values(book.models).filter((m) => (m.sheet ?? '') === sheet);
+}
+
+export function applySheetEdit(
+  book: PriceBook,
+  sheet: string,
+  edits: unknown,
+): { models: Record<string, PriceModel>; changed: string[] } {
+  const inSheet = new Map(sheetModels(book, sheet).map((m) => [m.code, m]));
+  if (!edits || typeof edits !== 'object' || Array.isArray(edits)) reject('ไม่มีรุ่นที่จะบันทึก');
+  const models = { ...book.models };
+  const changed: string[] = [];
+  for (const [code, body] of Object.entries(edits as Record<string, unknown>)) {
+    const current = inSheet.get(code);
+    if (!current) reject(`รุ่น ${code} ไม่ได้อยู่ในชีต ${sheet}`);
+    const next = applyModelEdit(current!, body, book);
+    if (JSON.stringify(next) !== JSON.stringify(current)) {
+      models[code] = next;
+      changed.push(code);
+    }
+  }
+  return { models, changed };
 }

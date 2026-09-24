@@ -192,7 +192,7 @@ function bandProblems(bands: WBand[]): string[] {
    สรุปเป็นแถว "เดิม → ใหม่" แบบเดียวกับที่จอตรวจสมุดราคาใช้ · `struct` = เพิ่ม/ลบแถว
    ซึ่งต้องแยกให้เห็น เพราะการลบกฎทิ้งกับการขยับตัวเลขคนละน้ำหนักกันมาก */
 
-interface DiffRow { what: string; was: string; now: string; struct?: boolean; warn?: boolean }
+export interface DiffRow { what: string; was: string; now: string; struct?: boolean; warn?: boolean }
 
 function priceOf(a: EditorAdder): string {
   if (a.kind === 'percent') return a.percent === null ? '' : `${a.percent}%`;
@@ -859,7 +859,7 @@ export const ModelPriceEditor: React.FC<{
 
 /* ── กล่องตรวจก่อนบันทึก ───────────────────────────────────────────────── */
 
-const ReviewModal: React.FC<{
+export const ReviewModal: React.FC<{
   code: string;
   rows: DiffRow[];
   problems: string[];
@@ -888,7 +888,7 @@ const ReviewModal: React.FC<{
             <div className="rounded-xl border px-3 py-2 text-[12.5px]"
                  style={{ borderColor: 'var(--brand-border)', background: 'var(--brand-soft)', color: 'var(--brand-fg)' }}>
               <b>บันทึกราคาใหม่ของ {code} แล้ว</b> — มีผลกับการคิดราคาทันที ·
-              เล่มก่อนหน้าถูกเก็บไว้ กด “ย้อนไปเล่มก่อนหน้า” บนหน้าคิดราคาสินค้าได้ทุกเมื่อ
+              เล่มก่อนหน้าถูกเก็บไว้ กด “ย้อนไปเล่มก่อนหน้า” บนหน้าสมุดราคาได้ทุกเมื่อ
             </div>
           ) : (
             <>
@@ -901,7 +901,7 @@ const ReviewModal: React.FC<{
               {warns > 0 && (
                 <div className="flex gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11.5px] text-amber-800">
                   <AlertTriangle className="h-4 w-4 shrink-0 mt-px" />
-                  <span><b>{warns} รายการถูกลบหรือปิดไว้</b> — ช่องราคาที่ลบเลขออก = เลิกรับผลิตขนาดนั้น ถ้าตั้งใจให้ฟรีต้องใส่เลข 0 ไม่ใช่ลบทิ้ง</span>
+                  <span><b>{warns} รายการต้องดูให้แน่ใจ</b> (ตัวหนังสือสีเหลืองข้างล่าง) — ช่องราคาที่ลบเลขออก = เลิกรับผลิตขนาดนั้น ถ้าตั้งใจให้ฟรีต้องใส่เลข 0 ไม่ใช่ลบทิ้ง</span>
                 </div>
               )}
               {structs > 0 && (

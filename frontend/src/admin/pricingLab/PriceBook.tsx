@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { BookOpen, Download, Info, Pencil, Plus, Tag, Undo2, Upload } from 'lucide-react';
+import { BookOpen, Download, FileSpreadsheet, Info, Pencil, Plus, Tag, Undo2, Upload } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { PageHeader } from '../PageHeader';
 import { Button } from '../Button';
@@ -8,6 +8,7 @@ import { errMsg, formatDateTime } from '../logs/format';
 import { SubCodeModal } from './SubCodeModal';
 import { BookImportModal } from './BookImportModal';
 import { ModelPriceEditor } from './ModelPriceEditor';
+import { SheetEditor } from './SheetEditor';
 import { EFFECT_TH, type ModelBrief, type Overview, type SubCode } from './types';
 
 /**
@@ -21,10 +22,44 @@ import { EFFECT_TH, type ModelBrief, type Overview, type SubCode } from './types
  * ⚠️ กติกาเดิมของโมดูลยังอยู่ครบ: **ไฟล์นี้ไม่ถือราคาไว้ใน state** — `/overview` ส่งมาแค่ชื่อรุ่น
  *   กับจำนวน ราคาเดินทางมาเฉพาะตอนเปิดหน้าแก้รุ่น (`ModelPriceEditor`) หรือตอนกดดาวน์โหลดแม่แบบ
  *
- * ตารางรุ่นเป็น **ตาราง 1 แถวต่อ 1 รุ่น** ไม่ใช่ชิปเรียงต่อกัน (เจ้าของเลือกแบบ A 2026-09-23 หลังเห็น
- * ชิปแล้วบอกว่ารก) — ชิปยาวไม่เท่ากัน ชื่อรุ่นถูกตัด และรายชื่อรหัสที่ใช้ราคาเดียวกันไม่ตรงคอลัมน์
- * ⇒ คนหาไม่เจอว่าจะเริ่มอ่านตรงไหน · ตารางทำให้ "แก้รุ่นนี้แล้วกระทบรหัสไหน/กี่รายการ" อ่านจบในแถวเดียว
+ * ตารางรุ่นเป็น **ตาราง ไม่ใช่ชิปเรียงต่อกัน** (เจ้าของเลือกแบบ A 2026-09-23 หลังเห็นชิปแล้วบอกว่ารก)
+ * — ชิปยาวไม่เท่ากัน ชื่อรุ่นถูกตัด และรายชื่อรหัสที่ใช้ราคาเดียวกันไม่ตรงคอลัมน์
+ *
+ * **1 แถว = 1 ชีตของไฟล์ราคา** (เจ้าของสั่ง 2026-09-24: "1 ชีท / 1 สมุด") — ชีต `TS-01+TS-01-0`
+ * มีสองรุ่นในสมุด แต่คนดูแลราคารู้จักมันเป็นหน้าเดียวในไฟล์ ⇒ รวมเป็นแถวเดียว
+ * · ชีตที่ทุกรุ่นเป็น `excel` เปิดเป็น `SheetEditor` (ตารางหน้าตาแบบชีต) ทั้งชีต
+ * · ชีตอื่นยังเปิด `ModelPriceEditor` ทีละรุ่นเหมือนเดิม (ชีต BH มีสองรุ่น ⇒ ปุ่มแยกรายรุ่น)
+ *   จนกว่าจะย้ายมาแบบชีตทีละชีตตามที่เจ้าของสั่ง
  */
+
+interface SheetGroup {
+  sheet: string;
+  models: ModelBrief[];
+  /** ทุกรุ่นในชีตเปิดแบบ Excel ได้ */
+  excel: boolean;
+  products: number | null;
+}
+
+/** จัดรุ่นเป็นชีตตามลำดับในสมุด — รุ่นที่ไม่รู้ชีตเป็นชีตของตัวเอง */
+function groupSheets(models: ModelBrief[]): SheetGroup[] {
+  const map = new Map<string, ModelBrief[]>();
+  for (const m of models) {
+    const k = m.sheet || m.code;
+    map.set(k, [...(map.get(k) ?? []), m]);
+  }
+  return [...map].map(([sheet, ms]) => ({
+    sheet,
+    models: ms,
+    excel: ms.every((m) => m.excel),
+    products: ms.every((m) => typeof m.products === 'number')
+      ? ms.reduce((n, m) => n + (m.products ?? 0), 0)
+      : null,
+  }));
+}
+
+/** `Sheet1` ไม่บอกอะไรคนอ่าน — ชีตชื่อกลาง ๆ ใช้ชื่อรุ่นในชีตแทน */
+const sheetName = (g: SheetGroup) =>
+  /^Sheet\d+$/i.test(g.sheet) ? g.models.map((m) => m.name).join(' + ') : g.sheet;
 
 /**
  * `TSJ-01, TST-01, TSP-01` → `TSJ/TST/TSP-01` — ชื่ออื่นของรุ่นเดียวกันลงท้ายเลขเดียวกันเกือบทุกตัว
@@ -56,6 +91,8 @@ export const PriceBook: React.FC = () => {
   const [rollingBack, setRollingBack] = useState(false);
   /** รหัสรุ่นที่กำลังแก้ราคาอยู่ — หน้าแก้กินทั้งจอ ไม่ใช่กล่องซ้อน เพราะมันคือจอทำงาน ไม่ใช่คำถามสั้น ๆ */
   const [editingModel, setEditingModel] = useState<string | null>(null);
+  /** ชีตที่เปิดแบบ Excel อยู่ (`SheetEditor`) */
+  const [editingSheet, setEditingSheet] = useState<string | null>(null);
 
   const loadOverview = useCallback(async () => {
     try {
@@ -137,9 +174,15 @@ export const PriceBook: React.FC = () => {
       .slice(0, 16);
   }, [allSet, overview]);
 
-  const models = overview?.models ?? [];
+  const models = useMemo(() => overview?.models ?? [], [overview]);
+  const sheets = useMemo(() => groupSheets(models), [models]);
   const covered = models.reduce((n, m) => n + (m.products ?? 0), 0);
   const counted = models.some((m) => typeof m.products === 'number');
+  /** กดแถว: ชีตแบบ Excel → เปิดทั้งชีต · ชีตรุ่นเดียว → หน้าแก้รุ่น · ชีตหลายรุ่นแบบเดิม → ต้องกดปุ่มรายรุ่น */
+  const openRow = (g: SheetGroup) => {
+    if (g.excel) setEditingSheet(g.sheet);
+    else if (g.models.length === 1) setEditingModel(g.models[0]!.code);
+  };
 
   async function removeSub(row: SubCode) {
     if (!row.id) return;
@@ -157,6 +200,20 @@ export const PriceBook: React.FC = () => {
   }
 
   const bookMissing = overview && !overview.book.ok;
+
+  if (editingSheet) {
+    return (
+      <SheetEditor
+        sheet={editingSheet}
+        products={Object.fromEntries(models.map((m) => [m.code, m.products]))}
+        authHeaders={authHeaders}
+        onBack={(wasSaved) => {
+          setEditingSheet(null);
+          if (wasSaved) void loadOverview();
+        }}
+      />
+    );
+  }
 
   if (editingModel) {
     return (
@@ -235,71 +292,115 @@ export const PriceBook: React.FC = () => {
         </div>
       )}
 
-      {/* ── รุ่นที่มีราคา + ทางเข้าหน้าแก้ราคา ────────────────────────── */}
-      {models.length > 0 && (
+      {/* ── ชีตในสมุดราคา + ทางเข้าหน้าแก้ราคา ─────────────────────────
+          1 แถว = 1 ชีตของไฟล์ราคา (เจ้าของสั่ง 2026-09-24 "1 ชีท / 1 สมุด") */}
+      {sheets.length > 0 && (
         <TableCard
-          title="รุ่นที่มีราคาในสมุด"
-          hint={counted
-            ? `${models.length} รุ่น · ครอบสินค้า ${covered.toLocaleString('th-TH')} รายการ · กดแถวเพื่อแก้ราคาและกฎของรุ่นนั้น`
-            : `${models.length} รุ่น · กดแถวเพื่อแก้ราคาและกฎของรุ่นนั้น`}
+          title="ชีตในสมุดราคา"
+          hint={`${sheets.length} ชีต · ${models.length} รุ่น${counted ? ` · ครอบสินค้า ${covered.toLocaleString('th-TH')} รายการ` : ''} · ชีตที่มีป้าย “แบบ Excel” เปิดเป็นตารางหน้าตาเหมือนในไฟล์`}
         >
           <TableScroll>
             <table className="w-full text-xs hidden sm:table">
               <thead>
                 <tr className="text-left text-slate-500 border-b border-slate-100">
-                  <th className="px-4 py-2 font-semibold">รุ่น</th>
-                  <th className="px-4 py-2 font-semibold">ชื่อ</th>
+                  <th className="px-4 py-2 font-semibold">ชีต</th>
+                  <th className="px-4 py-2 font-semibold">รุ่นในชีต</th>
                   <th className="px-4 py-2 font-semibold">ใช้ราคาเดียวกัน</th>
-                  <th className="px-4 py-2 font-semibold text-right" title="จำนวนสินค้าในฐานที่หัวรหัสตกรุ่นนี้ — แก้ราคารุ่นนี้แล้วกระทบรายการเหล่านี้">
+                  <th className="px-4 py-2 font-semibold text-right" title="จำนวนสินค้าในฐานที่หัวรหัสตกรุ่นในชีตนี้ — แก้ราคาชีตนี้แล้วกระทบรายการเหล่านี้">
                     สินค้าที่ครอบ
                   </th>
                   <th className="px-4 py-2" />
                 </tr>
               </thead>
               <tbody>
-                {models.map((m) => (
-                  <tr key={m.code}
-                      onClick={() => setEditingModel(m.code)}
-                      className="group border-b border-slate-50 cursor-pointer hover:bg-slate-50">
-                    <td className="px-4 py-2.5 font-mono font-bold text-slate-900 whitespace-nowrap">{m.name}</td>
-                    <td className="px-4 py-2.5 text-slate-700">{m.label}</td>
-                    <td className="px-4 py-2.5 font-mono text-[11px] text-slate-500" title={m.others.join(', ')}>
-                      {m.others.length > 0 ? compactCodes(m.others) : <span className="text-slate-300">—</span>}
-                    </td>
-                    <td className="px-4 py-2.5 text-right tabular-nums text-slate-700 whitespace-nowrap">
-                      <Products m={m} />
-                    </td>
-                    <td className="px-4 py-2.5 text-right whitespace-nowrap">
-                      {/* ปุ่มจริงไว้ให้คีย์บอร์ด/โปรแกรมอ่านจอ — คลิกทั้งแถวเป็นแค่ทางลัดของเมาส์ */}
-                      <Button
-                        icon={Pencil}
-                        aria-label={`แก้ราคารุ่น ${m.name}`}
-                        onClick={(e) => { e.stopPropagation(); setEditingModel(m.code); }}
-                        className="opacity-60 group-hover:opacity-100 focus-visible:opacity-100"
-                      >
-                        แก้ราคา
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
+                {sheets.map((g) => {
+                  const clickable = g.excel || g.models.length === 1;
+                  return (
+                    <tr key={g.sheet}
+                        onClick={clickable ? () => openRow(g) : undefined}
+                        className={`group border-b border-slate-50 align-top ${clickable ? 'cursor-pointer hover:bg-slate-50' : ''}`}>
+                      <td className="px-4 py-2.5 whitespace-nowrap">
+                        <span className="font-mono font-bold text-slate-900">{sheetName(g)}</span>
+                        {g.excel && <ExcelBadge />}
+                      </td>
+                      <td className="px-4 py-2.5 text-slate-700">
+                        {g.models.map((m) => (
+                          <div key={m.code} className="leading-5">
+                            <span className="font-mono font-semibold text-slate-900">{m.name}</span>
+                            <span className="text-slate-500"> — {m.label}</span>
+                          </div>
+                        ))}
+                      </td>
+                      <td className="px-4 py-2.5 font-mono text-[11px] text-slate-500">
+                        {g.models.map((m) => (
+                          <div key={m.code} className="leading-5 whitespace-nowrap" title={m.others.join(', ')}>
+                            {m.others.length > 0 ? compactCodes(m.others) : <span className="text-slate-300">—</span>}
+                          </div>
+                        ))}
+                      </td>
+                      <td className="px-4 py-2.5 text-right tabular-nums text-slate-700 whitespace-nowrap">
+                        <Count n={g.products} />
+                      </td>
+                      <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                        {/* ปุ่มจริงไว้ให้คีย์บอร์ด/โปรแกรมอ่านจอ — คลิกทั้งแถวเป็นแค่ทางลัดของเมาส์ */}
+                        {clickable ? (
+                          <Button
+                            icon={g.excel ? FileSpreadsheet : Pencil}
+                            aria-label={`แก้ราคา ${sheetName(g)}`}
+                            onClick={(e) => { e.stopPropagation(); openRow(g); }}
+                            className="opacity-60 group-hover:opacity-100 focus-visible:opacity-100"
+                          >
+                            {g.excel ? 'เปิดชีต' : 'แก้ราคา'}
+                          </Button>
+                        ) : (
+                          <span className="inline-flex flex-col items-end gap-1">
+                            {g.models.map((m) => (
+                              <Button key={m.code} icon={Pencil} onClick={() => setEditingModel(m.code)}>
+                                แก้ {m.name}
+                              </Button>
+                            ))}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </TableScroll>
 
           {/* ตารางหลายคอลัมน์บนมือถือ = การ์ด ไม่ใช่ตารางที่เล็กลง (docs/design.md §3) */}
           <div className="sm:hidden p-3 space-y-2.5">
-            {models.map((m) => (
-              <button key={m.code} type="button" onClick={() => setEditingModel(m.code)}
-                      className="w-full text-left rounded-xl border border-slate-200 bg-card px-3.5 py-3">
+            {sheets.map((g) => (
+              <div key={g.sheet} className="rounded-xl border border-slate-200 bg-card px-3.5 py-3">
                 <div className="flex gap-2 items-baseline justify-between">
-                  <span className="font-mono font-bold text-[13px] text-slate-900">{m.name}</span>
-                  <span className="text-[11px] text-slate-500 tabular-nums"><Products m={m} /> รายการ</span>
+                  <span className="font-mono font-bold text-[13px] text-slate-900">
+                    {sheetName(g)}{g.excel && <ExcelBadge />}
+                  </span>
+                  <span className="text-[11px] text-slate-500 tabular-nums"><Count n={g.products} /> รายการ</span>
                 </div>
-                <div className="text-xs text-slate-700 mt-1">{m.label}</div>
-                {m.others.length > 0 && (
-                  <div className="text-[11px] text-slate-400 mt-1">ใช้ราคาเดียวกัน: <span className="font-mono">{compactCodes(m.others)}</span></div>
-                )}
-              </button>
+                {g.models.map((m) => (
+                  <div key={m.code} className="mt-1.5">
+                    <div className="text-xs text-slate-700">
+                      <span className="font-mono font-semibold text-slate-900">{m.name}</span> — {m.label}
+                    </div>
+                    {m.others.length > 0 && (
+                      <div className="text-[11px] text-slate-400">ใช้ราคาเดียวกัน: <span className="font-mono">{compactCodes(m.others)}</span></div>
+                    )}
+                  </div>
+                ))}
+                <div className="flex flex-wrap gap-1.5 mt-2.5">
+                  {g.excel || g.models.length === 1 ? (
+                    <Button icon={g.excel ? FileSpreadsheet : Pencil} onClick={() => openRow(g)}>
+                      {g.excel ? 'เปิดชีต' : 'แก้ราคา'}
+                    </Button>
+                  ) : (
+                    g.models.map((m) => (
+                      <Button key={m.code} icon={Pencil} onClick={() => setEditingModel(m.code)}>แก้ {m.name}</Button>
+                    ))
+                  )}
+                </div>
+              </div>
             ))}
           </div>
         </TableCard>
@@ -442,10 +543,18 @@ export const PriceBook: React.FC = () => {
 };
 
 /** จำนวนสินค้าที่ครอบ — `null` = นับไม่สำเร็จ (ฐานสินค้าตอบช้า) ไม่ใช่ศูนย์ */
-const Products: React.FC<{ m: ModelBrief }> = ({ m }) =>
-  typeof m.products === 'number'
-    ? <>{m.products.toLocaleString('th-TH')}</>
+const Count: React.FC<{ n: number | null }> = ({ n }) =>
+  typeof n === 'number'
+    ? <>{n.toLocaleString('th-TH')}</>
     : <span className="text-slate-300" title="นับไม่สำเร็จ — ลองเปิดหน้านี้ใหม่">—</span>;
+
+/** ป้าย "แบบ Excel" — ชีตนี้เปิดเป็นตารางหน้าตาเหมือนในไฟล์ราคา */
+const ExcelBadge: React.FC = () => (
+  <span className="ml-2 rounded px-1.5 py-0.5 align-middle font-sans text-[10px] font-bold"
+        style={{ background: 'var(--brand-soft)', color: 'var(--brand-fg)' }}>
+    แบบ Excel
+  </span>
+);
 
 /** ช่องข้อเท็จจริงหนึ่งช่องบนการ์ดสมุดราคา — ประกาศนอกคอมโพเนนต์ (eslint: static-components) */
 const Fact: React.FC<{ k: string; v: string; sub?: string; mono?: boolean }> = ({ k, v, sub, mono }) => (
