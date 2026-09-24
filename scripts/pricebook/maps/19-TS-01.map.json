@@ -13,6 +13,7 @@
     "colHeaderRow": 10,
     "cols": ["B", "C", "D", "E", "F"]
   },
+  "layout": { "rowNoteCol": "G", "colNotesRow": 16, "highlight": true },
   "adders": [
     {
       "id": "cable_over_1m",

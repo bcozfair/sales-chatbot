@@ -13,6 +13,10 @@ import type { EditorAdder, EditorView, Predicate } from './types';
  * ⇒ ทุกช่องเป็นรายการปิดที่มาจาก `vocab` ซึ่งเซิร์ฟเวอร์เป็นคนบอกว่ามีอะไรบ้าง
  * และฝั่งรับ (`modelEditor.ts`) ประกอบเงื่อนไขขึ้นใหม่เองอีกชั้น เพราะหน้าจอไม่ใช่ด่าน
  *
+ * **กฎที่ราคาแยกตามค่าแกน** (`rates` — เช่นราคาต่อ 100 mm ต่างกันตามขนาดแกน · 43 กฎในซีรีส์ TS)
+ * ไม่มีช่อง "ราคา" ช่องเดียวในกล่องนี้ — ตัวเลขอยู่ในตารางใต้กฎในหน้าหลัก เดิมกล่องโชว์ช่องราคาว่าง
+ * ซึ่งอ่านได้ว่า "กฎนี้ไม่มีราคา" ทั้งที่มีอยู่ครบทุกขนาด (เจ้าของเจอ 2026-09-23)
+ *
  * เงื่อนไขที่ซับซ้อนกว่าสามแบบนี้ (`และ` / `หรือ` / `ไม่ใช่` ที่ติดมาจากไฟล์ราคา)
  * **แก้จากที่นี่ไม่ได้** — กล่องจะบอกไว้ก่อนว่าถ้าบันทึก เงื่อนไขเดิมจะถูกแทน
  */
@@ -117,6 +121,22 @@ export const RuleEditModal: React.FC<{
   const [note, setNote] = useState(adder?.note ?? '');
   const [err, setErr] = useState('');
 
+  const byAxis = !!adder?.rates;
+  const unitTxt = unit.trim();
+  /** ประโยคสรุปของกฎ — คนตรวจอ่านบรรทัดนี้บรรทัดเดียวแล้วรู้ว่ากฎคิดยังไง ไม่ต้องประกอบเองจากหกช่อง */
+  const summary = (() => {
+    const whenTxt = mode === 'always' ? 'ทุกใบ'
+      : mode === 'option' ? `เมื่อลูกค้าติ๊ก “${optLabel(option)}”`
+        : mode === 'dim' ? `เมื่อ${dimLabel(dim)} ${OPS.find((o) => o.v === op)?.t.replace('…', dimV || '?') ?? ''} ${op === 'gte' ? '' : dimV}`.trim()
+          : 'ตามเงื่อนไขเดิม';
+    const price = byAxis ? `ราคาตามตาราง${adder?.byAxisTh ?? 'ค่าแกน'}` : null;
+    if (kind === 'flat') return `${whenTxt} → บวก ${price ?? `${amount || '?'} บาท`}`;
+    if (kind === 'percent') return `${whenTxt} → บวก ${percent || '?'}% ของยอดที่คิดมาถึงตอนนั้น`;
+    const per = `ทุก ๆ ${step || '1'} ${unitTxt || 'หน่วย'}`;
+    const base = over ? `ส่วนที่เกิน ${over}` : 'ส่วนที่เกินสเปกมาตรฐานของรุ่น';
+    return `${whenTxt} → ${dimLabel(pdim)} ${base} คิด ${price ?? `${rate || '?'} บาท`} ${per}${times && times !== '1' ? ` × ${times}` : ''}`;
+  })();
+
   const submit = () => {
     const name = label.trim();
     if (!name) { setErr('ใส่ชื่อรายการก่อนนะครับ — ชื่อนี้คือสิ่งที่ขึ้นในใบเสนอราคา'); return; }
@@ -172,7 +192,9 @@ export const RuleEditModal: React.FC<{
         </>
       }
     >
-      <div className="space-y-2.5">
+      {/* Modal ไม่ใส่ขอบในให้เนื้อ (กล่องอื่นใส่เอง) — เดิมกล่องนี้ไม่ใส่ ป้ายซ้ายถูกตัดครึ่งตัว
+          และช่องกรอกชนขอบขวา (เจ้าของเจอ 2026-09-23) */}
+      <div className="space-y-2.5 px-5 py-4">
         {err && <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">{err}</div>}
 
         <Row label="ชื่อรายการ">
@@ -224,7 +246,15 @@ export const RuleEditModal: React.FC<{
           </select>
         </Row>
 
-        {kind === 'flat' && (
+        {byAxis && (
+          <Row label="ราคา" sub>
+            <span className="text-[11.5px] text-slate-600">
+              แยกตาม<b>{adder?.byAxisTh ?? 'ค่าแกน'}</b> {adder?.rates?.length ?? 0} ค่า — แก้ตัวเลขในตารางใต้กฎนี้ในหน้าหลัก
+            </span>
+          </Row>
+        )}
+
+        {kind === 'flat' && !byAxis && (
           <Row label="จำนวนเงิน" sub>
             <input className={SM} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
             <span className="text-[11px] text-slate-400">บาท</span>
@@ -249,13 +279,17 @@ export const RuleEditModal: React.FC<{
                      title="เว้นว่าง = ใช้สเปกที่รวมในราคาตั้งแล้วของรุ่นนี้"
                      onChange={(e) => setOver(e.target.value)} />
             </Row>
-            <Row label="ราคา" sub>
-              <input className={SM} inputMode="decimal" value={rate} onChange={(e) => setRate(e.target.value)} />
-              <span className="text-[11px] text-slate-400">บาท ทุก ๆ</span>
+            <Row label={byAxis ? 'คิดทุก ๆ' : 'ราคา'} sub>
+              {!byAxis && (
+                <>
+                  <input className={SM} inputMode="decimal" value={rate} onChange={(e) => setRate(e.target.value)} />
+                  <span className="text-[11px] text-slate-400">บาท ทุก ๆ</span>
+                </>
+              )}
               <input className={SM} inputMode="decimal" value={step} placeholder="1"
                      onChange={(e) => setStep(e.target.value)} />
               <input className={`${FLD} w-[74px]`} value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="หน่วย" />
-              <span className="text-[11px] text-slate-400">· คูณ</span>
+              <span className="text-[11px] text-slate-400" title="เช่น สายสองเส้น = คูณ 2 · เว้นว่าง = 1">× จำนวนเท่า</span>
               <input className={SM} inputMode="decimal" value={times} onChange={(e) => setTimes(e.target.value)} placeholder="1" />
             </Row>
           </>
@@ -267,6 +301,10 @@ export const RuleEditModal: React.FC<{
             เลขน้อยคิดก่อน — สำคัญเมื่อมีเปอร์เซ็นต์ เพราะเปอร์เซ็นต์คิดจากยอดที่บวกมาแล้ว
           </span>
         </Row>
+
+        <div className="rounded-lg border border-[var(--brand-border)] bg-[var(--brand-soft)] px-3 py-2 text-[11.5px] text-slate-700">
+          <b>สรุป:</b> {summary}
+        </div>
 
         <Row label="หมายเหตุ">
           <input className={`${FLD} flex-1 min-w-0`} value={note} onChange={(e) => setNote(e.target.value)}

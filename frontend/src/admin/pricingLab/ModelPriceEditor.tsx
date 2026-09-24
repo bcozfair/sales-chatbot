@@ -19,7 +19,7 @@ import type { EditorAdder, EditorBand, EditorView } from './types';
  *
  * ⚠️ ต่างจาก `PricingLab.tsx` ตรงที่ **จอนี้ถือราคาไว้ใน state จริง** — จำเป็น เพราะมันคือจอแก้
  *   สิ่งที่ยังต้องเป็นจริงอยู่คือ "ไม่มีราคาอยู่ใน bundle" · ราคาเดินทางมาตอนเปิดรุ่นเท่านั้น
- *   และเส้น API ที่ส่งมาอยู่หลังด่าน `page.pricing` เดียวกับทั้ง router (ดูหัว routes/pricingLab.ts)
+ *   และเส้น API ที่ส่งมาอยู่หลังด่าน `page.pricebook` ของหน้าสมุดราคา (ดูหัว routes/pricingLab.ts)
  */
 
 const fmt = (n: number | null | undefined) =>
@@ -80,6 +80,54 @@ const Cell: React.FC<{
           : 'border-slate-200 bg-card text-slate-900'
       }`}
     />
+  );
+};
+
+/** เรียงค่าแกนแบบคนอ่าน: 2 · 2.5S · 3 · 3A · 3S · 3.2 … (ในชีตเรียงตามลำดับที่ลอกมา ปนกันจนหาไม่เจอ) */
+const byNatural = (x: string, y: string) => {
+  const nx = parseFloat(x);
+  const ny = parseFloat(y);
+  if (Number.isFinite(nx) && Number.isFinite(ny) && nx !== ny) return nx - ny;
+  return x.localeCompare(y, 'en', { numeric: true });
+};
+
+/**
+ * ราคาแยกตามค่าแกน (เช่น "ความยาวแกน L1" ที่ราคาต่อ 100 mm ต่างกันตามขนาดแกน) — แถวย่อยเต็มความกว้าง
+ *
+ * หัวบรรทัดบอกว่าเลขเหล่านี้แยกตามอะไร และหน่วยคืออะไร · ทุกช่องมีป้ายค่าแกนอยู่ข้างบน
+ * ⚠️ **ช่องว่าง ≠ 0** — ลบเลขทิ้ง = "ขนาดนี้ไม่มีราคา ต้องขอราคา" · ใส่ 0 = "ไม่คิดเงินเพิ่ม"
+ *   เดิมช่องที่ลบทิ้งถูกบันทึกเป็น 0 ⇒ ขนาดนั้นกลายเป็นของแถมเงียบ ๆ (บั๊กที่เจอ 2026-09-23)
+ */
+const RatesGrid: React.FC<{
+  a: EditorAdder;
+  orig: EditorAdder | undefined;
+  onChange: (value: string, rate: number | null) => void;
+}> = ({ a, orig, onChange }) => {
+  const unit = a.kind === 'perUnit'
+    ? `บาท / ${a.step && a.step !== 1 ? `${a.step} ` : ''}${a.unit.trim()}`
+    : a.kind === 'percent' ? '%' : 'บาท';
+  const rows = [...(a.rates ?? [])].sort((x, y) => byNatural(x.value, y.value));
+  return (
+    <div className="rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2.5">
+      <div className="text-[11px] text-slate-500 mb-2">
+        ราคาแยกตาม <b className="text-slate-700">{a.byAxisTh ?? 'ค่าแกน'}</b> · หน่วย {unit}
+        <span className="text-slate-400"> · เว้นว่าง = ขนาดนั้นต้องขอราคา (ไม่ใช่ฟรี)</span>
+      </div>
+      <div className="grid gap-x-2 gap-y-1.5 grid-cols-[repeat(auto-fill,minmax(84px,1fr))]">
+        {rows.map((r) => {
+          const was = orig?.rates?.find((x) => x.value === r.value)?.rate;
+          return (
+            <label key={r.value} className="flex flex-col gap-0.5">
+              <span className="text-[10.5px] font-semibold text-slate-500 truncate" title={r.value}>{r.value || '(ว่าง)'}</span>
+              <Cell label={`${a.label} — ${a.byAxisTh ?? ''} ${r.value}`} width="w-full"
+                    value={r.rate === null ? '' : String(r.rate)}
+                    was={was === null || was === undefined ? '' : String(was)}
+                    onChange={(val) => onChange(r.value, toNum(val))} />
+            </label>
+          );
+        })}
+      </div>
+    </div>
   );
 };
 
@@ -144,7 +192,7 @@ function bandProblems(bands: WBand[]): string[] {
    สรุปเป็นแถว "เดิม → ใหม่" แบบเดียวกับที่จอตรวจสมุดราคาใช้ · `struct` = เพิ่ม/ลบแถว
    ซึ่งต้องแยกให้เห็น เพราะการลบกฎทิ้งกับการขยับตัวเลขคนละน้ำหนักกันมาก */
 
-interface DiffRow { what: string; was: string; now: string; struct?: boolean; warn?: boolean }
+export interface DiffRow { what: string; was: string; now: string; struct?: boolean; warn?: boolean }
 
 function priceOf(a: EditorAdder): string {
   if (a.kind === 'percent') return a.percent === null ? '' : `${a.percent}%`;
@@ -244,7 +292,12 @@ function buildDiff(orig: EditorView, w: Working): DiffRow[] {
       for (const r of a.rates) {
         const b = o.rates.find((x) => x.value === r.value);
         if (b && b.rate !== r.rate) {
-          rows.push({ what: `กฎ ${a.label} — ${r.value || '(ว่าง)'}`, was: fmt(b.rate), now: fmt(r.rate) });
+          rows.push({
+            what: `กฎ ${a.label} — ${a.byAxisTh ?? ''} ${r.value || '(ว่าง)'}`.replace(/\s+/g, ' '),
+            was: b.rate === null ? 'ไม่มีราคา' : fmt(b.rate),
+            now: r.rate === null ? 'ไม่มีราคา — ขนาดนี้ต้องขอราคา' : fmt(r.rate),
+            warn: r.rate === null,
+          });
         }
       }
     }
@@ -293,7 +346,7 @@ export const ModelPriceEditor: React.FC<{
   const load = useCallback(async () => {
     setError('');
     try {
-      const res = await fetch(`/api/admin/pricing/model/${encodeURIComponent(code)}`, { headers: authHeaders });
+      const res = await fetch(`/api/admin/pricebook/model/${encodeURIComponent(code)}`, { headers: authHeaders });
       const body = await res.json();
       if (!res.ok) throw new Error(body?.error ?? 'โหลดราคาของรุ่นนี้ไม่สำเร็จ');
       setOrig(body.model);
@@ -334,7 +387,7 @@ export const ModelPriceEditor: React.FC<{
     setBusy(true);
     setError('');
     try {
-      const res = await fetch(`/api/admin/pricing/model/${encodeURIComponent(orig.code)}`, {
+      const res = await fetch(`/api/admin/pricebook/model/${encodeURIComponent(orig.code)}`, {
         method: 'PUT',
         headers: jsonHeaders,
         body: JSON.stringify({
@@ -395,7 +448,7 @@ export const ModelPriceEditor: React.FC<{
         <Button icon={ChevronLeft} onClick={() => onBack(savedOnce.current)}>กลับ</Button>
         <div className="min-w-[180px] flex-1">
           <h1 className="text-lg font-bold text-slate-900 truncate">
-            แก้ราคา {orig.code} — {orig.label}
+            แก้ราคา {orig.name ?? orig.code} — {orig.label}
           </h1>
           <p className="text-[11px] text-slate-400 mt-0.5">
             {orig.standardTh && <>รวมในราคาตั้งแล้ว: {orig.standardTh} · </>}
@@ -533,9 +586,9 @@ export const ModelPriceEditor: React.FC<{
         >
           <div className="px-4 py-3 space-y-2.5">
             <div className="flex items-center gap-3 flex-wrap rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-              <Sw checked={w.variantOn} label={`เปิดใช้ ${v.label} กับ ${orig.code}`}
+              <Sw checked={w.variantOn} label={`เปิดใช้ ${v.label} กับ ${orig.name ?? orig.code}`}
                   onChange={(on) => patch((d) => { d.variantOn = on; })} />
-              <span className="text-[12.5px] font-bold text-slate-800">เปิดใช้ {v.label} กับ {orig.code}</span>
+              <span className="text-[12.5px] font-bold text-slate-800">เปิดใช้ {v.label} กับ {orig.name ?? orig.code}</span>
               <span className="h-5 w-px bg-slate-200" />
               <span className="text-xs text-slate-500">ราคาตั้ง บวกเพิ่มจากราคาปกติ</span>
               <Cell label={`${v.label} บวกเพิ่มจากราคาตั้ง`} width="w-20"
@@ -630,7 +683,8 @@ export const ModelPriceEditor: React.FC<{
             </thead>
             <tbody>
               {w.adders.map((a, i) => (
-                <tr key={a.uid} className={`border-b border-slate-50 ${a.disabled ? 'opacity-55' : ''}`}>
+                <React.Fragment key={a.uid}>
+                <tr className={`${a.rates ? '' : 'border-b border-slate-50'} ${a.disabled ? 'opacity-55' : ''}`}>
                   <td className="px-4 py-2">
                     <Sw checked={!a.disabled} label={`เปิดใช้กฎ ${a.label}`}
                         onChange={(on) => patch((d) => { d.adders[i] = { ...a, disabled: !on }; })} />
@@ -651,22 +705,11 @@ export const ModelPriceEditor: React.FC<{
                   </td>
                   <td className="px-2 py-2 text-right whitespace-nowrap">
                     {a.rates ? (
-                      <div className="flex flex-wrap gap-x-3 gap-y-1 justify-end">
-                        {a.rates.map((r, ri) => (
-                          <span key={r.value} className="inline-flex items-center gap-1 text-[11px] text-slate-500">
-                            {r.value || '(ว่าง)'}
-                            <Cell label={`${a.label} — ${r.value}`} width="w-16"
-                                  value={String(r.rate)}
-                                  was={String(orig.adders.find((x) => x.id === a.id)?.rates?.[ri]?.rate ?? '')}
-                                  onChange={(val) => patch((d) => {
-                                    const rates = [...(a.rates ?? [])];
-                                    rates[ri] = { ...r, rate: toNum(val) ?? 0 };
-                                    d.adders[i] = { ...a, rates };
-                                  })} />
-                          </span>
-                        ))}
-                      </div>
-                    ) : (
+                      // ราคาแยกตามค่าแกนวาดเป็นแถวย่อยเต็มความกว้างข้างล่าง — ช่องนี้บอกแค่ว่า "ดูข้างล่าง"
+                      // (เดิมอัดช่องกรอก 36 ช่องไว้ในคอลัมน์นี้ แถวเดียวสูงเกินจอและไม่มีป้ายบอกว่าเลขคืออะไร)
+                      <span className="text-[11px] text-slate-500">
+                        แยกตาม{a.byAxisTh ?? 'ค่าแกน'} {a.rates.length} ค่า ↓
+                      </span>                    ) : (
                       <>
                         <Cell
                           label={`ราคาของกฎ ${a.label}`} width="w-24"
@@ -700,7 +743,7 @@ export const ModelPriceEditor: React.FC<{
                     <button
                       type="button" aria-label={`ลบกฎ ${a.label}`} title={`ลบกฎ ${a.label}`}
                       onClick={() => {
-                        if (!confirm(`ลบกฎ “${a.label}” ออกจาก ${orig.code}?\n\nถ้าแค่อยากหยุดใช้ชั่วคราว ให้ปิดสวิตช์แทน — ปิดแล้วย้อนกลับได้ และยังเห็นว่าเมื่อก่อนคิดเท่าไหร่`)) return;
+                        if (!confirm(`ลบกฎ “${a.label}” ออกจาก ${orig.name ?? orig.code}?\n\nถ้าแค่อยากหยุดใช้ชั่วคราว ให้ปิดสวิตช์แทน — ปิดแล้วย้อนกลับได้ และยังเห็นว่าเมื่อก่อนคิดเท่าไหร่`)) return;
                         patch((d) => { d.adders.splice(i, 1); delete d.variantPrices[a.id]; });
                       }}
                       className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-rose-600"
@@ -709,6 +752,21 @@ export const ModelPriceEditor: React.FC<{
                     </button>
                   </td>
                 </tr>
+                {a.rates && (
+                  <tr className={`border-b border-slate-50 ${a.disabled ? 'opacity-55' : ''}`}>
+                    <td />
+                    <td colSpan={5} className="px-2 pb-3">
+                      <RatesGrid a={a} orig={orig.adders.find((x) => x.id === a.id)}
+                                 onChange={(value, rate) => patch((d) => {
+                                   d.adders[i] = {
+                                     ...a,
+                                     rates: (a.rates ?? []).map((r) => (r.value === value ? { ...r, rate } : r)),
+                                   };
+                                 })} />
+                    </td>
+                  </tr>
+                )}
+                </React.Fragment>
               ))}
             </tbody>
           </table>
@@ -801,7 +859,7 @@ export const ModelPriceEditor: React.FC<{
 
 /* ── กล่องตรวจก่อนบันทึก ───────────────────────────────────────────────── */
 
-const ReviewModal: React.FC<{
+export const ReviewModal: React.FC<{
   code: string;
   rows: DiffRow[];
   problems: string[];
@@ -830,7 +888,7 @@ const ReviewModal: React.FC<{
             <div className="rounded-xl border px-3 py-2 text-[12.5px]"
                  style={{ borderColor: 'var(--brand-border)', background: 'var(--brand-soft)', color: 'var(--brand-fg)' }}>
               <b>บันทึกราคาใหม่ของ {code} แล้ว</b> — มีผลกับการคิดราคาทันที ·
-              เล่มก่อนหน้าถูกเก็บไว้ กด “ย้อนไปเล่มก่อนหน้า” บนหน้าคิดราคาสินค้าได้ทุกเมื่อ
+              เล่มก่อนหน้าถูกเก็บไว้ กด “ย้อนไปเล่มก่อนหน้า” บนหน้าสมุดราคาได้ทุกเมื่อ
             </div>
           ) : (
             <>
@@ -843,7 +901,7 @@ const ReviewModal: React.FC<{
               {warns > 0 && (
                 <div className="flex gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11.5px] text-amber-800">
                   <AlertTriangle className="h-4 w-4 shrink-0 mt-px" />
-                  <span><b>{warns} รายการถูกลบหรือปิดไว้</b> — ช่องราคาที่ลบเลขออก = เลิกรับผลิตขนาดนั้น ถ้าตั้งใจให้ฟรีต้องใส่เลข 0 ไม่ใช่ลบทิ้ง</span>
+                  <span><b>{warns} รายการต้องดูให้แน่ใจ</b> (ตัวหนังสือสีเหลืองข้างล่าง) — ช่องราคาที่ลบเลขออก = เลิกรับผลิตขนาดนั้น ถ้าตั้งใจให้ฟรีต้องใส่เลข 0 ไม่ใช่ลบทิ้ง</span>
                 </div>
               )}
               {structs > 0 && (

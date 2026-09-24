@@ -14,8 +14,10 @@
 import { NoBook, loadBookFrom } from '../pricebook/bookSource.js';
 import { computePrice, resolveModel } from '../../services/pricingLab/engine.js';
 import { parseProductCode } from '../../services/pricingLab/code.js';
-import { EditRejected, applyModelEdit, modelEditorView } from '../../services/pricingLab/modelEditor.js';
-import type { PriceBook, PriceModel } from '../../services/pricingLab/types.js';
+import { EditRejected, applyModelEdit, excelReady, modelEditorView } from '../../services/pricingLab/modelEditor.js';
+import type { PriceBook, PriceModel, SheetLayout } from '../../services/pricingLab/types.js';
+import { makeTemplate, readUploaded } from '../../services/pricingLab/bookFile.js';
+import { applyModels } from '../../services/pricingLab/bookUpdate.js';
 
 let pass = 0;
 const fails: string[] = [];
@@ -86,6 +88,17 @@ check('คำศัพท์ให้ช่องเลือกเป็นร�
 function rejects(name: string, body: unknown, expect: RegExp): void {
   try {
     applyModelEdit(bh01!, body);
+    check(name, false, 'ไม่ปฏิเสธเลย');
+  } catch (e) {
+    const msg = e instanceof EditRejected ? e.message : `พังด้วย ${String(e)}`;
+    check(name, e instanceof EditRejected && expect.test(msg), msg);
+  }
+}
+
+/** แบบทั่วไปของ `rejects` — สำหรับรุ่นอื่นนอกจาก BH-01 */
+function expectReject(name: string, fn: () => unknown, expect: RegExp): void {
+  try {
+    fn();
     check(name, false, 'ไม่ปฏิเสธเลย');
   } catch (e) {
     const msg = e instanceof EditRejected ? e.message : `พังด้วย ${String(e)}`;
@@ -179,6 +192,218 @@ check('กฎที่เพิ่มจากหน้าจอติดธง 
 check('กฎเดิมไม่ถูกมาร์กว่าเพิ่มเอง', added.adders.find((a) => a.id === 'conn_pl2')?.custom !== true);
 check('ที่มาในชีตของกฎเดิมยังอยู่',
   added.adders.find((a) => a.id === 'hold')?.source === bh01.adders.find((a) => a.id === 'hold')?.source);
+
+console.log('\n── 4. ราคาแยกตามค่าแกน (ซีรีส์ TS) — ช่องว่างต้องไม่กลายเป็น 0 ────────────\n');
+
+// เจ้าของเจอ 2026-09-23: ลบเลขในช่อง "ความยาวแกน L1 · ขนาด 2" ทิ้งแล้วบันทึก เดิมหน้าจอส่ง 0 ⇒ ขนาดนั้น
+// กลายเป็น "ไม่คิดเงินเพิ่ม" เงียบ ๆ · ของที่ถูกคือ "ไม่มีราคา" ⇒ ตัวคิดราคาต้องไม่คิดราคาขนาดนั้นให้
+const tsk04 = book.models['TSK-04'];
+if (!tsk04?.adders.find((a) => a.id === 'len_l1')?.rates) {
+  check('สมุดมี TSK-04 พร้อมกฎ len_l1 ที่ราคาแยกตามขนาดแกน', false, 'ไม่มี — ข้ามหัวข้อนี้');
+} else {
+  const tView = modelEditorView(book, tsk04);
+  const tAdders = tView.adders.map((a) => ({ ...a, when: a.when ?? { always: true } }));
+  const withRate = (rate: number | null) => applyModelEdit(tsk04, {
+    adders: tAdders.map((a) => (a.id !== 'len_l1' ? a : {
+      ...a, rates: a.rates!.map((r) => (r.value === '2' ? { ...r, rate } : r)),
+    })),
+    constraintsOff: [],
+  });
+  const emptied = withRate(null).adders.find((a) => a.id === 'len_l1')!;
+  check('ลบเลขทิ้ง ⇒ ขนาดนั้นหายจากตาราง (ไม่มีราคา) ไม่ใช่ 0', !('2' in (emptied.rates ?? {})),
+    JSON.stringify(emptied.rates?.['2']));
+  check('  ขนาดอื่นในกฎเดียวกันไม่ขยับ',
+    Object.keys(emptied.rates ?? {}).length === Object.keys(tsk04.adders.find((a) => a.id === 'len_l1')!.rates!).length - 1);
+  check('ใส่ 0 เอง ⇒ เก็บเป็น 0 จริง (ไม่คิดเงินเพิ่ม)',
+    withRate(0).adders.find((a) => a.id === 'len_l1')!.rates?.['2'] === 0);
+}
+
+/**
+ * จุดแรกที่สองค่าต่างกันจริง — ไม่นับลำดับคีย์ในออบเจกต์ และไม่นับคีย์ที่ค่าเป็น undefined
+ * (ตัวบันทึกประกอบกฎใหม่ด้วยลำดับคีย์ของมันเอง ซึ่งไม่กระทบราคาและไม่กระทบแม่แบบ .xlsx)
+ * ลำดับใน **อาเรย์** ยังนับ — ลำดับกฎ/ช่วงราคาคือสิ่งที่คนเห็นในแม่แบบ
+ */
+function firstDiff(a: unknown, b: unknown, path = ''): string | null {
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b)) return `${path}: ${JSON.stringify(a)} → ${JSON.stringify(b)}`;
+    if (a.length !== b.length) return `${path}: ${a.length} → ${b.length} รายการ`;
+    for (let i = 0; i < a.length; i++) {
+      const d = firstDiff(a[i], b[i], `${path}[${i}]`);
+      if (d) return d;
+    }
+    return null;
+  }
+  if (a && b && typeof a === 'object' && typeof b === 'object') {
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+    for (const k of keys) {
+      const d = firstDiff((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k], `${path}.${k}`);
+      if (d) return d;
+    }
+    return null;
+  }
+  return a === b ? null : `${path}: ${JSON.stringify(a)} → ${JSON.stringify(b)}`;
+}
+
+console.log('\n── 5. บันทึกโดยไม่แตะอะไร ⇒ สมุดต้องเท่าเดิมทุกค่า ทุกรุ่น ──────────────────\n');
+
+// ข้อนี้มีเพราะเจอพร้อมกันสามเรื่อง 2026-09-23: TS-18 บันทึกไม่ได้เลย (เงื่อนไขประกอบถูกปฏิเสธ) ·
+// ช่วงราคาของ BH สลับลำดับคีย์ · หน่วย " m" ถูกตัดช่องว่าง — สองเรื่องหลังไม่เปลี่ยนราคา แต่ทำให้
+// ประวัติบันทึกว่า "เปลี่ยน" ทั้งที่ไม่มีใครแก้อะไร ⇒ ส่งสิ่งที่หน้าจอส่งจริง แล้วเทียบทั้งรุ่น (ไม่นับลำดับคีย์)
+for (const m of Object.values(book.models)) {
+  const v = modelEditorView(book, m);
+  const body: Record<string, unknown> = {
+    adders: v.adders.map((a) => ({ ...a, when: a.when ?? { always: true } })),
+    constraintsOff: v.constraints.filter((c) => c.disabled).map((c) => c.id),
+  };
+  if (v.base.kind === 'banded') body.bands = v.base.bands;
+  if (v.variant) {
+    body.variant = { suffix: v.variant.suffix, label: v.variant.label, percent: v.variant.percent,
+      adderPrices: v.variant.adderPrices ?? {}, disabled: v.variant.disabled };
+  }
+  try {
+    const diff = firstDiff(m, applyModelEdit(m, body, book));
+    check(`${m.code} — บันทึกเปล่าแล้วสมุดเท่าเดิม`, diff === null, diff ?? '');
+  } catch (e) {
+    check(`${m.code} — บันทึกเปล่าแล้วสมุดเท่าเดิม`, false, e instanceof Error ? e.message : String(e));
+  }
+}
+
+console.log('\n── 6. สมุดรายชีต (ชีต TS-01+TS-01-0) — ตารางราคาตั้งสองแกนแก้จากจอ ─────────\n');
+
+// เจ้าของสั่ง 2026-09-24: "1 ชีท / 1 สมุด" + หน้าตาใกล้ Excel ที่สุด เริ่มที่ชีตนี้
+// ทางบันทึกคือ `PUT /sheet/:sheet` → `applyModelEdit(รุ่น, { cells, adderRates }, เล่ม)` ของแต่ละรุ่นในชีต
+const ts01 = book.models['TSK-01'];
+const ts010 = book.models['TSK-01-0'];
+if (!ts01 || !ts010 || ts01.base.kind !== 'matrix') {
+  check('สมุดมี TSK-01 / TSK-01-0 แบบตารางสองแกน', false, 'ไม่มี — ข้ามหัวข้อนี้');
+} else {
+  const ready = Object.values(book.models).filter(excelReady).map((m) => m.code).sort();
+  check('รุ่นที่เปิดแบบชีต Excel ได้ = สองรุ่นของชีต TS-01+TS-01-0 เท่านั้น',
+    ready.join(',') === 'TSK-01,TSK-01-0', ready.join(','));
+
+  const v = modelEditorView(book, ts01);
+  const grid = v.base.kind === 'matrix' ? v.base : null;
+  check('จอได้ตาราง 5 แถว (TSK/TSJ…TSZ) × 5 คอลัมน์ (M6x1.0…5/16”) ตามลำดับในชีต',
+    !!grid && grid.rows.join(',') === 'TSK/TSJ,TST,TSP,TSPA,TSZ' && grid.cols.join(',') === 'M6x1.0,M8x1.0,M10x1.25,1/4”,5/16”',
+    grid ? `${grid.rows.join(',')} × ${grid.cols.join(',')}` : 'ไม่ใช่ matrix');
+  check('ช่องมุมซ้ายบน = 160 (TS-01!B11) · มุมขวาล่าง = 1,680 (TS-01!F15)',
+    grid?.cells?.[0]?.[0] === 160 && grid?.cells?.[4]?.[4] === 1680);
+  check('หัวตารางแบบที่ชีตเขียน (TS_-01 · TS_-01-0)',
+    v.title === 'TS_-01' && modelEditorView(book, ts010).title === 'TS_-01-0', `${v.title}`);
+
+  const K = 'TSK/TSJ | M6x1.0';
+  const priceK = (b: PriceBook) => computePrice({ model: 'TSK-01', axes: { sensor: 'TSK/TSJ', thread: 'M6x1.0' } }, b);
+  const edited = applyModelEdit(ts01, { cells: { [K]: 175 } }, book);
+  const cells = edited.base.kind === 'matrix' ? edited.base.cells : {};
+  check('แก้ช่องเดียว ⇒ ช่องนั้นเปลี่ยน', cells[K] === 175, String(cells[K]));
+  check('  ช่องอื่นและลำดับคีย์ไม่ขยับ',
+    JSON.stringify(Object.keys(cells)) === JSON.stringify(Object.keys(ts01.base.cells))
+      && Object.keys(cells).every((k) => k === K || cells[k] === (ts01.base as { cells: Record<string, number> }).cells[k]));
+  check('  ราคาที่คิดได้ขยับตาม (160 → 175)', priceK(withModel(edited)).unitPrice === 175 && priceK(book).unitPrice === 160,
+    `${priceK(book).unitPrice} → ${priceK(withModel(edited)).unitPrice}`);
+
+  const emptied = applyModelEdit(ts01, { cells: { [K]: null } }, book);
+  const ec = emptied.base.kind === 'matrix' ? emptied.base.cells : {};
+  check('ลบเลขทิ้ง ⇒ ช่องนั้นหาย (ไม่รับผลิต) ไม่ใช่ 0', !(K in ec));
+  check('  คิดราคาช่องนั้นแล้วไม่ได้ราคา 0 เงียบ ๆ', priceK(withModel(emptied)).status !== 'priced',
+    priceK(withModel(emptied)).status);
+  const refilled = applyModelEdit(emptied, { cells: { [K]: 160 } }, withModel(emptied));
+  check('  กรอกคืนได้ (ช่องที่ว่างในตารางยังกรอกได้)',
+    refilled.base.kind === 'matrix' && refilled.base.cells[K] === 160);
+  expectReject('ช่องที่ไม่มีในตาราง (แถว/คอลัมน์ใหม่) ถูกปฏิเสธ',
+    () => applyModelEdit(ts01, { cells: { 'TSX | M6x1.0': 100 } }, book), /ไม่มีช่อง/);
+  expectReject('ราคาที่ไม่ใช่ตัวเลขถูกปฏิเสธ',
+    () => applyModelEdit(ts01, { cells: { [K]: 'abc' } }, book), /ตัวเลข/);
+  expectReject('แก้ตารางสองแกนกับรุ่นแบบช่วงขนาด (BH) ถูกปฏิเสธ',
+    () => applyModelEdit(bh01, { cells: { [K]: 1 } }, book), /สองแกน/);
+
+  // ราคาสาย (แถบหมายเหตุใต้ตาราง) — ช่องว่างต้องไม่กลายเป็น 0 และต้องกรอกคืนได้
+  const cable = ts01.adders.find((a) => a.id === 'cable_over_1m');
+  const cableKey = Object.keys(cable?.rates ?? {})[0];
+  if (!cable || !cableKey) {
+    check('TSK-01 มีกฎราคาสาย', false);
+  } else {
+    const noCable = applyModelEdit(ts01, { adderRates: { cable_over_1m: [{ value: cableKey, rate: null }] } }, book);
+    const r1 = noCable.adders.find((a) => a.id === 'cable_over_1m')?.rates ?? {};
+    check(`ลบราคาสาย "${cableKey}" ⇒ หายจากสมุด (ต้องขอราคา) ไม่ใช่ 0`, !(cableKey in r1));
+    check('  ราคาสายชนิดอื่นไม่ขยับ',
+      Object.keys(cable.rates!).filter((k) => k !== cableKey).every((k) => r1[k] === cable.rates![k]));
+    const vAfter = modelEditorView(withModel(noCable), noCable);
+    check('  จอยังเห็นช่องของสายชนิดนั้น (ว่าง) ให้กรอกคืน',
+      !!vAfter.adders.find((a) => a.id === 'cable_over_1m')?.rates?.some((r) => r.value === cableKey && r.rate === null));
+    const back = applyModelEdit(noCable, { adderRates: { cable_over_1m: [{ value: cableKey, rate: 80 }] } }, withModel(noCable));
+    check('  กรอกคืนแล้วเก็บได้จริง',
+      back.adders.find((a) => a.id === 'cable_over_1m')?.rates?.[cableKey] === 80);
+    expectReject('ราคาสายของกฎที่ไม่มีถูกปฏิเสธ',
+      () => applyModelEdit(ts01, { adderRates: { nope: [] } }, book), /ไม่มีกฎ/);
+    const bogus = applyModelEdit(ts01, { adderRates: { cable_over_1m: [{ value: 'สายทองคำ', rate: 1 }] } }, book);
+    check('ชนิดสายที่สมุดไม่รู้จักถูกทิ้ง (สร้างค่าแกนใหม่จาก API ไม่ได้)',
+      !('สายทองคำ' in (bogus.adders.find((a) => a.id === 'cable_over_1m')?.rates ?? {})));
+  }
+
+  // บันทึกจากหน้าสมุดรายชีตโดยไม่แตะอะไร ⇒ ต้องเท่าเดิม **ทุกไบต์** (เส้น PUT /sheet ใช้ JSON.stringify ตัดสินว่ารุ่นไหนเปลี่ยน)
+  for (const m of [ts01, ts010]) {
+    const mv = modelEditorView(book, m);
+    const body = {
+      cells: mv.base.kind === 'matrix' && mv.base.cells
+        ? Object.fromEntries(mv.base.rows.flatMap((r, i) => mv.base.kind === 'matrix'
+          ? mv.base.cols.map((c, j) => [`${r} | ${c}`, mv.base.kind === 'matrix' ? mv.base.cells![i]![j] : null]) : []))
+        : {},
+      adderRates: Object.fromEntries(mv.adders.filter((a) => a.rates).map((a) => [a.id, a.rates])),
+    };
+    check(`${m.code} — บันทึกทั้งชีตแบบไม่แก้อะไร ได้ JSON เดิมทุกไบต์`,
+      JSON.stringify(applyModelEdit(m, body, book)) === JSON.stringify(m));
+  }
+}
+
+console.log('\n── 7. หน้าตาของชีต (ชนิดสายรุ่นเริ่มต้น · ตัวหนังสือแดง · คอลัมน์เหลือง) ────────\n');
+
+// เจ้าของสั่งเพิ่ม 2026-09-24 — แสดงผลอย่างเดียว ⇒ ข้อที่สำคัญที่สุดคือ "ราคาไม่ขยับ" และ "ไม่หายระหว่างทาง"
+// ค่าเดียวกับที่ `importer.ts --layout-only` อ่านได้จากไฟล์จริง (TS-01+TS-01-0!G11:G15 · C16:D16 · E11:E15)
+if (ts01 && ts01.base.kind === 'matrix') {
+  const LAY: SheetLayout = {
+    rowNote: { label: 'ชนิดสาย รุ่นเริ่มต้น', values: { 'TSK/TSJ': 'สาย ถักสแตนเลส', TST: 'สาย เทปล่อน', TSP: 'สาย PVC', TSPA: 'สาย PVC', TSZ: 'สาย PVC' } },
+    colNotes: { 'M8x1.0': '*M8x1.25', 'M10x1.25': '*M10x1.5' },
+    highlightCols: ['1/4”'],
+  };
+  const withL: PriceModel = { ...ts01, layout: LAY };
+  const bookL = withModel(withL);
+  const v7 = modelEditorView(bookL, withL);
+  check('จอได้หน้าตาครบสามอย่าง',
+    v7.layout.rowNote?.values.TST === 'สาย เทปล่อน' && v7.layout.colNotes['M8x1.0'] === '*M8x1.25' && v7.layout.highlightCols[0] === '1/4”');
+  const priceAll = (b: PriceBook) => ['TSK/TSJ', 'TST', 'TSZ'].map((r) =>
+    computePrice({ model: 'TSK-01', axes: { sensor: r, thread: 'M8x1.0' } }, b).unitPrice).join(',');
+  check('มีหน้าตาแล้วราคาไม่ขยับสักช่อง', priceAll(bookL) === priceAll(book));
+
+  const sameBody = { layout: { rowNote: LAY.rowNote!.values, colNotes: LAY.colNotes, highlightCols: LAY.highlightCols } };
+  check('บันทึกหน้าตาเดิมกลับไป ⇒ JSON เดิมทุกไบต์', JSON.stringify(applyModelEdit(withL, sameBody, bookL)) === JSON.stringify(withL));
+  check('ไม่ส่ง layout มา ⇒ คงเดิม (หน้าแก้ทีละรุ่นไม่ลบของที่มันไม่เห็น)',
+    JSON.stringify(applyModelEdit(withL, { cells: {} }, bookL).layout) === JSON.stringify(LAY));
+  const e7 = applyModelEdit(withL, { layout: { ...sameBody.layout, rowNote: { ...LAY.rowNote!.values, TSZ: 'สาย ไฟเบอร์กลาส' }, highlightCols: ['M6x1.0', '1/4”'] } }, bookL);
+  check('แก้ข้อความท้ายแถว + เพิ่มคอลัมน์เหลือง ได้ตามลำดับคอลัมน์ของตาราง',
+    e7.layout?.rowNote?.values.TSZ === 'สาย ไฟเบอร์กลาส' && e7.layout?.highlightCols?.join(',') === 'M6x1.0,1/4”'
+      && e7.layout?.rowNote?.label === 'ชนิดสาย รุ่นเริ่มต้น', JSON.stringify(e7.layout));
+  const cleared = applyModelEdit(withL, { layout: { rowNote: {}, colNotes: {}, highlightCols: [] } }, bookL);
+  check('ลบทุกอย่าง ⇒ ช่อง layout หายไปทั้งช่อง (ไม่เหลือ {} ค้าง)', !('layout' in cleared));
+  expectReject('ข้อความของแถวที่ไม่มีในตาราง ถูกปฏิเสธ',
+    () => applyModelEdit(withL, { layout: { rowNote: { TSX: 'x' } } }, bookL), /ไม่มี "TSX"/);
+  expectReject('ไฮไลต์คอลัมน์ที่ไม่มี ถูกปฏิเสธ',
+    () => applyModelEdit(withL, { layout: { highlightCols: ['M99'] } }, bookL), /ไม่มี "M99"/);
+  expectReject('ข้อความยาวเกิน ถูกปฏิเสธ',
+    () => applyModelEdit(withL, { layout: { colNotes: { 'M6x1.0': 'x'.repeat(61) } } }, bookL), /ยาวเกิน/);
+  const bad = modelEditorView(bookL, { ...withL, layout: { rowNote: 'พัง', colNotes: [1], highlightCols: 'x' } as unknown as SheetLayout });
+  check('layout เสียในฐาน (ใครแก้มือ) ⇒ จอไม่พัง อ่านเป็นว่าง',
+    bad.layout.rowNote === null && Object.keys(bad.layout.colNotes).length === 0 && bad.layout.highlightCols.length === 0);
+
+  // แม่แบบ Excel ไป-กลับ: หน้าตาต้องไม่หายระหว่างทาง (ชีต "หน้าตาในไฟล์ราคา")
+  const { book: back } = await readUploaded(Buffer.from(makeTemplate(bookL, '2026-09-24')));
+  check('แม่แบบ .xlsx ไป-กลับ ⇒ หน้าตาเท่าเดิมทุกไบต์',
+    JSON.stringify(back?.models['TSK-01']?.layout) === JSON.stringify(LAY), JSON.stringify(back?.models['TSK-01']?.layout));
+  // ไฟล์รุ่นเก่า (ไม่มีชีตหน้าตา) = ไม่รู้ ไม่ใช่ลบ
+  const oldFile: PriceBook = { ...bookL, models: { ...bookL.models, 'TSK-01': { ...withL, layout: undefined } } };
+  const merged = applyModels(bookL, oldFile, ['TSK-01'], { at: '2026-09-24T00:00:00.000Z' });
+  check('อัปแม่แบบรุ่นก่อนที่ไม่มีชีตหน้าตา ⇒ หน้าตาเดิมยังอยู่', JSON.stringify(merged.models['TSK-01']?.layout) === JSON.stringify(LAY));
+}
 
 console.log(`\n${'─'.repeat(70)}`);
 console.log(`ผล: ผ่าน ${pass} · ตก ${fails.length}`);

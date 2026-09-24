@@ -9,7 +9,11 @@ import {
 } from '../services/pricingLab/bookStore.js';
 import { computePrice } from '../services/pricingLab/engine.js';
 import { parseProductCode } from '../services/pricingLab/code.js';
-import { EditRejected, applyModelEdit, modelEditorView } from '../services/pricingLab/modelEditor.js';
+import { displayName } from '../services/pricingLab/labels.js';
+import { productsPerModel } from '../services/pricingLab/bookCoverage.js';
+import {
+  EditRejected, applyModelEdit, applySheetEdit, excelReady, modelEditorView, sheetModels,
+} from '../services/pricingLab/modelEditor.js';
 import { makeTemplate, readUploaded, templateFileName } from '../services/pricingLab/bookFile.js';
 import {
   BookConflict, BookRejected, RevisionNotFound, KEEP_BACKUPS,
@@ -21,7 +25,7 @@ import {
 } from '../db/pricingLabRepo.js';
 
 /**
- * API ของหน้า "คิดราคาสินค้า" — โมดูลที่ถอดออกได้ทั้งก้อน
+ * API ของหน้า "คิดราคาสินค้า" + หน้า "สมุดราคา" — โมดูลที่ถอดออกได้ทั้งก้อน
  *
  * เจ้าของสั่ง 2026-09-18: เอาเครื่องคิดราคาเข้าหน้าแอดมินจริงเพื่อให้ทดลองใช้หลังล็อกอิน
  * **เฟสแรกยังไม่ต่อกับใบเสนอราคา คิดราคาให้ดูอย่างเดียว** ⇒ ไฟล์นี้ไม่ import
@@ -38,8 +42,15 @@ import {
  * ช่อง `fingerprint` ที่หน้าจอถือ = `r<เลขการบันทึก>` (ชื่อช่องเดิม ทึบเหมือนเดิม ⇒ frontend ไม่ต้องแก้)
  * และ **ต้องส่งมาทุกครั้งที่บันทึก** (เจ้าของเคาะ 2026-09-23 · แผน §12 ข้อ 8) — ยุคไฟล์ไม่ส่งก็ข้ามด่านไปเลย
  *
- * สิทธิ์เข้าถึงถูกบังคับที่จุด mount ใน index.ts (adminAuthMiddleware + requireCapability('page.pricing'))
- * ไม่ใช่ในไฟล์นี้ ⇒ ไม่มีทางที่ route ใหม่จะหลุดออกไปโดยไม่มีการตรวจสิทธิ์
+ * **สอง router สองสิทธิ์** (เจ้าของสั่งแยกเมนู 2026-09-23 — "หน้าคิดราคาก็คือคิดราคาอย่างเดียว")
+ *   `pricingLabRouter` → `/api/admin/pricing`   ด่าน `page.pricing`   = คิดราคาอย่างเดียว **เขียนอะไรไม่ได้เลย**
+ *   `pricebookRouter`  → `/api/admin/pricebook` ด่าน `page.pricebook` = ทุกเส้นที่แก้ราคา/อ่านราคาทั้งรุ่น
+ * ⇒ เจ้าของเปิดหน้าคิดราคาให้เซลส์ได้โดยไม่ต้องยกสิทธิ์แก้ราคาไปด้วย · ก่อนแยก ใครคิดราคาได้ = แก้ราคาได้
+ * ⚠️ **เส้นที่เขียนหรือคืนราคาเกินกว่า "ผลของรหัสที่พิมพ์" ห้ามอยู่ใน `pricingLabRouter`** — ใส่ผิดตัว
+ *   เมื่อไหร่ สิทธิ์ที่แยกไว้กลายเป็นของประดับทันทีโดยไม่มีอะไรฟ้อง
+ *
+ * สิทธิ์เข้าถึงถูกบังคับที่จุด mount ใน index.ts (adminAuthMiddleware + requireCapability) ไม่ใช่ในไฟล์นี้
+ * ⇒ ไม่มีทางที่ route ใหม่จะหลุดออกไปโดยไม่มีการตรวจสิทธิ์
  *
  * ⚠️ **ราคาถูกคิดที่นี่ ไม่ได้ส่งสมุดราคาไปให้เบราว์เซอร์คิดเอง** — หน้าแอดมินเป็นไฟล์สาธารณะ
  *   (express.static ที่ public/) การล็อกอินเกิดในเบราว์เซอร์ ⇒ อะไรที่ build รวมไปกับหน้าจอ
@@ -51,7 +62,7 @@ import {
  *   **แอดมินต้องแก้ราคาเองได้จากหน้าจอ ไม่ต้องให้ใครไปรัน CLI บนเซิร์ฟเวอร์**
  *   ถ้าลบสองเส้นนี้ทิ้งเพราะเห็นว่าขัดกฎข้างบน ปุ่มบนหน้าจอจะตายโดยไม่มีอะไรฟ้อง
  *   สิ่งที่ทำให้มันไม่ขัดกฎจริง ๆ มีสามข้อ และต้องอยู่ครบทั้งสาม:
- *     1. **ผ่านด่านเดียวกับทั้ง router** (`adminAuthMiddleware` + `page.pricing` ที่ index.ts)
+ *     1. **ผ่านด่านของ router** (`adminAuthMiddleware` + `page.pricebook` ที่ index.ts)
  *        ⇒ คนที่ไม่ได้ล็อกอินโหลดไม่ได้ · ต่างจาก bundle ที่ไม่มีด่านอะไรเลย
  *     2. **ไม่มีอะไรถูก build รวมไปกับหน้าจอ** — ไฟล์เดินทางตอนกดปุ่มแล้วจบ
  *        `PricingLab.tsx` ไม่เก็บสมุดราคาไว้ใน state สักช่อง
@@ -64,10 +75,11 @@ import {
  *     · สามข้อข้างบนยังครบทุกข้อ (ด่านเดียวกัน · ไม่มีอะไรอยู่ใน bundle · โหลดตอนกดเท่านั้น)
  *     · และ `GET /template` ที่มีอยู่แล้ว **คืนทั้งเล่ม** ให้คนกลุ่มเดียวกันนี้อยู่ก่อนแล้ว
  *       ⇒ เส้นนี้ให้น้อยกว่าเส้นที่มีอยู่ ไม่ได้เปิดอะไรใหม่ให้ใคร
- *   ⇒ เส้นที่ยัง **ห้ามเพิ่ม** คือเส้นที่คืนสมุดราคาให้ **คนที่ไม่ได้ผ่านด่าน `page.pricing`**
+ *   ⇒ เส้นที่ยัง **ห้ามเพิ่ม** คือเส้นที่คืนสมุดราคาให้ **คนที่ไม่ได้ผ่านด่าน `page.pricebook`**
  *     หรือเส้นที่ทำให้ราคาไปอยู่ใน bundle ของหน้าแอดมิน (ซึ่งไม่มีด่านอะไรเลย)
  */
 export const pricingLabRouter = Router();
+export const pricebookRouter = Router();
 
 /**
  * body parser ผูกกับ router ตัวนี้ตัวเดียว ไม่ใช่ทั้งแอป
@@ -88,7 +100,8 @@ const smallJson = json({ limit: '64kb' });
 const uploadJson = json({ limit: '12mb' });
 const UPLOAD_PATHS = new Set(['/import/preview', '/import/apply']);
 
-pricingLabRouter.use((req, res, next) => (UPLOAD_PATHS.has(req.path) ? uploadJson : smallJson)(req, res, next));
+pricingLabRouter.use(smallJson);
+pricebookRouter.use((req, res, next) => (UPLOAD_PATHS.has(req.path) ? uploadJson : smallJson)(req, res, next));
 
 /**
  * ส่งส่วนต่างกลับไม่เกินกี่แถว — กันสองอย่างพร้อมกัน: payload ที่บวมจนหน้าค้าง
@@ -189,7 +202,7 @@ const nowIso = () => new Date().toISOString();
  * ส่งเป็นไบต์ตรง ๆ ไม่ใช่ base64 เพราะขาไปฝั่งเบราว์เซอร์ใช้ `fetch` + `blob` อยู่แล้ว
  * (ต้องแนบ Authorization ⇒ `<a href>` ธรรมดาใช้ไม่ได้ เพราะเบราว์เซอร์ไม่แนบ header ให้)
  */
-pricingLabRouter.get('/template', async (_req: AdminRequest, res: Response) => {
+pricebookRouter.get('/template', async (_req: AdminRequest, res: Response) => {
   const book = (await loadBookState())?.book;
   if (!book) return noBook(res);
 
@@ -209,7 +222,7 @@ pricingLabRouter.get('/template', async (_req: AdminRequest, res: Response) => {
  * ขั้นนี้คือทั้งเหตุผลที่ปุ่มอัปโหลดปลอดภัยพอจะให้ใครก็ได้ที่เปิดหน้านี้กด: ของที่ย้อนยาก
  * ถูกคั่นด้วยจอที่บันทึกไม่ได้เสมอ ⇒ คนที่อัปไฟล์ผิดรู้ตัวก่อนที่ราคาจะขยับ ไม่ใช่หลังจากนั้น
  */
-pricingLabRouter.post('/import/preview', async (req: AdminRequest, res: Response) => {
+pricebookRouter.post('/import/preview', async (req: AdminRequest, res: Response) => {
   const state = await loadBookState();
   if (!state) return noBook(res);
 
@@ -239,7 +252,7 @@ pricingLabRouter.post('/import/preview', async (req: AdminRequest, res: Response
  * การจำแปลว่ามีสถานะค้างในหน่วยความจำที่ต้องมีอายุ ต้องเก็บกวาด และหายไปตอน restart
  * ทั้งที่การอ่าน .xlsx ซ้ำใช้เวลาไม่ถึงวินาที ⇒ แลกความเร็วที่ไม่มีใครรู้สึก กับสถานะที่ไม่มีเลย
  */
-pricingLabRouter.post('/import/apply', async (req: AdminRequest, res: Response) => {
+pricebookRouter.post('/import/apply', async (req: AdminRequest, res: Response) => {
   const state = await loadBookState();
   if (!state) return noBook(res);
 
@@ -291,14 +304,13 @@ pricingLabRouter.post('/import/apply', async (req: AdminRequest, res: Response) 
   res.json({ ok: true, saved: picked.length, at, fingerprint: tokenOf(revision), issues });
 });
 
-/** ย้อนไปเล่มก่อนหน้า — ทางถอยทางเดียวของเครื่องที่ไม่มีใครไปรัน CLI ได้ */
 /**
  * ย้อนไปเล่มก่อนหน้า — ทางถอยทางเดียวของเครื่องที่ไม่มีใครไปรัน CLI ได้
  *
  * ชื่อที่ส่งมาคือ `rev-<เลข>` จากรายการใน `/overview` · การย้อนคือการบันทึกใหม่ ⇒ ย้อนผิดก็ย้อนกลับได้
- * สิทธิ์เท่ากับทั้งหน้า (`page.pricing`) — เจ้าของเคาะ 2026-09-23 (แผน §12 ข้อ 3)
+ * สิทธิ์เท่ากับทั้งหน้าสมุดราคา (`page.pricebook`) — เจ้าของเคาะ 2026-09-23 (แผน §12 ข้อ 3)
  */
-pricingLabRouter.post('/rollback', async (req: AdminRequest, res: Response) => {
+pricebookRouter.post('/rollback', async (req: AdminRequest, res: Response) => {
   const name = typeof req.body?.name === 'string' ? req.body.name : '';
   if (!name) return res.status(400).json({ error: 'ยังไม่ได้เลือกเล่มที่จะย้อนไป' });
   const target = parseRestoreName(name);
@@ -318,28 +330,48 @@ pricingLabRouter.post('/rollback', async (req: AdminRequest, res: Response) => {
   res.json({ ok: true, fingerprint: tokenOf(revision) });
 });
 
+/** รายชื่อรุ่นที่ส่งให้หน้าจอ — `code` คือรหัสในฐาน · `name` คือชื่อที่ขึ้นจอ (ดู `displayName`) */
+function modelBriefs(book: PriceBook | undefined) {
+  if (!book) return [];
+  return Object.values(book.models).map((m) => {
+    const { name, others } = displayName(m.code, m.aliases ?? []);
+    // `excel` = รุ่นนี้เปิดแบบชีต Excel ได้ (หน้าสมุดรายชีต) — เป็นธงจริง/เท็จ ไม่มีราคาติดไปด้วย
+    return { code: m.code, name, label: m.label, sheet: m.sheet, aliases: m.aliases ?? [], others, excel: excelReady(m) };
+  });
+}
+
 /**
- * ทุกอย่างที่หน้าจอต้องใช้ตอนเปิด — **ยกเว้นราคา**
+ * หน้า "คิดราคาสินค้า" ตอนเปิด — แค่พอให้รู้ว่าใช้เล่มไหนอยู่ และอ่านชื่อรุ่นในผลคิดราคาได้
  *
- * รายชื่อรุ่นส่งไปแค่ `code` / `label` / `aliases` ไม่ส่ง `cells` `adders` `base` ตามกฎที่หัวไฟล์
- * (สามช่องนั้นคือราคาจริงทั้งหมดของบริษัท)
+ * ไม่มีรหัสย่อย · census · เล่มสำรอง · จำนวนช่องราคา — ของพวกนั้นเป็นของงานแก้ราคา
+ * อยู่ที่ `GET /api/admin/pricebook/overview` หลังด่าน `page.pricebook`
  */
 pricingLabRouter.get('/overview', async (_req: AdminRequest, res: Response) => {
   const state = await loadBookState();
+  const book = state?.book;
+  res.json({
+    book: await bookStatus(state),
+    version: book?.version ?? null,
+    models: modelBriefs(book),
+    edited: book?.edited ?? null,
+  });
+});
+
+/**
+ * หน้า "สมุดราคา" ตอนเปิด — ทุกอย่าง **ยกเว้นราคา**
+ *
+ * รายชื่อรุ่นส่งไปแค่ชื่อ/ชื่ออื่น/จำนวนสินค้าที่ครอบ ไม่ส่ง `cells` `adders` `base` ตามกฎที่หัวไฟล์
+ * (สามช่องนั้นคือราคาจริงทั้งหมดของบริษัท)
+ */
+pricebookRouter.get('/overview', async (_req: AdminRequest, res: Response) => {
+  const state = await loadBookState();
   const status = await bookStatus(state);
   const book = state?.book;
-  const models = book
-    ? Object.values(book.models).map((m) => ({
-        code: m.code,
-        label: m.label,
-        sheet: m.sheet,
-        aliases: m.aliases ?? [],
-      }))
-    : [];
+  const coverage = state ? await productsPerModel(state) : null;
   res.json({
     book: status,
     version: book?.version ?? null,
-    models,
+    models: modelBriefs(book).map((m) => ({ ...m, products: coverage?.counts[m.code] ?? null })),
     subCodes: book ? await listSubCodes() : [],
     fromPriceFile: book?.subCodes ?? [],
     census,
@@ -364,7 +396,7 @@ pricingLabRouter.get('/overview', async (_req: AdminRequest, res: Response) => {
  * `GET` คืนทุกอย่างของรุ่นเดียวที่หน้าจอต้องใช้ (ตารางราคา · กฎ · ตัวเลือกท้ายรหัส ·
  * คำศัพท์ให้ช่องเลือก) — เหตุผลที่เส้นนี้คืนราคาได้อยู่ที่หัวไฟล์ อย่าลบทิ้งเพราะเห็นว่าขัดกฎ
  */
-pricingLabRouter.get('/model/:code', async (req: AdminRequest, res: Response) => {
+pricebookRouter.get('/model/:code', async (req: AdminRequest, res: Response) => {
   const state = await loadBookState();
   if (!state) return noBook(res);
   const { book } = state;
@@ -381,7 +413,7 @@ pricingLabRouter.get('/model/:code', async (req: AdminRequest, res: Response) =>
  * A กดบันทึก ⇒ ถ้าไม่ตรวจ งานของ B หายไปทั้งเล่มด้วยหน้าจอที่ A เปิดค้างไว้ตั้งแต่เช้า
  * (ท่าเดียวกับ `/import/apply` — เส้นนี้เพิ่งมาทีหลัง จึงต้องใช้ด่านเดียวกัน ไม่ใช่ด่านที่สอง)
  */
-pricingLabRouter.put('/model/:code', async (req: AdminRequest, res: Response) => {
+pricebookRouter.put('/model/:code', async (req: AdminRequest, res: Response) => {
   const state = await loadBookState();
   if (!state) return noBook(res);
   const { book } = state;
@@ -393,7 +425,7 @@ pricingLabRouter.put('/model/:code', async (req: AdminRequest, res: Response) =>
 
   let next;
   try {
-    next = applyModelEdit(current, req.body);
+    next = applyModelEdit(current, req.body, book);
   } catch (e) {
     if (e instanceof EditRejected) return res.status(400).json({ error: e.message });
     throw e;
@@ -430,6 +462,83 @@ pricingLabRouter.put('/model/:code', async (req: AdminRequest, res: Response) =>
 });
 
 /**
+ * "สมุดรายชีต" — ทุกรุ่นที่มาจากชีต Excel เดียวกัน เปิด/บันทึกพร้อมกัน
+ *
+ * เจ้าของสั่ง 2026-09-24: **"1 ชีท / 1 สมุด"** และหน้าแก้ต้อง "ใกล้เคียง format เดิมใน excel มากที่สุด"
+ * ชีต `TS-01+TS-01-0` มีสองตารางในหน้าเดียว (สองรุ่นในสมุด) ⇒ คนแก้ต้องเห็นทั้งสองตารางเรียงกัน
+ * เหมือนในไฟล์ ไม่ใช่เปิดทีละรุ่น
+ *
+ * บันทึกทั้งชีตเป็น **การบันทึกครั้งเดียว** (ประวัติหนึ่งแถว · ย้อนทีเดียวกลับครบ) — ถ้ายิง
+ * `PUT /model/:code` ทีละรุ่น รุ่นที่สองจะชนด่าน `fingerprint` ของรุ่นแรกเสมอ และถ้าพังกลางทาง
+ * ชีตจะค้างครึ่งเดียว
+ * ใช้ `applyModelEdit` ตัวเดียวกับหน้าแก้ทีละรุ่น (ผ่าน `applySheetEdit`) — ด่านตรวจค่าจึงมีชุดเดียว
+ */
+
+pricebookRouter.get('/sheet/:sheet', async (req: AdminRequest, res: Response) => {
+  const state = await loadBookState();
+  if (!state) return noBook(res);
+  const sheet = String(req.params.sheet ?? '');
+  const models = sheetModels(state.book, sheet);
+  if (models.length === 0) return res.status(404).json({ error: `ไม่มีชีต ${sheet} ในสมุดราคา` });
+  res.json({
+    sheet,
+    models: models.map((m) => modelEditorView(state.book, m)),
+    fingerprint: state.token,
+    version: state.book.version,
+  });
+});
+
+pricebookRouter.put('/sheet/:sheet', async (req: AdminRequest, res: Response) => {
+  const state = await loadBookState();
+  if (!state) return noBook(res);
+  const { book } = state;
+  const sheet = String(req.params.sheet ?? '');
+  if (sheetModels(book, sheet).length === 0) return res.status(404).json({ error: `ไม่มีชีต ${sheet} ในสมุดราคา` });
+
+  if (staleToken(req, res, state, MODEL_CONFLICT)) return;
+
+  let nextModels: PriceBook['models'];
+  let changed: string[];
+  try {
+    ({ models: nextModels, changed } = applySheetEdit(book, sheet, req.body?.models));
+  } catch (e) {
+    if (e instanceof EditRejected) return res.status(400).json({ error: e.message });
+    throw e;
+  }
+  if (changed.length === 0) return res.status(400).json({ error: 'ไม่มีราคาไหนเปลี่ยน — ไม่ได้บันทึก' });
+
+  const at = nowIso();
+  const note = typeof req.body?.note === 'string' ? req.body.note.trim().slice(0, 200) : '';
+  let revision: number;
+  try {
+    revision = await commitBookChange({
+      parent: state.revision,
+      kind: 'model',
+      next: {
+        ...book,
+        models: nextModels,
+        edited: { at, by: req.admin?.username, note: note ? `แก้ชีต ${sheet}: ${note}` : `แก้ราคาชีต ${sheet} จากหน้าจอ` },
+      },
+      changed,
+      by: req.admin?.username ?? null,
+    });
+  } catch (e) {
+    if (e instanceof BookConflict) return res.status(409).json({ error: MODEL_CONFLICT });
+    if (e instanceof BookRejected) return res.status(400).json({ error: e.message });
+    throw e;
+  }
+
+  const saved = { ...book, models: nextModels };
+  res.json({
+    ok: true,
+    at,
+    changed,
+    fingerprint: tokenOf(revision),
+    models: sheetModels(saved, sheet).map((m) => modelEditorView(saved, m)),
+  });
+});
+
+/**
  * คิดราคาจากรหัสที่พิมพ์มา · `draft` = รหัสย่อยที่ยังไม่ได้บันทึก
  *
  * `draft` คือทั้งเหตุผลที่ endpoint นี้เป็น POST ไม่ใช่ GET — หน้าจอต้องบอกได้ว่า
@@ -455,17 +564,17 @@ pricingLabRouter.post('/quote', async (req: AdminRequest, res: Response) => {
   res.json({ parsed, outcome });
 });
 
-pricingLabRouter.get('/subcodes', async (_req: AdminRequest, res: Response) => {
+pricebookRouter.get('/subcodes', async (_req: AdminRequest, res: Response) => {
   res.json({ rows: await listSubCodes() });
 });
 
-pricingLabRouter.post('/subcodes', async (req: AdminRequest, res: Response) => {
+pricebookRouter.post('/subcodes', async (req: AdminRequest, res: Response) => {
   const row = await upsertSubCode(req.body, req.admin?.username ?? '');
   if (!row) return res.status(400).json({ error: 'กรอกไม่ครบ — ต้องมีรหัสย่อย ผลกับราคา และค่าของผลนั้น' });
   res.json({ row });
 });
 
-pricingLabRouter.put('/subcodes/:id', async (req: AdminRequest, res: Response) => {
+pricebookRouter.put('/subcodes/:id', async (req: AdminRequest, res: Response) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'id ไม่ถูกต้อง' });
   const row = await updateSubCode(id, req.body, req.admin?.username ?? '');
@@ -473,7 +582,7 @@ pricingLabRouter.put('/subcodes/:id', async (req: AdminRequest, res: Response) =
   res.json({ row });
 });
 
-pricingLabRouter.delete('/subcodes/:id', async (req: AdminRequest, res: Response) => {
+pricebookRouter.delete('/subcodes/:id', async (req: AdminRequest, res: Response) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'id ไม่ถูกต้อง' });
   const ok = await deleteSubCode(id);

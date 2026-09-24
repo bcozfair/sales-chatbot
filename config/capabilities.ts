@@ -82,6 +82,7 @@ export type PageCapability =
   | 'page.settings_block'
   | 'page.settings_shipping'
   | 'page.pricing'
+  | 'page.pricebook'
   | 'page.productsdata'
   | 'page.customersdata'
   | 'page.odoocontacts'
@@ -422,6 +423,17 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     modes: SWITCH,
     defaults: switchFor('allow', 'deny', 'deny', 'deny'),
     enforcedAt: 'app.use(/api/admin/pricing) — ด่านวางก่อนจุด mount ของ pricingLabRouter',
+  },
+  {
+    // แยกจาก page.pricing เมื่อ 2026-09-23 (เจ้าของสั่ง) — ก่อนแยก ใครเปิดหน้าคิดราคาได้ก็แก้ราคาได้
+    // ทั้งเล่ม ⇒ ช่องนี้คือ "ใครแก้ราคา/กฎ/รหัสย่อยได้" ส่วน page.pricing เหลือแค่ "ใครคิดราคาได้"
+    // ค่าเริ่มต้น admin คนเดียว = เท่ากับของเดิมเป๊ะ (วันแยก prod ไม่มีแถว override ของ page.pricing)
+    key: 'page.pricebook',
+    group: 'page',
+    label: 'สมุดราคา',
+    modes: SWITCH,
+    defaults: switchFor('allow', 'deny', 'deny', 'deny'),
+    enforcedAt: 'app.use(/api/admin/pricebook) — ด่านวางก่อนจุด mount ของ pricebookRouter',
   },
   {
     key: 'page.productsdata',

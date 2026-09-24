@@ -1,5 +1,5 @@
 /* ─────────────────────────────────────────────────────────────────────────────
-   เปิดหน้า "คิดราคาสินค้า" จริงแล้วกดปุ่มนำเข้า/ส่งออกจริง
+   เปิดหน้า "สมุดราคา" จริงแล้วกดปุ่มนำเข้า/ส่งออกจริง
 
    เครื่องมือของสมุดราคา — ดู services/pricingLab/README.md
 
@@ -86,7 +86,7 @@ console.log(`ใช้บัญชี ${admin.username} · เซิร์ฟเ
 // ── เตรียมไฟล์สองใบไว้อัป: "เหมือนเดิม" กับ "แก้ราคาแล้ว" ────────────────────
 
 const auth = { Authorization: `Bearer ${token}` };
-const tRes = await fetch(`${BASE}/api/admin/pricing/template`, { headers: auth });
+const tRes = await fetch(`${BASE}/api/admin/pricebook/template`, { headers: auth });
 ok('ดาวน์โหลดแม่แบบผ่าน API ได้', tRes.ok, `${tRes.status}`);
 ok('ไฟล์ที่ได้เป็น .xlsx',
   (tRes.headers.get('Content-Type') ?? '').includes('spreadsheetml'),
@@ -153,7 +153,7 @@ async function openPage(width: number): Promise<void> {
     sessionStorage.setItem('admin_token', t);
     sessionStorage.setItem('admin_user', u);
   }, token, JSON.stringify({ id: admin.id, username: admin.username, name: admin.name, role: admin.role }));
-  await page.goto(`${BASE}/admin.html#pricing`, { waitUntil: 'networkidle0' });
+  await page.goto(`${BASE}/admin.html#pricebook`, { waitUntil: 'networkidle0' });
   await wait(900);
 }
 
@@ -162,7 +162,7 @@ for (const width of [1280, 390]) {
   await openPage(width);
 
   const body = await page.evaluate(() => document.body.innerText);
-  ok(`${width}px — เข้าหน้าคิดราคาสินค้าได้`, body.includes('คิดราคาสินค้า'), body.slice(0, 60).replace(/\n/g, ' '));
+  ok(`${width}px — เข้าหน้าสมุดราคาได้`, body.includes('สมุดราคาที่ระบบใช้อยู่'), body.slice(0, 60).replace(/\n/g, ' '));
   ok(`${width}px — การ์ด "สมุดราคาที่ระบบใช้อยู่" ขึ้น`, body.includes('สมุดราคาที่ระบบใช้อยู่'));
   ok(`${width}px — มีปุ่มดาวน์โหลดแม่แบบ`, body.includes('แม่แบบ'));
   ok(`${width}px — มีปุ่มอัปโหลดราคาใหม่`, body.includes('อัปโหลด'));
@@ -254,7 +254,7 @@ for (const width of [1280, 390]) {
 
 // ── ยกเลิกแล้วต้องไม่มีอะไรถูกบันทึก ─────────────────────────────────────────
 
-const ov = async () => (await (await fetch(`${BASE}/api/admin/pricing/overview`, { headers: auth })).json());
+const ov = async () => (await (await fetch(`${BASE}/api/admin/pricebook/overview`, { headers: auth })).json());
 const beforeSave = await ov();
 ok('กดยกเลิกแล้วสมุดราคาไม่ขยับ', beforeSave.shelf.edited === null || beforeSave.shelf.edited === undefined,
   JSON.stringify(beforeSave.shelf.edited));

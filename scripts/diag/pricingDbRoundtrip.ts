@@ -34,7 +34,7 @@ import {
 } from '../../services/pricingLab/bookUpdate.js';
 import { parseProductCode } from '../../services/pricingLab/code.js';
 import { computePrice } from '../../services/pricingLab/engine.js';
-import { applyModelEdit, modelEditorView } from '../../services/pricingLab/modelEditor.js';
+import { EditRejected, applyModelEdit, applySheetEdit, modelEditorView } from '../../services/pricingLab/modelEditor.js';
 import { checkPriceModel } from '../../services/pricingLab/modelShape.js';
 import type { PriceBook, PriceModel, ProductConfig } from '../../services/pricingLab/types.js';
 import { NoBook, loadBookFrom } from '../pricebook/bookSource.js';
@@ -365,6 +365,44 @@ try {
   check('โครงสร้างรุ่นใหม่กว่าโค้ด (schema_version 2) ถูกข้าม', !('ZZ-V2' in st12.book.models) && st12.skipped.some((s) => s.code === 'ZZ-V2'));
   check('รุ่นอื่นยังโหลดได้ครบ', codes.every((c) => c in st12.book.models));
   await client.query(`DELETE FROM pricing_models WHERE code IN ('ZZ-BAD', 'ZZ-V2')`);
+
+  // ── 12ข สมุดรายชีต ───────────────────────────────────────────────────────
+  // เจ้าของสั่ง 2026-09-24 "1 ชีท / 1 สมุด" — ชีต TS-01+TS-01-0 มีสองรุ่น บันทึกต้องเป็นครั้งเดียว
+  section('12ข. แก้ทั้งชีต (PUT /sheet) = บันทึกครั้งเดียว หลายรุ่น');
+  const SHEET = 'TS-01+TS-01-0';
+  const head12b = (await readBookState(db))!;
+  const inSheet = Object.values(head12b.book.models).filter((m) => m.sheet === SHEET);
+  if (inSheet.length < 2) {
+    check(`เล่มนี้มีชีต ${SHEET} สองรุ่น`, false, `${inSheet.length} รุ่น — ข้ามหัวข้อนี้`);
+  } else {
+    const edits = Object.fromEntries(inSheet.map((m) => {
+      const cells = m.base.kind === 'matrix' ? m.base.cells : {};
+      const k = Object.keys(cells)[0]!;
+      return [m.code, { cells: { [k]: cells[k]! + 5 } }];
+    }));
+    const { models: next12b, changed: ch12b } = applySheetEdit(head12b.book, SHEET, edits);
+    check('รุ่นที่เปลี่ยน = ทุกรุ่นในชีต', ch12b.sort().join(',') === inSheet.map((m) => m.code).sort().join(','), ch12b.join(','));
+    const revBefore = await count('pricing_book_revisions');
+    const histBefore = await count('pricing_model_history');
+    await commitBookChange({
+      parent: head12b.revision, kind: 'model', changed: ch12b, by: 'diag',
+      next: { ...head12b.book, models: next12b, edited: { at: '2026-09-24T01:00:00.000Z', by: 'diag', note: `แก้ราคาชีต ${SHEET} จากหน้าจอ` } },
+    }, tx);
+    const back12b = (await readBookState(db))!;
+    check('การบันทึกเพิ่ม 1 ครั้ง (ย้อนทีเดียวกลับครบทั้งชีต)', (await count('pricing_book_revisions')) === revBefore + 1);
+    check(`ประวัติเพิ่ม ${ch12b.length} แถว (แถวละรุ่น)`, (await count('pricing_model_history')) === histBefore + ch12b.length);
+    check('ทุกรุ่นในชีตเปลี่ยนตามที่แก้',
+      ch12b.every((c) => JSON.stringify(back12b.book.models[c]) === JSON.stringify(next12b[c])));
+    const others12b = codes.filter((c) => !ch12b.includes(c)
+      && JSON.stringify(back12b.book.models[c]) !== JSON.stringify(head12b.book.models[c]));
+    check('รุ่นนอกชีตเท่าเดิมทุกไบต์', others12b.length === 0, others12b.join(' · '));
+    const empty12b = applySheetEdit(back12b.book, SHEET, Object.fromEntries(inSheet.map((m) => [m.code, {}])));
+    check('บันทึกทั้งชีตโดยไม่แก้อะไร ⇒ ไม่มีรุ่นไหนนับว่าเปลี่ยน', empty12b.changed.length === 0, empty12b.changed.join(','));
+    const outsider = codes.find((c) => !inSheet.some((m) => m.code === c))!;
+    let e12b: unknown;
+    try { applySheetEdit(back12b.book, SHEET, { [outsider]: {} }); } catch (e) { e12b = e; }
+    check(`แก้รุ่นนอกชีต (${outsider}) ผ่านเส้นของชีตไม่ได้`, e12b instanceof EditRejected, String(e12b ?? 'ไม่ปฏิเสธ'));
+  }
 
   // ── 13 เขียนต่อท้ายอย่างเดียว ─────────────────────────────────────────────
   section('13. ไม่มีโค้ดที่แก้/ลบประวัติ');

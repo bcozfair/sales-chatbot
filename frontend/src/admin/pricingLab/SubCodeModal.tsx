@@ -108,7 +108,7 @@ export const SubCodeModal: React.FC<Props> = ({
     setBusy(true);
     setErr('');
     try {
-      const url = editing?.id ? `/api/admin/pricing/subcodes/${editing.id}` : '/api/admin/pricing/subcodes';
+      const url = editing?.id ? `/api/admin/pricebook/subcodes/${editing.id}` : '/api/admin/pricebook/subcodes';
       const res = await fetch(url, {
         method: editing?.id ? 'PUT' : 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },

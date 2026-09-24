@@ -25,6 +25,7 @@ import { CustomersDirectory } from './CustomersDirectory';
 import { OdooContacts } from './OdooContacts';
 // โมดูลทดลอง "คิดราคาสินค้า" — ถอดออก = ลบ import นี้ + 1 เมนู + 1 แถวใน PAGE_TITLES + 1 สาขา render
 import { PricingLab } from './pricingLab/PricingLab';
+import { PriceBook } from './pricingLab/PriceBook';
 import { LogsShell } from './logs/LogsShell';
 import type { LogTab } from './logs/LogsShell';
 import { useAdminRoute, type MainTab, type SubTab } from './navHash';
@@ -65,6 +66,7 @@ import {
   Package,
   ShieldCheck,
   CircleDollarSign,
+  BookOpen,
 } from 'lucide-react';
 
 // MainTab / SubTab ย้ายไป navHash.ts แล้ว เพราะชื่อแท็บกลายเป็นส่วนหนึ่งของ URL (ดูเหตุผลในไฟล์นั้น)
@@ -163,6 +165,9 @@ const NAV_GROUPS: { key: string; label: string; icon: typeof LayoutDashboard; it
       // ShieldBan ไม่ใช่ Ban เพราะ Ban ถูกใช้กับ "บัญชีห้ามเสนอราคา" ไปแล้ว — คนละเรื่องกัน
       { sub: 'block', label: 'บล็อกสินค้า', icon: ShieldBan, roles: ['admin'], cap: 'page.settings_block' },
       { sub: 'shipping', label: 'ค่าขนส่ง & เครดิต', icon: Truck, roles: ['admin'], cap: 'page.settings_shipping' },
+      // ราคาตั้งของสินค้าสั่งทำ = ค่าที่ร้านตั้งทิ้งไว้ให้ระบบใช้ ⇒ อยู่กลุ่มนี้ ไม่ใช่ข้าง "คิดราคาสินค้า"
+      // ซึ่งเป็นเครื่องมือตอนทำใบ · แยกหน้า+สิทธิ์จากหน้านั้นเมื่อ 2026-09-23 (เจ้าของสั่ง)
+      { tab: 'pricebook', label: 'สมุดราคา', icon: BookOpen, roles: ['admin'], cap: 'page.pricebook' },
     ],
   },
   {
@@ -229,6 +234,7 @@ const PAGE_TITLES: Record<MainTab, string> = {
   rolepermissions: 'สิทธิ์ตามบทบาท',
   blacklist: 'บัญชีห้ามเสนอราคา',
   pricing: 'คิดราคาสินค้า',
+  pricebook: 'สมุดราคา',
   productsdata: 'ข้อมูลสินค้า',
   customersdata: 'ข้อมูลลูกค้า & ผู้ติดต่อ',
   odoocontacts: 'ผู้ติดต่อที่ต้องคีย์เข้า Odoo',
@@ -817,7 +823,14 @@ function AdminContent() {
             </div>
           ) : effectiveTab === 'pricing' ? (
             <div className="animate-fade-in">
-              <PricingLab />
+              <PricingLab
+                canEditBook={visibleTabs.includes('pricebook')}
+                onOpenBook={() => goTo('pricebook')}
+              />
+            </div>
+          ) : effectiveTab === 'pricebook' ? (
+            <div className="animate-fade-in">
+              <PriceBook />
             </div>
           ) : effectiveTab === 'productsdata' ? (
             <div className="animate-fade-in">

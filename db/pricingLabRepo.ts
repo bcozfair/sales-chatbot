@@ -166,3 +166,16 @@ export async function deleteSubCode(id: number, db: DbExecutor = pool): Promise<
   const { rowCount } = await db.query(`DELETE FROM pricing_subcodes WHERE id = $1`, [id]);
   return (rowCount ?? 0) > 0;
 }
+
+/**
+ * รหัสสินค้าทุกตัวที่ขึ้นต้นด้วยตระกูลที่สมุดราคารู้จัก — หน้า "สมุดราคา" ใช้นับว่าแต่ละรุ่นครอบสินค้ากี่รายการ
+ *
+ * กรองหยาบที่ฐานด้วยสองตัวอักษรแรก (22,297 จาก ~51k แถว · วัด 2026-09-23 ใช้ 70 ms) ส่วนการตัดสินว่า
+ * ตกรุ่นไหนทำที่ `modelOfCode` ตัวเดียวกับตัวคิดราคา — ไม่เขียนกติกาชุดที่สองเป็น SQL
+ */
+export async function listCatalogCodes(db: DbExecutor = pool): Promise<string[]> {
+  const { rows } = await db.query<{ model: string }>(
+    `SELECT model FROM products WHERE model ~* '^\\s*(TS|BH)'`
+  );
+  return rows.map((r) => r.model);
+}

@@ -131,6 +131,7 @@ const SHEET = {
   constraints: 'เงื่อนไขและข้อห้าม',
   variants: 'ตัวเลือกท้ายรหัส',
   derived: 'ค่าที่คำนวณเอง',
+  layout: 'หน้าตาในไฟล์ราคา',
   subCodes: 'รหัสย่อย',
   basePrefix: 'ฐาน-'
 } as const;
@@ -350,6 +351,7 @@ const README_LINES = [
   `${SHEET.constraints}    ข้อห้าม/ข้อควรระวัง — ไม่รับผลิต · ต้องขอราคา · เตือน`,
   `${SHEET.variants}        ตัวอักษรท้ายเลขรุ่นที่คิดเพิ่มจากรุ่นหลัก (ซีรีส์ BH = ตัว C)`,
   `${SHEET.derived}       ค่าที่ระบบคิดให้เอง เช่น พื้นที่ผิว`,
+  `${SHEET.layout}     ข้อความ/ไฮไลต์รอบตารางแบบในไฟล์ราคาเดิม — แสดงผลอย่างเดียว ไม่มีผลกับราคา`,
   `${SHEET.subCodes}                ความหมายของตัวอักษรในรหัสสินค้า และผลกับราคา`,
   '',
   '── กติกา 5 ข้อ ตอนแก้ ────────────────────────────────────────',
@@ -769,6 +771,84 @@ function variantsSheet(book: PriceBook): SheetTable {
   };
 }
 
+// ── หน้าตาในไฟล์ราคา (`SheetLayout`) ─────────────────────────────────────────
+//
+// หนึ่งแถว = หนึ่งชิ้นของหน้าตา · สี่ชนิด (คำในคอลัมน์ "ส่วน" เป็นรายการปิด):
+const LAYOUT_PART = {
+  rowNoteLabel: 'หัวคอลัมน์ท้ายตาราง',
+  rowNote: 'ข้อความท้ายแถว',
+  colNote: 'ข้อความใต้คอลัมน์',
+  highlight: 'คอลัมน์ไฮไลต์เหลือง'
+} as const;
+
+function layoutSheet(book: PriceBook): SheetTable {
+  const rows: CellValue[][] = [];
+  for (const m of Object.values(book.models)) {
+    const L = m.layout;
+    if (!L) continue;
+    if (L.rowNote) {
+      rows.push([m.code, LAYOUT_PART.rowNoteLabel, '', L.rowNote.label]);
+      for (const [k, v] of Object.entries(L.rowNote.values)) rows.push([m.code, LAYOUT_PART.rowNote, k, v]);
+    }
+    for (const [k, v] of Object.entries(L.colNotes ?? {})) rows.push([m.code, LAYOUT_PART.colNote, k, v]);
+    for (const k of L.highlightCols ?? []) rows.push([m.code, LAYOUT_PART.highlight, k, '']);
+  }
+  return {
+    name: SHEET.layout,
+    title:
+      'ข้อความและไฮไลต์รอบตารางราคาตั้ง แบบที่ไฟล์ราคาเดิมเขียนไว้ · แสดงบนหน้าสมุดราคาอย่างเดียว ไม่มีผลกับราคา',
+    columns: [
+      { label: 'รหัสรุ่น', width: 12 },
+      { label: 'ส่วน', width: 22 },
+      { label: 'ค่าแกน', width: 14 },
+      { label: 'ข้อความ', width: 32 }
+    ],
+    rows,
+    freeze: true
+  };
+}
+
+/**
+ * ⚠️ ไฟล์ที่ไม่มีชีตนี้ (แม่แบบที่ดาวน์โหลดก่อน 2026-09-24) = ไม่รู้ ไม่ใช่ "ลบทิ้ง" —
+ * `applyModels` คงหน้าตาเดิมของรุ่นไว้เมื่อไฟล์ไม่ได้ส่งมา
+ */
+function readLayout(grid: CellValue[][] | undefined, models: Record<string, PriceModel>, R: Reader): void {
+  const name = SHEET.layout;
+  if (!grid) return;
+  const h = findHeader(grid, ['รหัสรุ่น', 'ส่วน', 'ค่าแกน']);
+  if (!h) {
+    R.err(name, 'ไม่พบแถวหัวตาราง (ต้องมี "รหัสรุ่น" · "ส่วน" · "ค่าแกน")');
+    return;
+  }
+  for (let r = h.at + 1; r < grid.length; r++) {
+    const row = grid[r] ?? [];
+    if (isEmptyRow(row)) continue;
+    const line = r + 1;
+    const code = toText(cell(row, h.index, 'รหัสรุ่น'));
+    const model = models[code];
+    if (!model) {
+      R.err(name, `ไม่รู้จักรุ่น "${code}"`, line);
+      continue;
+    }
+    const part = toText(cell(row, h.index, 'ส่วน'));
+    const key = toText(cell(row, h.index, 'ค่าแกน'));
+    const text = toText(cell(row, h.index, 'ข้อความ'));
+    const L = (model.layout = model.layout ?? {});
+    if (part === LAYOUT_PART.rowNoteLabel) {
+      L.rowNote = { label: text || 'หมายเหตุ', values: L.rowNote?.values ?? {} };
+    } else if (part === LAYOUT_PART.rowNote && key && text) {
+      L.rowNote = L.rowNote ?? { label: 'หมายเหตุ', values: {} };
+      L.rowNote.values[key] = text;
+    } else if (part === LAYOUT_PART.colNote && key && text) {
+      L.colNotes = { ...(L.colNotes ?? {}), [key]: text };
+    } else if (part === LAYOUT_PART.highlight && key) {
+      L.highlightCols = [...(L.highlightCols ?? []), key];
+    } else {
+      R.warn(name, `แถวนี้อ่านไม่ออก (ส่วน "${part}") — ข้ามไป · ใช้ได้แค่ ${Object.values(LAYOUT_PART).join(' · ')}`, line);
+    }
+  }
+}
+
 function derivedSheet(book: PriceBook): SheetTable {
   const rows: CellValue[][] = [];
   for (const m of Object.values(book.models)) {
@@ -813,6 +893,7 @@ export function bookToSheets(book: PriceBook, opts?: { exportedAt?: string }): S
     constraintsSheet(book),
     variantsSheet(book),
     derivedSheet(book),
+    layoutSheet(book),
     subCodesSheet(book),
     ...Object.values(book.models).map(baseSheet)
   ];
@@ -944,6 +1025,7 @@ export function sheetsToBook(grids: RawSheet[]): { book: PriceBook | null; issue
   readConstraints(by.get(SHEET.constraints), models, R);
   readVariants(by.get(SHEET.variants), models, R);
   readDerived(by.get(SHEET.derived), models, R);
+  readLayout(by.get(SHEET.layout), models, R);
   const subCodes = readSubCodes(by.get(SHEET.subCodes), R);
 
   // ── หัวสมุด ────────────────────────────────────────────────────────────────

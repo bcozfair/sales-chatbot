@@ -23,6 +23,8 @@ export type MainTab =
   | 'rolepermissions'
   // โมดูลทดลอง "คิดราคาสินค้า" (services/pricingLab/) — ถอดออก = ลบคำนี้กับแถวใน TAB_SLUG
   | 'pricing'
+  // หน้า "สมุดราคา" — แยกจากหน้าคิดราคาพร้อมสิทธิ์ของตัวเอง (page.pricebook · 2026-09-23)
+  | 'pricebook'
   // สองหน้าข้อมูลอ้างอิงจาก Odoo (อ่านอย่างเดียว)
   | 'productsdata' | 'customersdata'
   // คิวงานค้างของโมดูล local_contacts — ผู้ติดต่อที่แอดมินเพิ่มเองแต่ยังไม่มีใน Odoo
@@ -59,6 +61,7 @@ export const TAB_SLUG: Record<MainTab, string> = {
   rolepermissions: 'rolepermissions',
   blacklist: 'blacklist',
   pricing: 'pricing',
+  pricebook: 'pricebook',
   productsdata: 'productsdata',
   customersdata: 'customersdata',
   odoocontacts: 'odoocontacts',

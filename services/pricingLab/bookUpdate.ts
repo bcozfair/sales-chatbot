@@ -170,7 +170,11 @@ export function applyModels(
   const models: Record<string, PriceModel> = { ...current.models };
   for (const code of picked) {
     const next = incoming.models[code];
-    if (next) models[code] = next;
+    if (!next) continue;
+    // หน้าตาของชีต (`layout` — แสดงผลอย่างเดียว) ที่ไฟล์ไม่ได้ส่งมา = แม่แบบรุ่นก่อน 2026-09-24 ที่ยังไม่มีชีต
+    // "หน้าตาในไฟล์ราคา" ⇒ คงของเดิมไว้ ไม่ใช่ลบทิ้งเงียบ ๆ (ลบได้จากหน้าสมุดรายชีต)
+    const keep = !next.layout && current.models[code]?.layout;
+    models[code] = keep ? { ...next, layout: current.models[code]!.layout } : next;
   }
   return {
     ...current,

@@ -36,10 +36,27 @@ export interface SubCode {
 }
 
 export interface ModelBrief {
+  /** รหัสรุ่นในฐาน — ตัวที่ส่งกลับไปตอนแก้/บันทึก */
   code: string;
+  /** ชื่อที่ขึ้นจอ: รุ่นหลักรวมกับชื่ออื่นที่ต่างแค่เลขรุ่น (`BH-01` → `BH-01,02`) — ดู `displayName` ฝั่ง backend */
+  name: string;
   label: string;
   sheet?: string;
   aliases: string[];
+  /** ชื่ออื่นที่ไม่ได้รวมเข้า `name` — คอลัมน์ "ใช้ราคาเดียวกัน" */
+  others: string[];
+  /** จำนวนสินค้าในฐานที่หัวรหัสตกรุ่นนี้ · `null` = นับไม่สำเร็จ · ไม่มีช่องนี้ = หน้าคิดราคา (ไม่ได้นับ) */
+  products?: number | null;
+  /** true = เปิดแบบชีต Excel ได้ (หน้าสมุดรายชีต `SheetEditor`) — เกณฑ์อยู่ที่ `excelReady()` ฝั่ง backend */
+  excel?: boolean;
+}
+
+/** `GET /api/admin/pricing/overview` — หน้าคิดราคาได้แค่นี้ ของงานแก้ราคาอยู่ที่ `Overview` */
+export interface QuoteOverview {
+  book: { ok: boolean; message?: string; models?: number; version?: string };
+  version: string | null;
+  models: ModelBrief[];
+  edited: { at: string; by?: string; note?: string } | null;
 }
 
 export interface CodePart {
@@ -105,6 +122,7 @@ export interface BookShelf {
   keep: number;
 }
 
+/** `GET /api/admin/pricebook/overview` — หน้าสมุดราคา */
 export interface Overview {
   book: { ok: boolean; message?: string; models?: number; version?: string };
   version: string | null;
@@ -218,7 +236,8 @@ export interface EditorAdder {
   unit: string;
   byAxis: string | null;
   byAxisTh: string | null;
-  rates: { value: string; rate: number }[] | null;
+  /** `rate: null` = ค่าแกนนี้ไม่มีราคา (ต้องขอราคา) — ไม่ใช่ 0 */
+  rates: { value: string; rate: number | null }[] | null;
   disabled: boolean;
   custom: boolean;
   note: string;
@@ -241,13 +260,34 @@ export interface EditorVariant {
 
 export interface EditorView {
   code: string;
+  /** ชื่อที่ขึ้นจอ (`BH-01,02`) */
+  name: string;
+  /** หัวตารางแบบที่ชีตเขียน (`TS_-01`) */
+  title: string;
+  /** เปิดแบบชีต Excel ได้ครบทุกช่อง */
+  excel: boolean;
+  /** หน้าตาของชีตรอบตาราง (แสดงผลอย่างเดียว ไม่มีผลกับราคา) — คีย์ = ค่าแกนแถว/คอลัมน์ */
+  layout: {
+    rowNote: { label: string; values: Record<string, string> } | null;
+    colNotes: Record<string, string>;
+    highlightCols: string[];
+  };
   label: string;
   sheet: string;
   aliases: string[];
   standardTh: string;
   base:
     | { kind: 'banded'; quantity: string; quantityTh: string; unit: string; bands: EditorBand[] }
-    | { kind: 'matrix'; note: string }
+    | {
+        kind: 'matrix';
+        note: string;
+        axes: string[];
+        axesTh: string[];
+        rows: string[];
+        cols: string[];
+        /** `cells[แถว][คอลัมน์]` · `null` = ช่องว่าง = ไม่รับผลิต · ตารางสามแกน = `null` */
+        cells: (number | null)[][] | null;
+      }
     | { kind: 'ref'; model: string };
   variant: EditorVariant | null;
   adders: EditorAdder[];
