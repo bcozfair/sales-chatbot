@@ -446,6 +446,22 @@ if (ts01 && ts01.base.kind === 'matrix') {
   const noCable = q({ sensor: 'TSK/TSJ', thread: '1/4”' }, 2, bare);
   check('ไม่มีค่าเริ่มต้นและรหัสไม่บอกสาย ⇒ "รหัสไม่ได้บอกชนิดสาย" (missing)',
     noCable.violations.some((v) => v.missing && /รหัสไม่ได้บอกชนิดสาย/.test(v.message)), noCable.violations.map((v) => v.message).join('|'));
+  // ตัวอักษรหลัง M = ชนิดสาย/Ground ตามแคตตาล็อก (docs/pricing-code-ts-01.md) ที่ยังไม่ต่อเข้าราคา —
+  // ห้ามเติมสายตั้งต้นทับ: เคยได้ 240 (สแตนเลสถัก) ทั้งที่ `T` คือเทปล่อน (340) พร้อมคำว่า "รหัสไม่ได้ระบุ"
+  const byCode = (code: string) => { const p = parseProductCode(code, b8); return computePrice(p.cfg!, b8); };
+  for (const code of ['TSK-01(M6)4.8+2MT', 'TSK-01(M6)4.8+2MTU', 'TSP-01(M6)4.8+2MC']) {
+    const r = byCode(code);
+    check(`${code} ⇒ ไม่ได้ราคาสายตั้งต้น ขึ้น "อ่านไม่ออก" (missing)`,
+      r.status !== 'priced' && r.violations.some((v) => v.missing && /อ่าน ".+" ในรหัสไม่ออก/.test(v.message))
+        && !r.breakdown.some((l) => /รหัสไม่ได้ระบุ/.test(l.detail ?? '')),
+      `${r.status} ${r.unitPrice} ${r.violations.map((v) => v.message).join('|')}`);
+  }
+  const at1m = byCode('TSK-01(M6)4.8+1MT');
+  check('  สายไม่เกิน 1 M มีตัวอักษรต่อท้าย ⇒ ยังคิดได้ 160 (ไม่มีค่าสายให้ต้องรู้ชนิด)', at1m.status === 'priced' && at1m.unitPrice === 160,
+    `${at1m.status} ${at1m.unitPrice}`);
+  const plain = byCode('TSK-01(M6)4.8+2M');
+  check('  ไม่มีตัวอักษรต่อท้าย ⇒ ยังใช้สายตั้งต้นตาม TYPE (240)', plain.unitPrice === 240, String(plain.unitPrice));
+
   const realGap = q({ sensor: 'TSK/TSJ', thread: 'M99' }, 1);
   check('ช่องที่ไม่มีจริงในตาราง ⇒ ยังเป็น "ไม่รับผลิต" (ไม่ใช่ missing)',
     realGap.violations.some((v) => !v.missing && /ไม่รับผลิต/.test(v.message)));

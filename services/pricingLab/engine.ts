@@ -228,7 +228,8 @@ function computeAdder(
   model: PriceModel,
   subtotal: Money,
   axes: Record<string, string>,
-  dims: Record<string, number>
+  dims: Record<string, number>,
+  unread: Record<string, string> = {}
 ): AdderResult {
   if (a.kind === 'percent') {
     return { amount: money((subtotal * (a.percent ?? 0)) / 100), detail: `${a.percent}% ของ ${fmt(subtotal)}` };
@@ -256,6 +257,9 @@ function computeAdder(
     if (rate === undefined) {
       if (a.skipIfNoRate) return { amount: 0, skip: true };
       // ไม่มีค่าแกนเลย = รหัสไม่ได้บอก (ต่างจาก "บอกแล้วแต่ไม่มีราคา" ซึ่งแปลว่าไม่รับทำ)
+      if (!axisValue && unread[a.byAxis] !== undefined) {
+        return { amount: 0, missing: true, blocked: `${a.label}: ยังอ่าน "${unread[a.byAxis]}" ในรหัสไม่ออกว่าเป็น${axisLabel(a.byAxis)}อะไร` };
+      }
       if (!axisValue) return { amount: 0, missing: true, blocked: `${a.label}: รหัสไม่ได้บอก${axisLabel(a.byAxis)}` };
       return { amount: 0, blocked: `${a.label}: ไม่มีราคาสำหรับ ${axisLabel(a.byAxis)} ${axisValue}` };
     }
@@ -376,11 +380,15 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
   // ค่าว่างใน cfg.axes แปลว่า "ไม่ได้ระบุ" ไม่ใช่ "เลือกค่าว่าง" ⇒ กรองทิ้งก่อนเติมค่าเริ่มต้น
   // ไม่งั้นช่อง "— ไม่มี —" บนหน้าจอจะลบค่ามาตรฐานของแกนนั้นไปเงียบ ๆ
   const given = Object.fromEntries(Object.entries(cfg.axes ?? {}).filter(([, v]) => v !== ''));
-  const axes = { ...(model.axisDefaults ?? {}), ...given };
+  const staticDefaults = Object.fromEntries(
+    Object.entries(model.axisDefaults ?? {}).filter(([k]) => cfg.unread?.[k] === undefined)
+  );
+  const axes = { ...staticDefaults, ...given };
   // ค่าเริ่มต้นที่ขึ้นกับอีกแกน (สายของ TS-01 ขึ้นกับ TYPE) — แพ้ค่าที่รหัสบอกเอง ชนะ `axisDefaults`
   const defaultedBy: Record<string, string> = {};
   for (const [axis, d] of Object.entries(model.axisDefaultsBy ?? {})) {
-    if (axis in given) continue;
+    // รหัสบอกมาแล้วแต่อ่านไม่ออก ≠ รหัสไม่ได้บอก — เติมค่าเริ่มต้นตรงนี้ = คิดเงินผิดชนิดโดยไม่มีอะไรฟ้อง
+    if (axis in given || cfg.unread?.[axis] !== undefined) continue;
     const v = d.values[axes[d.by] ?? ''];
     if (v === undefined) continue;
     axes[axis] = v;
@@ -456,7 +464,7 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
       .sort((x, y) => x.order - y.order);
     for (const a of ordered) {
       if (a.when && !evalPredicate(a.when, axes, dims, options)) continue;
-      const r = computeAdder(a, model, running, axes, dims);
+      const r = computeAdder(a, model, running, axes, dims, cfg.unread);
       if (r.blocked) {
         violations.push({ id: a.id, level: 'block', message: r.blocked, ...(r.missing ? { missing: true } : {}) });
         continue;

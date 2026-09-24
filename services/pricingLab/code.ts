@@ -279,8 +279,11 @@ function leftovers(c: Ctx, rest: string): string[] {
 }
 
 /**
- * ส่วนสายของ TC: `+1M` `+3M` `+1.5M` `+30cm` — ตัวอักษรที่ตามหลัง M (P/T/C/U/F ฯลฯ)
- * ยังไม่มีหลักฐานว่าคืออะไร จึงถูกแยกออกมาเป็นรหัสย่อยที่อ่านไม่ออกต่างหาก ไม่กลืนทิ้ง
+ * ส่วนสายของ TC: `+1M` `+3M` `+1.5M` `+30cm` — ตัวอักษรที่ตามหลัง M คือ **ชนิดสาย + Ground**
+ * ตามแคตตาล็อกของ TS_-01 (`docs/pricing-code-ts-01.md` · เจ้าของส่งภาพ 2026-09-24) แต่ **ยังไม่ต่อ
+ * เข้ากับราคา** (รอเจ้าของเคาะเรื่องสายตั้งต้น) จึงยังแยกออกมาเป็นท่อนที่อ่านไม่ออก ไม่กลืนทิ้ง
+ * · รุ่นที่คิดค่าสายตามชนิด ต้องบอก engine ด้วยว่ารหัสพูดถึงสายแล้ว (`cfg.unread`) ไม่งั้นมันเติม
+ *   สายตั้งต้นให้แล้วคิดเงินผิดชนิดเงียบ ๆ
  */
 function readCable(c: Ctx, token: string): boolean {
   const m = token.match(/^\+?(\d+(?:\.\d+)?)(M|CM)([A-Z]*)$/i);
@@ -296,7 +299,8 @@ function readCable(c: Ctx, token: string): boolean {
     kind: 'dim'
   });
   if (tail) {
-    add(c, { text: tail, reads: 'ตัวอักษรท้ายส่วนสาย — ยังไม่มีในชีตราคาว่าแปลว่าอะไร', kind: 'unknown' });
+    add(c, { text: tail, reads: 'ชนิดสาย/Ground ตามแคตตาล็อก — ยังไม่ได้ต่อเข้ากับราคา', kind: 'unknown' });
+    if (c.model.adders.some((a) => a.byAxis === 'cable')) c.cfg.unread = { ...c.cfg.unread, cable: tail.toUpperCase() };
   }
   return true;
 }
