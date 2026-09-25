@@ -104,6 +104,13 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
   const modelName = (c?: string) => overview?.models.find((m) => m.code === c)?.name ?? c;
 
   const bookMissing = overview && !overview.book.ok;
+  /** สิ่งที่ยังไม่ได้รวมในราคา: กฎที่ข้ามเพราะอ่านค่าในรหัสไม่ออก + ท่อนของรหัสที่อ่านไม่ออก */
+  const notIncluded = result
+    ? [
+        ...(result.outcome?.violations ?? []).filter((v) => v.partial).map((v) => v.message),
+        ...result.parsed.parts.filter((p) => isUnknown(p.kind)).map((p) => `${p.text} — ${p.reads}`),
+      ]
+    : [];
 
   return (
     <div className="space-y-3.5">
@@ -212,7 +219,11 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
               {result.outcome?.status === 'priced' ? (
                 <>
                   <div className="text-center py-1.5">
-                    <div className="text-[11px] text-slate-500">ราคาตั้ง (ยังไม่รวมส่วนลด)</div>
+                    {/* ท่อนที่อ่านไม่ออกไม่ได้ทำให้คิดราคาไม่ได้ — คิดเฉพาะส่วนที่คำนวณได้แล้วบอกให้ชัดว่ายังไม่ครบ
+                        (เจ้าของสั่ง 2026-09-25) · ห้ามโชว์เหมือนราคาเต็ม ไม่งั้นคนจะเอาไปเสนอลูกค้าทั้งที่ขาดบางส่วน */}
+                    <div className={`text-[11px] ${notIncluded.length ? 'text-amber-700 font-semibold' : 'text-slate-500'}`}>
+                      {notIncluded.length ? 'ราคาเฉพาะส่วนที่คำนวณได้ (ยังไม่รวมส่วนลด)' : 'ราคาตั้ง (ยังไม่รวมส่วนลด)'}
+                    </div>
                     <div className="text-3xl font-extrabold text-slate-900 tabular-nums leading-tight">
                       {result.outcome.unitPrice.toLocaleString()}
                       <span className="text-sm font-semibold text-slate-500 ml-1.5">บาท</span>
@@ -232,10 +243,21 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
                       </div>
                     ))}
                     <div className="flex justify-between border-t border-slate-100 mt-1.5 pt-2 text-[13px] font-extrabold text-slate-900">
-                      <span>รวมต่อหน่วย</span>
+                      <span>{notIncluded.length ? 'รวมเฉพาะส่วนที่คำนวณได้' : 'รวมต่อหน่วย'}</span>
                       <span className="tabular-nums">{result.outcome.unitPrice.toLocaleString()} บาท</span>
                     </div>
                   </div>
+                  {notIncluded.length > 0 && (
+                    <div className="flex gap-2.5 rounded-xl px-3.5 py-2.5 mt-3 text-xs leading-relaxed bg-amber-50 border border-amber-200 text-amber-800">
+                      <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <span>
+                        <b>ราคานี้ยังไม่ครบ</b> — ส่วนที่อ่านไม่ออกยังไม่ได้รวม ต้องถามฝ่ายขายก่อนเสนอราคา
+                        <ul className="mt-1 list-disc pl-4">
+                          {notIncluded.map((t) => <li key={t}>{t}</li>)}
+                        </ul>
+                      </span>
+                    </div>
+                  )}
                 </>
               ) : (
                 <EmptyState

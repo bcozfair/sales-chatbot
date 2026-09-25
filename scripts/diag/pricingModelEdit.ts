@@ -451,10 +451,13 @@ if (ts01 && ts01.base.kind === 'matrix') {
   // ตัวอักษรหลัง M = ชนิดสาย/Ground ตามแคตตาล็อก (docs/pricing-code-ts-01.md) ที่ยังไม่ต่อเข้าราคา —
   // ห้ามเติมสายตั้งต้นทับ: เคยได้ 240 (สแตนเลสถัก) ทั้งที่ `T` คือเทปล่อน (340) พร้อมคำว่า "รหัสไม่ได้ระบุ"
   const byCode = (code: string) => { const p = parseProductCode(code, b8); return computePrice(p.cfg!, b8); };
-  for (const code of ['TSK-01(M6)4.8+2MT', 'TSK-01(M6)4.8+2MTU', 'TSP-01(M6)4.8+2MC']) {
+  // เจ้าของสั่ง 2026-09-25: "รหัสที่อ่านไม่ออกให้ขึ้นเตือนไว้ แต่คำนวณเฉพาะส่วนที่คำนวณได้ไปก่อน"
+  // ⇒ ได้ราคาตั้งอย่างเดียว (ไม่รวมค่าสาย) + เตือน partial · ยังห้ามเติมสายตั้งต้นแทน
+  for (const [code, base] of [['TSK-01(M6)4.8+2MT', 160], ['TSK-01(M6)4.8+2MTU', 160], ['TSP-01(M6)4.8+2MC', 920]] as const) {
     const r = byCode(code);
-    check(`${code} ⇒ ไม่ได้ราคาสายตั้งต้น ขึ้น "อ่านไม่ออก" (missing)`,
-      r.status !== 'priced' && r.violations.some((v) => v.missing && /อ่าน ".+" ในรหัสไม่ออก/.test(v.message))
+    check(`${code} ⇒ ได้ ${base} (เฉพาะราคาตั้ง) + เตือนว่ายังไม่รวมค่าสาย · ไม่ได้สายตั้งต้น`,
+      r.status === 'priced' && r.unitPrice === base
+        && r.violations.some((v) => v.partial && v.level === 'warn' && /ยังไม่รวม: อ่าน ".+" ในรหัสไม่ออก/.test(v.message))
         && !r.breakdown.some((l) => /รหัสไม่ได้ระบุ/.test(l.detail ?? '')),
       `${r.status} ${r.unitPrice} ${r.violations.map((v) => v.message).join('|')}`);
   }
@@ -552,12 +555,16 @@ if (ts01 && ts010) {
   price('TSK-01-0(M6)+2MT', 370, 'TS_-01-0 T = เทปล่อน 190 + 180');
   price('TSP-01-0(M4)+2MPU', 1030, 'TS_-01-0 P + U = 930 + 100');
   const z = run('TSK-01-0(M6)+2MTSU');
-  check('TSK-01-0(M6)+2MTSU — แคตตาล็อก TS_-01-0 ไม่มี TS ⇒ ทิ้งทั้งท่อน ไม่แตกเป็น T + SU แล้วคิดเทปล่อน',
-    z.r.status !== 'priced' && z.r.violations.some((v) => v.missing) && z.p.parts.some((x) => x.text === 'TSU' && x.kind === 'unknown'),
+  check('TSK-01-0(M6)+2MTSU — แคตตาล็อก TS_-01-0 ไม่มี TS ⇒ ทิ้งทั้งท่อน (ไม่แตกเป็น T + SU) · ได้ 190 เฉพาะราคาตั้ง + เตือน',
+    z.r.status === 'priced' && z.r.unitPrice === 190 && z.r.violations.some((v) => v.partial)
+      && z.p.parts.some((x) => x.text === 'TSU' && x.kind === 'unknown'),
     `${z.r.status} ${z.r.unitPrice} ${z.p.parts.map((x) => `${x.text}[${x.kind}]`).join(' ')}`);
   const c0 = run('TSK-01-0(M6)+2MC');
-  check('TSK-01-0(M6)+2MC — แคตตาล็อก TS_-01-0 ไม่มี C ⇒ อ่านไม่ออก (ไม่ใช้ C ของ TS_-01)',
-    c0.r.status !== 'priced' && c0.r.violations.some((v) => v.missing), c0.r.violations.map((v) => v.message).join('|'));
+  check('TSK-01-0(M6)+2MC — แคตตาล็อก TS_-01-0 ไม่มี C ⇒ อ่านไม่ออก (ไม่ใช้ C ของ TS_-01) · ได้ 190 + เตือน',
+    c0.r.status === 'priced' && c0.r.unitPrice === 190 && c0.r.violations.some((v) => v.partial),
+    `${c0.r.status} ${c0.r.unitPrice} ${c0.r.violations.map((v) => v.message).join('|')}`);
+  const full = run('TSK-01-0(M6)+2MT');
+  check('  รหัสที่อ่านได้ครบ ⇒ ไม่มีเตือน partial', !full.r.violations.some((v) => v.partial));
 
   const v9 = modelEditorView(b9, b9.models['TSK-01']!);
   check('หน้าชีตรู้ค่ามาตรฐานของเกลียว', JSON.stringify(v9.axisDefaults) === JSON.stringify([{ axis: 'thread', axisTh: 'ขนาดเกลียว', value: '1/4”' }]),

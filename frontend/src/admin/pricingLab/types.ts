@@ -93,7 +93,8 @@ export interface PriceOutcome {
   breakdown: BreakdownLine[];
   /** `missing` = คิดไม่ได้เพราะรหัสไม่ได้บอกค่า (ไม่ใช่ไม่รับผลิต) — ดู `Violation` ฝั่ง backend */
   /** `noRate` = รหัสบอกค่าแล้วแต่กฎบวกเพิ่มยังไม่มีราคาของค่านั้น (ไม่ใช่ไม่รับผลิตเหมือนกัน) */
-  violations: { id: string; level: 'block' | 'quoteOnRequest' | 'warn'; message: string; missing?: boolean; noRate?: boolean }[];
+  /** `partial` = กฎข้อนั้นยังไม่รวมในราคา เพราะอ่านค่าในรหัสไม่ออก (ราคาเฉพาะส่วนที่คำนวณได้) */
+  violations: { id: string; level: 'block' | 'quoteOnRequest' | 'warn'; message: string; missing?: boolean; noRate?: boolean; partial?: boolean }[];
   bookVersion: string;
 }
 

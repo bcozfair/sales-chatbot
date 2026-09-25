@@ -222,6 +222,8 @@ interface AdderResult {
   missing?: boolean;
   /** `blocked` เพราะค่าที่รหัสบอกยังไม่มีราคาในกฎนี้ */
   noRate?: boolean;
+  /** ข้ามกฎนี้ไปก่อนเพราะอ่านค่าในรหัสไม่ออก — ราคาที่เหลือยังคิดต่อ (ข้อความเตือนอยู่ในนี้) */
+  partial?: string;
   skip?: boolean;
 }
 
@@ -259,8 +261,10 @@ function computeAdder(
     if (rate === undefined) {
       if (a.skipIfNoRate) return { amount: 0, skip: true };
       // ไม่มีค่าแกนเลย = รหัสไม่ได้บอก (ต่างจาก "บอกแล้วแต่ไม่มีราคา" ซึ่งแปลว่าไม่รับทำ)
+      // รหัสบอกมาแต่อ่านไม่ออก ⇒ ข้ามกฎนี้แล้วคิดส่วนที่เหลือต่อ พร้อมเตือนว่ายังไม่รวม (เจ้าของสั่ง 2026-09-25:
+      // "รหัสที่อ่านไม่ออกให้ขึ้นเตือนไว้ แต่คำนวณเฉพาะส่วนที่คำนวณได้ไปก่อน") · ห้ามเติมค่าตั้งต้นแทน — นั่นคือการเดา
       if (!axisValue && unread[a.byAxis] !== undefined) {
-        return { amount: 0, missing: true, blocked: `${a.label}: ยังอ่าน "${unread[a.byAxis]}" ในรหัสไม่ออกว่าเป็น${axisLabel(a.byAxis)}อะไร` };
+        return { amount: 0, partial: `${a.label} — ยังไม่รวม: อ่าน "${unread[a.byAxis]}" ในรหัสไม่ออกว่าเป็น${axisLabel(a.byAxis)}อะไร` };
       }
       if (!axisValue) return { amount: 0, missing: true, blocked: `${a.label}: รหัสไม่ได้บอก${axisLabel(a.byAxis)}` };
       return { amount: 0, noRate: true, blocked: `${a.label}: ยังไม่มีราคาสำหรับ ${axisLabel(a.byAxis)} ${axisValue}` };
@@ -477,6 +481,10 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
     for (const a of ordered) {
       if (a.when && !evalPredicate(a.when, axes, dims, options)) continue;
       const r = computeAdder(a, model, running, axes, dims, cfg.unread);
+      if (r.partial) {
+        violations.push({ id: a.id, level: 'warn', message: r.partial, partial: true });
+        continue;
+      }
       if (r.blocked) {
         violations.push({
           id: a.id, level: 'block', message: r.blocked,
