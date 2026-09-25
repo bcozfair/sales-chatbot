@@ -11,11 +11,12 @@
  * รันโดยไม่เขียนอะไรลงฐาน — อ่านเล่มปัจจุบัน (SELECT) แล้วทุกอย่างอยู่ในหน่วยความจำ
  * (ทางบันทึกลงฐานของ `PUT /model` พิสูจน์ที่ `diag:pricing-db` ข้อ 6)
  */
+import { readFileSync } from 'node:fs';
 import { NoBook, loadBookFrom } from '../pricebook/bookSource.js';
 import { computePrice, resolveModel } from '../../services/pricingLab/engine.js';
 import { parseProductCode } from '../../services/pricingLab/code.js';
 import { EditRejected, applyModelEdit, excelReady, modelEditorView } from '../../services/pricingLab/modelEditor.js';
-import type { PriceBook, PriceModel, SheetLayout } from '../../services/pricingLab/types.js';
+import type { Adder, PriceBook, PriceModel, SheetLayout } from '../../services/pricingLab/types.js';
 import { makeTemplate, readUploaded } from '../../services/pricingLab/bookFile.js';
 import { applyModels } from '../../services/pricingLab/bookUpdate.js';
 import { checkPriceModel } from '../../services/pricingLab/modelShape.js';
@@ -519,11 +520,20 @@ if (ts01 && ts010) {
   // ราคาสายเทปล่อนหุ้มชีลด์ 160/ม. — เจ้าของสั่ง 2026-09-25 "ใส่ 160 ไปก่อน" (ถอดจากราคาขาย Odoo · Excel ไม่มีสายนี้)
   // อยู่ในฐานเท่านั้น ⇒ เล่มจาก --data ไม่มี · เติมให้เหมือนกันทั้งสองทาง ด่านจึงให้ผลเดียวกัน
   const TS_RATE = 160;
+  // ความยาวแกน TS_-01 (เจ้าของสั่ง 2026-09-25 "เริ่มคิดเงินเมื่อยาวเกิน std · ยึดราคาจาก excel") — แมปอ่าน
+  // TS-06!C27/C31 ⇒ เล่มจาก --data มีเอง · เล่มในฐานก่อนเขียน r7 ยังไม่มี ⇒ เติมตัวเลขเดียวกันให้
+  // (หน้าตากฎมาจากไฟล์แมปเองทุกช่อง รวม `source` — ไม่มี source = แม่แบบ .xlsx อ่านกลับเป็น "กฎที่คนเพิ่มเอง")
+  const lenSpec = (JSON.parse(readFileSync(new URL('../pricebook/maps/19-TS-01.map.json', import.meta.url), 'utf8')) as
+    { adders: (Adder & { ratesFrom?: unknown })[] }).adders.find((a) => a.id === 'len_l1')!;
+  const { ratesFrom: _rf, ...lenRest } = lenSpec;
+  const LEN_L1: Adder = { ...lenRest, rates: { '4.8': 110, '6': 120 } };
   const withStd = (m: PriceModel, thread: string): PriceModel => {
     const rows = m.base.kind === 'matrix' ? [...new Set(Object.keys(m.base.cells).map((k) => k.split(' | ')[0]!))] : [];
+    const needLen = m.code === 'TSK-01' && !m.adders.some((a) => a.id === 'len_l1');
     return { ...m, axisDefaults: { thread },
-      adders: m.adders.map((a) => (a.id === 'cable_over_1m'
-        ? { ...a, rates: { ...a.rates, 'สายเทปล่อนหุ้มชีลด์': a.rates?.['สายเทปล่อนหุ้มชีลด์'] ?? TS_RATE } } : a)),
+      ...(needLen ? { standard: { ...m.standard, L1: 5 } } : {}),
+      adders: [...(needLen ? [LEN_L1] : []), ...m.adders.map((a) => (a.id === 'cable_over_1m'
+        ? { ...a, rates: { ...a.rates, 'สายเทปล่อนหุ้มชีลด์': a.rates?.['สายเทปล่อนหุ้มชีลด์'] ?? TS_RATE } } : a))],
       axisDefaultsBy: { cable: { ...STD.cable, values: Object.fromEntries(rows.map((r) => [r, 'สายสแตนเลสถัก'])) } } };
   };
   const cat = loadCatalogSubcodes();
@@ -617,6 +627,56 @@ if (ts01 && ts010) {
     check(`${code} — บันทึกจากจอโดยไม่แก้ (มีช่องว่างของซิลิโคนติดไปด้วย) ⇒ JSON เดิมทุกไบต์`,
       JSON.stringify(applyModelEdit(m, body, b9)) === JSON.stringify(m));
   }
+
+  console.log('\n── 10. ความยาวแกน xNN ของ TS_-01 (เจ้าของสั่ง 2026-09-25: "เริ่มคิดเงินเมื่อยาวเกิน std ของแต่ละรุ่น · ยึดราคาจาก excel") ─\n');
+  // std = แคตตาล็อก TS_-01 "Tube Length None 5mm." · อัตรา = TS-06 "บวกเพิ่ม 100 mm ละ" แกน 4.8 = 110 · 6 = 120 ปัดขึ้น
+  const lenRule = b9.models['TSK-01']!.adders.find((a) => a.id === 'len_l1');
+  check('กฎความยาวแกนของ TSK-01 = 4.8 → 110 · 6 → 120 · เกิน 5 mm · 100 mm ละ ปัดขึ้น',
+    JSON.stringify(lenRule?.rates) === JSON.stringify({ '4.8': 110, '6': 120 }) && b9.models['TSK-01']!.standard.L1 === 5
+      && lenRule?.step === 100 && lenRule?.round === 'ceil' && lenRule?.over === undefined,
+    JSON.stringify({ rates: lenRule?.rates, std: b9.models['TSK-01']!.standard }));
+  price('TSK-01(M6)4.8x5+1M', 160, 'ยาวเท่ามาตรฐาน 5 mm ⇒ ไม่บวก');
+  const x10 = price('TSK-01(M6)4.8x10+1M', 270, 'เกิน 5 mm อยู่ 5 ⇒ ปัดขึ้น 1 × 110 (Excel · ไม่ใช่ราคาขาย Odoo)');
+  check('  x10 อ่านเป็นความยาวแกน (ไม่ขึ้นแดง) และบรรทัดราคาบอกว่าเกิน 5mm',
+    x10.p.parts.some((x) => x.text === 'x10' && x.kind === 'dim') && x10.r.breakdown.some((l) => /เกิน 5mm/.test(l.detail ?? '')),
+    x10.r.breakdown.map((l) => l.detail).join('|'));
+  price('TSK-01(M6)4.8x105+1M', 270, 'เกิน 100 พอดี ⇒ 1 บล็อก');
+  price('TSK-01(M6)4.8x106+1M', 380, 'เกิน 101 ⇒ 2 × 110');
+  price('TSK-01(M8)6x50+1M', 310, 'แกน 6 = 120 ต่อ 100 mm (190 + 120)');
+  price('TSP-01(M6)4.8x50+2MTSU', 1190, 'รวมกับค่าสาย: 920 + 110 + 160');
+  price('TSK-01 4.8x300+1M', 490, 'ไม่มีวงเล็บ = 1/4” 160 + 3 × 110');
+  price('TSK-01(M8)6+1M', 190, 'ไม่มี x ⇒ ไม่มีค่าความยาว (เหมือนเดิม)');
+  const bad = run('TSK-01(M6)5x50+1M');
+  check('TSK-01(M6)5x50+1M — ขนาดแกน 5 ไม่มีในกฎ ⇒ "ยังไม่รวม" (partial) ไม่ใช่ "รหัสไม่ได้บอก"',
+    bad.r.violations.some((v) => v.partial && /ความยาวแกน/.test(v.message)) && !bad.r.violations.some((v) => v.missing),
+    bad.r.violations.map((v) => JSON.stringify(v)).join('|'));
+  const x0 = run('TSK-01-0(M6)x50+1M');
+  check('TS_-01-0 ไม่มีแกน ⇒ ไม่ได้กฎความยาวไปด้วย · x ในรหัสขึ้นแดง (ไม่ใช่คิดเงินเงียบ ๆ)',
+    !b9.models['TSK-01-0']!.adders.some((a) => a.dim === 'L1') && x0.p.parts.some((x) => /^x50/.test(x.text) && x.kind === 'unknown')
+      && !x0.r.breakdown.some((l) => /L1|ความยาวแกน/.test(`${l.label} ${l.detail ?? ''}`)),
+    x0.p.parts.map((x) => `${x.text}[${x.kind}]`).join(' '));
+
+  const lenRows = modelEditorView(b9, b9.models['TSK-01']!).adders.find((a) => a.id === 'len_l1')?.rates ?? [];
+  check('หน้าชีตมีแถบความยาวแกน 2 ช่อง (4.8 · 6) — ไม่ดึงขนาดแกน 36 ค่าของ TS-06 มา',
+    JSON.stringify(lenRows.map((r) => [r.value, r.rate])) === JSON.stringify([['4.8', 110], ['6', 120]]), JSON.stringify(lenRows));
+  check('  ยังเปิดแบบชีต Excel ได้', excelReady(b9.models['TSK-01']!));
+  const cableRows = modelEditorView(b9, b9.models['TSK-01']!).adders.find((a) => a.id === 'cable_over_1m')?.rates ?? [];
+  check('  ช่องราคาสายยังครบ 6 ชนิดเหมือนเดิม', cableRows.length === 6, JSON.stringify(cableRows.map((r) => r.value)));
+  const set6 = applyModelEdit(b9.models['TSK-01']!, { adderRates: { len_l1: [{ value: '6', rate: 130 }] } }, b9);
+  const b10 = { ...b9, models: { ...b9.models, 'TSK-01': set6 } };
+  check('แก้อัตราแกน 6 จากจอเป็น 130 ⇒ TSK-01(M8)6x50+1M = 320',
+    computePrice(parseProductCode('TSK-01(M8)6x50+1M', b10).cfg!, b10).unitPrice === 320);
+  const blank = applyModelEdit(b9.models['TSK-01']!, { adderRates: { len_l1: [{ value: '6', rate: null }] } }, b9);
+  check('  ลบเลขแกน 6 ทิ้ง ⇒ ช่องยังอยู่บนจอให้ใส่คืนได้ (คีย์มาจากกฎของตัวเองในเล่ม ไม่ใช่ TS-06)',
+    !('6' in (blank.adders.find((a) => a.id === 'len_l1')?.rates ?? {}))
+      && (modelEditorView({ ...b9, models: { ...b9.models, 'TSK-01': blank } }, blank).adders.find((a) => a.id === 'len_l1')?.rates ?? []).length === 1);
+  const { book: back10 } = await readUploaded(Buffer.from(makeTemplate(b9, '2026-09-25')));
+  // เทียบแบบเรียงคีย์ — แม่แบบเขียน `rates` ก่อน `source` (ลำดับคีย์ในกฎไม่มีผลกับราคาหรือการเรียงชีต)
+  const canon = (v: unknown): string => JSON.stringify(v, (_k, x) =>
+    x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => a.localeCompare(b))) : x);
+  check('แม่แบบ .xlsx ไป-กลับ ⇒ กฎความยาวแกนเท่าเดิมทุกค่า (มี source · ไม่กลายเป็นกฎที่คนเพิ่มเอง)',
+    canon(back10?.models['TSK-01']?.adders.find((a) => a.id === 'len_l1')) === canon(lenRule) && !!lenRule?.source,
+    JSON.stringify(back10?.models['TSK-01']?.adders.find((a) => a.id === 'len_l1')));
 }
 
 console.log(`\n${'─'.repeat(70)}`);

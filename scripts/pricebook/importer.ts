@@ -8,6 +8,7 @@
 //    … --data <dir> --apply --replace-all --by <username>                      แทนทั้งเล่ม (ย้อนได้จากหน้าจอ)
 //    … --from-json pricebook/book.json --apply [--replace-all]                  ย้ายเล่มของยุคไฟล์เข้าฐาน
 //    … --data <dir> --extras-only [--apply --by <username>]                      เติมของรอบตาราง (ค่ามาตรฐานเมื่อรหัสไม่ระบุ · หน้าตา) ลงเล่มปัจจุบัน ไม่แตะตัวเลขราคา
+//    … --data <dir> --new-rules [--apply --by <username>]                        เติม "กฎบวกเพิ่มที่แมปเพิ่งมี" ลงเล่มปัจจุบัน ไม่แก้กฎ/ราคาเดิมสักช่อง
 //    … --data <dir> --out <ไฟล์.json>                                           เขียนเป็นไฟล์ (ไม่แตะฐาน)
 //
 //  **`--data` ไม่มีค่าเริ่มต้นโดยตั้งใจ** — ยุคไฟล์ตั้งต้นที่ `data/` ซึ่งถูกเสิร์ฟออกเว็บโดยไม่ตรวจสิทธิ์
@@ -86,7 +87,12 @@ interface AdderSpec extends Omit<Adder, 'rates' | 'amount'> {
    * ให้เอาราคาสายType นั้นมาบวกเพิ่มกรณีเกิน 1 เมตร"
    * ⇒ ก๊อปตัวเลขมาไว้ในแมปของแต่ละรุ่น = วันที่ราคาสายขยับจะมีรุ่นที่ลืมแก้
    */
-  ratesFrom?: CellRange & { keyCol: string; sheet?: string };
+  /**
+   * `keys` = เลือกเฉพาะบางแถวในช่วงนั้น — TS_-01 ไม่มีคอลัมน์ "บวกเพิ่ม 100 mm ละ" ในชีตตัวเอง
+   * เลยอ่านจากชีตพี่น้อง (TS-06) เฉพาะขนาดแกนที่แคตตาล็อก TS_-01 มีจริง (4.8 · 6) ไม่เอาทั้ง 36 ขนาด
+   * · กุญแจที่ขอแต่หาไม่เจอ = นำเข้าล้ม (แถวในชีตขยับแล้วจะได้รู้ ไม่ใช่ได้กฎว่าง ๆ)
+   */
+  ratesFrom?: CellRange & { keyCol: string; sheet?: string; keys?: string[] };
   /** ดึงจำนวนคงที่จากเซลล์เดียว เช่น "B16" */
   amountFrom?: string;
 }
@@ -326,11 +332,16 @@ function importSheet(
       for (let r = ratesFrom.rows[0]; r <= ratesFrom.rows[1]; r++) {
         const key = cellText(src, r, ratesFrom.keyCol);
         if (!key) continue;
+        if (ratesFrom.keys && !ratesFrom.keys.includes(key)) continue;
         if (src === ws) countNoise(r, ratesFrom.col);
         const v = cellMoney(src, r, ratesFrom.col);
         if (v === undefined) continue; // ช่องว่าง = ไม่รับทำตัวเลือกนี้กับค่าแกนนี้
         rates[key] = v;
         report.adderRates++;
+      }
+      const lost = (ratesFrom.keys ?? []).filter((k) => !(k in rates));
+      if (lost.length) {
+        throw new Error(`${map.code} adder ${spec.id}: ไม่พบ ${lost.join(' · ')} ในคอลัมน์ ${ratesFrom.keyCol} แถว ${ratesFrom.rows.join('–')} ของชีต ${ratesFrom.sheet ?? map.sheet}`);
       }
       a.rates = rates;
     }
@@ -637,6 +648,69 @@ async function applyExtrasOnly(fromFile: PriceBook, opts: { apply: boolean; by: 
   return 0;
 }
 
+/**
+ * `--new-rules` — เติม **กฎบวกเพิ่มที่แมปเพิ่งมี** (id ที่รุ่นในฐานยังไม่มี) พร้อมค่ามาตรฐานของมิติที่กฎนั้นใช้
+ * ลงเล่มปัจจุบันในฐาน · กฎเดิม · ราคาตั้ง · อัตราที่แอดมินแก้จากจอ **คงเดิมทุกไบต์**
+ *
+ * มีเพราะ `--extras-only` สัญญาว่าไม่แตะตัวเลขราคา (กฎใหม่คือการเปลี่ยนราคา — คนละคำสัญญา) และ
+ * `--replace-all` จะทับราคาที่แก้จากจอไป (เช่นสาย TS 160 ที่อยู่ในฐานเท่านั้น) · ครั้งแรกที่ใช้:
+ * ความยาวแกน `xNN` ของ TS_-01 (เจ้าของสั่ง 2026-09-25 — `DEPLOY.md` 4.11ข)
+ * · `standard` เติมเฉพาะคีย์ที่ฐานยังไม่มี **ไม่ทับค่าเดิม** · ค่าเดิมต่างจากแมป = หยุด ไม่เขียน (ให้คนดู)
+ */
+async function applyNewRules(fromFile: PriceBook, opts: { apply: boolean; by: string | null }): Promise<number> {
+  const state = await readBookState();
+  if (!state) {
+    console.error('ยังไม่มีสมุดราคาในฐาน — --new-rules เติมได้เฉพาะเล่มที่มีอยู่แล้ว (เล่มแรกใช้ --apply ธรรมดา)');
+    return 1;
+  }
+  const models = { ...state.book.models };
+  const changed: string[] = [];
+  for (const [code, m] of Object.entries(state.book.models)) {
+    const f = fromFile.models[code];
+    if (!f) continue;
+    const have = new Set(m.adders.map((a) => a.id));
+    const added = f.adders.filter((a) => !have.has(a.id));
+    if (!added.length) continue;
+    const standard = { ...m.standard };
+    for (const a of added) {
+      const dim = a.dim;
+      if (!dim || f.standard[dim] === undefined) continue;
+      if (standard[dim] === undefined) standard[dim] = f.standard[dim]!;
+      else if (standard[dim] !== f.standard[dim]) {
+        console.error(`${code}: ค่ามาตรฐาน ${dim} ในฐาน = ${standard[dim]} แต่แมป = ${f.standard[dim]} — ไม่เขียน ให้คนตัดสินก่อน`);
+        return 1;
+      }
+    }
+    // เรียงตาม order เหมือนที่ตัวนำเข้าเรียง — กฎเดิมไม่ขยับตำแหน่งกันเอง
+    const adders = [...m.adders, ...added].sort((x, y) => x.order - y.order);
+    models[code] = withFields(m, { standard, adders });
+    changed.push(code);
+    console.log(`\n${code}:`);
+    for (const a of added) {
+      console.log(`  + ${a.id} "${a.label}" — ${a.dim ? `เกิน ${a.over ?? standard[a.dim] ?? 0} ${a.unit ?? ''} · ` : ''}` +
+        `${a.rates ? Object.entries(a.rates).map(([k, v]) => `${k} = ${v}`).join(' · ') : (a.amount ?? a.rate ?? a.percent)}`);
+    }
+  }
+  if (changed.length === 0) {
+    console.log('\nเล่มในฐานมีกฎครบตามแมปแล้ว — ไม่มีอะไรต้องเขียน');
+    return 0;
+  }
+  if (!opts.apply) {
+    console.log(`\n(ยังไม่ได้เขียนลงฐาน — ${changed.length} รุ่น · ใส่ --apply --by <username> เพื่อบันทึก)`);
+    return 0;
+  }
+  const at = new Date().toISOString();
+  const revision = await commitBookChange({
+    parent: state.revision,
+    kind: 'model',
+    next: { ...state.book, models, edited: { at, by: opts.by ?? undefined, note: 'เติมกฎบวกเพิ่มที่แมปเพิ่งมี (กฎ/ราคาเดิมคงเดิม)' } },
+    changed,
+    by: opts.by,
+  });
+  console.log(`\nบันทึกแล้ว — การบันทึกครั้งที่ ${revision} (${changed.join(', ')})`);
+  return 0;
+}
+
 async function main(): Promise<number> {
   const args = process.argv.slice(2);
   const val = (flag: string): string | undefined => {
@@ -650,6 +724,7 @@ async function main(): Promise<number> {
   const apply = args.includes('--apply');
   const replaceAll = args.includes('--replace-all');
   const extrasOnly = args.includes('--extras-only') || args.includes('--layout-only');
+  const newRules = args.includes('--new-rules');
 
   if (!dataDir === !fromJson) {
     console.error('ต้องบอกที่มาของสมุดราคาอย่างใดอย่างหนึ่ง:');
@@ -692,6 +767,7 @@ async function main(): Promise<number> {
   }
 
   if (extrasOnly) return applyExtrasOnly(book, { apply, by });
+  if (newRules) return applyNewRules(book, { apply, by });
 
   if (outFile) {
     writeFileSync(resolve(outFile), JSON.stringify(book, null, 2), 'utf8');

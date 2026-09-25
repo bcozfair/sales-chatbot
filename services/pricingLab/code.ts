@@ -336,11 +336,13 @@ function readCable(c: Ctx, token: string): boolean {
  * ใช้ร่วมกันหลายชีตเพราะหัวตารางเขียนรหัสมาตรฐานไว้เป็นแบบเดียวกัน (TS-04 · TS-06 · TS-08 ·
  * TS-10 · TS-11 · TS-12 · TS-01) — **ส่วนไหนอ่านหรือไม่อ่าน ดูจากแกนที่รุ่นนั้นมีจริงในสมุดราคา**
  * ไม่ใช่จากรหัสรุ่นที่เขียนไว้ในโค้ด: TS-11/TS-12 ไม่มีเกลียวจึงไม่มีวงเล็บ · TS-01 ไม่มีแกน D
- * เพราะทั้งรุ่นใช้ขนาดเดียว (4.8) ⇒ เตือนว่า "ไม่มีวงเล็บ" เฉพาะรุ่นที่มีแกนเกลียวจริงเท่านั้น
+ * ในตารางราคาตั้ง (ราคาตามเกลียว) แต่ค่าความยาวแกนแยกราคาตาม D ⇒ อ่าน D ไว้ให้กฎนั้น
+ * ⇒ เตือนว่า "ไม่มีวงเล็บ" เฉพาะรุ่นที่มีแกนเกลียวจริงเท่านั้น
  */
 function readTsGeneric(c: Ctx, rest: string, prefix: string): void {
   const hasThread = axisValues(c.model, 'thread').length > 0;
   const hasD = axisValues(c.model, 'D').length > 0;
+  const dRates = hasD ? [] : [...new Set(c.model.adders.filter((a) => a.byAxis === 'D').flatMap((a) => Object.keys(a.rates ?? {})))];
 
   const paren = rest.match(/^\(([^)]*)\)/);
   if (paren && !hasThread) {
@@ -393,6 +395,12 @@ function readTsGeneric(c: Ctx, rest: string, prefix: string): void {
       } else {
         add(c, { text: dText, reads: `ไม่มีแกน ${dText} ในตารางราคา ${c.model.sheet ?? c.model.code}`, kind: 'unknown' });
       }
+    } else if (dRates.length && matchValue(dRates, dText)) {
+      // ขนาดแกนไม่ได้อยู่ในตารางราคาตั้ง แต่กฎบวกเพิ่มแยกราคาตามแกน — TS_-01 ความยาวแกน 4.8 = 110 · 6 = 120
+      // ต่อ 100 mm (เจ้าของสั่ง 2026-09-25) ⇒ ต้องจำไว้ ไม่งั้นรหัสที่มี `x` จะขึ้น "รหัสไม่ได้บอกขนาดแกน"
+      const hit = matchValue(dRates, dText)!;
+      c.cfg.axes = { ...c.cfg.axes, D: hit };
+      add(c, { text: dText, reads: `แกน D = ${hit} mm`, kind: 'axis' });
     } else if (Number(dText) === c.model.standard.dia_mm) {
       // TS-01 ทั้งรุ่นใช้แกนขนาดเดียว (ชีตเขียนไว้ในรหัสมาตรฐานเอง) ⇒ ตัวเลขนี้ไม่ได้เลือกอะไร
       add(c, { text: dText, reads: `แกน ${dText} mm — ขนาดเดียวของรุ่นนี้ ไม่มีผลกับราคา`, kind: 'noPrice' });
@@ -404,6 +412,8 @@ function readTsGeneric(c: Ctx, rest: string, prefix: string): void {
         reads: `ตารางราคา ${c.model.sheet ?? c.model.code} มีขนาดแกนเดียวคือ ${c.model.standard.dia_mm ?? '—'} mm — ยังไม่ได้ตั้งค่าว่า ${dText} คิดเท่าไหร่`,
         kind: 'unknown'
       });
+      // รหัสบอกขนาดแกนมาแล้วแต่อ่านไม่ออก — กฎความยาวแกนต้องขึ้น "ยังไม่รวม" ไม่ใช่ "รหัสไม่ได้บอก"
+      if (dRates.length) c.cfg.unread = { ...c.cfg.unread, D: dText };
     }
     if (core[2]) {
       // ความยาวแกนคิดเงินได้ก็ต่อเมื่อชีตมีคอลัมน์ "บวกเพิ่ม 100 mm ละ" ของรุ่นนั้น
