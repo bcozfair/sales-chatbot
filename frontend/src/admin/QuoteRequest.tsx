@@ -44,6 +44,7 @@ import { ConfirmIssueModal } from './ConfirmIssueModal';
 import { describeApiError } from './apiError';
 import { LocalContactModal, DeleteContactModal } from './LocalContactModal';
 import { isLocalContactId } from './localContacts';
+import { formatDate } from './logs/format';
 import {
   AlertCircle,
   AlertTriangle,
@@ -320,6 +321,21 @@ interface PreviewQuote {
  * (= ก้อนระดับบริษัท ยังไม่ได้เลือกผู้ติดต่อ)
  */
 type PartyView = Omit<PreviewResult['customer'], 'contact_id'> & { contact_id: number | null };
+
+/**
+ * ส่วนลดทั้งบิลของ 3 ใบสั่งขายล่าสุดของบริษัท — รูปเดียวกับ `DiscountSummary` ฝั่ง server
+ * (`services/dataDirectoryService.ts` ตัวเดียวกับหน้า "ข้อมูลลูกค้า") · อ่านเฉพาะช่องที่ใช้
+ */
+interface DiscountHist {
+  rows: { ref: string; date: string | null; amount: number; discount: number; pct: number | null }[];
+  same: boolean;
+}
+/** สี่สถานะของแถว "ส่วนลดเดิม" — `ok` + `data: null` = บริษัทนี้ไม่เคยมีใบสั่งขาย (ไม่ใช่ความผิดพลาด) */
+type DiscountState =
+  | { status: 'none' }
+  | { status: 'loading' }
+  | { status: 'error' }
+  | { status: 'ok'; data: DiscountHist | null };
 
 interface PreviewResult {
   customer: {
@@ -1160,6 +1176,116 @@ const ServiceNameField: React.FC<{
   );
 };
 
+/** % ส่วนลด — จำนวนเต็มไม่มีทศนิยม (".00" ของเปอร์เซ็นต์คือขยะ) · กติกาเดียวกับหน้า "ข้อมูลลูกค้า" */
+const pctText = (v: number) => `${v % 1 === 0 ? v.toFixed(0) : v.toFixed(2)}%`;
+
+/**
+ * แถว "ส่วนลดเดิม" ใต้ "สถานที่ส่งของ" — เจ้าของเลือกแบบ C ของ mockup `discount-history`
+ * แล้วสั่งย้ายมาไว้ตรงนี้ (2026-09-25): ปุ่ม `30%, 30%, 25% ▾` กดแล้วกางตาราง 3 ใบ
+ *
+ * · ข้อมูลให้คนออกใบดูเท่านั้น **ไม่พิมพ์ลง PDF** และไม่ไปแตะตัวเลขในใบ
+ * · ขอบเขต = รหัสลูกค้านี้ (`company_id`) เท่านั้น — ไม่รวมสาขาที่เลขภาษีเดียวกัน (เคาะ 2026-09-17)
+ * · กล่องลอยผ่าน portal เพราะการ์ดใบตัดขอบ (`overflow-hidden`) · ปิดด้วยกดที่อื่นหรือ Esc
+ * · สี่สถานะ: ยังไม่เลือกบริษัท = "—" · กำลังโหลด · ไม่เคยมีใบ · โหลดไม่สำเร็จ (ไม่บล็อกการออกใบ)
+ */
+const DiscountHistoryField: React.FC<{ state: DiscountState; onRetry: () => void }> = ({ state, onRetry }) => {
+  const [open, setOpen] = useState(false);
+  const { shellRef, popRef, pos } = useAnchoredPopover(open, setOpen, 300);
+  const popId = useId();
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open]);
+
+  if (state.status === 'none') return <span className="text-slate-400">—</span>;
+  if (state.status === 'loading') {
+    return (
+      <span className="inline-flex items-center gap-1 text-slate-400">
+        <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+        กำลังโหลด...
+      </span>
+    );
+  }
+  if (state.status === 'error') {
+    return (
+      <span className="inline-flex flex-wrap items-center gap-x-2 text-red-600">
+        โหลดไม่สำเร็จ
+        <button type="button" onClick={onRetry} className="font-semibold underline hover:text-red-700">
+          ลองใหม่
+        </button>
+      </span>
+    );
+  }
+  const d = state.data;
+  if (!d || d.rows.length === 0) return <span className="text-slate-500">ยังไม่เคยมีใบสั่งขาย</span>;
+
+  const summary = d.rows.map((r) => (r.pct != null ? pctText(r.pct) : '—')).join(', ');
+  return (
+    <>
+      <div ref={shellRef} className="inline-flex max-w-full">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          aria-controls={popId}
+          aria-label={`ส่วนลดทั้งบิลของ ${d.rows.length} ใบสั่งขายล่าสุด ${summary} — กดเพื่อดูรายละเอียด`}
+          className="inline-flex items-center gap-1 h-6 px-2 -my-0.5 rounded-md border border-slate-300 bg-card
+            text-[11.5px] font-semibold text-slate-700 tabular-nums hover:border-[var(--brand-fg)] hover:text-[var(--brand-fg)]"
+        >
+          {summary}
+          <ChevronDown className={`w-3 h-3 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+        </button>
+      </div>
+      {open &&
+        pos &&
+        createPortal(
+          <div
+            ref={popRef}
+            id={popId}
+            role="dialog"
+            aria-label="ส่วนลดทั้งบิลของใบสั่งขายล่าสุด"
+            style={{ position: 'fixed', left: pos.left, top: pos.top, bottom: pos.bottom, width: pos.width }}
+            className="z-50 bg-card border border-slate-200 rounded-xl shadow-xl px-3 py-2.5"
+          >
+            <p className="text-[10.5px] font-bold text-slate-500">
+              ส่วนลดทั้งบิล · {d.rows.length} ใบสั่งขายล่าสุดของรหัสลูกค้านี้
+            </p>
+            <table className="w-full mt-1.5 text-[11.5px]">
+              <thead>
+                <tr className="text-[10px] text-slate-400">
+                  <th className="text-left font-semibold pb-1">เลขที่ใบ</th>
+                  <th className="text-right font-semibold pb-1">วันที่</th>
+                  <th className="text-right font-semibold pb-1">ยอดก่อนลด</th>
+                  <th className="text-right font-semibold pb-1">ส่วนลด</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {d.rows.map((r) => (
+                  <tr key={r.ref}>
+                    <td className="py-1 font-mono text-[11px] text-[var(--brand-fg)]">{r.ref}</td>
+                    <td className="py-1 text-right text-slate-400 whitespace-nowrap">{formatDate(r.date)}</td>
+                    <td className="py-1 text-right tabular-nums text-slate-700">{money2(r.amount)}</td>
+                    <td className="py-1 text-right tabular-nums font-bold text-slate-800">
+                      {r.pct != null ? pctText(r.pct) : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="mt-1.5 pt-1.5 border-t border-slate-100 text-[10.5px] text-slate-500">
+              {d.rows.length > 1 && (d.same ? 'ส่วนลดเท่ากันทุกใบ · ' : 'ส่วนลดไม่เท่ากัน · ')}
+              ข้อมูลให้ดูเท่านั้น ไม่พิมพ์ลงใบ
+            </p>
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+};
+
 const ProductSearchBox: React.FC<{
   /** คำที่เติมไว้ให้ตั้งแต่แรก — แถวที่จับคู่ไม่ได้ใช้รุ่นที่ลูกค้าพิมพ์มาเป็นตัวตั้ง */
   initialQuery?: string;
@@ -1433,6 +1559,9 @@ interface DocCtx {
   deliveryTypes: { key: DeliveryTypeKey; label: string }[];
   deliveryOv: Partial<Record<'PM' | 'THT', DeliveryOv>>;
   setDeliveryOv: (co: 'PM' | 'THT', v: DeliveryOv | undefined) => void;
+  /** แถว "ส่วนลดเดิม" ใต้ "สถานที่ส่งของ" */
+  discount: DiscountState;
+  retryDiscount: () => void;
   // ── แถบเพิ่มรายการท้ายตาราง ──
   addProductRow: (h: SearchHit) => void;
   addRow: () => void;
@@ -1442,7 +1571,12 @@ interface DocCtx {
   justAdded: string | null;
 }
 
-const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
+/**
+ * `firstLabel` = ใบนี้ไม่ใช่ใบแรกของชุด ⇒ ไม่วาดบล็อกผู้ซื้อซ้ำ (เจ้าของสั่ง 2026-09-25) เหลือบรรทัด
+ * เดียวที่บอกชื่อผู้ซื้อและชี้ไปใบแรก — ช่องเลือกบริษัท/ผู้ติดต่อมีชุดเดียวในใบแรก ⇒ ตอนผลตรวจแตกใบ
+ * เป็น PM/THT ช่องที่กำลังกรอกอยู่ไม่กระโดดที่ · กระดาษ PDF ของทุกใบยังมีผู้ซื้อครบเหมือนเดิม
+ */
+const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx; firstLabel?: string }> = ({ g, ctx, firstLabel }) => {
   const q = g.quote;
   const co = q?.company ?? null;
   const cust = ctx.customer;
@@ -1537,6 +1671,13 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
       {/* ── ผู้ซื้อ / ข้อมูลเอกสาร — ช่องกรอกอยู่ตรงที่มันไปโผล่บนใบ ไม่ใช่ในฟอร์มอีกใบข้างบน ──
           ซ้าย 2/3 · ขวา 1/3 (เจ้าของสั่ง 2026-09-23 · แทน 3/4–1/4 ที่ลองก่อน) — ฝั่งซ้ายมีช่องเลือกบริษัท/ผู้ติดต่อที่ชื่อยาว
           ส่วนฝั่งขวาเป็นค่าสั้น ๆ ที่ตัดบรรทัดได้ (เครดิต/กำหนดส่ง wrap เองอยู่แล้ว) */}
+      {firstLabel ? (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 px-4 py-2.5 border-b border-slate-200 text-[11.5px]">
+          <span className="text-slate-400 shrink-0 w-[86px]">นามผู้ซื้อ</span>
+          <span className="font-semibold text-slate-700 min-w-0 break-words">{cust?.display_name || '—'}</span>
+          <span className="text-slate-400">· ข้อมูลลูกค้าและผู้ติดต่อเดียวกับใบ {firstLabel} ด้านบน</span>
+        </div>
+      ) : (
       <div className="grid grid-cols-1 sm:grid-cols-[2fr_1fr] border-b border-slate-200">
         <div className="px-4 py-3">
           <DocField label="รหัสลูกค้า">
@@ -1644,8 +1785,12 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
             <span className="text-slate-400">—</span>
           </DocField>
           <DocField label="สถานที่ส่งของ">{cust?.address || '—'}</DocField>
+          <DocField label="ส่วนลดเดิม">
+            <DiscountHistoryField state={ctx.discount} onRetry={ctx.retryDiscount} />
+          </DocField>
         </div>
       </div>
+      )}
 
       {/* ── ตารางรายการ 6 คอลัมน์เหมือนใบจริง — และเป็นที่ที่แก้ของได้จริง ── */}
       <table className="w-full text-sm">
@@ -2670,6 +2815,37 @@ export const QuoteRequest: React.FC = () => {
     (party && party.key === partyKey ? party.block : null) ??
     (coParty && coParty.key === customerId ? coParty.block : null);
 
+  /**
+   * ส่วนลดเดิม (3 ใบสั่งขายล่าสุด) — ขึ้นกับบริษัทอย่างเดียว ⇒ ยิงเฉพาะตอนบริษัทเปลี่ยน ไม่ผูกกับ
+   * ผู้ติดต่อ/เครดิตแบบ `/party` · เก็บคู่กับคีย์บริษัทเหมือน `party` ⇒ ของบริษัทก่อนไม่ค้างบนจอ
+   * · อ่านไม่ได้ = บอกว่าโหลดไม่สำเร็จ ไม่ใช่ "ไม่เคยมีใบ" และไม่บล็อกการออกใบ
+   */
+  const [discHist, setDiscHist] = useState<{ key: number; data: DiscountHist | null; failed: boolean } | null>(null);
+  const [discRetry, setDiscRetry] = useState(0);
+  useEffect(() => {
+    if (customerId === null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/admin/webquote/discount-history?customer_id=${customerId}`, { headers: authHeaders });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (!cancelled) setDiscHist({ key: customerId, data: data?.discount ?? null, failed: false });
+      } catch {
+        if (!cancelled) setDiscHist({ key: customerId, data: null, failed: true });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [customerId, authHeaders, discRetry]);
+  const discountState: DiscountState =
+    customerId === null
+      ? { status: 'none' }
+      : !discHist || discHist.key !== customerId
+        ? { status: 'loading' }
+        : discHist.failed
+          ? { status: 'error' }
+          : { status: 'ok', data: discHist.data };
+
   // ค้นบริษัทเพิ่ม — หน่วง 300ms เท่ากับช่องค้นสินค้า ไม่งั้นยิงคิวรีทุกตัวอักษรที่พิมพ์
   useEffect(() => {
     const q = customerQuery.trim();
@@ -3580,6 +3756,11 @@ export const QuoteRequest: React.FC = () => {
     offerBulk,
     bulkOffer,
     multiDoc: groups.length > 1,
+    discount: discountState,
+    retryDiscount: () => {
+      setDiscHist(null);
+      setDiscRetry((n) => n + 1);
+    },
     applyBulk,
     dismissBulk,
     rowTagsOf,
@@ -3866,8 +4047,8 @@ export const QuoteRequest: React.FC = () => {
 
         {/* ── ใบ ── ก่อนตรวจครั้งแรกเป็นใบเดียวที่ยังไม่รู้ว่าเป็นของบริษัทไหน
             (resolveQuoteCompany อยู่ฝั่ง server) แล้วค่อยแตกเป็น PM/THT เมื่อผลตรวจกลับมา */}
-        {groups.map((g) => (
-          <QuoteDocument key={g.co} g={g} ctx={docCtx} />
+        {groups.map((g, i) => (
+          <QuoteDocument key={g.co} g={g} ctx={docCtx} firstLabel={i > 0 ? groups[0].co : undefined} />
         ))}
 
         {/* เปิดไฟล์ไม่ได้ต้องบอกเหตุผล — แท็บที่ไม่เปิดเฉย ๆ คนอ่านว่าระบบพัง */}
