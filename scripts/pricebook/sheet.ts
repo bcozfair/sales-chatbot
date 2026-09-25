@@ -107,7 +107,8 @@ const EFFECT_TH: Record<SubCodeEffect, string> = {
   flat: 'บวกเงินคงที่',
   percent: 'บวกเปอร์เซ็นต์',
   perUnit: 'บวกตามส่วนที่เกิน',
-  setAxis: 'ตั้งค่าให้ช่อง'
+  setAxis: 'ตั้งค่าให้ช่อง',
+  option: 'เปิดกฎบวกเพิ่มของรุ่น'
 };
 
 const MATCH_TH: Record<SubCode['match'], string> = {

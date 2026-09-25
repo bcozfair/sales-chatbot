@@ -10,7 +10,7 @@
 //     หน้าแอดมินเป็นไฟล์สาธารณะ ของที่ส่งมาถึงเบราว์เซอร์ = ของที่โหลดได้โดยไม่ต้องล็อกอิน
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type SubCodeEffect = 'none' | 'basePrice' | 'flat' | 'percent' | 'perUnit' | 'setAxis';
+export type SubCodeEffect = 'none' | 'basePrice' | 'flat' | 'percent' | 'perUnit' | 'setAxis' | 'option';
 
 export interface SubCode {
   id?: number;
@@ -49,6 +49,8 @@ export interface ModelBrief {
   products?: number | null;
   /** true = เปิดแบบชีต Excel ได้ (หน้าสมุดรายชีต `SheetEditor`) — เกณฑ์อยู่ที่ `excelReady()` ฝั่ง backend */
   excel?: boolean;
+  /** กฎของรุ่นที่รหัสย่อยแบบ "เปิดกฎ" เลือกได้ — ชื่ออย่างเดียว ไม่มีราคา (`modelBriefs` ฝั่ง backend) */
+  options?: { key: string; label: string }[];
 }
 
 /** `GET /api/admin/pricing/overview` — หน้าคิดราคาได้แค่นี้ ของงานแก้ราคาอยู่ที่ `Overview` */
@@ -185,6 +187,7 @@ export const EFFECT_TH: Record<SubCodeEffect, string> = {
   percent: 'บวกเปอร์เซ็นต์',
   perUnit: 'บวกตามส่วนที่เกิน',
   setAxis: 'ตั้งค่าให้ช่อง',
+  option: 'เปิดกฎบวกเพิ่มของรุ่น',
 };
 
 /** คำอธิบายสั้น ๆ ใต้ตัวเลือก — คนที่ไม่ได้อ่านสเปรดชีตมาก่อนต้องเลือกถูกจากบรรทัดนี้ */
@@ -195,6 +198,7 @@ export const EFFECT_HINT: Record<SubCodeEffect, string> = {
   percent: 'บวกเป็นสัดส่วนของยอดก่อนหน้า',
   perUnit: 'คิดตามส่วนที่เกินมาตรฐาน เช่น ความยาว',
   setAxis: 'ไม่ได้บวกเงิน แต่ไปเปลี่ยนตัวเลือกที่ใช้เปิดตารางราคา',
+  option: 'ใช้ราคาของกฎที่รุ่นนี้มีอยู่แล้ว — แก้ราคาที่กฎ ไม่ใช่ที่รหัสย่อย',
 };
 
 

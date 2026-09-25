@@ -5,6 +5,7 @@
   "label": "RTD TS-10 (เกลียว + ออกสาย)",
   "aliases": ["TSPA-10", "TSZ-10", "TS-10"],
   "standard": { "L1": 100, "cable_m": 1 },
+  "axisDefaults": { "cable": "สายพีวีซี" },
   "base": {
     "kind": "matrix",
     "axes": ["D", "thread", "sensor"],

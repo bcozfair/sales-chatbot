@@ -767,6 +767,20 @@ npx tsx scripts/pricebook/importer.ts --data <โฟลเดอร์ Excel> --
 สำรองที่ `backup/pricing-before-tube-len-2026-09-25-1053.dump`) ⇒ deploy ไม่ต้องทำซ้ำ · ฐานใหม่ที่บูตด้วย `--apply` ได้กฎนี้เองจากแมป
 · ตรวจ: `TSK-01(M6)4.8x10+1M` = 270 · `TSK-01(M8)6x50+1M` = 310 · `TSP-01(M6)4.8x50+2MTSU` = 1,190 · รันซ้ำต้องได้ "ไม่มีอะไรต้องเขียน"
 
+**ท้ายรหัส TS_-08 / TS_-10 ตามแคตตาล็อก** (แคตตาล็อกชุดเพิ่ม `backup/Catalogue/` 2026-09-25 · **ต้องได้คำสั่งเจ้าของ · ยังไม่ได้เขียนฐานของ PMSV**) —
+TS_-08 `-[2]-[หัวกระโหลก][Ground]` เช่น `-2-KBU` · TS_-10 หลัง M = `[ชนิดสาย][Ground]` เช่น `+3MTU` ⇒ 10 แถวใน `catalog-subcodes.json`
+(หัว B/K/KB + 2 element เป็นรหัสย่อยแบบ **"เปิดกฎบวกเพิ่มของรุ่น"** — ราคาอยู่ในกฎเดิมของชีต R9–R11/U ไม่ได้พิมพ์ตัวเลขใหม่) +
+ค่ามาตรฐานสาย TS-10 = พีวีซี (แมป 16 · แคตตาล็อก "Standard for RTD" = `TS-10!A41`) · **ต้องใช้โค้ดตั้งแต่คอมมิตนี้** (ชนิดรหัสย่อยใหม่ `option`
+— โค้ดเก่าอ่านแถวนี้ไม่ออกแล้วข้ามทิ้งเงียบ ๆ = กลับไปเป็นท่อนแดงเหมือนเดิม ไม่ได้คิดผิด) · ทำสองคำสั่งคู่กัน (สำรองสี่ตาราง `pricing_*` ก่อน):
+```bash
+npx tsx scripts/pricebook/seedCatalogSubcodes.ts                                       # รายงาน — ต้องเห็น + 10 แถว (TSP-08 · TSP-10)
+npx tsx scripts/pricebook/seedCatalogSubcodes.ts --apply --by admin
+npx tsx scripts/pricebook/importer.ts --data <โฟลเดอร์ Excel> --extras-only            # รายงาน — ต้องเห็นแค่ TSP-10: cable = สายพีวีซี
+npx tsx scripts/pricebook/importer.ts --data <โฟลเดอร์ Excel> --extras-only --apply --by admin
+```
+ตรวจ: `TSP-08(S4)6x100-BU` = 2,180 · `TSP-08(S4)6x100-KBU` = 2,380 · `TSP-08(S6)8x43-2-BU` = 3,010 · `TSP-10(S4)6x100+3MTU` = 1,940 ·
+`TSP-10(S2)6x100+2M` = 1,635 · `TSP-10(S2)5x55+5MTSU` = "ยังไม่มีราคา" (สาย TS ของ TS-10 ยังไม่มีตัวเลข) · รันซ้ำต้องได้ "ไม่มีอะไรต้องเขียน"
+
 **ถอยกลับ** (หลัง dump): `TRUNCATE pricing_model_history, pricing_models, pricing_book_revisions;` — หน้าจอกลับไปขึ้น
 "ยังไม่มีสมุดราคาในระบบ" เท่ากับก่อนนำเข้า · ⚠️ `db:restore` / `pg_restore` ของ dump เก่าก็พาราคาย้อนไปตามวันของ dump ด้วย
 

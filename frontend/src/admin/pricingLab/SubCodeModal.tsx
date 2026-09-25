@@ -34,7 +34,7 @@ interface Props {
   onSaved: () => void;
 }
 
-const EFFECTS: SubCodeEffect[] = ['none', 'flat', 'percent', 'perUnit', 'basePrice', 'setAxis'];
+const EFFECTS: SubCodeEffect[] = ['none', 'option', 'flat', 'percent', 'perUnit', 'basePrice', 'setAxis'];
 
 /** ตระกูลของรุ่น: `TS-14` → `TS*` — ตัวเลือกกลางระหว่าง "รุ่นเดียว" กับ "ทุกรุ่น" */
 function familyOf(code: string): string | null {
@@ -60,6 +60,9 @@ export const SubCodeModal: React.FC<Props> = ({
   const [preview, setPreview] = useState<{ before: number | null; after: number | null } | null>(null);
 
   const family = familyOf(modelCode);
+  // กฎที่เปิดได้ — ของรุ่นในช่อง "ใช้กับรุ่นไหน" ถ้าเลือกรุ่นเดียว ไม่งั้นของรุ่นที่กำลังคิดอยู่
+  // (ขอบเขตทั้งตระกูล/ทุกรุ่น: รุ่นที่ไม่มีกฎนั้นจะขึ้นแดงเองที่ตัวอ่านรหัส ไม่คิดเงินเงียบ ๆ)
+  const optionChoices = (models.find((m) => m.code === scope) ?? models.find((m) => m.code === modelCode))?.options ?? [];
   /** ตัวที่ลงท้ายด้วยตัวเลข (S000) ตั้งเป็นแม่แบบตัวเดียวครอบได้ทั้งชุด S000–S999 */
   const digits = /\d/.test(subCode);
   const asPattern = pattern ? subCode.replace(/\d/g, '#') : subCode;
@@ -70,6 +73,7 @@ export const SubCodeModal: React.FC<Props> = ({
     if (effect === 'percent') d.percent = Number(percent) || 0;
     if (effect === 'perUnit') { d.rate = Number(rate) || 0; d.dim = dim; }
     if (effect === 'setAxis') { d.axis = axis; d.value = value; }
+    if (effect === 'option') d.value = value;
     return d;
   }, [asPattern, pattern, scope, reads, effect, amount, percent, rate, dim, axis, value]);
 
@@ -139,7 +143,8 @@ export const SubCodeModal: React.FC<Props> = ({
       footer={
         <>
           <Button variant="neutral" onClick={onClose} disabled={busy}>ยกเลิก</Button>
-          <Button variant="primary" onClick={() => void save()} busy={busy} disabled={!reads.trim()}>
+          <Button variant="primary" onClick={() => void save()} busy={busy}
+                  disabled={!reads.trim() || (effect === 'option' && !value)}>
             บันทึก
           </Button>
         </>
@@ -199,6 +204,19 @@ export const SubCodeModal: React.FC<Props> = ({
                        placeholder="เช่น L1" />
               </div>
             </>
+          )}
+          {effect === 'option' && (
+            <div>
+              <label className={lab} htmlFor="sc-option">เปิดกฎไหน</label>
+              <select id="sc-option" className={fld} value={value} onChange={(e) => setValue(e.target.value)}>
+                <option value="">— เลือกกฎ —</option>
+                {value && !optionChoices.some((o) => o.key === value) && <option value={value}>{value}</option>}
+                {optionChoices.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+              </select>
+              {optionChoices.length === 0 && (
+                <p className="text-[11px] text-slate-400 mt-1">รุ่นนี้ไม่มีกฎที่เปิดด้วยตัวเลือก</p>
+              )}
+            </div>
           )}
           {effect === 'setAxis' && (
             <>

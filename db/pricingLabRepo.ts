@@ -27,7 +27,7 @@ export interface StoredSubCode extends SubCode {
   id: number;
 }
 
-const EFFECTS: SubCodeEffect[] = ['none', 'basePrice', 'flat', 'percent', 'perUnit', 'setAxis'];
+const EFFECTS: SubCodeEffect[] = ['none', 'basePrice', 'flat', 'percent', 'perUnit', 'setAxis', 'option'];
 const ROUNDS = ['ceil', 'floor', 'exact'];
 
 const str = (v: unknown): string | undefined => {
@@ -91,6 +91,12 @@ export function clean(raw: unknown): SubCode | null {
     const value = str(r.value);
     if (!axis || !value) return null;
     out.axis = axis;
+    out.value = value;
+  }
+  if (effect === 'option') {
+    // ชื่อ option ของกฎที่จะเปิด — ไม่มี = แถวนี้ไม่ทำอะไร แต่ตัวอ่านรหัสจะนับว่า "อ่านออก" ⇒ ต้องปฏิเสธ
+    const value = str(r.value);
+    if (!value) return null;
     out.value = value;
   }
 
