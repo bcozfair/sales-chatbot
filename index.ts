@@ -144,6 +144,7 @@ import {
   listPaymentTermOptions,
   proposeFromText,
   getQuoteParty,
+  matchQuoteContact,
   createDraft as createWebQuoteDraft,
   previewDraft as previewWebQuoteDraft,
   previewQuotePdf as previewWebQuotePdf,
@@ -2976,6 +2977,8 @@ app.post('/api/admin/webquote/propose', adminAuthMiddleware, requireCapability('
  *
  * คืนก้อน `customer` **ตัวเดียวกับที่ `/preview` คืน** จาก `resolveQuoteParty()` ตัวเดียวกัน
  * ⇒ หน้าจอวาดที่เดิมได้โดยไม่ต้องรู้ว่าค่ามาจากเส้นไหน และสองเส้นเพี้ยนจากกันไม่ได้
+ *
+ * ไม่ส่ง `contact_id` = ก้อนระดับบริษัท (`contact_id: null`) — หัวใบขึ้นตั้งแต่เลือกบริษัท (2026-09-25)
  */
 app.get('/api/admin/webquote/party', adminAuthMiddleware, requireCapability('quote.create'), async (req: any, res: any) => {
   try {
@@ -2991,6 +2994,24 @@ app.get('/api/admin/webquote/party', adminAuthMiddleware, requireCapability('quo
     });
   } catch (err: any) {
     sendWebQuoteError(res, 'GET /api/admin/webquote/party', err);
+  }
+});
+
+/**
+ * GET /api/admin/webquote/contact-match — ชื่อผู้ติดต่อที่สกัดจากข้อความตรงกับคนนี้ไหม
+ *
+ * หน้าจอเรียกก่อนเลือกผู้ติดต่อคนเดียวของบริษัทให้เอง เมื่อข้อความระบุชื่อผู้ติดต่อมา
+ * (ไม่ระบุ = เลือกให้ได้เลย ไม่ต้องเรียก) — ตัดสินด้วยตัวจับคู่ตัวเดียวกับ LINE (matchQuoteContact)
+ */
+app.get('/api/admin/webquote/contact-match', adminAuthMiddleware, requireCapability('quote.create'), async (req: any, res: any) => {
+  try {
+    res.json(await matchQuoteContact({
+      customerId: req.query?.customer_id,
+      contactId: req.query?.contact_id,
+      contactQuery: req.query?.q,
+    }));
+  } catch (err: any) {
+    sendWebQuoteError(res, 'GET /api/admin/webquote/contact-match', err);
   }
 });
 

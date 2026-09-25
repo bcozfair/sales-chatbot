@@ -315,6 +315,12 @@ interface PreviewQuote {
   };
 }
 
+/**
+ * หัวใบที่จอวาด — ก้อน `customer` ของ `/preview` หรือของ `/party` ซึ่ง `contact_id` เป็น `null` ได้
+ * (= ก้อนระดับบริษัท ยังไม่ได้เลือกผู้ติดต่อ)
+ */
+type PartyView = Omit<PreviewResult['customer'], 'contact_id'> & { contact_id: number | null };
+
 interface PreviewResult {
   customer: {
     customer_id: number;
@@ -1375,7 +1381,7 @@ interface ItemPayload {
 type AutoFeeOv = { name: string; price: string };
 
 interface DocCtx {
-  customer: PreviewResult['customer'] | null;
+  customer: PartyView | null;
   identity: QuoteIssuerIdentity | null;
   svcCfg: ServiceCfg | null;
   /** ค่าที่แก้ทับบรรทัดค่าขนส่งของกฎ — null = ใช้ชื่อ/ราคาจากหน้าตั้งค่า */
@@ -2324,6 +2330,15 @@ export const QuoteRequest: React.FC = () => {
   const [contacts, setContacts] = useState<ContactRow[]>([]);
   const [contactId, setContactId] = useState<number | null>(null);
   /**
+   * เลือกผู้ติดต่อให้เองเมื่อบริษัทมีคนเดียว (เจ้าของสั่ง 2026-09-25) — สองค่านี้คุมว่าเมื่อไหร่ห้าม
+   * · `contactAuto` = false ตอนเปิดใบเดิม/คำขอที่ตีกลับ — คนของใบต้นทางหายไปแล้วต้องให้คนเลือก
+   *   ไม่ใช่สลับเป็นอีกคนเงียบ ๆ
+   * · `contactQuery` = ชื่อ/เบอร์ผู้ติดต่อที่สกัดจากข้อความ — มีค่าแล้วต้องถาม server ว่าตรงกับ
+   *   คนนั้นไหมก่อน ("ระบุมาแล้วไม่ใช่คนนี้" = ห้ามเลือกให้)
+   */
+  const [contactAuto, setContactAuto] = useState(true);
+  const [contactQuery, setContactQuery] = useState('');
+  /**
    * ช่องวางข้อความกางอยู่ไหม — พับเองเมื่อสกัดสำเร็จ เพราะตั้งแต่นั้นงานอยู่ในใบแล้ว
    * เป็น state ของหน้าจอล้วน ๆ ไม่ใช่ "ขั้น" ที่ผ่านไปแล้วผ่านเลย (กางกลับมาได้ตลอด)
    */
@@ -2393,6 +2408,8 @@ export const QuoteRequest: React.FC = () => {
     setCustomerQuery('');
     setContacts([]);
     setContactId(null);
+    setContactAuto(true);
+    setContactQuery('');
     setPasteOpen(true);
     setResults([]);
     setStrandedIds([]);
@@ -2453,6 +2470,8 @@ export const QuoteRequest: React.FC = () => {
       setCustomerOptions(data.customer_id ? [{ id: data.customer_id, display_name: data.company_name ?? '' }] : []);
       setCustomerId(data.customer_id ?? null);
       setContactId(data.contact_id ?? null);
+      setContactAuto(false);
+      setContactQuery('');
       setPaymentTerms(String(data.payment_terms_override ?? '').trim() || null);
       setAutoFeeOv(data.auto_fee ? { name: data.auto_fee.name, price: String(num(data.auto_fee.price)) } : null);
       setApprovalNote(String(data.note ?? ''));
@@ -2555,16 +2574,33 @@ export const QuoteRequest: React.FC = () => {
         // ทุกรหัสสาขาของนิติบุคคลเดียวกัน คนที่ได้มาจึงอาจอยู่ใต้อีก company_id
         // ปล่อยค้างไว้ = ช่องผู้ติดต่อว่างแต่ปุ่ม "ยืนยัน" กดได้ แล้วใบไปโผล่ผิดผู้ติดต่อ
         setContactId((cur) => (cur !== null && list.some((c) => c.id === cur) ? cur : null));
+
+        // บริษัทมีผู้ติดต่อคนเดียว = เลือกให้เลย (เจ้าของสั่ง 2026-09-25 · 75% ของบริษัททั้งหมด
+        // วัดวันเดียวกัน) · ข้อความระบุชื่อมา ⇒ ต้องตรงกับคนนั้นก่อน ตัดสินด้วยตัวจับคู่ของ LINE
+        // ที่ server ไม่ใช่เทียบสตริงบนจอ · ไม่ทับคนที่เลือกไว้แล้ว (`cur ??`)
+        if (list.length !== 1 || !contactAuto) return;
+        const only = list[0].id;
+        if (contactQuery) {
+          // ถามไม่สำเร็จ = ไม่เลือกให้ (ปลอดภัยกว่าเดา) · ห้ามปล่อยให้ตกไป catch ด้านล่าง
+          // ซึ่งล้างรายชื่อผู้ติดต่อทิ้งทั้งที่โหลดมาได้แล้ว
+          const qs = new URLSearchParams({ customer_id: String(customerId), contact_id: String(only), q: contactQuery });
+          const m = await fetch(`/api/admin/webquote/contact-match?${qs.toString()}`, { headers: authHeaders })
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null);
+          if (cancelled || m?.match !== true) return;
+        }
+        setContactId((cur) => cur ?? only);
       } catch {
         if (!cancelled) setContacts([]);
       }
     })();
     return () => { cancelled = true; };
-  }, [customerId]);
+  }, [customerId, contactAuto, contactQuery, authHeaders]);
 
   /**
    * หัวใบ (รหัสลูกค้า · เลขผู้เสียภาษี · ที่อยู่ · เครดิตของลูกค้า) ต้องขึ้น **ตั้งแต่เลือก
-   * ผู้ติดต่อเสร็จ** ไม่ใช่รอจนมีสินค้าในใบ
+   * ผู้ติดต่อเสร็จ** ไม่ใช่รอจนมีสินค้าในใบ — ก้อนนี้คือก้อนเต็ม (มีผู้ติดต่อ) · ก่อนเลือกผู้ติดต่อ
+   * หัวใบอ่านก้อนระดับบริษัท `coParty` ข้างล่างแทน
    *
    * `/preview` ตอบก้อนนี้แทนไม่ได้เพราะมันบังคับว่าต้องมี items (ทั้งฟังก์ชันคือการตรวจกฎของ
    * รายการ) ⇒ ก่อนหน้านี้ช่องพวกนี้ขึ้น "—" จนกว่าจะพิมพ์สินค้าเข้าไป ทั้งที่ข้อมูลพร้อมอยู่แล้ว
@@ -2602,8 +2638,34 @@ export const QuoteRequest: React.FC = () => {
     return () => { cancelled = true; };
   }, [customerId, contactId, paymentTerms, authHeaders]);
 
-  /** ก้อนของ "คนที่เลือกอยู่ตอนนี้" เท่านั้น — คีย์ไม่ตรง = ของรอบก่อน ทิ้ง */
-  const partyBlock = party && party.key === partyKey ? party.block : null;
+  /**
+   * ก้อนระดับบริษัท — หัวใบต้องขึ้น **ตั้งแต่เจอบริษัท ไม่ต้องรอผู้ติดต่อ** (เจ้าของสั่ง 2026-09-25)
+   * รหัสลูกค้า · เลขผู้เสียภาษี · เครดิต ไม่ขึ้นกับผู้ติดต่อ ส่วนโทร/อีเมลเป็นของบริษัท และที่อยู่
+   * ขึ้นเฉพาะเมื่อผู้ติดต่อทุกคนใช้ที่เดียวกัน (server ตัดสิน) · ยิงเฉพาะตอนยังไม่มีผู้ติดต่อ แต่
+   * อ่านได้ตลอดที่บริษัทยังเป็นรายเดิม ⇒ ตอนเพิ่งเลือกผู้ติดต่อ หัวใบไม่ว่างวูบระหว่างรอก้อนเต็ม
+   */
+  const [coParty, setCoParty] = useState<{ key: number; block: PartyView } | null>(null);
+  useEffect(() => {
+    if (customerId === null || contactId !== null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const qs = new URLSearchParams({ customer_id: String(customerId) });
+        if (paymentTerms !== null) qs.set('payment_terms_override', paymentTerms);
+        const res = await fetch(`/api/admin/webquote/party?${qs.toString()}`, { headers: authHeaders });
+        const data = res.ok ? await res.json() : null;
+        if (!cancelled && data?.customer) setCoParty({ key: customerId, block: data.customer });
+      } catch {
+        // อ่านไม่ได้ = หัวใบคงเป็น "—" จนกว่าจะเลือกผู้ติดต่อ (ก้อนเต็มยิงแยกอีกเส้น)
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [customerId, contactId, paymentTerms, authHeaders]);
+
+  /** ก้อนของ "คนที่เลือกอยู่ตอนนี้" เท่านั้น — คีย์ไม่ตรง = ของรอบก่อน ทิ้ง · ยังไม่มี = ของบริษัท */
+  const partyBlock: PartyView | null =
+    (party && party.key === partyKey ? party.block : null) ??
+    (coParty && coParty.key === customerId ? coParty.block : null);
 
   // ค้นบริษัทเพิ่ม — หน่วง 300ms เท่ากับช่องค้นสินค้า ไม่งั้นยิงคิวรีทุกตัวอักษรที่พิมพ์
   useEffect(() => {
@@ -2776,6 +2838,8 @@ export const QuoteRequest: React.FC = () => {
           : null;
       setCustomerId(autoId);
       setContactId(autoId !== null && data.contact_candidates.length === 1 ? data.contact_candidates[0].item.id : null);
+      setContactAuto(true);
+      setContactQuery(String(data.quote_data?.contact_query ?? '').trim());
       setCustomerQuery('');
       // ร่างชุดใหม่จากข้อความใหม่ = ลูกค้าคนใหม่ ⇒ ค่าที่ตั้งทับของชุดก่อนต้องไม่ติดมาด้วย
       setPaymentTerms(null);
@@ -3395,6 +3459,8 @@ export const QuoteRequest: React.FC = () => {
       setCustomerOptions(cid ? [{ id: cid, display_name: q?.company_name ?? '' }] : []);
       setCustomerId(cid);
       setContactId(q?.contact_id ?? null);
+      setContactAuto(false);
+      setContactQuery('');
       // ค่าที่คนออกใบต้นทางตั้งทับไว้ต้องตามมา ไม่งั้น "แก้ใบเดิม" จะเงียบ ๆ คืนกำหนดส่งกับ
       // เครดิตกลับเป็นค่าอัตโนมัติ ทั้งที่ใบที่ลูกค้าถืออยู่ไม่ได้เขียนแบบนั้น
       // อ่านจากธง `payment_terms_override` ตรง ๆ ไม่ใช่เดาจากการเทียบค่า — ใบที่ลูกค้ามีเครดิต
@@ -3518,8 +3584,13 @@ export const QuoteRequest: React.FC = () => {
     customerOpt,
     customerOpts,
     onPickCustomer: (o) => {
+      // กดบริษัทเดิมซ้ำ = ไม่ได้เปลี่ยนอะไร — ล้างผู้ติดต่อทิ้งตรงนี้ effect โหลดรายชื่อจะไม่วิ่ง
+      // (customerId ไม่ขยับ) ⇒ คนเดียวของบริษัทจะไม่ถูกเลือกกลับให้ ช่องค้างว่างโดยไม่มีเหตุ
+      if (Number(o.id) === customerId) return;
       setCustomerId(Number(o.id));
       setContactId(null);
+      // เปลี่ยนบริษัทเอง = เลิกยึดผู้ติดต่อของใบต้นทางแล้ว เลือกคนเดียวของบริษัทใหม่ให้ได้
+      setContactAuto(true);
       // เครดิตเป็นของ "บริษัทนี้" — เปลี่ยนบริษัทแล้วค่าที่ตั้งทับไว้หมดความหมาย
       // (กติกาเดียวกับ quote-edit.html ที่เขียนเครดิตใหม่ทุกครั้งที่เปลี่ยนบริษัท)
       setPaymentTerms(null);

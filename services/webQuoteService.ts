@@ -19,7 +19,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { pool } from '../config/db.js';
 import {
-  getCustomerById, getContactById, getSalespersonByUserId, getAdminSalespersonIds,
+  getCustomerById, getContactById, getContactsByCustomerId, getSalespersonByUserId, getAdminSalespersonIds,
   insertMessage, getMessageMetaById, listCustomerPaymentTerms,
   saveQuotationRuleOverrides,
   savePriceApproval,
@@ -1339,16 +1339,106 @@ async function resolveQuoteParty(params: {
 }
 
 /**
+ * ก้อนคู่สัญญาของ `/party` — เหมือน `WebQuoteParty` ทุกช่อง ยกเว้น `contact_id` ที่เป็น `null` ได้
+ * (= ก้อนระดับบริษัท ยังไม่ได้เลือกผู้ติดต่อ) · `/preview` ยังคืน `WebQuoteParty` ที่มีผู้ติดต่อเสมอ
+ */
+export type WebQuotePartyView = Omit<WebQuoteParty, 'contact_id'> & { contact_id: number | null };
+
+/**
  * ทางเข้าสาธารณะของก้อนคู่สัญญา — ใช้โดย `GET /api/admin/webquote/party` ที่หน้าจอเรียก
- * ทันทีที่เลือกบริษัท/ผู้ติดต่อครบ โดยยังไม่มีสินค้าในใบ
+ * ทันทีที่เลือกบริษัท โดยยังไม่มีสินค้าในใบ
+ *
+ * ไม่ส่ง `contactId` มา = ก้อนระดับบริษัท (รหัสลูกค้า · เลขผู้เสียภาษี · เครดิต) — เจ้าของสั่ง
+ * 2026-09-25 ว่าหัวใบต้องขึ้น **ตั้งแต่เจอบริษัท ไม่ต้องรอผู้ติดต่อ** ก่อนหน้านั้นเส้นนี้บังคับ
+ * `contact_id` จึงขึ้น "—" ทั้งหัวใบจนกว่าจะเลือกผู้ติดต่อ ทั้งที่ช่องพวกนี้ไม่ขึ้นกับผู้ติดต่อเลย
  */
 export async function getQuoteParty(params: {
   customerId: unknown;
   contactId: unknown;
   paymentTermsOverride?: unknown;
   role?: Role | null;
-}): Promise<WebQuoteParty> {
+}): Promise<WebQuotePartyView> {
+  const c = params.contactId;
+  if (c === undefined || c === null || c === '') return resolveCompanyParty(params);
   return (await resolveQuoteParty(params)).block;
+}
+
+/**
+ * ก้อนระดับบริษัท — ช่องของบริษัทมาจากแหล่งเดียวกับ `resolveQuoteParty` (getCustomerById ·
+ * ตัวตรวจเครดิตที่ตั้งทับชุดเดียวกัน) ⇒ พอเลือกผู้ติดต่อแล้วก้อนเต็มมาแทน ตัวเลขไม่กระโดด
+ *
+ * ช่องของผู้ติดต่อ: โทร/อีเมล ใช้ของบริษัท · ที่อยู่ใส่ให้ **เฉพาะเมื่อผู้ติดต่อทุกคนที่มีที่อยู่
+ * ใช้ที่อยู่เดียวกัน** (วัด 2026-09-25: 8,290 จาก 9,967 บริษัทที่มีหลายคน) — ที่อยู่ในใบมาจาก
+ * ผู้ติดต่อ ถ้าหลายคนคนละที่แล้วเดาหยิบมาหนึ่งที่ หัวใบจะโชว์ที่อยู่ที่อาจไม่ใช่ของใบนี้
+ */
+async function resolveCompanyParty(params: {
+  customerId: unknown;
+  paymentTermsOverride?: unknown;
+  role?: Role | null;
+}): Promise<WebQuotePartyView> {
+  const customerId = Number(params.customerId);
+  if (!Number.isFinite(customerId) || customerId <= 0) {
+    throw new WebQuoteError('BAD_REQUEST', 'ต้องระบุบริษัท (customer_id) เป็นตัวเลข', 400);
+  }
+  const customer = await getCustomerById(customerId);
+  if (!customer) throw new WebQuoteError('BAD_REQUEST', `ไม่พบบริษัท id=${customerId}`, 400);
+
+  const paymentTermsOverride = parsePaymentTermsOverride(params.paymentTermsOverride);
+  if (params.role) await assertMayOverridePaymentTerms(params.role, paymentTermsOverride);
+  const customerPaymentTerms = String(customer.customer_payment_terms || '');
+  const effectivePaymentTerms = paymentTermsOverride ?? customerPaymentTerms;
+  const { hasCreditTerms } = await import('./shippingFee.js');
+
+  const contacts = await getContactsByCustomerId(customerId);
+  const addrs = new Set(contacts.map((c: any) => buildThaiAddress(c)).filter(Boolean));
+
+  return {
+    customer_id: customerId,
+    contact_id: null,
+    display_name: String(customer.display_name || ''),
+    reference: String(customer.reference || ''),
+    tax_id: String(customer.tax_id || ''),
+    payment_terms: effectivePaymentTerms,
+    customer_payment_terms: customerPaymentTerms,
+    payment_terms_overridden: paymentTermsOverride !== null,
+    has_credit_terms: hasCreditTerms(effectivePaymentTerms),
+    contact_name: '',
+    contact_phone: String(customer.phone || ''),
+    contact_email: String(customer.email || ''),
+    address: addrs.size === 1 ? [...addrs][0] : '',
+  };
+}
+
+/**
+ * คะแนนที่ถือว่า "ชื่อที่พิมพ์มาคือคนนี้" — ค่าเดียวกับที่ LINE ใช้ยืนยันผู้ติดต่อเอง
+ * (`score < 0.45` ใน quotationService.ts) ⇒ เว็บกับ LINE ตัดสินชื่อเดียวกันเหมือนกัน
+ */
+const CONTACT_MATCH_MAX_SCORE = 0.45;
+
+/**
+ * ชื่อ/เบอร์ผู้ติดต่อที่สกัดได้จากข้อความ ตรงกับผู้ติดต่อคนนี้ไหม — ใช้โดย
+ * `GET /api/admin/webquote/contact-match` ตอนหน้าจอจะเลือกผู้ติดต่อคนเดียวของบริษัทให้เอง
+ *
+ * เจ้าของสั่ง 2026-09-25: บริษัทที่มีผู้ติดต่อคนเดียวให้เลือกให้เลย **ยกเว้นข้อความระบุชื่อมา
+ * แล้วไม่ใช่คนนั้น** — ตัวจับคู่คือ `findContactCandidates` ตัวเดียวกับที่ propose/LINE ใช้
+ * ไม่ใช่การเทียบสตริงบนหน้าจอ ไม่งั้น "คุณ มิค" กับ "คุณมิค (ฝ่ายซื้อ)" จะตอบคนละแบบกับ LINE
+ */
+export async function matchQuoteContact(params: {
+  customerId: unknown;
+  contactId: unknown;
+  contactQuery: unknown;
+}): Promise<{ match: boolean }> {
+  const customerId = Number(params.customerId);
+  const contactId = Number(params.contactId);
+  const q = String(params.contactQuery ?? '').trim();
+  if (!Number.isFinite(customerId) || customerId <= 0 || !Number.isFinite(contactId) || contactId <= 0) {
+    throw new WebQuoteError('BAD_REQUEST', 'ต้องระบุ customer_id และ contact_id เป็นตัวเลข', 400);
+  }
+  if (!q) return { match: false };
+  const cands = await findContactCandidates(customerId, q);
+  return {
+    match: cands.some((c: any) => Number(c?.item?.id) === contactId && Number(c?.score) < CONTACT_MATCH_MAX_SCORE),
+  };
 }
 
 /** ทางเข้าสาธารณะ — คืนเฉพาะสิ่งที่หน้าจอต้องใช้ */
