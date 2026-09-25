@@ -187,6 +187,8 @@ function matrixValues(cells: Record<string, Money>, axisCount: number): string[]
  * เหตุที่ต้องมี: ช่องที่ลบเลขทิ้งแล้วบันทึก = คีย์หายจากสมุด (ถูก — ว่าง ≠ 0) แต่ถ้ารับเฉพาะคีย์ที่
  * "มีอยู่แล้ว" ช่องนั้นจะหายจากจอถาวร ใส่ราคาคืนไม่ได้อีกเลย ⇒ รุ่นที่เปิดแบบชีต (`excelReady`)
  * รู้จักค่าแกนจากกฎที่แยกตามแกนเดียวกันทั้งเล่ม (ชนิดสาย 4 ชนิดของ TS-21+22+25 ใช้ร่วมกันทุกรุ่น)
+ * — **ยกเว้นรุ่นที่แกนนั้นเป็นแกนของตารางราคาตั้ง** (2026-09-25): ขนาดแกน D ของ TS-06 คือขนาดที่ TS-06 ทำ
+ * ดึงมาแล้วกฎความยาวแกนของ TS_-01 ได้ช่องว่าง 34 ช่องของขนาดที่ TS_-01 ไม่มี
  *
  * **รุ่นอื่นยังรู้จักแค่คีย์ของตัวเอง** — ลองขยายแบบเดียวกันแล้ว (2026-09-24) กฎที่ใช้กับบางขนาดแกน
  * อย่าง "เคลือบเทฟลอน" ได้ช่องว่างเพิ่มถึง 32 ช่อง และหน้าแปลนสองมาตรฐานของ TS-18 ปนกัน
@@ -204,6 +206,9 @@ function knownRateKeys(book: PriceBook | undefined, m: PriceModel, a: Adder): st
   const keys = new Set(own);
   if (excelReady(m)) {
     for (const other of Object.values(book.models)) {
+      // แกนที่เป็นหัวแถว/หัวคอลัมน์ของตารางรุ่นอื่น = ขนาดที่รุ่นนั้นทำ ไม่ใช่ของที่ใช้ร่วมกัน
+      // (ขนาดแกน D ของ TS-06 มี 36 ค่า · TS_-01 ทำแค่ 4.8 กับ 6) ⇒ ไม่ดึงมา
+      if (other.base.kind === 'matrix' && other.base.axes.includes(a.byAxis)) continue;
       for (const x of other.adders) {
         if (x.byAxis === a.byAxis) for (const k of Object.keys(x.rates ?? {})) keys.add(k);
       }
@@ -213,7 +218,9 @@ function knownRateKeys(book: PriceBook | undefined, m: PriceModel, a: Adder): st
     if (sc.disabled || sc.effect !== 'setAxis' || sc.axis !== a.byAxis || !sc.value) continue;
     if (scopeRank(sc, m) !== undefined) keys.add(sc.value);
   }
-  return [...keys];
+  // คีย์ที่เป็นเลขล้วน (ขนาดแกน 4.8 · 6) เรียงตามค่า — JS วางคีย์จำนวนเต็มไว้หน้าเสมอ จอจะขึ้น "6 · 4.8"
+  const out = [...keys];
+  return out.every((k) => k.trim() !== '' && Number.isFinite(Number(k))) ? out.sort((x, y) => Number(x) - Number(y)) : out;
 }
 
 /**

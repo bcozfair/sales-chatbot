@@ -4,7 +4,7 @@
   "code": "TSK-01",
   "label": "Thermocouple / RTD TS-01 (หัวเกลียวสั้น)",
   "aliases": ["TSJ-01", "TST-01", "TSP-01", "TSPA-01", "TSZ-01", "TS-01"],
-  "standard": { "dia_mm": 4.8, "cable_m": 1 },
+  "standard": { "dia_mm": 4.8, "cable_m": 1, "L1": 5 },
   "base": {
     "kind": "matrix",
     "axes": ["sensor", "thread"],
@@ -17,6 +17,19 @@
   "axisDefaults": { "thread": "1/4”" },
   "axisDefaultsBy": { "cable": { "fill": "สายสแตนเลสถัก", "label": "ชนิดสายมาตรฐาน", "source": "แคตตาล็อก TS_-01 'การสั่งซื้อ' Cable Type None = สแตนเลสถัก (docs/pricing-code-ts-01.md) — เจ้าของเคาะ 2026-09-24 ให้ยึดแคตตาล็อก ไม่ใช่คอลัมน์ G ของชีต" } },
   "adders": [
+    {
+      "id": "len_l1",
+      "label": "ความยาวแกนส่วนที่เกินมาตรฐาน 5 mm (บวกเพิ่ม 100 mm ละ)",
+      "order": 20,
+      "kind": "perUnit",
+      "dim": "L1",
+      "step": 100,
+      "round": "ceil",
+      "unit": "mm",
+      "byAxis": "D",
+      "ratesFrom": { "sheet": "TS-06", "col": "C", "keyCol": "B", "rows": [27, 31], "keys": ["4.8", "6"] },
+      "source": "ความยาวมาตรฐาน 5 mm = แคตตาล็อก TS_-01 'Tube Length None 5mm.' · อัตรา = TS-06!C27 (4.8) · C31 (6) 'บวกเพิ่ม 100 mm ละ' (ชีต TS-01 ไม่มีคอลัมน์นี้ · ชีตพี่น้องเท่ากันทุกชีต) — เจ้าของสั่ง 2026-09-25 'xNN เริ่มคิดเงินเมื่อยาวเกิน std ของแต่ละรุ่น · ยึดราคาจาก excel'"
+    },
     {
       "id": "cable_over_1m",
       "label": "ราคาสายส่วนที่ยาวเกิน 1 เมตร (ตามชนิดสาย)",

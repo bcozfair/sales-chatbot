@@ -420,7 +420,8 @@ const SheetTable: React.FC<{
         </p>
 
         {/* แถบหมายเหตุใต้ตาราง — ในชีตเป็นแถบสีส้ม "สายยาวกว่า 1 M บวกเพิ่มตามราคาสาย"
-            ราคาสายจริงอยู่อีกชีต (TS-21+22+25) ซึ่งสมุดลอกมาไว้ในกฎของแต่ละรุ่น ⇒ วางให้แก้ตรงนี้เลย */}
+            ราคาสายจริงอยู่อีกชีต (TS-21+22+25) ซึ่งสมุดลอกมาไว้ในกฎของแต่ละรุ่น ⇒ วางให้แก้ตรงนี้เลย
+            · กฎละหนึ่งแถบ — TS_-01 มีแถบความยาวแกน (แยกตามขนาดแกน) อยู่เหนือแถบราคาสาย ตามลำดับ `order` */}
         {v.adders.filter((a) => a.rates).map((a) => (
           <div key={a.id} className="mt-3.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
             <div className="text-[13px] font-bold text-amber-800">หมายเหตุ : {a.label}</div>
@@ -457,7 +458,7 @@ const SheetTable: React.FC<{
               </table>
             </div>
             <p className="mt-1.5 text-[11px] text-amber-700">
-              ช่องว่าง = สายชนิดนั้นต้องขอราคา (ไม่ใช่ฟรี)
+              ช่องว่าง = {a.byAxis === 'cable' ? 'สายชนิดนั้น' : `${a.byAxisTh ?? 'ค่า'}นั้น`}ต้องขอราคา (ไม่ใช่ฟรี)
               {a.source?.includes('TS-21+22+25') && <> · ราคาสายลอกมาจากชีต <span className="font-mono">TS-21+22+25</span> — แก้ตรงนี้มีผลกับ {v.title} เท่านั้น</>}
             </p>
           </div>
