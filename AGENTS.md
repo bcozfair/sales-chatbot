@@ -432,7 +432,7 @@ docker compose exec -T db psql -U "$PG_USER" -d "$PG_DATABASE" -c "SELECT …"  
 | ไม่แตะ DB เลย | 11 | รันได้ |
 | แตะ DB แต่ SELECT อย่างเดียว | 26 | รันได้ |
 | เขียนจริงแล้ว **ROLLBACK** ทุกกรณี — `apiLogSmoke` (เฉพาะ `--write`) · `dateFilterSmoke` · `exportTrackingSmoke` · `pricingDbRoundtrip` (ตารางชั่วคราวบังของจริง · เพิ่ม 2026-09-23) · `pricingLab` (ข้อ 5 · เดิม commit แล้วลบทิ้งใน `finally` ซึ่งจะลบค่า `-BU` ของแอดมินทิ้งด้วย — แก้เป็น ROLLBACK 2026-09-23) | 5 | รันได้ · **ห้ามแก้เป็น `COMMIT`** (กฎเหล็ก) |
-| **เขียนจริง commit ลงฐาน แล้วลบทิ้งใน `finally`** — `companyNameConsistencySmoke` · `confirmRaceDiag` · `lineFlexParity` · `pdfIssuerSmoke` · `priceApprovalSmoke` · `shippingFeeSmoke` · `webQuoteSmoke` | 7 | **ต้องขอเจ้าของก่อน** |
+| **เขียนจริง commit ลงฐาน แล้วลบทิ้งใน `finally`** — `companyNameConsistencySmoke` · `confirmRaceDiag` · `lineFlexParity` · `pdfIssuerSmoke` · `priceApprovalSmoke` · `productMatchLine` (เพิ่ม 2026-09-25) · `shippingFeeSmoke` · `webQuoteSmoke` | 8 | **ต้องขอเจ้าของก่อน** |
 
 เจ็ดไฟล์กลุ่มสุดท้าย **ไม่ได้อยู่ในทรานแซกชัน** — มันสร้างแถวจริงใน `quotations` / `salesperson` /
 `admin_users` / `messages` / `quotation_counters` แล้วค่อย `DELETE` ตอนจบ ⇒ **ฆ่ากลางคัน
@@ -576,6 +576,7 @@ TS ไต่ `node_modules` ขึ้นไปตามลำดับ ⇒ `<ท
 | flow ยืนยัน / การออกเลขใบ | `npm run diag:confirm-race` (ต้องเปิด server ก่อน) · **บวก `diag:odoo-export` ทั้ง qp/qt** ตั้งแต่เฟส H เพราะการยืนยันเขียนช่อง Sales Team ของไฟล์ export ลงใบด้วย |
 | กฎสต็อก / validation ของใบ | `npm run diag:stock-rule` · `diag:stock-rule-put` · `diag:quote-validation` |
 | รายการ "รุ่นใกล้เคียง" ที่ให้เซลส์กดเลือก | `npm run diag:product-candidates` — เฉลยมาจากประวัติแชทจริง ไม่มี fixture ในกิต ⇒ **จำนวนเคสขยับได้ ตัวที่เป็น gate คือ "หลุดจากรายการ 0 เคส"** ไม่ใช่เปอร์เซ็นต์ |
+| การจับคู่รหัสสินค้า (`findProduct` · `thaiSuffixVariant`) | `npm run diag:product-match-line` — ยิงข้อความผ่าน `handleEvent` จริงทั้งทางขอใบและทางถามราคา (11 เคสจากข้อความจริงที่เคยผิด: "ดูดออก" · ผิดซีรีส์) · **commit แถวจริงแล้วลบ ต้องขอเจ้าของก่อน** · `diag:product-candidates` วัดแค่ `buildCandidateList` ไม่ครอบ findProduct |
 | ชื่อลูกค้า / ส่งออก Odoo | `npm run diag:odoo-export` — ถ้าขึ้น `(ตรวจ 0 ชื่อ)` แปลว่าด่านผ่านแบบว่างเปล่า อย่าเชื่อ |
 | กฎเครดิต | `npm run diag:credit-hold` (read-only รันกับ prod ได้) |
 | นิยาม `customers_data_build` / ผู้ติดต่อที่แอดมินเพิ่มเอง | `npm run diag:local-contacts` — **บวก `diag:credit-hold` · `diag:data-directory` · `diag:customer-search` ทุกครั้งที่แตะนิยาม view** เพราะทั้งสามอ่านตารางที่ view สร้าง · ด่านนี้เขียน `local_contacts` และ `customers_data_view` ของจริงใน transaction ที่ **ROLLBACK เสมอ** ห้ามเปลี่ยนเป็น COMMIT |

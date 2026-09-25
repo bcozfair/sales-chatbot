@@ -78,6 +78,7 @@
     "diag:web-sales-owner": "tsx scripts/diag/webSalesOwnerSmoke.ts",
     "diag:web-credit-dormant": "tsx scripts/diag/webCreditDormantProbe.ts",
     "diag:product-candidates": "tsx scripts/diag/productCandidateEval.ts",
+    "diag:product-match-line": "tsx scripts/diag/productMatchLine.ts",
     "diag:migrations": "node scripts/diag/migrationsAudit.mjs",
     "diag:backup": "node scripts/diag/backupHealth.mjs",
     "backfill:contacts": "tsx scripts/backfillContactsFromSaleOrders.ts",

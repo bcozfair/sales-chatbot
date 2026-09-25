@@ -146,11 +146,15 @@ user_id, message_id, type, content, reply_token, reply_content, meta (jsonb), cr
 - **`buildDotInitialVariants()`**: จัดการชื่อบริษัทที่ใช้จุดย่อ เช่น "บ.เอ.เค.พลาสติก"
 
 #### `productService.ts`
-- **`findProduct()`**: ค้นหาสินค้า 3 stage:
-  1. Exact match — normalize ทั้งสองฝั่ง ตัด `()` ออก
-  2. pg_trgm fuzzy search — similarity > 0.25, ถ้า score ≥ 0.85 ยืนยันทันที
-  3. AI Pick (DeepSeek) เมื่อ score ปานกลาง
-  4. Legacy fallback เมื่อ pg_trgm ไม่พร้อม
+- **`findProduct()`**: ค้นหาสินค้าไล่ทีละขั้น หยุดที่ขั้นแรกที่ได้ผล แล้วผ่านด่านลำดับของรหัสก่อนคืนค่า:
+  1. Stage 1 exact — normalize ทั้งสองฝั่ง ตัด space / comma / `()` ออก (เทียบทั้ง `model` และ `name`)
+  2. Stage 1.3 — รหัสหลายคำคั่นด้วยช่องว่าง ค้นแบบ AND ทุกคำ (หลายผล = AI เลือก · AI ตอบ 0 = ให้เซลส์เลือก)
+  3. Stage 1.5 — ค้นด้วยเลขที่ยาวที่สุดในรหัส + เทียบส่วนตัวอักษร
+  4. Stage 1.7 — pg_trgm แยกคะแนนส่วนตัวเลข/ตัวอักษร
+  5. Stage 2 — pg_trgm fuzzy + AI Pick (DeepSeek) · legacy fallback เมื่อ pg_trgm ไม่พร้อม
+  6. **`applySequenceGuard()`** (2026-09-25) — ผลที่ไม่มีทุกช่วงของรหัสเรียงตามลำดับ (`pmv25.c220` → pmv|25|c|220)
+     แต่มีรุ่นอื่นที่มี ⇒ เปลี่ยนเป็นให้เลือก/ดันรุ่นที่ตรงลำดับขึ้นก่อน **ไม่เลือกแทนให้** — แก้ `PMV25.01.024` ที่เคยได้
+     `PMV12.00024` (ผิดซีรีส์จาก Stage 1.5) · กติกาและตัวเลขทดลองอยู่ที่หัวฟังก์ชัน
 
 #### `thaiSuffixVariant.ts`
 - **`applyThaiSuffixVariants()`**: รันหลัง `findProduct()` ใน `quoteExtraction` (ครอบทั้ง LINE และหน้าเว็บ) และใน branch
