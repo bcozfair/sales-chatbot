@@ -305,15 +305,26 @@ async function findProductStages(codeRaw: any, chatContext?: string): Promise<Fi
 //  เหมือนเดิม 2,464 · เลือกผิด → ให้เลือก 8 (ไล่ดูแล้ว ผลเดิมผิดชัดทั้ง 8 เช่น `PEV4000` → `VT-4000`) ·
 //  เรียงตัวเลือกใหม่ 71 · ไม่มีรายการไหนถูกเลือกให้ใหม่ · query เพิ่ม p50 3 ms / p95 8 ms
 //  ล้มเหลวด้วยเหตุใดก็ตาม = คืนผลเดิม · export ไว้ให้ `scripts/diag/findProductSequence.ts` เรียกตรง
+//
+//  แก้ 2026-09-25 (ตรวจซ้ำก่อน deploy · ไล่ชื่อรุ่นทุกตัวในฐานเป็นรหัสของตัวเอง): เดิม **326 รุ่นไม่ผ่านกติกา
+//  ของตัวเอง** และ 3 รุ่นในนั้นถูกเปลี่ยนเป็นให้เลือกจริง (`ลวดชั้นท์ 30A/50mV` · `ขาหยึดติดตั้งCMT-007BN`)
+//  ทั้งที่พิมพ์ชื่อรุ่นมาเป๊ะ — หน้าเว็บ (`resolveItems` ที่หาด้วยรหัสเต็ม) จะตอบ "ไม่พบสินค้า"
+//  สาเหตุสองข้อ: (1) ตัดคำไทยทิ้งแล้วช่วงสองฝั่งติดกัน (`Heater (หล่อ…) Size` → `heatersize` ·
+//  `WS5/8*แหวน…5/8` → `…85…`) ⇒ คำไทยต้องเป็นตัวคั่น (2) ชื่อที่ขึ้นต้นด้วยไทย/สัญลักษณ์
+//  (`สาย THW 10 Sq.mm.`) ไม่มีวันขึ้นต้นด้วยช่วงแรก ⇒ ข้ามรหัสแบบนี้ (273 รุ่น) · หลังแก้: 0 จาก 50,891 ·
+//  และรุ่นที่ normalize แล้วตรงกับรหัสเป๊ะ ไม่แตะเสมอ ไม่ว่ากติกาข้างบนจะเป็นยังไง
+//  query กรองความยาวใน SQL ก่อน `LIMIT` — เดิมรหัสสั้น (`TSK-01-0`) ได้เกิน 300 แถวแล้วตัดตามสต็อก
+//  ทำให้รุ่นที่ใกล้ที่สุดหลุดได้ (9 จาก 2,543 รหัสในชุดทดลอง) · รหัสจริง 2,543 ตัวผลเท่าเดิมทุกตัวหลังแก้ทั้งหมดนี้
 // ─────────────────────────────────────────────
 const SEQ_MAX_EXTRA = 4;
 const SEQ_MAX_INSERT_WITH_ORIGINALS = 3;
 const THAI_CHARS = /[฀-๿]/g;
 const MODEL_NORM_SQL = `LOWER(REGEXP_REPLACE(COALESCE(model, ''), '[\\s,\\(\\)]', '', 'g'))`;
 
-/** ช่วงตัวอักษร/ตัวเลข แบ่งจากรหัสที่ยังมีตัวคั่น — "25.01.024" ต้องเป็น 25|01|024 ไม่ใช่ 2501024 */
+/** ช่วงตัวอักษร/ตัวเลข แบ่งจากรหัสที่ยังมีตัวคั่น — "25.01.024" ต้องเป็น 25|01|024 ไม่ใช่ 2501024
+ *  คำไทยเป็นตัวคั่นด้วย ห้ามตัดทิ้งเฉย ๆ ("Heater (หล่อ…) Size" ต้องเป็น heater|size ไม่ใช่ heatersize) */
 function codeRuns(code: string): string[] {
-  return normalize(code).replace(THAI_CHARS, '').match(/[a-z]+|[0-9]+/g) ?? [];
+  return normalize(code).replace(THAI_CHARS, ' ').match(/[a-z]+|[0-9]+/g) ?? [];
 }
 function codeSkeleton(code: string): string {
   return normalize(code).replace(THAI_CHARS, '').replace(/[^a-z0-9]/g, '');
@@ -332,19 +343,24 @@ function followsSequence(runs: string[], model: string): boolean {
 
 export async function applySequenceGuard(code: string, result: FindProductResult): Promise<FindProductResult> {
   try {
+    // ตรงกับรหัสเป๊ะ = ไม่แตะ (หน้าเว็บหาสินค้าด้วยรหัสเต็มแล้วต้องได้ตัวนั้น ไม่ใช่รายการให้เลือก)
+    if (result.found && result.product && normalize(result.product.model || '') === normalize(code)) return result;
     const runs = codeRuns(code);
     const sk = codeSkeleton(code);
     if (sk.length < 5 || runs.length < 2 || !runs.some((r) => /[a-z]/.test(r)) || !runs.some((r) => /\d/.test(r))) {
       return result;
     }
+    // ขึ้นต้นด้วยไทย/สัญลักษณ์ ("สาย THW 10") — กติกา "ขึ้นต้นด้วยช่วงแรก" ใช้ไม่ได้ ⇒ ไม่ตัดสิน
+    if (!/^[a-z0-9]/.test(normalize(code))) return result;
     if (result.found && result.product && followsSequence(runs, result.product.model || '')) return result;
 
     const { rows } = await pool.query<Product>(
       `SELECT * FROM products
         WHERE is_system_item = false AND ${MODEL_NORM_SQL} LIKE $1
+          AND LENGTH(REGEXP_REPLACE(LOWER(COALESCE(model, '')), '[^a-z0-9]', '', 'g')) <= $2
         ORDER BY quantity_on_hand_unreserved DESC
         LIMIT 300`,
-      [runs.join('%') + '%']
+      [runs.join('%') + '%', sk.length + SEQ_MAX_EXTRA]
     );
     const extraOf = (p: Product) => codeSkeleton(p.model || '').length - sk.length;
     const seq = dedupeByModel(rows.filter((p) => extraOf(p) <= SEQ_MAX_EXTRA)).sort(
