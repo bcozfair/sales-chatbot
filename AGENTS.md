@@ -437,7 +437,8 @@ docker compose exec -T db psql -U "$PG_USER" -d "$PG_DATABASE" -c "SELECT …"  
 เจ็ดไฟล์กลุ่มสุดท้าย **ไม่ได้อยู่ในทรานแซกชัน** — มันสร้างแถวจริงใน `quotations` / `salesperson` /
 `admin_users` / `messages` / `quotation_counters` แล้วค่อย `DELETE` ตอนจบ ⇒ **ฆ่ากลางคัน
 (Ctrl-C, timeout, เครื่องดับ) = แถวทดสอบค้างอยู่ในฐานของร้าน** และ `npm run diag:line-parity`
-ซึ่งเป็นด่านประจำของงาน prompt/Flex ก็อยู่ในกลุ่มนี้
+ซึ่งเป็นด่านประจำของงาน prompt/Flex ก็อยู่ในกลุ่มนี้ (รันเคสสองรอบต่อครั้ง — โค้ดก่อนแก้กับโค้ดปัจจุบัน —
+ใน worktree ชั่วคราวที่ลบเองตอนจบ · ต้องรันบน host ที่มี git ไม่ใช่ในกล่อง)
 
 ชื่อไม่ช่วย: `stockRuleSmoke` ลงท้าย `Smoke` แต่ไม่แตะ DB เลย ส่วน `confirmRaceDiag` กับ
 `lineFlexParity` ไม่ได้ลงท้าย `Smoke` แต่เขียนจริง — วัดใหม่เมื่อสงสัยด้วย
@@ -580,7 +581,7 @@ TS ไต่ `node_modules` ขึ้นไปตามลำดับ ⇒ `<ท
 | ชื่อลูกค้า / ส่งออก Odoo | `npm run diag:odoo-export` — ถ้าขึ้น `(ตรวจ 0 ชื่อ)` แปลว่าด่านผ่านแบบว่างเปล่า อย่าเชื่อ |
 | กฎเครดิต | `npm run diag:credit-hold` (read-only รันกับ prod ได้) |
 | นิยาม `customers_data_build` / ผู้ติดต่อที่แอดมินเพิ่มเอง | `npm run diag:local-contacts` — **บวก `diag:credit-hold` · `diag:data-directory` · `diag:customer-search` ทุกครั้งที่แตะนิยาม view** เพราะทั้งสามอ่านตารางที่ view สร้าง · ด่านนี้เขียน `local_contacts` และ `customers_data_view` ของจริงใน transaction ที่ **ROLLBACK เสมอ** ห้ามเปลี่ยนเป็น COMMIT |
-| `prompt` ของการสกัด / Flex | `npm run diag:line-parity` |
+| `prompt` ของการสกัด / Flex | `npm run diag:line-parity` — prompt เทียบ golden · Flex เทียบกับ **โค้ดก่อนแก้บนฐานเดียวกัน** (เลือก base เอง: จุดแยกจาก main / HEAD ถ้ามีไฟล์แก้ค้าง / HEAD^1 บน main สะอาด · `-- --base <ref>`) ⇒ สต็อก/ราคาเปลี่ยนไม่ทำให้ล้ม · ล้ม = โค้ดทำให้คำตอบเปลี่ยนจริง (ต่างทั้งสองรอบ) หรือได้ "ระบบขัดข้อง" |
 | หน้าเว็บขอใบเสนอราคา | `npm run diag:web-quote` · `diag:pdf-issuer` · `diag:sp-dedupe` · `diag:web-sales-owner` (เติม "ออกในนาม" จากลูกค้า/ใบเดิม · อ่านอย่างเดียว) |
 | คิวอนุมัติราคา / role `approver` | `npm run diag:price-approval` — **ข้อ 1 ห้ามล้มเด็ดขาด** (ใบจาก LINE ที่ติดราคาขั้นต่ำต้องยังออกไม่ได้) · ต้องรัน migration `2026-09-15_02_*` ก่อน ไม่งั้น `admin_users_role_check` ปฏิเสธตั้งแต่ setup |
 | ชั้นตัดสินใจ "ต้องให้คนเลือกไหม" | `npm run diag:web-decision` (`--ai` = pipeline เต็ม) — กฎ auto-select มี **สองสำเนาโดยตั้งใจ** (`quotationService.ts` ของ LINE ห้ามแตะ · `decideCustomerSelection()` ของเว็บ) ด่านนี้อ่านซอร์สมาเทียบให้ว่ายังตรงกัน |
