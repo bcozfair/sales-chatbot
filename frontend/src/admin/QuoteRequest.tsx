@@ -1232,8 +1232,12 @@ const DiscountHistoryField: React.FC<{ state: DiscountState; onRetry: () => void
           aria-expanded={open}
           aria-controls={popId}
           aria-label={`ส่วนลดทั้งบิลของ ${d.rows.length} ใบสั่งขายล่าสุด ${summary} — กดเพื่อดูรายละเอียด`}
-          className="inline-flex items-center gap-1 h-6 px-2 -my-0.5 rounded-md border border-slate-300 bg-card
-            text-[11.5px] font-semibold text-slate-700 tabular-nums hover:border-[var(--brand-fg)] hover:text-[var(--brand-fg)]"
+          /* ป้ายสีแบรนด์แบบ mockup C (เจ้าของสั่ง 2026-09-25 "ให้โดดเด่น") — ไม่สื่อด้วยสีอย่างเดียว:
+             ตัวเลข % กับลูกศรบอกอยู่แล้วว่าเป็นของที่กดกางได้ · โทเคนมีทั้งสองธีมใน index.css */
+          className="inline-flex items-center gap-1 h-6 px-2.5 -my-0.5 rounded-full border border-[var(--brand-border)]
+            bg-[var(--brand-soft)] text-[11.5px] font-bold text-[var(--brand-fg)] tabular-nums
+            hover:border-[var(--brand-border-strong)] hover:bg-[var(--brand-soft-strong)]
+            aria-expanded:border-[var(--brand-border-strong)] aria-expanded:bg-[var(--brand-soft-strong)]"
         >
           {summary}
           <ChevronDown className={`w-3 h-3 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
