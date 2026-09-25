@@ -24,6 +24,7 @@ import { resolveDeliveryTerms, type DeliveryTypeKey } from '../utils/deliveryTer
 import { isBlacklisted } from './blacklistService.js';
 import { checkCreditHold, type CreditHoldResult } from './creditHoldService.js';
 import { getIssuerSnapshot } from './webIdentity.js';
+import { DEFAULT_ODOO_SOURCE } from './odooSaleOrderExport.js';
 import { thaiDateDMY, thaiYearMonth } from '../utils/thaiTime.js';
 import {
   loadQuotationRules,
@@ -817,7 +818,8 @@ export interface DraftQuoteOverrides {
   delivery?: Partial<Record<'PM' | 'THT', { type?: DeliveryTypeKey | null; days?: number | null }>>;
   /**
    * source_id ของไฟล์นำเข้า Odoo (คอลัมน์ K) ที่คนออกใบเลือก — **ค่าเดียวทุกใบในชุด** (PM/THT)
-   * ไม่ส่ง/null = คอลัมน์เป็น NULL ⇒ export ใช้ค่าตั้งต้น (ใบจาก LINE ทุกใบเป็นแบบนี้)
+   * ไม่ส่ง/null = `Sales` (ใบจาก LINE ทุกใบเป็นแบบนี้) — เจ้าของสั่ง 2026-09-25 ให้ทุกแถวมีค่า
+   * ไม่ปล่อย NULL (ใบเก่า backfill เป็น Sales แล้ว ดู migration 2026-09-25_02)
    * ตรวจค่ามาแล้วจากผู้เรียก (`parseSourceId` ใน webQuoteService.ts) — ที่นี่แค่บันทึก
    */
   sourceId?: string | null;
@@ -1101,7 +1103,7 @@ export async function insertDraftQuotations(
       employee_details: employeeDetails,
       customer_id: customerId || null,
       contact_id: contactId || null,
-      source_id: overrides?.sourceId ?? null,
+      source_id: overrides?.sourceId ?? DEFAULT_ODOO_SOURCE,
       ...deliveryOf('PM')
     });
   }
@@ -1119,7 +1121,7 @@ export async function insertDraftQuotations(
       employee_details: employeeDetails,
       customer_id: customerId || null,
       contact_id: contactId || null,
-      source_id: overrides?.sourceId ?? null,
+      source_id: overrides?.sourceId ?? DEFAULT_ODOO_SOURCE,
       ...deliveryOf('THT')
     });
   }

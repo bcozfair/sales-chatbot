@@ -1059,8 +1059,9 @@ CREATE TABLE public.quotations (
     -- ตรึงที่นี่เพราะผู้ติดต่อหายจาก view ได้ทีหลัง แล้วช่อง I จะว่างเงียบ ๆ (plan §5.7)
     customer_sales_team text,
     -- K: source_id ของไฟล์นำเข้า Odoo ที่คนออกใบเลือกจากหน้าเว็บ (ODOO_SOURCE_OPTIONS)
-    -- NULL = ใบจาก LINE / ใบที่ออกก่อน 2026-09-25 ⇒ export ใช้ค่าตั้งต้น (ODOO_EXPORT_SOURCE = Sales)
-    source_id text,
+    -- ใบเก่าทั้งหมด backfill เป็น 'Sales' และแถวใหม่ได้ 'Sales' เมื่อไม่ระบุ (เจ้าของสั่ง 2026-09-25)
+    -- export ยังถอยไปค่าตั้งต้นเมื่อเจอ NULL (กันไว้ ไม่ควรมีแล้ว)
+    source_id text DEFAULT 'Sales'::text,
     CONSTRAINT quotations_delivery_days_override_check CHECK (
         (delivery_days_override IS NULL)
         OR ((delivery_days_override >= 0) AND (delivery_days_override <= 3650))
