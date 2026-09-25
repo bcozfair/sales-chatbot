@@ -51,6 +51,7 @@ import {
   ArrowRight,
   BadgeCheck,
   Ban,
+  Check,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -367,6 +368,10 @@ interface ServiceCfg {
   internal_reference: string;
   odoo_name: string;
   default_item_name: string;
+  /** ชื่อตั้งต้นตอนกด "เพิ่มค่าบริการ" — คนละค่ากับ default_item_name ซึ่งเป็นชื่อของบรรทัดที่กฎเติม */
+  manual_item_name: string;
+  /** ชื่อที่เลือกได้จาก dropdown ของช่องชื่อ */
+  name_presets: string[];
   default_price: number;
 }
 
@@ -954,6 +959,198 @@ interface PopPos {
   maxHeight: number;
 }
 
+/**
+ * กล่องลอยที่เกาะใต้ช่องกรอก — วาดผ่าน portal ด้วย `position: fixed` เพราะตารางของใบเลื่อน/ตัดขอบเองได้
+ * กล่องแบบ absolute ในแถวจึงโดนตัดหาย · ใช้ร่วมกันระหว่างช่องค้นสินค้ากับช่องชื่อค่าบริการ
+ * `contentKey` เปลี่ยน = วางตำแหน่งใหม่ (เนื้อหาในกล่องเปลี่ยนความสูง)
+ */
+function useAnchoredPopover(open: boolean, setOpen: (v: boolean) => void, minWidth: number, contentKey?: unknown) {
+  const [pos, setPos] = useState<PopPos | null>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+
+  const place = useCallback(() => {
+    const el = shellRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const width = Math.max(r.width, minWidth);
+    const below = window.innerHeight - r.bottom - 16;
+    const above = r.top - 16;
+    // คีย์บอร์ดมือถือกินครึ่งล่างของจอ ⇒ ถ้าข้างล่างไม่พอให้พลิกขึ้นบนแทน
+    const down = below >= 220 || below >= above;
+    setPos({
+      left: Math.max(8, Math.min(r.left, window.innerWidth - width - 12)),
+      top: down ? r.bottom + 4 : undefined,
+      bottom: down ? undefined : window.innerHeight - r.top + 4,
+      width,
+      maxHeight: Math.max(120, Math.min(360, down ? below : above)),
+    });
+  }, [minWidth]);
+
+  // `scroll` ต้องดักแบบ capture เพราะกล่องตารางเลื่อนเองได้ ไม่ใช่แค่หน้าเว็บ
+  useEffect(() => {
+    if (!open) return;
+    place();
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    return () => {
+      window.removeEventListener('scroll', place, true);
+      window.removeEventListener('resize', place);
+    };
+  }, [open, place, contentKey]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (shellRef.current?.contains(t) || popRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    document.addEventListener('mousedown', onPointer);
+    return () => document.removeEventListener('mousedown', onPointer);
+  }, [open, setOpen]);
+
+  return { shellRef, popRef, pos };
+}
+
+/**
+ * ชื่อของบรรทัดค่าบริการที่คนเพิ่มเอง — พิมพ์เองได้ หรือกดลูกศรเลือกจากชื่อที่ใช้บ่อย
+ * (เจ้าของสั่ง 2026-09-25) · รายการมาจาก server (`MANUAL_SERVICE_NAME_PRESETS` ใน
+ * `services/shippingFee.ts`) ไม่เขียนซ้ำในไฟล์นี้ · อ่านรายการไม่ได้ = เหลือช่องพิมพ์ล้วนเหมือนเดิม
+ * · พิมพ์แล้วกล่องหุบ — คนที่เริ่มพิมพ์คือคนที่ไม่เอาชื่อในรายการ
+ */
+const ServiceNameField: React.FC<{
+  value: string;
+  presets: string[];
+  onChange: (v: string) => void;
+}> = ({ value, presets, onChange }) => {
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(-1);
+  const { shellRef, popRef, pos } = useAnchoredPopover(open, setOpen, 280);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const popId = useId();
+  const hasList = presets.length > 0;
+
+  const show = (v: boolean) => {
+    setOpen(v && hasList);
+    setActive(-1);
+  };
+  const choose = (name: string) => {
+    onChange(name);
+    show(false);
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!hasList) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (!open) return show(true);
+      setActive((i) => (i + 1) % presets.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (open) setActive((i) => (i <= 0 ? presets.length - 1 : i - 1));
+    } else if (e.key === 'Enter') {
+      if (open && active >= 0) {
+        e.preventDefault();
+        choose(presets[active]);
+      }
+    } else if (e.key === 'Escape') {
+      if (open) {
+        e.preventDefault();
+        show(false);
+      }
+    } else if (e.key === 'Tab') {
+      show(false);
+    }
+  };
+
+  return (
+    <>
+      <div
+        ref={shellRef}
+        className="flex items-center w-full max-w-xs h-8 rounded-lg border border-slate-300 bg-card focus-within:border-[var(--brand-fg)]"
+      >
+        <input
+          ref={inputRef}
+          value={value}
+          onChange={(e) => {
+            onChange(e.target.value);
+            show(false);
+          }}
+          onFocus={() => show(true)}
+          onKeyDown={onKeyDown}
+          placeholder="ชื่อรายการที่จะขึ้นในใบ — เลือกหรือพิมพ์เอง"
+          aria-label="ชื่อรายการค่าบริการ"
+          autoComplete="off"
+          role={hasList ? 'combobox' : undefined}
+          aria-expanded={hasList ? open : undefined}
+          aria-controls={hasList ? popId : undefined}
+          aria-activedescendant={open && active >= 0 ? `${popId}-opt-${active}` : undefined}
+          className="flex-1 min-w-0 h-full px-2.5 bg-transparent text-xs text-slate-800 outline-none"
+        />
+        {hasList && (
+          <button
+            type="button"
+            tabIndex={-1}
+            // ห้ามขโมยโฟกัสจากช่องพิมพ์ ไม่งั้นกล่องหุบแล้วกางใหม่สลับกัน
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              show(!open);
+              inputRef.current?.focus();
+            }}
+            title="เลือกจากชื่อที่ใช้บ่อย"
+            aria-label="เลือกจากชื่อที่ใช้บ่อย"
+            className="h-full px-2 text-slate-400 hover:text-slate-700"
+          >
+            <ChevronDown className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+      {open &&
+        pos &&
+        createPortal(
+          <div
+            ref={popRef}
+            id={popId}
+            role="listbox"
+            onMouseDown={(e) => e.preventDefault()}
+            style={{
+              position: 'fixed',
+              left: pos.left,
+              top: pos.top,
+              bottom: pos.bottom,
+              width: pos.width,
+              maxHeight: pos.maxHeight,
+            }}
+            className="z-50 overflow-y-auto overscroll-contain bg-card border border-slate-200 rounded-xl shadow-xl"
+          >
+            <div className="px-3 py-1 bg-slate-50 border-b border-slate-200 text-[10px] text-slate-500">
+              เลือกชื่อที่ใช้บ่อย — หรือพิมพ์ชื่ออื่นในช่องได้เลย
+            </div>
+            {presets.map((name, i) => (
+              <button
+                key={name}
+                id={`${popId}-opt-${i}`}
+                role="option"
+                aria-selected={value === name}
+                type="button"
+                onMouseEnter={() => setActive(i)}
+                onClick={() => choose(name)}
+                className={`w-full text-left px-3 py-2 flex items-center gap-2 text-xs ${
+                  value === name ? 'font-semibold text-[var(--brand-fg)]' : 'text-slate-700'
+                } ${i === active ? 'bg-slate-100' : 'hover:bg-slate-50'}`}
+              >
+                <span className="flex-1 min-w-0">{name}</span>
+                {value === name && <Check className="w-3.5 h-3.5 shrink-0" />}
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+};
+
 const ProductSearchBox: React.FC<{
   /** คำที่เติมไว้ให้ตั้งแต่แรก — แถวที่จับคู่ไม่ได้ใช้รุ่นที่ลูกค้าพิมพ์มาเป็นตัวตั้ง */
   initialQuery?: string;
@@ -972,28 +1169,8 @@ const ProductSearchBox: React.FC<{
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
-  const [pos, setPos] = useState<PopPos | null>(null);
-  const shellRef = useRef<HTMLDivElement>(null);
-  const popRef = useRef<HTMLDivElement>(null);
+  const { shellRef, popRef, pos } = useAnchoredPopover(open, setOpen, 320, `${hits.length}|${loading}|${failed}`);
   const popId = useId();
-
-  const place = useCallback(() => {
-    const el = shellRef.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    const width = Math.max(r.width, 320);
-    const below = window.innerHeight - r.bottom - 16;
-    const above = r.top - 16;
-    // คีย์บอร์ดมือถือกินครึ่งล่างของจอ ⇒ ถ้าข้างล่างไม่พอให้พลิกขึ้นบนแทน
-    const down = below >= 220 || below >= above;
-    setPos({
-      left: Math.max(8, Math.min(r.left, window.innerWidth - width - 12)),
-      top: down ? r.bottom + 4 : undefined,
-      bottom: down ? undefined : window.innerHeight - r.top + 4,
-      width,
-      maxHeight: Math.max(120, Math.min(360, down ? below : above)),
-    });
-  }, []);
 
   useEffect(() => {
     // ล้างผลค้นตอนช่องว่างทำที่ onChange ไม่ใช่ที่นี่ — setState ตรง ๆ ใน effect
@@ -1018,29 +1195,6 @@ const ProductSearchBox: React.FC<{
     }, 300);
     return () => clearTimeout(timer);
   }, [query]);
-
-  // `scroll` ต้องดักแบบ capture เพราะกล่องตารางเลื่อนเองได้ ไม่ใช่แค่หน้าเว็บ
-  useEffect(() => {
-    if (!open) return;
-    place();
-    window.addEventListener('scroll', place, true);
-    window.addEventListener('resize', place);
-    return () => {
-      window.removeEventListener('scroll', place, true);
-      window.removeEventListener('resize', place);
-    };
-  }, [open, place, hits.length, loading, failed]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointer = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (shellRef.current?.contains(t) || popRef.current?.contains(t)) return;
-      setOpen(false);
-    };
-    document.addEventListener('mousedown', onPointer);
-    return () => document.removeEventListener('mousedown', onPointer);
-  }, [open]);
 
   const choose = (h: SearchHit) => {
     onPick(h);
@@ -1512,12 +1666,10 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
                 <td className="block md:table-cell align-top px-4 md:pl-0 md:pr-3 py-1 md:py-2">
                   {r.isService ? (
                     <div className="space-y-1 pt-1">
-                      <input
+                      <ServiceNameField
                         value={r.name}
-                        onChange={(e) => ctx.patchRow(r.key, { name: e.target.value })}
-                        placeholder="ชื่อรายการที่จะขึ้นในใบ เช่น ค่าติดตั้งหน้างาน"
-                        aria-label="ชื่อรายการค่าบริการ"
-                        className="w-full max-w-xs h-8 px-2.5 rounded-lg border border-slate-300 bg-card text-xs text-slate-800 outline-none focus:border-[var(--brand-fg)]"
+                        presets={ctx.svcCfg?.name_presets ?? []}
+                        onChange={(name) => ctx.patchRow(r.key, { name })}
                       />
                       <p className="text-[11px] text-slate-400">
                         {r.model} · {ctx.svcCfg?.internal_reference} · {ctx.svcCfg?.odoo_name} (Odoo)
@@ -2721,6 +2873,9 @@ export const QuoteRequest: React.FC = () => {
           internal_reference: String(d.internal_reference ?? ''),
           odoo_name: String(d.product_name ?? ''),
           default_item_name: String(d.default_item_name ?? ''),
+          // ค่าจริงอยู่ที่ server ที่เดียว (MANUAL_SERVICE_*) · ไม่มีช่องนี้ = ถอยไปพฤติกรรมเดิม
+          manual_item_name: String(d.manual_item_name ?? d.default_item_name ?? ''),
+          name_presets: Array.isArray(d.manual_name_presets) ? d.manual_name_presets.map(String) : [],
           default_price: num(d.fee_price),
         });
       } catch {
@@ -2760,7 +2915,7 @@ export const QuoteRequest: React.FC = () => {
         key: newKey(),
         productTemplateId: svcCfg.product_id,
         model: svcCfg.model,
-        name: svcCfg.default_item_name,
+        name: svcCfg.manual_item_name,
         quantity: '1',
         price: String(svcCfg.default_price),
         disc1: '',

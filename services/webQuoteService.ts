@@ -661,7 +661,7 @@ export interface CreateDraftResult {
  *   แล้วค่อยทับราคาต่อหน่วยทีหลังถ้าแอดมินตั้งมา
  */
 async function resolveItems(items: WebQuoteItemInput[]): Promise<any[]> {
-  const { isShippingFeeItem, loadShippingFeeConfig } = await import('./shippingFee.js');
+  const { isShippingFeeItem, loadShippingFeeConfig, MANUAL_SERVICE_ITEM_NAME } = await import('./shippingFee.js');
   const shippingCfg = await loadShippingFeeConfig();
   const out: any[] = [];
   for (const [i, raw] of items.entries()) {
@@ -713,7 +713,8 @@ async function resolveItems(items: WebQuoteItemInput[]): Promise<any[]> {
     // เพราะ buildShippingFeeSnapshot เขียนทับด้วย fee_quantity และ 0 ทุกครั้งอยู่ดี
     if (isShippingFeeItem(itemForDb, shippingCfg)) {
       const customName = String(raw?.name ?? '').trim();
-      itemForDb.name = customName || shippingCfg.defaultItemName;
+      // ว่าง = ชื่อตั้งต้นของบรรทัดที่คนเพิ่มเอง ไม่ใช่ชื่อของกฎค่าขนส่ง (เจ้าของสั่ง 2026-09-25)
+      itemForDb.name = customName || MANUAL_SERVICE_ITEM_NAME;
       itemForDb.internal_reference = shippingCfg.productInternalReference;
       itemForDb.quantity = shippingCfg.feeQuantity;
       itemForDb.discount_1 = 0;
