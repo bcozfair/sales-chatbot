@@ -141,6 +141,16 @@ async function bookWithDb(): Promise<PriceBook | undefined> {
   return withSubCodes(state.book, await listSubCodes());
 }
 
+/**
+ * เล่มสำหรับ **หน้าแก้ราคา** — รวมรหัสย่อยจากฐานเพื่อให้รู้ว่าช่องราคาแยกตามแกนช่องไหนควรมี
+ * (ชนิดสายที่ตั้งผ่านตารางรหัสย่อย · ดู `knownRateKeys`) · **ห้ามส่งตัวนี้ไป `commitBookChange`**
+ * — ตอนบันทึกใช้ `{ ...book, models }` ของเล่มเดิม ไม่งั้นแถวรหัสย่อยในฐานจะถูกคัดลอกลงสมุดราคา
+ * แล้วกลายเป็นสองที่ที่ต้องแก้คู่กัน
+ */
+async function editorBook(book: PriceBook): Promise<PriceBook> {
+  return withSubCodes(book, await listSubCodes());
+}
+
 function noBook(res: Response) {
   return res.status(503).json({ error: NO_BOOK_MESSAGE });
 }
@@ -403,7 +413,7 @@ pricebookRouter.get('/model/:code', async (req: AdminRequest, res: Response) => 
   const code = String(req.params.code ?? '');
   const m = book.models[code];
   if (!m) return res.status(404).json({ error: `ไม่มีรุ่น ${code} ในสมุดราคา` });
-  res.json({ model: modelEditorView(book, m), fingerprint: state.token, version: book.version });
+  res.json({ model: modelEditorView(await editorBook(book), m), fingerprint: state.token, version: book.version });
 });
 
 /**
@@ -423,9 +433,10 @@ pricebookRouter.put('/model/:code', async (req: AdminRequest, res: Response) => 
 
   if (staleToken(req, res, state, MODEL_CONFLICT)) return;
 
+  const eb = await editorBook(book);
   let next;
   try {
-    next = applyModelEdit(current, req.body, book);
+    next = applyModelEdit(current, req.body, eb);
   } catch (e) {
     if (e instanceof EditRejected) return res.status(400).json({ error: e.message });
     throw e;
@@ -458,7 +469,7 @@ pricebookRouter.put('/model/:code', async (req: AdminRequest, res: Response) => 
     throw e;
   }
 
-  res.json({ ok: true, at, fingerprint: tokenOf(revision), model: modelEditorView(book, next) });
+  res.json({ ok: true, at, fingerprint: tokenOf(revision), model: modelEditorView(eb, next) });
 });
 
 /**
@@ -480,9 +491,10 @@ pricebookRouter.get('/sheet/:sheet', async (req: AdminRequest, res: Response) =>
   const sheet = String(req.params.sheet ?? '');
   const models = sheetModels(state.book, sheet);
   if (models.length === 0) return res.status(404).json({ error: `ไม่มีชีต ${sheet} ในสมุดราคา` });
+  const eb = await editorBook(state.book);
   res.json({
     sheet,
-    models: models.map((m) => modelEditorView(state.book, m)),
+    models: models.map((m) => modelEditorView(eb, m)),
     fingerprint: state.token,
     version: state.book.version,
   });
@@ -497,10 +509,11 @@ pricebookRouter.put('/sheet/:sheet', async (req: AdminRequest, res: Response) =>
 
   if (staleToken(req, res, state, MODEL_CONFLICT)) return;
 
+  const eb = await editorBook(book);
   let nextModels: PriceBook['models'];
   let changed: string[];
   try {
-    ({ models: nextModels, changed } = applySheetEdit(book, sheet, req.body?.models));
+    ({ models: nextModels, changed } = applySheetEdit(eb, sheet, req.body?.models));
   } catch (e) {
     if (e instanceof EditRejected) return res.status(400).json({ error: e.message });
     throw e;
@@ -528,7 +541,7 @@ pricebookRouter.put('/sheet/:sheet', async (req: AdminRequest, res: Response) =>
     throw e;
   }
 
-  const saved = { ...book, models: nextModels };
+  const saved = { ...eb, models: nextModels };
   res.json({
     ok: true,
     at,

@@ -480,8 +480,12 @@ if (ts01 && ts01.base.kind === 'matrix') {
 
   const v8 = modelEditorView(b8, m8);
   const df = v8.defaultsBy[0];
+  // เล่มจาก Excel มี 4 ชนิด · เล่มในฐานมีสายเทปล่อนหุ้มชีลด์เพิ่ม (เจ้าของสั่ง 2026-09-25) ⇒ นับจากราคาในรุ่นเอง ไม่ใช่เลขตายตัว
+  const cableKeys = Object.keys(m8.adders.find((a) => a.id === 'cable_over_1m')?.rates ?? {});
   check('จอได้คอลัมน์ค่าเริ่มต้น + ตัวเลือก = ชนิดสายที่มีราคา',
-    df?.label === 'ชนิดสาย รุ่นเริ่มต้น' && df.options.length === 4 && df.values.TST === 'สายเทปล่อน', JSON.stringify(df));
+    df?.label === 'ชนิดสาย รุ่นเริ่มต้น' && df.options.length === cableKeys.length
+      && ['สายสแตนเลสถัก', 'สายพีวีซี', 'สายไฟเบอร์กลาส', 'สายเทปล่อน'].every((k) => df.options.includes(k))
+      && df.values.TST === 'สายเทปล่อน', JSON.stringify(df));
   check('บันทึกค่าเดิมกลับไป ⇒ JSON เดิมทุกไบต์',
     JSON.stringify(applyModelEdit(m8, { defaultsBy: { cable: DEF.cable.values } }, b8)) === JSON.stringify(m8));
   const ch8 = applyModelEdit(m8, { defaultsBy: { cable: { ...DEF.cable.values, TSZ: 'สายไฟเบอร์กลาส' } } }, b8);
@@ -512,9 +516,14 @@ console.log('\n── 9. แคตตาล็อก TS_-01 / TS_-01-0 (เจ�
 // ที่ seedCatalogSubcodes.ts เขียนลงตารางรหัสย่อย — ด่านนี้ประกอบเล่มเองจากสองไฟล์นั้น ไม่พึ่งของในฐาน
 if (ts01 && ts010) {
   const STD = { cable: { label: 'ชนิดสายมาตรฐาน', by: 'sensor', values: {} as Record<string, string> } };
+  // ราคาสายเทปล่อนหุ้มชีลด์ 160/ม. — เจ้าของสั่ง 2026-09-25 "ใส่ 160 ไปก่อน" (ถอดจากราคาขาย Odoo · Excel ไม่มีสายนี้)
+  // อยู่ในฐานเท่านั้น ⇒ เล่มจาก --data ไม่มี · เติมให้เหมือนกันทั้งสองทาง ด่านจึงให้ผลเดียวกัน
+  const TS_RATE = 160;
   const withStd = (m: PriceModel, thread: string): PriceModel => {
     const rows = m.base.kind === 'matrix' ? [...new Set(Object.keys(m.base.cells).map((k) => k.split(' | ')[0]!))] : [];
     return { ...m, axisDefaults: { thread },
+      adders: m.adders.map((a) => (a.id === 'cable_over_1m'
+        ? { ...a, rates: { ...a.rates, 'สายเทปล่อนหุ้มชีลด์': a.rates?.['สายเทปล่อนหุ้มชีลด์'] ?? TS_RATE } } : a)),
       axisDefaultsBy: { cable: { ...STD.cable, values: Object.fromEntries(rows.map((r) => [r, 'สายสแตนเลสถัก'])) } } };
   };
   const cat = loadCatalogSubcodes();
@@ -545,23 +554,26 @@ if (ts01 && ts010) {
   price('TSK-01(M6)4.8+3MF', 350, 'F = ไฟเบอร์กลาส 95 × 2');
   price('TSK-01(M8)6+1M', 190, 'แกน 6 คู่กับ M8 — ไม่มีผลกับราคา');
   check('  แกน 6 ไม่ขึ้นแดง', !run('TSK-01(M8)6+1M').p.parts.some((x) => x.kind === 'unknown'));
-  const tsu = run('TSP-01(M6)4.8+2MTSU');
-  check('TSP-01(M6)4.8+2MTSU — TS = เทปล่อนหุ้มชีลด์ ยังไม่มีราคา ⇒ "ยังไม่มีราคา" (noRate) ไม่ใช่ไม่รับผลิต',
-    tsu.r.status !== 'priced' && tsu.r.violations.some((v) => v.noRate && /เทปล่อนหุ้มชีลด์/.test(v.message)) && !tsu.r.violations.some((v) => v.missing),
-    tsu.r.violations.map((v) => JSON.stringify(v)).join('|'));
+  price('TSP-01(M6)4.8+2MTSU', 1080, 'TS = เทปล่อนหุ้มชีลด์ 160 (เจ้าของสั่ง 2026-09-25) + U · ไม่มีค่าเมตรแรก (ยึด Excel)');
+  price('TSK-01 4.8+3MTS', 480, 'TS ไม่มีวงเล็บ = 1/4” 160 + 160 × 2');
+  const cc = run('TSK-01(M6)4.8+2MC');
+  check('TSK-01(M6)4.8+2MC — C = ซิลิโคน ยังไม่มีราคา ⇒ "ยังไม่มีราคา" (noRate) ไม่ใช่ไม่รับผลิต',
+    cc.r.status !== 'priced' && cc.r.violations.some((v) => v.noRate && /ซิลิโคน/.test(v.message)) && !cc.r.violations.some((v) => v.missing),
+    cc.r.violations.map((v) => JSON.stringify(v)).join('|'));
   price('TSK-01(M6)4.8+1MC', 160, 'สายซิลิโคนไม่เกิน 1 M ⇒ ไม่มีค่าสายให้ต้องรู้ราคา');
 
   price('TSJ-01-0+2M', 240, 'TS_-01-0 ไม่มีวงเล็บ = M5 160 + สแตนเลสถัก 80');
   price('TSK-01-0(M6)+2MT', 370, 'TS_-01-0 T = เทปล่อน 190 + 180');
   price('TSP-01-0(M4)+2MPU', 1030, 'TS_-01-0 P + U = 930 + 100');
-  const z = run('TSK-01-0(M6)+2MTSU');
-  check('TSK-01-0(M6)+2MTSU — แคตตาล็อก TS_-01-0 ไม่มี TS ⇒ ทิ้งทั้งท่อน (ไม่แตกเป็น T + SU) · ได้ 190 เฉพาะราคาตั้ง + เตือน',
-    z.r.status === 'priced' && z.r.unitPrice === 190 && z.r.violations.some((v) => v.partial)
-      && z.p.parts.some((x) => x.text === 'TSU' && x.kind === 'unknown'),
-    `${z.r.status} ${z.r.unitPrice} ${z.p.parts.map((x) => `${x.text}[${x.kind}]`).join(' ')}`);
+  // เจ้าของสั่ง 2026-09-25: "ให้ TS_-01-0 รับสาย C/TS ด้วยราคาเดียวกับ TS_-01" (ภาพไม่มี แต่ขายจริง 40 รหัส)
+  const z = price('TSK-01-0(M6)+2MTSU', 350, 'TS_-01-0 รับ TS แล้ว = 190 + 160 · U ไม่มีราคาเพิ่ม');
+  check('  อ่านเป็น TS + U (ไม่แตกเป็น T + SU) และไม่มีเตือน partial',
+    z.p.parts.some((x) => x.text === 'TS') && z.p.parts.some((x) => x.text === 'U') && !z.r.violations.some((v) => v.partial),
+    z.p.parts.map((x) => `${x.text}[${x.kind}]`).join(' '));
+  price('TSP-01-0+3MTSU', 1240, 'TS_-01-0 ไม่มีวงเล็บ = M5 920 + 160 × 2');
   const c0 = run('TSK-01-0(M6)+2MC');
-  check('TSK-01-0(M6)+2MC — แคตตาล็อก TS_-01-0 ไม่มี C ⇒ อ่านไม่ออก (ไม่ใช้ C ของ TS_-01) · ได้ 190 + เตือน',
-    c0.r.status === 'priced' && c0.r.unitPrice === 190 && c0.r.violations.some((v) => v.partial),
+  check('TSK-01-0(M6)+2MC — รับ C แล้ว แต่ซิลิโคนยังไม่มีราคา ⇒ "ยังไม่มีราคา" เหมือน TS_-01 (ไม่ใช่อ่านไม่ออก)',
+    c0.r.status !== 'priced' && c0.r.violations.some((v) => v.noRate && /ซิลิโคน/.test(v.message)) && !c0.r.violations.some((v) => v.partial),
     `${c0.r.status} ${c0.r.unitPrice} ${c0.r.violations.map((v) => v.message).join('|')}`);
   const full = run('TSK-01-0(M6)+2MT');
   check('  รหัสที่อ่านได้ครบ ⇒ ไม่มีเตือน partial', !full.r.violations.some((v) => v.partial));
@@ -570,7 +582,41 @@ if (ts01 && ts010) {
   check('หน้าชีตรู้ค่ามาตรฐานของเกลียว', JSON.stringify(v9.axisDefaults) === JSON.stringify([{ axis: 'thread', axisTh: 'ขนาดเกลียว', value: '1/4”' }]),
     JSON.stringify(v9.axisDefaults));
   check('ยังเปิดแบบชีต Excel ได้', excelReady(b9.models['TSK-01']!) && excelReady(b9.models['TSK-01-0']!));
-  check('ไฟล์ catalog-subcodes.json ผ่านตัวตรวจทุกแถว (10 + แกน 6)', cat.length === 11, String(cat.length));
+  check('ไฟล์ catalog-subcodes.json ผ่านตัวตรวจทุกแถว (12 + แกน 6)', cat.length === 13, String(cat.length));
+
+  // ── ราคาสายที่ตารางรหัสย่อยตั้งให้ ต้องมีช่องบนหน้าสมุดราคาเสมอ (เจ้าของ 2026-09-25: "ต้องสามารถแก้ไขผ่าน ui ได้")
+  const rowsOf = (b: PriceBook, code: string) =>
+    modelEditorView(b, b.models[code]!).adders.find((a) => a.id === 'cable_over_1m')?.rates ?? [];
+  for (const code of ['TSK-01', 'TSK-01-0']) {
+    const r = rowsOf(b9, code);
+    check(`${code} — จอมีช่อง "สายซิลิโคน" (ว่าง) กับ "สายเทปล่อนหุ้มชีลด์" (160)`,
+      r.some((x) => x.value === 'สายซิลิโคน' && x.rate === null) && r.some((x) => x.value === 'สายเทปล่อนหุ้มชีลด์' && x.rate === 160),
+      JSON.stringify(r));
+  }
+  const noSc: PriceBook = { ...b9, subCodes: book.subCodes ?? [] };
+  check('  ไม่มีแถวรหัสย่อย ⇒ ไม่มีช่องซิลิโคน (ช่องมาจากตารางรหัสย่อยจริง ไม่ได้ฝังชื่อสายไว้)',
+    !rowsOf(noSc, 'TSK-01').some((x) => x.value === 'สายซิลิโคน'));
+  const tsk04 = Object.values(b9.models).find((m) => !excelReady(m) && m.adders.some((a) => a.byAxis === 'cable'));
+  if (tsk04) {
+    const own = Object.keys(tsk04.adders.find((a) => a.byAxis === 'cable')!.rates ?? {});
+    check(`  รุ่นที่รหัสย่อยไม่ได้ครอบ (${tsk04.code}) ไม่ได้ช่องเพิ่ม`,
+      (modelEditorView(b9, tsk04).adders.find((a) => a.byAxis === 'cable')?.rates ?? []).length === own.length);
+  }
+  const setC = applyModelEdit(b9.models['TSK-01']!, { adderRates: { cable_over_1m: [{ value: 'สายซิลิโคน', rate: 120 }] } }, b9);
+  check('กรอกราคาซิลิโคนจากจอ ⇒ เก็บได้ และ TSK-01(M6)4.8+3MC = 160 + 120 × 2',
+    setC.adders.find((a) => a.id === 'cable_over_1m')?.rates?.['สายซิลิโคน'] === 120
+      && computePrice(parseProductCode('TSK-01(M6)4.8+3MC', { ...b9, models: { ...b9.models, 'TSK-01': setC } }).cfg!,
+        { ...b9, models: { ...b9.models, 'TSK-01': setC } }).unitPrice === 400);
+  const dropped = applyModelEdit(b9.models['TSK-01']!, { adderRates: { cable_over_1m: [{ value: 'สายซิลิโคน', rate: 120 }] } }, noSc);
+  check('  เล่มที่ไม่รวมรหัสย่อยจากฐาน ⇒ ช่องนั้นถูกทิ้ง (เหตุที่ route ต้องส่ง editorBook)',
+    !('สายซิลิโคน' in (dropped.adders.find((a) => a.id === 'cable_over_1m')?.rates ?? {})));
+  for (const code of ['TSK-01', 'TSK-01-0']) {
+    const m = b9.models[code]!;
+    const mv = modelEditorView(b9, m);
+    const body = { adderRates: Object.fromEntries(mv.adders.filter((a) => a.rates).map((a) => [a.id, a.rates])) };
+    check(`${code} — บันทึกจากจอโดยไม่แก้ (มีช่องว่างของซิลิโคนติดไปด้วย) ⇒ JSON เดิมทุกไบต์`,
+      JSON.stringify(applyModelEdit(m, body, b9)) === JSON.stringify(m));
+  }
 }
 
 console.log(`\n${'─'.repeat(70)}`);

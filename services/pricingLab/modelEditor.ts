@@ -19,6 +19,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { AXIS_TH, DIM_TH, KIND_TH, OPTION_TH, axisLabel, dimLabel, displayName } from './labels.js';
+import { scopeRank } from './subcodes.js';
 import type { Adder, Band, ModelVariant, Money, Predicate, PriceBook, PriceModel, SheetLayout } from './types.js';
 
 // ── ที่หน้าจออ่าน ────────────────────────────────────────────────────────────
@@ -190,15 +191,27 @@ function matrixValues(cells: Record<string, Money>, axisCount: number): string[]
  * **รุ่นอื่นยังรู้จักแค่คีย์ของตัวเอง** — ลองขยายแบบเดียวกันแล้ว (2026-09-24) กฎที่ใช้กับบางขนาดแกน
  * อย่าง "เคลือบเทฟลอน" ได้ช่องว่างเพิ่มถึง 32 ช่อง และหน้าแปลนสองมาตรฐานของ TS-18 ปนกัน
  * ⇒ จอยาวขึ้นและอ่านยากขึ้น ซึ่งคือสิ่งที่เจ้าของเพิ่งบอกว่า "งง"
+ *
+ * **และค่าแกนที่ตารางรหัสย่อยตั้งให้รุ่นนี้ได้ (`setAxis`) ก็ต้องมีช่องเสมอ** (2026-09-25) — สายซิลิโคน (C)
+ * กับเทปล่อนหุ้มชีลด์ (TS) ของ TS_-01 มาจากแคตตาล็อก ไม่มีในชีตราคาสาย ⇒ ไม่มีรุ่นไหนมีคีย์นี้
+ * ⇒ จอไม่มีช่องให้กรอก ทั้งที่รหัสอ่านออกแล้วและหน้าคำนวณราคาขึ้น "ยังไม่มีราคาในสมุดราคา"
+ * เจ้าของสั่งว่าราคาสายต้อง "แก้ไขผ่าน ui ได้" ⇒ ช่องต้องโผล่เองเมื่อมีแถวรหัสย่อย ไม่ใช่รอคนแก้ Excel
+ * · ต้องส่งเล่มที่รวมรหัสย่อยจากฐานแล้วมา (`withSubCodes`) ไม่งั้นเห็นแค่ของที่ติดมากับไฟล์ราคา
  */
 function knownRateKeys(book: PriceBook | undefined, m: PriceModel, a: Adder): string[] {
   const own = Object.keys(a.rates ?? {});
-  if (!a.byAxis || !book || !excelReady(m)) return own;
+  if (!a.byAxis || !book) return own;
   const keys = new Set(own);
-  for (const other of Object.values(book.models)) {
-    for (const x of other.adders) {
-      if (x.byAxis === a.byAxis) for (const k of Object.keys(x.rates ?? {})) keys.add(k);
+  if (excelReady(m)) {
+    for (const other of Object.values(book.models)) {
+      for (const x of other.adders) {
+        if (x.byAxis === a.byAxis) for (const k of Object.keys(x.rates ?? {})) keys.add(k);
+      }
     }
+  }
+  for (const sc of book.subCodes ?? []) {
+    if (sc.disabled || sc.effect !== 'setAxis' || sc.axis !== a.byAxis || !sc.value) continue;
+    if (scopeRank(sc, m) !== undefined) keys.add(sc.value);
   }
   return [...keys];
 }
