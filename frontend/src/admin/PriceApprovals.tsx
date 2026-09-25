@@ -364,6 +364,7 @@ export const PriceApprovals: React.FC = () => {
         payment_terms_override: data.payment_terms_override ?? null,
         note: data.note ?? null,
         items: data.items ?? [],
+        auto_fee: data.auto_fee ?? null,
       };
       sessionStorage.setItem(APPROVAL_RELOAD_KEY, JSON.stringify(payload));
       // เปลี่ยนแท็บด้วย hash — ตัวอ่าน hash ของ AdminApp รับช่วงต่อเอง (navHash.ts)

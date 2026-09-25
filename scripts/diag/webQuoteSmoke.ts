@@ -1175,6 +1175,69 @@ async function case12() {
   ok('ไม่มีโทเคน → ไม่ผ่านประตู', noToken.status === 401 || noToken.status === 403, `HTTP ${noToken.status}`);
 }
 
+/**
+ * ข้อ 13 — แก้ชื่อ/ราคาของค่าขนส่งที่กฎเติมให้ (เจ้าของสั่ง 2026-09-25)
+ *
+ * บรรทัดที่แก้ทับต้อง **ยังเป็นของกฎ** (`is_auto_fee` → `is_manual_service = false`): ชื่อ/ราคา
+ * ตามที่แก้ แต่กฎยังตัดสินว่ามีหรือไม่มี ⇒ ถ้าพลาดไปติดธง is_manual_service บรรทัดจะค้างอยู่
+ * แม้ลูกค้าเป็นเครดิตหรือยอดถึงเกณฑ์แล้ว — คิดเงินลูกค้าเกินโดยไม่มีอะไรฟ้อง
+ */
+async function case13() {
+  console.log(`\n${BOLD}13) แก้ชื่อ/ราคาค่าขนส่งที่กฎเติมให้${RESET}`);
+  const { loadShippingFeeConfig, isShippingFeeItem } = await import('../../services/shippingFee.js');
+  const cfg = await loadShippingFeeConfig();
+  if (!cfg.isActive || cfg.productId === null) {
+    console.log(`  ${DIM}ข้าม — shipping_fee_config ปิดอยู่บนเครื่องนี้${RESET}`);
+    return;
+  }
+  const cust = await pickCustomerContact();
+  const product = await pickCheapProduct(cust, cfg.thresholdBeforeVat);
+  const overPrice = cfg.feePrice + 55;
+  const items = [
+    { product_template_id: product.product_template_id, quantity: 1 },
+    { product_template_id: cfg.productId, quantity: 1, price: overPrice, name: 'ค่าส่งด่วน (ทดสอบ)', is_auto_fee: true },
+  ];
+  const base = { customerId: cust.customerId, contactId: cust.contactId, items };
+  const feesOf = (pv: any) => pv.quotes.flatMap((q: any) => q.items).filter((it: any) => it.is_shipping_fee);
+
+  // ── ก) Cash = กฎเข้าเงื่อนไข ⇒ บรรทัดเดียว ใช้ชื่อ/ราคาที่แก้ ยังนับเป็นของกฎ ──
+  const cash = await previewDraft({ ...base, paymentTermsOverride: 'Cash' });
+  const f = feesOf(cash);
+  ok('กฎเข้าเงื่อนไข ⇒ บรรทัดค่าขนส่งบรรทัดเดียว', f.length === 1, `ได้ ${f.length}`);
+  ok('  ชื่อที่แก้ถูกใช้', f[0]?.name === 'ค่าส่งด่วน (ทดสอบ)', f[0]?.name);
+  ok('  ราคาที่แก้ถูกใช้', Number(f[0]?.price) === overPrice, `${f[0]?.price}`);
+  ok('  ยังเป็นของกฎ (ไม่ติดธงคนเพิ่มเอง)', f[0]?.is_manual_service === false);
+  ok('  service_line.auto_applied = true ⇒ หน้าจอไม่เปิดปุ่มเพิ่มค่าบริการซ้อน', cash.service_line.auto_applied === true);
+
+  // ── ข) เครดิต = กฎไม่เข้าเงื่อนไข ⇒ บรรทัดหาย แม้จะส่งค่าที่แก้มาด้วย ──
+  const credit = await previewDraft({ ...base, paymentTermsOverride: '30 Days' });
+  ok('ลูกค้าเครดิต ⇒ บรรทัดที่แก้ไว้หายตามกฎ (ไม่ค้างเป็นของคนเพิ่มเอง)', feesOf(credit).length === 0,
+    `ได้ ${feesOf(credit).length}`);
+
+  // ── ค) ช่องว่าง ⇒ ถอยไปค่าของกฎ ไม่ใช่ "ค่าบริการ" ของคนเพิ่มเอง / ไม่ใช่ราคาสินค้าระบบ ──
+  const blank = await previewDraft({
+    ...base, paymentTermsOverride: 'Cash',
+    items: [items[0], { product_template_id: cfg.productId, quantity: 1, price: null, name: '  ', is_auto_fee: true }],
+  });
+  const fb = feesOf(blank)[0];
+  ok('ชื่อว่าง ⇒ ชื่อจากหน้าตั้งค่า', fb?.name === cfg.defaultItemName, fb?.name);
+  ok('ราคาว่าง ⇒ ราคาจากหน้าตั้งค่า', Number(fb?.price) === cfg.feePrice, `${fb?.price}`);
+
+  // ── ง) ของจริง: สร้างร่างแล้วค่าที่แก้ต้องลง DB และยังเป็นของกฎ ──
+  await createDraft({
+    adminId, role: 'admin', spUserId: TEST_SP_USER,
+    customerId: cust.customerId, contactId: cust.contactId, items, paymentTermsOverride: 'Cash',
+  });
+  const { rows } = await pool.query(
+    `SELECT item_details FROM quotations WHERE user_id = $1 AND status = 'draft'`, [webUserId]);
+  const dbFees = rows.flatMap((r: any) => (Array.isArray(r.item_details) ? r.item_details : []))
+    .filter((it: any) => isShippingFeeItem(it, cfg));
+  ok('ใบจริงมีบรรทัดค่าขนส่ง 1 บรรทัด', dbFees.length === 1, `ได้ ${dbFees.length}`);
+  ok('  ชื่อ/ราคาที่แก้ลง DB', dbFees[0]?.name === 'ค่าส่งด่วน (ทดสอบ)' && Number(dbFees[0]?.price) === overPrice,
+    `${dbFees[0]?.name} · ${dbFees[0]?.price}`);
+  ok('  ธง is_manual_service = false ใน snapshot', dbFees[0]?.is_manual_service === false);
+}
+
 async function main() {
   console.log(`${BOLD}webQuoteSmoke — ด่านเฟส D${RESET} ${DIM}(${BASE})${RESET}`);
 
@@ -1199,6 +1262,7 @@ async function main() {
     await case10();
     await case11();
     await case12();
+    await case13();
   } finally {
     await teardown();
   }

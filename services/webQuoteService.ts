@@ -625,6 +625,12 @@ export interface WebQuoteItemInput {
    * และ snapshot รองรับทั้งขาเขียน (`buildItemSnapshots`) และขาอ่าน (`legacyItems`) มาตั้งแต่ต้น
    */
   remark?: string | null;
+  /**
+   * บรรทัดค่าบริการนี้คือ "ค่าขนส่งที่กฎเติมให้" ที่คนแก้ชื่อ/ราคาทับ ไม่ใช่บรรทัดที่คนกดเพิ่มเอง
+   * (เจ้าของสั่ง 2026-09-25) ⇒ ยังเป็นของกฎ: ถอดออกเองเมื่อยอดถึงเกณฑ์ เหมือนที่เซลส์แก้ราคา
+   * บรรทัดนี้ในหน้า LIFF ได้อยู่แล้ว · ใช้กับบรรทัดค่าบริการเท่านั้น บรรทัดอื่นไม่สนค่านี้
+   */
+  is_auto_fee?: boolean;
 }
 
 export interface CreateDraftResult {
@@ -712,14 +718,20 @@ async function resolveItems(items: WebQuoteItemInput[]): Promise<any[]> {
     // ⇒ ชื่อของบรรทัดนี้เป็นข้อมูลของ *ใบ* ไม่ใช่ของ *สินค้า* · จำนวนกับส่วนลดยังถูกล็อกตามกฎ
     // เพราะ buildShippingFeeSnapshot เขียนทับด้วย fee_quantity และ 0 ทุกครั้งอยู่ดี
     if (isShippingFeeItem(itemForDb, shippingCfg)) {
+      // บรรทัดของกฎที่คนแก้ทับ (is_auto_fee) ต้องไม่ติดธง is_manual_service — ธงนั้นทำให้บรรทัด
+      // "อยู่ต่อเสมอ" (shouldHaveShippingFee) ซึ่งไม่ใช่ของกฎอีกแล้ว · ไม่ติดธง = กฎยังตัดสินเองว่า
+      // จะมีบรรทัดนี้ไหม ส่วนชื่อ/ราคาที่แก้ไว้ buildShippingFeeSnapshot เก็บต่อให้ (prev)
+      const autoFee = raw?.is_auto_fee === true;
       const customName = String(raw?.name ?? '').trim();
-      // ว่าง = ชื่อตั้งต้นของบรรทัดที่คนเพิ่มเอง ไม่ใช่ชื่อของกฎค่าขนส่ง (เจ้าของสั่ง 2026-09-25)
-      itemForDb.name = customName || MANUAL_SERVICE_ITEM_NAME;
+      // ว่าง = ชื่อตั้งต้นของฝั่งนั้น: ของกฎ = ชื่อจากหน้าตั้งค่า · ของคนเพิ่มเอง = "ค่าบริการ" (2026-09-25)
+      itemForDb.name = customName || (autoFee ? shippingCfg.defaultItemName : MANUAL_SERVICE_ITEM_NAME);
+      // ราคาว่าง/0 ของบรรทัดกฎ = ราคาจากหน้าตั้งค่า (ราคาของสินค้าระบบ N/A ไม่ใช่ราคาค่าขนส่ง)
+      if (autoFee && !(Number.isFinite(price) && price > 0)) itemForDb.price = shippingCfg.feePrice;
       itemForDb.internal_reference = shippingCfg.productInternalReference;
       itemForDb.quantity = shippingCfg.feeQuantity;
       itemForDb.discount_1 = 0;
       itemForDb.discount_2 = 0;
-      itemForDb.is_manual_service = true;
+      itemForDb.is_manual_service = !autoFee;
     }
 
     out.push(itemForDb);
