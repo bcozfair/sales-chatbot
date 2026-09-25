@@ -80,6 +80,7 @@
     "diag:web-quote-source": "tsx scripts/diag/webQuoteSourceProbe.ts",
     "diag:product-candidates": "tsx scripts/diag/productCandidateEval.ts",
     "diag:product-match-line": "tsx scripts/diag/productMatchLine.ts",
+    "diag:product-sequence": "tsx scripts/diag/findProductSequence.ts",
     "diag:migrations": "node scripts/diag/migrationsAudit.mjs",
     "diag:backup": "node scripts/diag/backupHealth.mjs",
     "backfill:contacts": "tsx scripts/backfillContactsFromSaleOrders.ts",
