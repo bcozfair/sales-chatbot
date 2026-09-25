@@ -19,6 +19,7 @@ import type { PriceBook, PriceModel, SheetLayout } from '../../services/pricingL
 import { makeTemplate, readUploaded } from '../../services/pricingLab/bookFile.js';
 import { applyModels } from '../../services/pricingLab/bookUpdate.js';
 import { checkPriceModel } from '../../services/pricingLab/modelShape.js';
+import { loadCatalogSubcodes } from '../pricebook/seedCatalogSubcodes.js';
 
 let pass = 0;
 const fails: string[] = [];
@@ -414,7 +415,8 @@ if (ts01 && ts01.base.kind === 'matrix') {
   const DEF = { cable: { label: 'ชนิดสาย รุ่นเริ่มต้น', by: 'sensor', values: {
     'TSK/TSJ': 'สายสแตนเลสถัก', TST: 'สายเทปล่อน', TSP: 'สายพีวีซี', TSPA: 'สายพีวีซี', TSZ: 'สายพีวีซี' },
     source: 'TS-01+TS-01-0!G11:G15' } };
-  const m8: PriceModel = { ...ts01, axisDefaultsBy: DEF };
+  // ตัดค่ามาตรฐานของเกลียวทิ้ง (เล่มจาก --data มี 1/4” ตามแคตตาล็อก) — ข้อนี้ทดสอบกลไกตาม TYPE ล้วน ๆ
+  const m8: PriceModel = { ...ts01, axisDefaults: undefined, axisDefaultsBy: DEF };
   const b8 = withModel(m8);
   const q = (axes: Record<string, string>, cable_m: number, b: PriceBook = b8) =>
     computePrice({ model: 'TSK-01', axes, dims: { cable_m } }, b);
@@ -499,6 +501,69 @@ if (ts01 && ts01.base.kind === 'matrix') {
   const old8: PriceBook = { ...b8, models: { ...b8.models, 'TSK-01': { ...m8, axisDefaultsBy: undefined } } };
   check('อัปแม่แบบรุ่นก่อน (ไม่มีชีตค่าเริ่มต้น) ⇒ ค่าเดิมยังอยู่',
     JSON.stringify(applyModels(b8, old8, ['TSK-01'], { at: '2026-09-24T00:00:00.000Z' }).models['TSK-01']?.axisDefaultsBy) === JSON.stringify(DEF));
+}
+
+console.log('\n── 9. แคตตาล็อก TS_-01 / TS_-01-0 (เจ้าของสั่ง 2026-09-24: "ยึดตามภาพ · ทำตามภาพเลย · U ไม่มีราคาเพิ่ม") ─\n');
+
+// ค่ามาตรฐานมาจากแมป (19/20-*.map.json) · ความหมายตัวอักษรหลัง M มาจาก catalog-subcodes.json
+// ที่ seedCatalogSubcodes.ts เขียนลงตารางรหัสย่อย — ด่านนี้ประกอบเล่มเองจากสองไฟล์นั้น ไม่พึ่งของในฐาน
+if (ts01 && ts010) {
+  const STD = { cable: { label: 'ชนิดสายมาตรฐาน', by: 'sensor', values: {} as Record<string, string> } };
+  const withStd = (m: PriceModel, thread: string): PriceModel => {
+    const rows = m.base.kind === 'matrix' ? [...new Set(Object.keys(m.base.cells).map((k) => k.split(' | ')[0]!))] : [];
+    return { ...m, axisDefaults: { thread },
+      axisDefaultsBy: { cable: { ...STD.cable, values: Object.fromEntries(rows.map((r) => [r, 'สายสแตนเลสถัก'])) } } };
+  };
+  const cat = loadCatalogSubcodes();
+  const b9: PriceBook = {
+    ...book,
+    models: { ...book.models, 'TSK-01': withStd(ts01, '1/4”'), 'TSK-01-0': withStd(ts010, 'M5') },
+    subCodes: [...(book.subCodes ?? []), ...cat],
+  };
+  const run = (code: string) => { const p = parseProductCode(code, b9); return { p, r: computePrice(p.cfg!, b9) }; };
+  const price = (code: string, want: number, label: string) => {
+    const { p, r } = run(code);
+    check(`${code} = ${want.toLocaleString()} — ${label}`, r.status === 'priced' && r.unitPrice === want,
+      `${r.status} ${r.unitPrice} ${r.violations.map((v) => v.message).join('|')} · ${p.parts.map((x) => `${x.text}[${x.kind}]`).join(' ')}`);
+    return { p, r };
+  };
+
+  const a = price('TSJ-01 4.8+2M', 240, 'ไม่มีวงเล็บ = เกลียว 1/4” · ไม่บอกสาย = สแตนเลสถัก 80');
+  check('  บรรทัดราคาตั้งบอกว่าเกลียวมาจากค่ามาตรฐาน', /ขนาดเกลียว 1\/4” = ค่ามาตรฐานของรุ่น — รหัสไม่ได้ระบุ/.test(a.r.breakdown[0]?.detail ?? ''),
+    a.r.breakdown[0]?.detail);
+  check('  ไม่มีคำเตือน "ไม่มีวงเล็บ" แล้ว', !a.p.warnings.some((w) => /วงเล็บ/.test(w)), a.p.warnings.join('|'));
+  price('TST-01(M6)4.8+3M', 380, 'TYPE T ไม่บอกสาย = สแตนเลสถัก ตามแคตตาล็อก (ไม่ใช่เทปล่อนตามคอลัมน์ G)');
+  price('TSP-01(1/4")4.8+2M', 1000, 'RTD ไม่บอกสาย = สแตนเลสถัก 80 (ไม่ใช่ PVC)');
+  const t = price('TSK-01(M6)4.8+2MT', 340, 'T = เทปล่อน 180');
+  check('  บรรทัดค่าสายไม่อ้างว่า "รหัสไม่ได้ระบุ"', !t.r.breakdown.some((l) => /รหัสไม่ได้ระบุ/.test(l.detail ?? '')));
+  price('TSK-01(M6)4.8+2MTU', 340, 'T + U — Unground ไม่มีราคาเพิ่ม');
+  const pu = price('TSP-01(M6)4.8+2MPU', 1020, 'P = พีวีซี 100 + U');
+  check('  U ขึ้นเป็น "ไม่มีผลกับราคา" ไม่ใช่ตัวแดง', pu.p.parts.some((x) => x.text === 'U' && x.kind === 'noPrice'));
+  price('TSK-01(M6)4.8+3MF', 350, 'F = ไฟเบอร์กลาส 95 × 2');
+  price('TSK-01(M8)6+1M', 190, 'แกน 6 คู่กับ M8 — ไม่มีผลกับราคา');
+  check('  แกน 6 ไม่ขึ้นแดง', !run('TSK-01(M8)6+1M').p.parts.some((x) => x.kind === 'unknown'));
+  const tsu = run('TSP-01(M6)4.8+2MTSU');
+  check('TSP-01(M6)4.8+2MTSU — TS = เทปล่อนหุ้มชีลด์ ยังไม่มีราคา ⇒ "ยังไม่มีราคา" (noRate) ไม่ใช่ไม่รับผลิต',
+    tsu.r.status !== 'priced' && tsu.r.violations.some((v) => v.noRate && /เทปล่อนหุ้มชีลด์/.test(v.message)) && !tsu.r.violations.some((v) => v.missing),
+    tsu.r.violations.map((v) => JSON.stringify(v)).join('|'));
+  price('TSK-01(M6)4.8+1MC', 160, 'สายซิลิโคนไม่เกิน 1 M ⇒ ไม่มีค่าสายให้ต้องรู้ราคา');
+
+  price('TSJ-01-0+2M', 240, 'TS_-01-0 ไม่มีวงเล็บ = M5 160 + สแตนเลสถัก 80');
+  price('TSK-01-0(M6)+2MT', 370, 'TS_-01-0 T = เทปล่อน 190 + 180');
+  price('TSP-01-0(M4)+2MPU', 1030, 'TS_-01-0 P + U = 930 + 100');
+  const z = run('TSK-01-0(M6)+2MTSU');
+  check('TSK-01-0(M6)+2MTSU — แคตตาล็อก TS_-01-0 ไม่มี TS ⇒ ทิ้งทั้งท่อน ไม่แตกเป็น T + SU แล้วคิดเทปล่อน',
+    z.r.status !== 'priced' && z.r.violations.some((v) => v.missing) && z.p.parts.some((x) => x.text === 'TSU' && x.kind === 'unknown'),
+    `${z.r.status} ${z.r.unitPrice} ${z.p.parts.map((x) => `${x.text}[${x.kind}]`).join(' ')}`);
+  const c0 = run('TSK-01-0(M6)+2MC');
+  check('TSK-01-0(M6)+2MC — แคตตาล็อก TS_-01-0 ไม่มี C ⇒ อ่านไม่ออก (ไม่ใช้ C ของ TS_-01)',
+    c0.r.status !== 'priced' && c0.r.violations.some((v) => v.missing), c0.r.violations.map((v) => v.message).join('|'));
+
+  const v9 = modelEditorView(b9, b9.models['TSK-01']!);
+  check('หน้าชีตรู้ค่ามาตรฐานของเกลียว', JSON.stringify(v9.axisDefaults) === JSON.stringify([{ axis: 'thread', axisTh: 'ขนาดเกลียว', value: '1/4”' }]),
+    JSON.stringify(v9.axisDefaults));
+  check('ยังเปิดแบบชีต Excel ได้', excelReady(b9.models['TSK-01']!) && excelReady(b9.models['TSK-01-0']!));
+  check('ไฟล์ catalog-subcodes.json ผ่านตัวตรวจทุกแถว (10 + แกน 6)', cat.length === 11, String(cat.length));
 }
 
 console.log(`\n${'─'.repeat(70)}`);

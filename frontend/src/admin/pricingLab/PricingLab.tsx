@@ -242,11 +242,13 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
                   icon={AlertTriangle}
                   // "รหัสบอกไม่ครบ" ≠ "ไม่รับผลิต" — เดิมขึ้นอย่างหลังกับ TSJ-01 4.8+2M ที่แค่ไม่มีวงเล็บเกลียว (2026-09-24)
                   title={
-                    result.outcome?.violations.some((v) => v.level === 'block' && !v.missing)
+                    result.outcome?.violations.some((v) => v.level === 'block' && !v.missing && !v.noRate)
                       ? 'ไม่รับผลิตขนาดนี้'
                       : result.outcome?.violations.some((v) => v.missing)
                         ? 'รหัสยังบอกข้อมูลไม่ครบ'
-                        : 'ยังคิดราคาไม่ได้'
+                        : result.outcome?.violations.some((v) => v.noRate)
+                          ? 'ยังไม่มีราคาในสมุดราคา'
+                          : 'ยังคิดราคาไม่ได้'
                   }
                   hint={
                     result.outcome?.violations.map((v) => v.message).join(' · ')

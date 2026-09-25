@@ -102,6 +102,11 @@ export interface EditorView {
    * `options` = ค่าที่เลือกได้ (คีย์ของอัตราตามแกนนั้น) — เลือกนอกรายการไม่ได้ เพราะเติมแล้วจะหาราคาไม่เจอ
    */
   defaultsBy: { axis: string; axisTh: string; by: string; label: string; values: Record<string, string>; options: string[] }[];
+  /**
+   * ค่ามาตรฐานเมื่อรหัสไม่ระบุ (`axisDefaults`) — **มีผลกับราคา** แต่หน้าจอนี้แสดงอย่างเดียว (แก้ผ่านแม่แบบ)
+   * TS_-01: รหัสไม่มีวงเล็บเกลียว = 1/4” ตามแคตตาล็อก (2026-09-24)
+   */
+  axisDefaults: { axis: string; axisTh: string; value: string }[];
   variant: (ModelVariant & { covers: string[] }) | null;
   adders: EditorAdder[];
   constraints: { id: string; level: string; levelTh: string; message: string; whenTh: string; disabled: boolean }[];
@@ -296,6 +301,7 @@ export function modelEditorView(book: PriceBook, m: PriceModel): EditorView {
       values: { ...d.values },
       options: defaultOptions(book, m, axis)
     })),
+    axisDefaults: Object.entries(m.axisDefaults ?? {}).map(([axis, value]) => ({ axis, axisTh: axisLabel(axis), value })),
     label: m.label,
     sheet: m.sheet ?? '',
     aliases: m.aliases ?? [],

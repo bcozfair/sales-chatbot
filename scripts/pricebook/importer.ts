@@ -7,7 +7,7 @@
 //    … --data <dir> --apply --by <username>                                    เล่มแรกของฐาน
 //    … --data <dir> --apply --replace-all --by <username>                      แทนทั้งเล่ม (ย้อนได้จากหน้าจอ)
 //    … --from-json pricebook/book.json --apply [--replace-all]                  ย้ายเล่มของยุคไฟล์เข้าฐาน
-//    … --data <dir> --extras-only [--apply --by <username>]                      เติมของรอบตาราง (ชนิดสายรุ่นเริ่มต้น · หน้าตา) ลงเล่มปัจจุบัน ไม่แตะตัวเลขราคา
+//    … --data <dir> --extras-only [--apply --by <username>]                      เติมของรอบตาราง (ค่ามาตรฐานเมื่อรหัสไม่ระบุ · หน้าตา) ลงเล่มปัจจุบัน ไม่แตะตัวเลขราคา
 //    … --data <dir> --out <ไฟล์.json>                                           เขียนเป็นไฟล์ (ไม่แตะฐาน)
 //
 //  **`--data` ไม่มีค่าเริ่มต้นโดยตั้งใจ** — ยุคไฟล์ตั้งต้นที่ `data/` ซึ่งถูกเสิร์ฟออกเว็บโดยไม่ตรวจสิทธิ์
@@ -126,8 +126,17 @@ interface LayoutSpec {
  * **ข้อความที่ `names` ไม่รู้จัก = นำเข้าล้ม** ไม่ใช่ข้ามเงียบ ๆ — ข้ามแล้วรหัสแถวนั้นจะกลับไปคิดไม่ได้โดยไม่มีใครรู้
  */
 interface AxisDefaultBySpec {
-  col: string;
-  names: Record<string, string>;
+  col?: string;
+  names?: Record<string, string>;
+  /**
+   * ค่าเดียวกันทุกแถว ไม่อ่านจากชีต — ใช้เมื่อที่มาของค่าไม่ใช่คอลัมน์ในไฟล์ราคา
+   * (TS_-01 · TS_-01-0: แคตตาล็อกบอก "ชนิดสาย None = สแตนเลสถัก" ทุก TYPE และเจ้าของสั่ง 2026-09-24
+   * ให้ยึดแคตตาล็อก ไม่ใช่คอลัมน์ G "ชนิดสาย รุ่นเริ่มต้น" ที่บอก TST = เทปล่อน · TSP = PVC)
+   * ยังเก็บเป็นรายแถว เพื่อให้หน้าชีตมีช่องให้แก้ต่อ TYPE ได้เหมือนเดิม
+   */
+  fill?: string;
+  label?: string;
+  source?: string;
 }
 
 interface SheetMap {
@@ -361,6 +370,17 @@ function importSheet(
     }
   }
 
+  // ค่ามาตรฐานของแกนในตาราง ต้องเป็นหัวแถว/หัวคอลัมน์ที่มีจริง — `1/4"` กับ `1/4”` คนละคีย์
+  // พิมพ์ผิดแล้วรหัสที่ไม่มีวงเล็บจะกลับไปคิดไม่ได้เงียบ ๆ ⇒ นำเข้าล้มแทน
+  if (base.kind === 'matrix') {
+    for (const [axis, v] of Object.entries(map.axisDefaults ?? {})) {
+      const i = base.axes.indexOf(axis);
+      if (i < 0) continue;
+      const have = new Set(Object.keys(base.cells).map((k) => k.split(' | ')[i]));
+      if (!have.has(v)) throw new Error(`${map.code}: axisDefaults.${axis} = "${v}" ไม่มีในตาราง (${[...have].join(' · ')})`);
+    }
+  }
+
   const model: PriceModel & { importStats?: ImportReport } = {
     code: map.code,
     label: map.label,
@@ -390,6 +410,16 @@ function readDefaultsBy(map: SheetMap, ws: ExcelJS.Worksheet, spec: MatrixSpec):
   const headerRows = Array.isArray(spec.colHeaderRow) ? spec.colHeaderRow : [spec.colHeaderRow];
   const out: Record<string, AxisDefaultBy> = {};
   for (const [axis, d] of Object.entries(map.axisDefaultsBy)) {
+    if (d.fill) {
+      const values: Record<string, string> = {};
+      for (let r = spec.rows[0]; r <= spec.rows[1]; r++) {
+        const key = cellText(ws, r, spec.rowHeaderCol);
+        if (key) values[key] = d.fill;
+      }
+      out[axis] = { ...(d.label ? { label: d.label } : {}), by: spec.axes[0]!, values, ...(d.source ? { source: d.source } : {}) };
+      continue;
+    }
+    if (!d.col || !d.names) throw new Error(`${map.code}: axisDefaultsBy.${axis} ต้องมี fill หรือ col + names`);
     const names = new Map(Object.entries(d.names).map(([k, v]) => [norm(k), v]));
     const values: Record<string, string> = {};
     for (let r = spec.rows[0]; r <= spec.rows[1]; r++) {
@@ -401,12 +431,12 @@ function readDefaultsBy(map: SheetMap, ws: ExcelJS.Worksheet, spec: MatrixSpec):
       values[key] = v;
     }
     if (!Object.keys(values).length) continue;
-    const label = cellText(ws, headerRows[headerRows.length - 1]!, d.col);
+    const label = d.label ?? cellText(ws, headerRows[headerRows.length - 1]!, d.col);
     out[axis] = {
       ...(label ? { label } : {}),
       by: spec.axes[0]!,
       values,
-      source: `${map.sheet}!${d.col}${spec.rows[0]}:${d.col}${spec.rows[1]}`
+      source: d.source ?? `${map.sheet}!${d.col}${spec.rows[0]}:${d.col}${spec.rows[1]}`
     };
   }
   return Object.keys(out).length ? out : undefined;
@@ -555,9 +585,14 @@ async function applyExtrasOnly(fromFile: PriceBook, opts: { apply: boolean; by: 
   const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
   for (const [code, m] of Object.entries(state.book.models)) {
     const f = fromFile.models[code];
-    if (!f || (!f.layout && !f.axisDefaultsBy)) continue; // แมปของรุ่นนี้ไม่ได้บอกให้อ่าน ⇒ ไม่แตะ
+    if (!f || (!f.layout && !f.axisDefaultsBy && !f.axisDefaults)) continue; // แมปของรุ่นนี้ไม่ได้บอกให้อ่าน ⇒ ไม่แตะ
     const patch: Partial<PriceModel> = {};
     const notes: string[] = [];
+    // ค่ามาตรฐานเมื่อรหัสไม่ระบุ (เกลียว None = 1/4” ของ TS_-01 ตามแคตตาล็อก) — แตะเฉพาะเมื่อแมปบอกมา
+    if (f.axisDefaults && !same(m.axisDefaults, f.axisDefaults)) {
+      patch.axisDefaults = f.axisDefaults;
+      notes.push(`ค่ามาตรฐานเมื่อรหัสไม่ระบุ: ${Object.entries(f.axisDefaults).map(([k, v]) => `${k} = ${v}`).join(' · ')}`);
+    }
     if (!same(m.layout, f.layout)) { patch.layout = f.layout; notes.push(`หน้าตา: ${JSON.stringify(f.layout ?? null)}`); }
     if (!same(m.axisDefaultsBy, f.axisDefaultsBy)) {
       patch.axisDefaultsBy = f.axisDefaultsBy;
@@ -594,7 +629,7 @@ async function applyExtrasOnly(fromFile: PriceBook, opts: { apply: boolean; by: 
   const revision = await commitBookChange({
     parent: state.revision,
     kind: 'model',
-    next: { ...state.book, models, edited: { at, by: opts.by ?? undefined, note: 'เติมของรอบตารางจากไฟล์ราคา (ชนิดสายรุ่นเริ่มต้น · หน้าตา) — ไม่แตะตัวเลขราคา' } },
+    next: { ...state.book, models, edited: { at, by: opts.by ?? undefined, note: 'เติมของรอบตารางจากไฟล์ราคา/แคตตาล็อก (ค่ามาตรฐานเมื่อรหัสไม่ระบุ · หน้าตา) — ไม่แตะตัวเลขราคา' } },
     changed,
     by: opts.by,
   });

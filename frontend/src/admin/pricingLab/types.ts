@@ -92,7 +92,8 @@ export interface PriceOutcome {
   unitPrice: number;
   breakdown: BreakdownLine[];
   /** `missing` = คิดไม่ได้เพราะรหัสไม่ได้บอกค่า (ไม่ใช่ไม่รับผลิต) — ดู `Violation` ฝั่ง backend */
-  violations: { id: string; level: 'block' | 'quoteOnRequest' | 'warn'; message: string; missing?: boolean }[];
+  /** `noRate` = รหัสบอกค่าแล้วแต่กฎบวกเพิ่มยังไม่มีราคาของค่านั้น (ไม่ใช่ไม่รับผลิตเหมือนกัน) */
+  violations: { id: string; level: 'block' | 'quoteOnRequest' | 'warn'; message: string; missing?: boolean; noRate?: boolean }[];
   bookVersion: string;
 }
 
@@ -275,6 +276,8 @@ export interface EditorView {
   };
   /** ค่าเริ่มต้นที่ขึ้นกับอีกแกน (ชนิดสายตาม TYPE) — **มีผลกับราคา** · `options` = ค่าที่เลือกได้ */
   defaultsBy: { axis: string; axisTh: string; by: string; label: string; values: Record<string, string>; options: string[] }[];
+  /** ค่ามาตรฐานเมื่อรหัสไม่ระบุ (`axisDefaults`) — มีผลกับราคา · หน้าจอแสดงอย่างเดียว */
+  axisDefaults?: { axis: string; axisTh: string; value: string }[];
   label: string;
   sheet: string;
   aliases: string[];

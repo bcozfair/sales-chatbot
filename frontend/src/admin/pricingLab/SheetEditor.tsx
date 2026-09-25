@@ -261,6 +261,8 @@ const SheetTable: React.FC<{
   /** แถวข้อความใต้ตาราง (ตัวหนังสือแดง) — โผล่เฉพาะชีตที่มี เพิ่มใหม่ทำผ่านแม่แบบ Excel */
   const hasColNotes = Object.keys(L.colNotes).length > 0;
   const head = (i: number) => `${axesTh[i] ?? axes[i]} (${(axes[i] ?? '').toUpperCase()})`;
+  /** คอลัมน์ที่รหัสไม่ระบุแล้วใช้คิด (ค่ามาตรฐานของแกนคอลัมน์) — ติดป้ายไว้ใต้หัวคอลัมน์ */
+  const stdCol = v.axisDefaults?.find((ad) => ad.axis === axes[1])?.value;
 
   return (
     <section className="bg-card border border-slate-200 rounded-2xl overflow-hidden">
@@ -322,6 +324,7 @@ const SheetTable: React.FC<{
                       className="w-full px-3 py-1.5 hover:underline"
                     >
                       {c}
+                      {stdCol === c && <span className="block text-[10px] font-semibold text-emerald-700">มาตรฐาน</span>}
                     </button>
                   </th>
                 ))}
@@ -406,6 +409,11 @@ const SheetTable: React.FC<{
           {v.defaultsBy.map((df) => (
             <React.Fragment key={df.axis}>
               {' · '}<b className="text-slate-600">คอลัมน์ “{df.label}” มีผลกับราคา</b> — รหัสที่ไม่ได้บอก{df.axisTh} ใช้ค่าในคอลัมน์นี้คิด
+            </React.Fragment>
+          ))}
+          {(v.axisDefaults ?? []).map((ad) => (
+            <React.Fragment key={ad.axis}>
+              {' · '}<b className="text-slate-600">รหัสที่ไม่ได้บอก{ad.axisTh} คิดด้วย {ad.value}</b> (ค่ามาตรฐานของรุ่น)
             </React.Fragment>
           ))}
           {(L.rowNote || hasColNotes) && <> · {[L.rowNote && `คอลัมน์ “${L.rowNote.label}”`, hasColNotes && 'ตัวหนังสือแดง'].filter(Boolean).join(' และ ')} เป็นข้อความกำกับ ไม่มีผลกับราคา</>}

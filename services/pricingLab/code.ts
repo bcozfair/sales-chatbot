@@ -280,10 +280,13 @@ function leftovers(c: Ctx, rest: string): string[] {
 
 /**
  * ส่วนสายของ TC: `+1M` `+3M` `+1.5M` `+30cm` — ตัวอักษรที่ตามหลัง M คือ **ชนิดสาย + Ground**
- * ตามแคตตาล็อกของ TS_-01 (`docs/pricing-code-ts-01.md` · เจ้าของส่งภาพ 2026-09-24) แต่ **ยังไม่ต่อ
- * เข้ากับราคา** (รอเจ้าของเคาะเรื่องสายตั้งต้น) จึงยังแยกออกมาเป็นท่อนที่อ่านไม่ออก ไม่กลืนทิ้ง
- * · รุ่นที่คิดค่าสายตามชนิด ต้องบอก engine ด้วยว่ารหัสพูดถึงสายแล้ว (`cfg.unread`) ไม่งั้นมันเติม
- *   สายตั้งต้นให้แล้วคิดเงินผิดชนิดเงียบ ๆ
+ * ตามแคตตาล็อก (`docs/pricing-code-ts-01.md` · เจ้าของส่งภาพ TS_-01 และ TS_-01-0 มา 2026-09-24)
+ *
+ * **ความหมายของตัวอักษรอยู่ในตารางรหัสย่อย ไม่ใช่ในไฟล์นี้** — `T` = เทปล่อน ของรุ่นหนึ่ง อาจไม่มี
+ * ในอีกรุ่น (TS_-01-0 ไม่มี C/TS) และร้านต้องแก้เองได้ ⇒ ที่นี่แค่ตัดท้ายเป็นท่อนที่ตารางรู้จัก
+ * แบบ **ยาวสุดก่อน** (`TSU` = `TS` + `U` ถ้ารุ่นนั้นมี `TS` · ไม่มี = `T` + `SU`)
+ * · ท่อนที่ตารางไม่รู้จัก → ขึ้นแดง และถ้ายังไม่มีท่อนไหนบอกชนิดสาย ต้องบอก engine ว่ารหัสพูดถึงสาย
+ *   แล้ว (`cfg.unread`) ไม่งั้นมันเติมสายตั้งต้นให้แล้วคิดเงินผิดชนิดเงียบ ๆ (เกือบหลุดมาแล้ว 2026-09-24)
  */
 function readCable(c: Ctx, token: string): boolean {
   const m = token.match(/^\+?(\d+(?:\.\d+)?)(M|CM)([A-Z]*)$/i);
@@ -298,10 +301,31 @@ function readCable(c: Ctx, token: string): boolean {
     reads: `สายยาว ${meters} เมตร (มาตรฐานของรุ่นนี้คือ ${c.model.standard.cable_m ?? '—'} เมตร)`,
     kind: 'dim'
   });
-  if (tail) {
-    add(c, { text: tail, reads: 'ชนิดสาย/Ground ตามแคตตาล็อก — ยังไม่ได้ต่อเข้ากับราคา', kind: 'unknown' });
-    if (c.model.adders.some((a) => a.byAxis === 'cable')) c.cfg.unread = { ...c.cfg.unread, cable: tail.toUpperCase() };
+  if (!tail) return true;
+  // ตัดเป็นท่อนที่ตารางรู้จัก ยาวสุดก่อน — **อ่านได้ครบทุกตัวอักษรเท่านั้นถึงจะใช้** ไม่งั้นทิ้งทั้งท่อน:
+  // `TSU` ของ TS_-01-0 (แคตตาล็อกไม่มี TS) จะกลายเป็น `T` + `SU` แล้วได้ราคาสายเทปล่อนทั้งที่
+  // อาจเป็นเทปล่อนหุ้มชีลด์ — เดาแบบนั้นแย่กว่าบอกว่าอ่านไม่ออก
+  const pieces: string[] = [];
+  let rest = tail.toUpperCase();
+  while (rest) {
+    let len = rest.length;
+    while (len > 0 && !findSubCode(c.book, c.model, rest.slice(0, len))) len--;
+    if (len === 0) break;
+    pieces.push(rest.slice(0, len));
+    rest = rest.slice(len);
   }
+  if (!rest) {
+    for (const p of pieces) readFromTable(c, p);
+    return true;
+  }
+  add(c, {
+    text: tail,
+    reads: pieces.length
+      ? `ชนิดสาย/Ground — ตารางรหัสย่อยของรุ่นนี้อ่านได้ไม่ครบ (รู้จัก ${pieces.join(' + ')} · ไม่รู้จัก ${rest})`
+      : 'ชนิดสาย/Ground ที่ตารางรหัสย่อยของรุ่นนี้ยังไม่รู้จัก',
+    kind: 'unknown'
+  });
+  if (c.model.adders.some((a) => a.byAxis === 'cable')) c.cfg.unread = { ...c.cfg.unread, cable: tail.toUpperCase() };
   return true;
 }
 
@@ -353,7 +377,8 @@ function readTsGeneric(c: Ctx, rest: string, prefix: string): void {
       add(c, { text: `(${raw})`, reads: 'อ่านไม่ออกว่าเป็นเกลียวขนาดไหน', kind: 'unknown' });
     }
     rest = rest.slice(paren[0].length);
-  } else if (hasThread) {
+  } else if (hasThread && !c.model.axisDefaults?.thread) {
+    // รุ่นที่มีเกลียวมาตรฐาน (TS_-01 = 1/4” · TS_-01-0 = M5 ตามแคตตาล็อก) ไม่ต้องเตือน — engine ใช้ค่านั้นแล้วบอกบนบรรทัดราคา
     c.warnings.push('รหัสนี้ไม่มีวงเล็บบอกขนาดเกลียว — ใส่เกลียวต่อท้ายเลขรุ่นแล้วคิดใหม่ เช่น TSK-01(M6)');
   }
 
@@ -371,6 +396,8 @@ function readTsGeneric(c: Ctx, rest: string, prefix: string): void {
     } else if (Number(dText) === c.model.standard.dia_mm) {
       // TS-01 ทั้งรุ่นใช้แกนขนาดเดียว (ชีตเขียนไว้ในรหัสมาตรฐานเอง) ⇒ ตัวเลขนี้ไม่ได้เลือกอะไร
       add(c, { text: dText, reads: `แกน ${dText} mm — ขนาดเดียวของรุ่นนี้ ไม่มีผลกับราคา`, kind: 'noPrice' });
+    } else if (readFromTable(c, dText)) {
+      // ขนาดแกนที่แคตตาล็อกบอกความหมายไว้ (TS_-01: 6 mm คู่กับเกลียว M8/M10) — ตั้งในตารางรหัสย่อย
     } else {
       add(c, {
         text: dText,

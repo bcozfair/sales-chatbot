@@ -220,6 +220,8 @@ interface AdderResult {
   blocked?: string;
   /** `blocked` เพราะรหัสไม่ได้บอกค่าแกน ไม่ใช่เพราะไม่รับทำ */
   missing?: boolean;
+  /** `blocked` เพราะค่าที่รหัสบอกยังไม่มีราคาในกฎนี้ */
+  noRate?: boolean;
   skip?: boolean;
 }
 
@@ -261,7 +263,7 @@ function computeAdder(
         return { amount: 0, missing: true, blocked: `${a.label}: ยังอ่าน "${unread[a.byAxis]}" ในรหัสไม่ออกว่าเป็น${axisLabel(a.byAxis)}อะไร` };
       }
       if (!axisValue) return { amount: 0, missing: true, blocked: `${a.label}: รหัสไม่ได้บอก${axisLabel(a.byAxis)}` };
-      return { amount: 0, blocked: `${a.label}: ไม่มีราคาสำหรับ ${axisLabel(a.byAxis)} ${axisValue}` };
+      return { amount: 0, noRate: true, blocked: `${a.label}: ยังไม่มีราคาสำหรับ ${axisLabel(a.byAxis)} ${axisValue}` };
     }
   }
 
@@ -384,8 +386,11 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
     Object.entries(model.axisDefaults ?? {}).filter(([k]) => cfg.unread?.[k] === undefined)
   );
   const axes = { ...staticDefaults, ...given };
-  // ค่าเริ่มต้นที่ขึ้นกับอีกแกน (สายของ TS-01 ขึ้นกับ TYPE) — แพ้ค่าที่รหัสบอกเอง ชนะ `axisDefaults`
+  // แกนไหนได้ค่ามาจากค่าเริ่มต้น (ไม่ใช่จากรหัส) — บอกบนบรรทัดราคา เพราะ "ทำไมคิดเกลียว 1/4”"
+  // ต้องตอบได้จากหน้าจอ (TS_-01: รหัสไม่มีวงเล็บ = 1/4” ตามแคตตาล็อก · 2026-09-24)
   const defaultedBy: Record<string, string> = {};
+  for (const a of Object.keys(staticDefaults)) if (!(a in given)) defaultedBy[a] = 'ค่ามาตรฐานของรุ่น';
+  // ค่าเริ่มต้นที่ขึ้นกับอีกแกน (สายของ TS-01 ขึ้นกับ TYPE) — แพ้ค่าที่รหัสบอกเอง ชนะ `axisDefaults`
   for (const [axis, d] of Object.entries(model.axisDefaultsBy ?? {})) {
     // รหัสบอกมาแล้วแต่อ่านไม่ออก ≠ รหัสไม่ได้บอก — เติมค่าเริ่มต้นตรงนี้ = คิดเงินผิดชนิดโดยไม่มีอะไรฟ้อง
     if (axis in given || cfg.unread?.[axis] !== undefined) continue;
@@ -397,7 +402,10 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
   // รหัสย่อยที่ "เซ็ตค่าให้ช่อง" ต้องมีผลก่อนหาราคาตั้ง ไม่งั้นตารางจะถูกค้นด้วยค่าเก่า
   const subCodes = matchedSubCodes(book, model, cfg.options ?? []);
   for (const sc of subCodes) {
-    if (sc.effect === 'setAxis' && sc.axis) axes[sc.axis] = sc.value ?? '';
+    if (sc.effect === 'setAxis' && sc.axis) {
+      axes[sc.axis] = sc.value ?? '';
+      delete defaultedBy[sc.axis];
+    }
   }
   // standard คือสเปกที่รวมอยู่ในราคาตั้งแล้ว ⇒ เป็นค่าตั้งต้นของทุก dim ที่ผู้ใช้ไม่ได้ระบุ
   const dims: Record<string, number> = { ...model.standard, ...(cfg.dims ?? {}) };
@@ -446,7 +454,11 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
     });
   } else {
     running = base.amount;
-    breakdown.push({ step: 'base', label: base.label, detail: base.detail, amount: base.amount, running });
+    const baseAxes = !ownBase[0] && model.base.kind === 'matrix' ? model.base.axes : [];
+    const fromDefault = baseAxes.filter((a) => defaultedBy[a])
+      .map((a) => `${axisLabel(a)} ${axes[a]} = ${defaultedBy[a]} — รหัสไม่ได้ระบุ`);
+    const detail = fromDefault.length ? [base.detail, `(${fromDefault.join(' · ')})`].filter(Boolean).join(' ') : base.detail;
+    breakdown.push({ step: 'base', label: base.label, detail, amount: base.amount, running });
   }
 
   if (base.ok) {
@@ -466,7 +478,10 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
       if (a.when && !evalPredicate(a.when, axes, dims, options)) continue;
       const r = computeAdder(a, model, running, axes, dims, cfg.unread);
       if (r.blocked) {
-        violations.push({ id: a.id, level: 'block', message: r.blocked, ...(r.missing ? { missing: true } : {}) });
+        violations.push({
+          id: a.id, level: 'block', message: r.blocked,
+          ...(r.missing ? { missing: true } : {}), ...(r.noRate ? { noRate: true } : {}),
+        });
         continue;
       }
       if (r.skip || r.amount === 0) continue;
