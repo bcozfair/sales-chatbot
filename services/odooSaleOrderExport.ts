@@ -149,8 +149,8 @@ export interface OdooExportQuotationRow {
    */
   delivery_terms?: any;
   /**
-   * K: source_id ที่คนออกใบเลือกไว้ (`quotations.source_id`) — NULL/ว่าง = ใช้ `config.sourceId`
-   * ซึ่งคือค่าที่ทุกใบเคยได้มาตลอดก่อนมีคอลัมน์นี้
+   * K: source_id ของใบ (`quotations.source_id`) — ทุกแถวมีค่าแล้ว (ใบเก่า backfill เป็น Sales 2026-09-25)
+   * NULL/ว่าง ยังถอยไปใช้ `config.sourceId` เผื่อแถวที่หลุดมา (เช่นฐานที่ยังไม่ได้รัน migration _02)
    */
   source_id?: string | null;
 }
