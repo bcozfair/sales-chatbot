@@ -83,8 +83,23 @@ export const ConfirmIssueModal: React.FC<Props> = ({
       onClose={busy ? undefined : onCancel}
       footer={
         <>
+          {/* ช่องรับทราบอยู่แถวเดียวกับปุ่ม (เจ้าของสั่ง 2026-09-25) — ติ๊กแล้วกดต่อได้ทันที ไม่ต้องเลื่อนหา
+              และไม่หลุดจากจอเมื่อรายการกฎยาว เพราะแถบปุ่มอยู่กับที่ · mr-auto ดันไปซ้ายสุด จอแคบตกบรรทัดเอง */}
+          {needAck && (
+            <label htmlFor={ackId} className="mr-auto flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700">
+              <input
+                id={ackId}
+                type="checkbox"
+                checked={acked}
+                disabled={busy}
+                onChange={(e) => setAcked(e.target.checked)}
+                className="w-4 h-4 shrink-0 accent-[var(--btn-danger-bg)]"
+              />
+              ข้าพเจ้าอ่านครบแล้ว และยืนยันข้ามกฎ {violations.length} ข้อ
+            </label>
+          )}
           <Button variant="neutral" tone="soft" icon={Pencil} disabled={busy} onClick={onCancel}>
-            กลับไปแก้
+            แก้ไข
           </Button>
           <Button
             variant={needApproval ? 'warning' : 'danger'}
@@ -94,7 +109,7 @@ export const ConfirmIssueModal: React.FC<Props> = ({
             disabled={needAck && !acked}
             onClick={onConfirm}
           >
-            {needApproval ? 'ส่งขออนุมัติราคา' : 'ยืนยันออกใบ'}
+            {needApproval ? 'ส่งขออนุมัติราคา' : 'ยืนยัน'}
           </Button>
         </>
       }
@@ -145,22 +160,6 @@ export const ConfirmIssueModal: React.FC<Props> = ({
                 <li key={`${v.type}-${v.model}-${i}`} className="ml-1">{v.display_message}</li>
               ))}
             </ul>
-            <label
-              htmlFor={ackId}
-              className="flex items-start gap-2.5 px-3 py-2.5 rounded-xl border border-slate-300 bg-slate-50 cursor-pointer"
-            >
-              <input
-                id={ackId}
-                type="checkbox"
-                checked={acked}
-                disabled={busy}
-                onChange={(e) => setAcked(e.target.checked)}
-                className="mt-px w-4 h-4 shrink-0 accent-[var(--btn-danger-bg)]"
-              />
-              <span className="font-bold text-slate-700">
-                ข้าพเจ้าอ่านครบทุกข้อแล้ว และยืนยันออกใบทั้งที่ติดด่านตรวจ {violations.length} ข้อ
-              </span>
-            </label>
           </section>
         )}
 
