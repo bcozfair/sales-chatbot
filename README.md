@@ -152,6 +152,12 @@ user_id, message_id, type, content, reply_token, reply_content, meta (jsonb), cr
   3. AI Pick (DeepSeek) เมื่อ score ปานกลาง
   4. Legacy fallback เมื่อ pg_trgm ไม่พร้อม
 
+#### `thaiSuffixVariant.ts`
+- **`applyThaiSuffixVariants()`**: รันหลัง `findProduct()` ใน `quoteExtraction` (ครอบทั้ง LINE และหน้าเว็บ) —
+  รุ่นที่ต่างกันแค่คำไทยท้ายชื่อ (`PMV12.00220` / `PMV12.00220 ดูดออก`) ตัดสินจากข้อความที่เซลส์พิมพ์จริง
+  เพราะ AI มักตัดคำไทยทิ้งจากรหัส: ตรงเป๊ะ = เลือกให้ · ใกล้เคียง (`ดูดลมออก`) = ให้เลือก รุ่นคำไทยขึ้นก่อน ·
+  ไม่มีคำไทยที่ตรง = รุ่นฐาน · ตัดสินไม่ได้หรือ DB ล่ม = ใช้ผลเดิม (กติกาและตัวเลขทดลองอยู่หัวไฟล์)
+
 #### `quotationService.ts`
 - **`processQuotationRequest()`**: orchestrate การสร้างใบเสนอราคาจากแชท:
   - หาลูกค้า → ถ้าไม่เจอ/หลายตัว แสดง Flex Message ให้เลือก
