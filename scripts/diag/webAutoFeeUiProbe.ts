@@ -7,6 +7,8 @@
      · ยอดสินค้าถึงเกณฑ์ → บรรทัดหาย (ยังเป็นของกฎ) · ลดกลับ → กลับมาพร้อมค่าที่แก้ไว้
      · ปุ่มคืนค่า → ชื่อ/ราคาจากหน้าตั้งค่า
      · เปิดคำขอกลับเข้าฟอร์มพร้อม auto_fee → ค่าที่แก้ไว้ตามมา
+     · (1280px) ของทุกเซลล์ในแถวอยู่แนวกลางเดียวกับช่องกรอก และช่องชื่อกว้างเต็มคอลัมน์ "รายการ"
+       (เจ้าของทักจากจอจริง 2026-09-25: "1 Pcs" กับยอดราคาลอยสูงกว่าช่องหน่วยละ)
    ทำซ้ำที่ 1280px และ 390px
 
    ป้อนฟอร์มผ่านก้อน sessionStorage ของ "แก้แล้วส่งใหม่" (APPROVAL_RELOAD_KEY) — ไม่ต้องกดค้นบริษัท
@@ -105,6 +107,8 @@ async function open(width: number, autoFee: { name: string; price: number } | nu
   const page = await browser.newPage();
   page.on('pageerror', (e) => { fail++; console.log('  ✗ หน้าพัง:', (e as Error)?.message ?? String(e)); });
   await page.setViewport({ width, height: 900 });
+  // tsx (esbuild keepNames) ห่อฟังก์ชันที่มีชื่อด้วย __name — ในเบราว์เซอร์ไม่มีตัวนี้ ⇒ ตั้งให้เป็นตัวเปล่า
+  await page.evaluateOnNewDocument('globalThis.__name = (f) => f;');
   await page.evaluateOnNewDocument((t, u, p) => {
     sessionStorage.setItem('admin_token', t);
     sessionStorage.setItem('admin_user', u);
@@ -126,6 +130,29 @@ for (const width of [1280, 390]) {
   ok('  ชื่อตั้งต้น = ชื่อจากหน้าตั้งค่า', (await val(page, NAME)) === cfg.defaultItemName, String(await val(page, NAME)));
   ok('  ราคาตั้งต้น = ราคาจากหน้าตั้งค่า', Number(await val(page, PRICE)) === cfg.feePrice, String(await val(page, PRICE)));
   ok('  ยังไม่แก้ = ไม่มีปุ่มคืนค่า', (await page.$(RESET)) === null);
+  if (width >= 768) {
+    // จุดกึ่งกลางแนวตั้งของของในแต่ละเซลล์ — ต่างกันเกิน 1px = แถวดูไม่เสมอกัน
+    const lay = await page.$eval(PRICE, (el, nameSel) => {
+      const mid = (e: Element | null | undefined) => { if (!e) return null; const r = e.getBoundingClientRect(); return Math.round((r.top + r.height / 2) * 10) / 10; };
+      const rowMids = (tr: Element) => ({
+        qty: mid(tr.querySelector('td[data-k="จำนวน"] > span')),
+        unit: mid(tr.querySelector('td[data-k="หน่วยละ"] input') ?? tr.querySelector('td[data-k="หน่วยละ"] > span')),
+        disc: mid(tr.querySelector('td[data-k="ส่วนลด"] span')),
+        total: mid(tr.querySelector('td[data-k="ราคา"] > span > span')),
+      });
+      const tr = el.closest('tr')!;
+      const shell = tr.querySelector(nameSel)!.parentElement!;
+      const td = shell.closest('td')!;
+      const cs = getComputedStyle(td);
+      const avail = td.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      const prod = [...document.querySelectorAll('tr')].find((r) => r.querySelector('input[aria-label="จำนวน"]'));
+      return { fee: { ...rowMids(tr), name: mid(shell) }, prod: prod ? rowMids(prod) : null, nameW: shell.getBoundingClientRect().width, avail };
+    }, NAME);
+    const spread = (o: Record<string, number | null>) => { const v = Object.values(o).filter((x): x is number => x !== null); return v.length < 4 ? Infinity : Math.max(...v) - Math.min(...v); };
+    ok('  แถวค่าขนส่ง: จำนวน · หน่วยละ · ส่วนลด · ราคา · ช่องชื่อ อยู่แนวกลางเดียวกัน', spread(lay.fee) <= 1, JSON.stringify(lay.fee));
+    ok('  แถวสินค้า: ตัวเลขกับช่องกรอกอยู่แนวกลางเดียวกัน', !!lay.prod && spread(lay.prod) <= 1, JSON.stringify(lay.prod));
+    ok('  ช่องชื่อกว้างเต็มคอลัมน์ "รายการ"', lay.nameW >= lay.avail - 1, `${Math.round(lay.nameW)} / ${Math.round(lay.avail)}px`);
+  }
   const addDisabled = await page.evaluate(() =>
     ([...document.querySelectorAll('button')].find((b) => (b.textContent || '').trim() === 'เพิ่มค่าบริการ') as HTMLButtonElement)?.disabled);
   ok('  ปุ่ม "เพิ่มค่าบริการ" ยังปิด (มีได้บรรทัดเดียว)', addDisabled === true);

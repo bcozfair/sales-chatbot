@@ -1026,6 +1026,7 @@ function useAnchoredPopover(open: boolean, setOpen: (v: boolean) => void, minWid
  * (เจ้าของสั่ง 2026-09-25) · รายการมาจาก server (`MANUAL_SERVICE_NAME_PRESETS` ใน
  * `services/shippingFee.ts`) ไม่เขียนซ้ำในไฟล์นี้ · อ่านรายการไม่ได้ = เหลือช่องพิมพ์ล้วนเหมือนเดิม
  * · พิมพ์แล้วกล่องหุบ — คนที่เริ่มพิมพ์คือคนที่ไม่เอาชื่อในรายการ
+ * · กว้างเต็มคอลัมน์ "รายการ" ไม่มีเพดาน (เจ้าของสั่ง 2026-09-25) — ชื่อค่าบริการยาวได้เป็นประโยค
  */
 const ServiceNameField: React.FC<{
   value: string;
@@ -1076,7 +1077,7 @@ const ServiceNameField: React.FC<{
     <>
       <div
         ref={shellRef}
-        className="flex items-center w-full max-w-xs h-8 rounded-lg border border-slate-300 bg-card focus-within:border-[var(--brand-fg)]"
+        className="flex items-center flex-1 min-w-0 w-full h-8 rounded-lg border border-slate-300 bg-card focus-within:border-[var(--brand-fg)]"
       >
         <input
           ref={inputRef}
@@ -1456,8 +1457,10 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
     'md:table-cell md:px-2 md:py-2 md:text-right md:align-top md:before:content-none';
   /** เซลล์ช่องกรอก (จำนวน · หน่วยละ · ส่วนลด) — จัดกลางในโหมดตารางให้ตรงกับหัวคอลัมน์ */
   const cellC = cell.replace('md:text-right', 'md:text-center');
-  /** ของในเซลล์ชิดขวาเสมอ ทั้งโหมดการ์ดและโหมดตาราง */
-  const inner = 'inline-flex items-center justify-end gap-1.5';
+  /** ของในเซลล์ชิดขวาเสมอ ทั้งโหมดการ์ดและโหมดตาราง
+   *  · จอกว้างสูงอย่างน้อยเท่าช่องกรอก (h-8) แล้วจัดกลางแนวตั้ง ⇒ ตัวเลขล้วน ("1 Pcs" · ยอดราคา · "—")
+   *    อยู่แนวเดียวกับตัวเลขในช่องกรอกของแถวเดียวกัน (เจ้าของทักจากจอจริง 2026-09-25 ว่าตัวหนังสือลอยสูงกว่า) */
+  const inner = 'inline-flex items-center justify-end gap-1.5 md:min-h-8';
   const inp =
     'h-8 px-2 rounded-lg border border-slate-300 bg-card text-xs text-right text-slate-800 outline-none ' +
     'focus:border-[var(--brand-fg)] disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-200';
@@ -1694,7 +1697,7 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
                 <td className="hidden md:table-cell align-top py-2.5 pl-4 text-xs text-slate-400">{idx + 1}</td>
                 <td className="block md:table-cell align-top px-4 md:pl-0 md:pr-3 py-1 md:py-2">
                   {r.isService ? (
-                    <div className="space-y-1 pt-1">
+                    <div className="space-y-1">
                       <ServiceNameField
                         value={r.name}
                         presets={ctx.svcCfg?.name_presets ?? []}
@@ -1717,7 +1720,7 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
                     </>
                   ) : r.status === 'ambiguous' ? (
                     // คำเตือนอยู่ "ใต้" ตัวเลือก — ของที่ต้องลงมือทำมาก่อน คำอธิบายว่าทำไมตามหลัง
-                    <div className="space-y-1 pt-1">
+                    <div className="space-y-1">
                       <select
                         defaultValue=""
                         onChange={(e) => {
@@ -1739,7 +1742,7 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
                       </p>
                     </div>
                   ) : (
-                    <div className="space-y-1 pt-1 max-w-sm">
+                    <div className="space-y-1 max-w-sm">
                       <ProductSearchBox
                         initialQuery={r.model}
                         placeholder="ค้นหารุ่นที่ถูกต้อง..."
@@ -1883,7 +1886,7 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
               <td className="block md:table-cell align-top px-4 md:pl-0 md:pr-3 py-1 md:py-2">
                 {/* ค่าบริการ/ค่าขนส่งใช้รหัสสินค้าร่วมกันทั้งระบบ ⇒ ตัวที่ต้องอ่านคือชื่อรายการ */}
                 {fee ? (
-                  <div className="space-y-1 pt-1">
+                  <div className="space-y-1">
                     <div className="flex items-center gap-1.5">
                       <ServiceNameField
                         value={ov?.name ?? it.name}
