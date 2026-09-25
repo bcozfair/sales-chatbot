@@ -75,6 +75,7 @@ import { dedupeActingSalespersons, type PickedSalesperson } from './salespersonP
 import { resolveCustomerSalesOwner, resolveQuotationSalesOwner, type SalesOwner } from './customerSalesOwner.js';
 import { queryCompanyDiscountHistory } from '../db/dataDirectoryRepo.js';
 import { summarizeDiscounts, type DiscountSummary } from './dataDirectoryService.js';
+import { checkCreditHold } from './creditHoldService.js';
 
 /**
  * งบเวลาต่อ 1 คำขอของหน้าเว็บ
@@ -1159,6 +1160,8 @@ export interface WebQuotePreviewResult {
     payment_terms_overridden: boolean;
     /** ระบบอ่านค่าที่ใช้จริงออกว่าเป็น "มีเครดิต" ไหม (กฎค่าบริการใช้คำตอบนี้) */
     has_credit_terms: boolean;
+    /** ลูกค้าติดด่านเครดิต (ไม่มีบิลเกินเกณฑ์) · `null` = ไม่ติด — ดู `partyCreditHold()` */
+    credit_hold: PartyCreditHold | null;
     contact_name: string;
     contact_phone: string;
     contact_email: string;
@@ -1260,6 +1263,48 @@ interface PreviewArtifacts {
 /** ก้อน "คู่สัญญาของใบ" ที่ทั้ง `/party` และ `/preview` คืน — รูปเดียวกันเป๊ะเพราะมาจากที่เดียวกัน */
 export type WebQuoteParty = WebQuotePreviewResult['customer'];
 
+// ── ลูกค้าเครดิตที่ไม่มีบิลเกินเกณฑ์ → ใบนี้ใช้ Cash (เจ้าของสั่ง 2026-09-25) ───────────────
+//
+//  หน้าจอตั้ง Term Payment เป็นค่านี้ให้ **ครั้งเดียวตอนเลือกบริษัท** แล้วขึ้นคำเตือน · คนออกใบ
+//  เปลี่ยนกลับเป็นเครดิตได้ · สิ่งที่ **ไม่** เปลี่ยน (เจ้าของเลือกเอง):
+//    · ด่าน CUSTOMER_CREDIT_HOLD ยังบล็อก/ให้ติ๊กรับทราบตาม role เหมือนเดิม — มันอ่านจากฐาน
+//      ลูกค้า ไม่ใช่จากใบ ⇒ ใบที่เป็น Cash ก็ยังติด
+//    · ค่า Cash คือ "เครดิตที่ตั้งทับ" ธรรมดา ⇒ ใบเข้าคิว "ต้องแก้มือใน Odoo" ตามกติกาเดิม
+//  เกณฑ์และเงื่อนไข "ใครติด" มาจาก checkCreditHold() ตัวเดียวกับด่าน (หน้า "เกณฑ์เครดิต")
+//  ไม่มีสำเนาของเกณฑ์ที่นี่
+
+/** ค่าที่ตั้งให้ — ต้องสะกดตรงกับค่าเครดิตใน Odoo ทุกอักขระ (อยู่ในรายการ /payment-terms) */
+export const DORMANT_CREDIT_TERMS = 'Cash';
+
+export interface PartyCreditHold {
+  /** วันบิลล่าสุด (ISO) ของนิติบุคคล · null = ไม่รู้ */
+  last_order_at: string | null;
+  dormant_months: number;
+  /** ค่าที่หน้าจอควรตั้งให้ · `null` = บัญชีนี้ตั้งเครดิตทับไม่ได้ (เห็นแค่คำเตือน) */
+  suggested_terms: string | null;
+}
+
+/**
+ * ข้อมูลประกอบหน้าจออย่างเดียว — **ไม่ใช่ด่าน** ⇒ อ่านไม่สำเร็จคืน `null` (ไม่มีคำเตือน)
+ * แทนที่จะทำให้หัวใบโหลดไม่ขึ้น · ด่านจริง (fail-closed) อยู่ใน validateQuotationItems
+ */
+async function partyCreditHold(customerId: number, role?: Role | null): Promise<PartyCreditHold | null> {
+  try {
+    const hold = await checkCreditHold(customerId);
+    if (!hold.held) return null;
+    // บัญชีที่ตั้งเครดิตทับไม่ได้ ถ้าหน้าจอตั้งให้ ทุกคำขอถัดไปจะโดน 403 ⇒ ไม่แนะนำค่าให้เลย
+    const mayOverride = role ? await can(role, 'quote.payment_terms_override') : false;
+    return {
+      last_order_at: hold.last_order_at ? hold.last_order_at.toISOString() : null,
+      dormant_months: hold.dormant_months,
+      suggested_terms: mayOverride ? DORMANT_CREDIT_TERMS : null,
+    };
+  } catch (err) {
+    console.error('[webQuote] credit hold hint failed (ไม่แสดงคำเตือน):', err);
+    return null;
+  }
+}
+
 /**
  * ── บริษัท + ผู้ติดต่อ + เครดิต ของใบ ────────────────────────────────────────────
  *
@@ -1332,6 +1377,7 @@ async function resolveQuoteParty(params: {
       customer_payment_terms: customerPaymentTerms,
       payment_terms_overridden: paymentTermsOverride !== null,
       has_credit_terms: hasCreditTerms(effectivePaymentTerms),
+      credit_hold: await partyCreditHold(resolvedCustomerId, params.role),
       contact_name: String(contact.name || ''),
       contact_phone: String(contact.phone || contact.mobile || ''),
       contact_email: String(contact.email || ''),
@@ -1404,6 +1450,7 @@ async function resolveCompanyParty(params: {
     customer_payment_terms: customerPaymentTerms,
     payment_terms_overridden: paymentTermsOverride !== null,
     has_credit_terms: hasCreditTerms(effectivePaymentTerms),
+    credit_hold: await partyCreditHold(customerId, params.role),
     contact_name: '',
     contact_phone: String(customer.phone || ''),
     contact_email: String(customer.email || ''),

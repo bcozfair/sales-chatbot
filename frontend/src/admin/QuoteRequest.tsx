@@ -337,6 +337,13 @@ type DiscountState =
   | { status: 'error' }
   | { status: 'ok'; data: DiscountHist | null };
 
+interface CreditHold {
+  last_order_at: string | null;
+  dormant_months: number;
+  /** ค่าที่ตั้งให้ (Cash) · null = บัญชีนี้ตั้งเครดิตทับไม่ได้ ⇒ เห็นแค่คำเตือน */
+  suggested_terms: string | null;
+}
+
 interface PreviewResult {
   customer: {
     customer_id: number;
@@ -350,6 +357,8 @@ interface PreviewResult {
     customer_payment_terms: string;
     payment_terms_overridden: boolean;
     has_credit_terms: boolean;
+    /** ติดด่านเครดิต (ไม่มีบิลเกินเกณฑ์) · null = ไม่ติด — รูปเดียวกับ `PartyCreditHold` ฝั่ง server */
+    credit_hold: CreditHold | null;
     contact_name: string;
     contact_phone: string;
     contact_email: string;
@@ -532,6 +541,10 @@ const RowTags: React.FC<{ tags: RowTag[]; dim: boolean; checking: boolean }> = (
  *  คำตอบจริงว่า "นับเป็นเครดิตไหม" มาจาก server ในฟิลด์ has_credit_terms */
 const looksLikeTerms = (s: string) => /\d/.test(s);
 
+/** วันที่บิลล่าสุดแบบสั้น (14 มิ.ย. 68) — ค่าจาก server เป็น timestamp เต็ม ไม่ใช่ YYYY-MM-DD */
+const holdDate = (iso: string | null) =>
+  iso ? new Date(iso).toLocaleDateString('th-TH', { timeZone: 'Asia/Bangkok', year: '2-digit', month: 'short', day: 'numeric' }) : '';
+
 const CreditField: React.FC<{
   effective: string;
   customerValue: string;
@@ -541,10 +554,18 @@ const CreditField: React.FC<{
   onChange: (v: string | null) => void;
   /** ในหัวใบมีป้าย "เครดิต" ของบล็อก meta อยู่แล้ว ⇒ ตัวมันเองต้องไม่พิมพ์ป้ายซ้ำอีกอัน */
   bare?: boolean;
-}> = ({ effective, customerValue, overridden, hasCredit, options, onChange, bare }) => {
+  /** ลูกค้าติดด่านเครดิต — หน้าหลักตั้ง Cash ให้แล้วตอนเลือกบริษัท ช่องนี้แค่บอกเหตุผล */
+  hold?: CreditHold | null;
+}> = ({ effective, customerValue, overridden, hasCredit, options, onChange, bare, hold }) => {
   /** โหมด "พิมพ์เอง" — เป็น state ของหน้าจอ ไม่ใช่ของค่า เพราะคนกดเลือกแล้วยังไม่ได้พิมพ์อะไร */
   const [other, setOther] = useState(false);
   const custom = other || (overridden && !options.includes(effective));
+  /** ใบนี้ใช้ค่าที่ระบบแนะนำสำหรับลูกค้าเครดิตที่เงียบเกินเกณฑ์ (แบบ A ของ mockup · เจ้าของเลือก 2026-09-25)
+   *  คิดจากค่า ไม่ได้จำว่า "ใครตั้ง" — คนเลือก Cash เองกับระบบตั้งให้ได้ผลเหมือนกันทุกอย่าง จึงบอกแบบเดียวกัน */
+  const holdApplied = !!hold?.suggested_terms && overridden && effective === hold.suggested_terms;
+  const holdWhy = hold
+    ? `ไม่มีบิลเครดิตเกิน ${hold.dormant_months} เดือน${hold.last_order_at ? ` (บิลล่าสุด ${holdDate(hold.last_order_at)})` : ''}`
+    : '';
 
   return (
     /* คำอธิบายอยู่ในช่องเดียวกับช่องเลือก — ก่อนหน้านี้เคยให้มันกินเต็มความกว้างของ grid
@@ -571,7 +592,9 @@ const CreditField: React.FC<{
           }}
           aria-label="เครดิตของใบนี้"
           className={`${bare ? 'h-8' : 'h-7'} pl-2 rounded-lg border bg-card text-[11px] font-semibold text-slate-800 outline-none ${
-            overridden ? 'pr-6 max-w-[10rem] border-blue-600' : 'pr-[4.5rem] max-w-[13rem] border-slate-300'
+            holdApplied
+              ? 'pr-[5rem] max-w-[13rem] border-amber-500 ring-1 ring-amber-300'
+              : overridden ? 'pr-6 max-w-[10rem] border-blue-600' : 'pr-[4.5rem] max-w-[13rem] border-slate-300'
           }`}
         >
           <option value="">{customerValue || 'ไม่มีข้อมูล'}</option>
@@ -585,6 +608,11 @@ const CreditField: React.FC<{
         {!overridden && (
           <span className="pointer-events-none absolute right-6 top-1/2 -translate-y-1/2 inline-flex items-center h-5 px-2 rounded-full border border-[var(--brand-border)] bg-[var(--brand-soft)] text-[10.5px] font-bold text-[var(--brand-fg)]">
             ค่าเดิม
+          </span>
+        )}
+        {holdApplied && (
+          <span className="pointer-events-none absolute right-6 top-1/2 -translate-y-1/2 inline-flex items-center h-5 px-2 rounded-full border border-amber-300 bg-amber-50 text-[10.5px] font-bold text-amber-800">
+            ระบบตั้ง
           </span>
         )}
         </span>
@@ -617,7 +645,32 @@ const CreditField: React.FC<{
           </>
         )}
       </div>
-      {overridden && (
+      {holdApplied ? (
+        /* แทนบรรทัดน้ำเงิน "✏️ ตั้งเอง" — คนไม่ได้ตั้งเอง และสองบรรทัดที่พูดเรื่องเดียวกันทำให้แถวรก */
+        <p className="mt-1 text-[10.5px] text-amber-800 leading-relaxed">
+          ⚠️ {holdWhy} — ระบบตั้งเป็น {hold!.suggested_terms} ให้ · เครดิตเดิมของลูกค้า:{' '}
+          <span className="font-bold">{customerValue || 'ไม่มีข้อมูล'}</span>
+        </p>
+      ) : hold ? (
+        /* กลับไปใช้เครดิต (หรือบัญชีที่ตั้งทับไม่ได้) — ด่านเครดิตยังบล็อกไม่ว่าเลือกอะไร (เจ้าของเลือก 2026-09-25)
+           ⇒ ถ้อยคำต้องไม่บอกว่า "ใช้ Cash แล้วจะผ่าน" แค่แนะนำ */
+        <p className="mt-1 text-[10.5px] text-amber-800 leading-relaxed">
+          ⚠️ {holdWhy}
+          {hold.suggested_terms && (
+            <>
+              {' '}— แนะนำให้ใช้ {hold.suggested_terms}
+              <button
+                type="button"
+                onClick={() => { setOther(false); onChange(hold.suggested_terms); }}
+                className="ml-1.5 inline-flex items-center h-[22px] px-2 rounded-full border border-[var(--brand-border)] bg-[var(--brand-soft)] text-[10.5px] font-bold text-[var(--brand-fg)] hover:border-[var(--brand-border-strong)] hover:bg-[var(--brand-soft-strong)]"
+              >
+                ใช้ {hold.suggested_terms}
+              </button>
+            </>
+          )}
+        </p>
+      ) : null}
+      {overridden && !holdApplied && (
         /* สีน้ำเงิน + ✏️ ตั้งเอง = ภาษาเดียวกับบรรทัด "ตั้งเอง" ของกำหนดส่ง (DeliveryStrip) ที่อยู่แถวถัดไป
            (เจ้าของสั่ง 2026-09-23 · เดิม slate-500 จมหายไปกับพื้น) · คำเตือนสีเหลืองข้างในยังเป็นสีเหลืองเหมือนเดิม */
         <p className="mt-1 text-[10.5px] text-blue-700 leading-relaxed">
@@ -2194,6 +2247,7 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx; firstLabel?: string }>
                 hasCredit={cust?.has_credit_terms ?? false}
                 options={ctx.paymentTermOpts}
                 onChange={ctx.setPaymentTerms}
+                hold={cust?.credit_hold ?? null}
                 bare
               />
             </dd>
@@ -2527,6 +2581,14 @@ export const QuoteRequest: React.FC = () => {
   //  ทุกครั้งที่ผลตรวจกลับมา ถ้าเก็บไว้ในนั้นค่าที่เพิ่งตั้งจะหายทุกครั้งที่ตรวจเสร็จ
   /** `null` = ใช้เครดิตของลูกค้าตามเดิม */
   const [paymentTerms, setPaymentTerms] = useState<string | null>(null);
+  /**
+   * ลูกค้าเครดิตที่ไม่มีบิลเกินเกณฑ์ → ตั้ง Term Payment เป็นค่าที่ server แนะนำ (Cash) ให้ **ครั้งเดียว
+   * ต่อการเลือกบริษัท** (เจ้าของสั่ง 2026-09-25) · จำ "บริษัทที่ตัดสินไปแล้ว" ไว้ ⇒ คนกด ↺ กลับไปใช้
+   * เครดิตแล้วระบบไม่ตั้งกลับให้อีก · ใบที่โหลดมาจากใบต้นทาง (แก้ใบเดิม/ส่งขออนุมัติใหม่) ถือว่า
+   * ตัดสินแล้ว — ค่าในใบที่ลูกค้าถืออยู่ต้องไม่ถูกเปลี่ยนเงียบ ๆ · ตั้งจากตอนก้อน `/party` มาถึง
+   * (ไม่ใช่ใน effect ตรง ๆ) เพราะ server เป็นคนตอบว่าติดด่านไหม และบัญชีนี้ตั้งทับได้ไหม
+   */
+  const holdDecidedFor = useRef<number | null>(null);
   const [paymentTermOpts, setPaymentTermOpts] = useState<string[]>([]);
   /** กำหนดส่งที่ตั้งเอง แยกตามใบ — ใบที่ไม่มีคีย์ = ยังใช้ค่าอัตโนมัติ */
   const [deliveryOv, setDeliveryOv] = useState<
@@ -2585,6 +2647,7 @@ export const QuoteRequest: React.FC = () => {
     setPreviewError('');
     setPreviewSig('');
     setPreviewAt('');
+    holdDecidedFor.current = null;
     setPaymentTerms(null);
     setDeliveryOv({});
     setAutoFeeOv(null);
@@ -2636,6 +2699,7 @@ export const QuoteRequest: React.FC = () => {
       setContactId(data.contact_id ?? null);
       setContactAuto(false);
       setContactQuery('');
+      holdDecidedFor.current = data.customer_id ?? null;
       setPaymentTerms(String(data.payment_terms_override ?? '').trim() || null);
       setAutoFeeOv(data.auto_fee ? { name: data.auto_fee.name, price: String(num(data.auto_fee.price)) } : null);
       setApprovalNote(String(data.note ?? ''));
@@ -2794,7 +2858,13 @@ export const QuoteRequest: React.FC = () => {
         if (paymentTerms !== null) qs.set('payment_terms_override', paymentTerms);
         const res = await fetch(`/api/admin/webquote/party?${qs.toString()}`, { headers: authHeaders });
         const data = res.ok ? await res.json() : null;
-        if (!cancelled && data?.customer) setParty({ key: `${customerId}:${contactId}`, block: data.customer });
+        if (cancelled || !data?.customer) return;
+        setParty({ key: `${customerId}:${contactId}`, block: data.customer });
+        if (holdDecidedFor.current !== customerId) {
+          holdDecidedFor.current = customerId;
+          const hint = (data.customer as PartyView).credit_hold?.suggested_terms;
+          if (hint && paymentTerms === null) setPaymentTerms(hint);
+        }
       } catch {
         // อ่านไม่ได้ = หัวใบคงเป็น "—" เหมือนเดิม · ของเก่าไม่ค้างอยู่แล้วเพราะคีย์ไม่ตรง
       }
@@ -2818,7 +2888,13 @@ export const QuoteRequest: React.FC = () => {
         if (paymentTerms !== null) qs.set('payment_terms_override', paymentTerms);
         const res = await fetch(`/api/admin/webquote/party?${qs.toString()}`, { headers: authHeaders });
         const data = res.ok ? await res.json() : null;
-        if (!cancelled && data?.customer) setCoParty({ key: customerId, block: data.customer });
+        if (cancelled || !data?.customer) return;
+        setCoParty({ key: customerId, block: data.customer });
+        if (holdDecidedFor.current !== customerId) {
+          holdDecidedFor.current = customerId;
+          const hint = (data.customer as PartyView).credit_hold?.suggested_terms;
+          if (hint && paymentTerms === null) setPaymentTerms(hint);
+        }
       } catch {
         // อ่านไม่ได้ = หัวใบคงเป็น "—" จนกว่าจะเลือกผู้ติดต่อ (ก้อนเต็มยิงแยกอีกเส้น)
       }
@@ -3037,6 +3113,8 @@ export const QuoteRequest: React.FC = () => {
       setContactQuery(String(data.quote_data?.contact_query ?? '').trim());
       setCustomerQuery('');
       // ร่างชุดใหม่จากข้อความใหม่ = ลูกค้าคนใหม่ ⇒ ค่าที่ตั้งทับของชุดก่อนต้องไม่ติดมาด้วย
+      // (บริษัทเดิมก็ต้องถูกตัดสินเรื่อง Cash ใหม่ — ไม่งั้นร่างชุดที่สองของลูกค้าเดิมไม่ได้ Cash)
+      holdDecidedFor.current = null;
       setPaymentTerms(null);
       setDeliveryOv({});
     } catch (e) {
@@ -3660,6 +3738,7 @@ export const QuoteRequest: React.FC = () => {
       // เครดิตกลับเป็นค่าอัตโนมัติ ทั้งที่ใบที่ลูกค้าถืออยู่ไม่ได้เขียนแบบนั้น
       // อ่านจากธง `payment_terms_override` ตรง ๆ ไม่ใช่เดาจากการเทียบค่า — ใบที่ลูกค้ามีเครดิต
       // 30 Days อยู่แล้วและไม่มีใครแก้ ต้องไม่ขึ้นป้าย "ตั้งเอง" ให้คนอ่านสับสน
+      holdDecidedFor.current = cid;
       setPaymentTerms(String(q?.payment_terms_override ?? '').trim() || null);
       setDeliveryOv(
         ((data.quotes ?? []) as DraftQuote[]).reduce<
