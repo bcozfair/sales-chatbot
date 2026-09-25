@@ -252,6 +252,9 @@ interface PreviewViolation {
   min_price?: number;
   min_order_qty?: number;
   qty?: number;
+  /** เฉพาะ CUSTOMER_CREDIT_HOLD */
+  last_order_at?: string | null;
+  dormant_months?: number;
 }
 
 interface PreviewItem {
@@ -376,6 +379,8 @@ interface PreviewResult {
   can_create_draft: boolean;
   /** คีย์ของกฎที่ต้องส่งกลับไปเป็น "คำรับทราบ" ตอนกดออกใบ — server เป็นคนประกอบคีย์ให้ */
   override_keys: string[];
+  /** ข้อที่ **role นี้ข้ามไม่ได้เลย** (สิทธิ์ = deny · วันนี้คือเซลส์) — ติ๊กอะไรก็ไม่ผ่าน ⇒ ห้ามเปิด modal ให้ติ๊ก */
+  blocked_keys: string[];
   /**
    * ข้อที่ **ติ๊กรับทราบเองไม่ได้ ต้องให้ผู้อนุมัติราคาตัดสิน** (ราคาต่ำกว่าขั้นต่ำ)
    * มีข้อเดียวก็เปลี่ยนความหมายของปุ่มทั้งปุ่ม: จาก "ออกใบ" เป็น "ส่งขออนุมัติ"
@@ -544,6 +549,25 @@ const looksLikeTerms = (s: string) => /\d/.test(s);
 /** วันที่บิลล่าสุดแบบสั้น (14 มิ.ย. 68) — ค่าจาก server เป็น timestamp เต็ม ไม่ใช่ YYYY-MM-DD */
 const holdDate = (iso: string | null) =>
   iso ? new Date(iso).toLocaleDateString('th-TH', { timeZone: 'Asia/Bangkok', year: '2-digit', month: 'short', day: 'numeric' }) : '';
+
+/** คีย์ของข้อ — รูปเดียวกับ `violationKey()` ฝั่ง server (`type|model`) ที่ส่งมาใน override/blocked_keys */
+const ruleKey = (v: { type: string; model: string }) => `${v.type}|${v.model || '-'}`;
+
+/**
+ * หนึ่งบรรทัดต่อหนึ่งข้อ สำหรับ modal ยืนยัน + กล่อง "ออกใบไม่ได้" ของเซลส์ (แบบ A · เจ้าของเลือก 2026-09-25)
+ * ถ้อยคำสั้นของหน้าเว็บเอง — `display_message` เป็นประโยคของ LINE ("…กรุณาติดต่อแอดมิน") ซึ่งไม่มีความหมาย
+ * กับคนที่เป็นแอดมิน · **ไม่แตะ `buildViolationDisplay` ฝั่ง server** เพราะ LINE ใช้ตัวนั้น
+ * ส่วนสินค้าใช้ `shortViolation` ตัวเดียวกับป้ายที่แถว ⇒ modal กับแถวพูดคำเดียวกัน
+ */
+const ruleLine = (v: PreviewViolation): { group: string; text: string } => {
+  if (v.type === 'CUSTOMER_BLACKLISTED') return { group: 'ลูกค้า', text: 'อยู่ในบัญชีห้ามเสนอราคา' };
+  if (v.type === 'CUSTOMER_CREDIT_HOLD') {
+    const last = v.last_order_at ? ` (บิลล่าสุด ${holdDate(v.last_order_at)})` : '';
+    return { group: 'ลูกค้า', text: `ไม่มีบิลเครดิตเกิน ${v.dormant_months ?? 12} เดือน${last}` };
+  }
+  if (v.type === 'SYSTEM_ERROR') return { group: 'ระบบ', text: 'ตรวจกฎไม่สำเร็จ — กด “ตรวจใหม่”' };
+  return { group: 'สินค้า', text: `${v.model} — ${shortViolation(v)}` };
+};
 
 const CreditField: React.FC<{
   effective: string;
@@ -1578,6 +1602,8 @@ type AutoFeeOv = { name: string; price: string };
 
 interface DocCtx {
   customer: PartyView | null;
+  /** กฎระดับลูกค้าที่ต้องติดป้ายใต้ชื่อบริษัท (แบบ A) — ด่านเครดิตไม่อยู่ในนี้เมื่อแถว Term Payment บอกแล้ว */
+  customerFlags: string[];
   identity: QuoteIssuerIdentity | null;
   svcCfg: ServiceCfg | null;
   /** ค่าที่แก้ทับบรรทัดค่าขนส่งของกฎ — null = ใช้ชื่อ/ราคาจากหน้าตั้งค่า */
@@ -1772,6 +1798,16 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx; firstLabel?: string }>
                 busy={ctx.custSearching}
                 facts={(o) => <CustomerFacts row={o.row} />}
               />
+              {ctx.customerFlags.length > 0 && (
+                <span className="flex flex-wrap gap-1 mt-1">
+                  {ctx.customerFlags.map((f) => (
+                    <span key={f} className="inline-flex items-center gap-1 h-5 px-2 rounded-full border border-red-200 bg-red-50 text-[10.5px] font-bold text-red-700">
+                      <Ban className="w-3 h-3 shrink-0" />
+                      {f}
+                    </span>
+                  ))}
+                </span>
+              )}
             </span>
           </div>
           <div className="flex gap-2 py-[2px] text-[11.5px] items-start">
@@ -3431,15 +3467,33 @@ export const QuoteRequest: React.FC = () => {
    */
   const manualReasons = staleNow ? [] : (preview?.odoo_manual_reasons ?? []);
   /**
-   * กล่องบนจอเหลือเฉพาะเรื่องที่ **แถว Term Payment ยังไม่ได้บอก** (เจ้าของสั่ง 2026-09-25 · ลดความรก)
-   * ลูกค้าติดด่านเครดิต กับ เครดิตที่ตั้งทับ มีบรรทัดของมันอยู่ใต้ช่อง Term Payment แล้ว
-   * ⇒ สองข้อนี้ขึ้นครั้งเดียวใน modal ยืนยัน · **modal ยังได้ `blockers`/`manualReasons` ครบทุกข้อ**
-   * (ต้องติ๊กรับทราบ/รู้ว่าใบจะไปคิวแก้มือเหมือนเดิม) และสีปุ่มยืนยันยังคิดจากชุดเต็ม
-   * ด่านเครดิตซ่อนได้เฉพาะตอนแถว Term Payment มีคำเตือนจริง (`credit_hold`) — ก้อนนั้นอ่านไม่ได้
-   * (คืน null) แล้วยังซ่อน = ไม่มีที่ไหนบนจอบอกเลย
+   * ── คำเตือนกฎบนจอ: แบบ A "ป้ายที่ต้นเหตุ + ยืนยันครั้งเดียว" (เจ้าของเลือก 2026-09-25) ──
+   *
+   * แยกตามว่า role นี้ **ข้ามได้ไหม** — ตัวตัดสินคือ `blocked_keys` ของ server (ไม่เดาจากชื่อ role)
+   *  · ข้ามได้ (admin/subadmin/approver วันนี้) ⇒ กฎเป็นข้อมูล: ติดป้ายที่ต้นเหตุ ไม่มีกล่องแดงเหนือใบ
+   *      สินค้า → ป้ายที่แถว (itemTagsOf) · ด่านเครดิต → แถว Term Payment · blacklist → ป้ายใต้ชื่อบริษัท
+   *      แล้วตัดสินใจครั้งเดียวใน modal ยืนยัน (ได้ **ชุดเต็ม** เสมอ ติ๊กรับทราบ + บันทึกชื่อเหมือนเดิม)
+   *  · ข้ามไม่ได้ (เซลส์ · เหมือนออกผ่าน LINE) ⇒ กฎคือเหตุผลที่ปุ่มกดไม่ได้: กล่องแดงเดียวรวมทุกข้อ
+   *      ปุ่มยืนยันจาง · **ไม่มี modal ให้ติ๊ก** — ก่อนหน้านี้หน้าจอไม่อ่าน blocked_keys เซลส์จึงติ๊กได้
+   *      กดได้ แล้วค่อยโดน 422 ตอนออกใบ
+   * ข้อที่ **ไม่มีที่ลงบนใบ** (สินค้าที่ไม่มีแถวรองรับ · ด่านเครดิตตอนแถว Term Payment อ่านสถานะไม่ได้ ·
+   * SYSTEM_ERROR) ยังขึ้นเป็นกล่องเหนือใบ — ซ่อนแล้วไม่มีที่ไหนบนจอบอกเลย
    */
+  const deniedKeys = new Set(staleNow ? [] : (preview?.blocked_keys ?? []));
+  const denied = blockers.filter((v) => deniedKeys.has(ruleKey(v)));
   const holdInTerms = !!(preview?.customer ?? partyBlock)?.credit_hold;
-  const pageBlockers = blockers.filter((v) => !(v.type === 'CUSTOMER_CREDIT_HOLD' && holdInTerms));
+  /** ป้ายใต้ชื่อบริษัท — กฎระดับลูกค้าที่แถว Term Payment ไม่ได้บอก */
+  const customerFlags = blockers
+    .filter((v) => v.type === 'CUSTOMER_BLACKLISTED' || (v.type === 'CUSTOMER_CREDIT_HOLD' && !holdInTerms))
+    .map((v) => (v.type === 'CUSTOMER_BLACKLISTED' ? 'บัญชีห้ามเสนอราคา' : 'ติดเงื่อนไขเครดิต'));
+  const onRowKeys = new Set(
+    (staleNow ? [] : (preview?.quotes ?? [])).flatMap((q) => q.items.flatMap((it) => (it.violations ?? []).map(ruleKey))),
+  );
+  /** กฎระดับลูกค้ามีที่ลงเสมอ (ป้ายใต้ชื่อ หรือแถว Term Payment) ⇒ ที่เหลือคือของที่ไม่มีแถวรองรับ + SYSTEM_ERROR */
+  const unplaced = blockers.filter(
+    (v) => v.type !== 'CUSTOMER_BLACKLISTED' && v.type !== 'CUSTOMER_CREDIT_HOLD' && !onRowKeys.has(ruleKey(v)),
+  );
+  /** เครดิตที่ตั้งทับมีบรรทัดของมันใต้ Term Payment แล้ว — เรื่องแก้มือชนิดอื่นยังไม่มีที่ลง */
   const pageManualReasons = manualReasons.filter((r) => r.kind !== 'payment_terms_override');
 
   /**
@@ -3503,7 +3557,7 @@ export const QuoteRequest: React.FC = () => {
    */
   const canIssue =
     rows.length > 0 && unresolved === 0 && customerId !== null && contactId !== null && !!spUserId &&
-    !previewing && !!preview && !staleNow && preview.can_create_draft;
+    !previewing && !!preview && !staleNow && preview.can_create_draft && denied.length === 0;
 
   /** ปุ่มที่จางอยู่เฉย ๆ โดยไม่บอกเหตุผล คือปุ่มที่ผู้ใช้สรุปว่าระบบพัง */
   const issueBlockedBecause = (): string => {
@@ -3513,6 +3567,7 @@ export const QuoteRequest: React.FC = () => {
     if (customerId === null || contactId === null) return 'ยังไม่ได้เลือกบริษัทและผู้ติดต่อ';
     if (previewing) return 'กำลังตรวจรายละเอียด...';
     if (!preview || staleNow) return 'ต้องตรวจรายละเอียดให้สำเร็จก่อน — กด “ตรวจใหม่”';
+    if (denied.length > 0) return `ติดกฎ ${denied.length} ข้อ — ออกใบไม่ได้`;
     // เหลือทางเดียวที่ปุ่มยังจางอยู่: ด่านตรวจทำงานไม่สำเร็จ (SYSTEM_ERROR) ซึ่งทะลุไม่ได้
     // เพราะมันไม่ได้แปลว่า "ใบนี้ผิดกฎ" แต่แปลว่า **ยังไม่รู้ว่าผิดหรือไม่**
     return 'ตรวจกฎไม่สำเร็จ — ลองกด “ตรวจใหม่” อีกครั้ง ถ้ายังไม่หายให้แจ้งผู้ดูแลระบบ';
@@ -3846,6 +3901,7 @@ export const QuoteRequest: React.FC = () => {
   const docCtx: DocCtx = {
     // พรีวิวมาแล้วใช้ของพรีวิว (ก้อนเดียวกัน แต่สดกว่าเพราะคิดพร้อมกับรายการ) ไม่มีก็ใช้ /party
     customer: preview?.customer ?? partyBlock,
+    customerFlags,
     identity,
     svcCfg,
     autoFeeOv,
@@ -4119,21 +4175,35 @@ export const QuoteRequest: React.FC = () => {
           </div>
         )}
 
-        {/* ติดกฎ = **ออกใบได้ แต่ต้องยืนยันอีกชั้น** (2026-09-15) — บทสรุปบรรทัดแรกต้องตรงกับสิ่งที่
-            ปุ่มทำจริง ไม่งั้นจอบอกว่า "ออกไม่ได้" แล้วปุ่มออกใบได้ = จอที่ไม่มีใครเชื่ออีกเลย */}
-        {pageBlockers.length > 0 && !staleNow && (
+        {/* กฎบนจอ — แบบ A (ดู `denied`/`unplaced` ข้างบน) · ข้ามได้ = ไม่มีกล่องนี้ ป้ายอยู่ที่ต้นเหตุแล้ว
+            ข้ามไม่ได้ (เซลส์) = กล่องเดียวรวมทุกข้อ เพราะมันคือเหตุผลที่ปุ่มกดไม่ได้ ไม่ใช่ข้อมูลประกอบ */}
+        {denied.length > 0 && !staleNow ? (
+          <div className="bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 text-xs text-red-700">
+            <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+              <Ban className="w-4 h-4 shrink-0" />
+              <b>ออกใบไม่ได้ — ติด {blockers.length} ข้อ</b>
+              <span>· แก้ใบ หรือให้แอดมินออกใบแทน</span>
+            </p>
+            <ul className="mt-1 pl-6 list-disc space-y-0.5">
+              {blockers.map((v, i) => {
+                const l = ruleLine(v);
+                return <li key={`${v.type}-${v.model}-${i}`}><span className="text-red-500">{l.group}:</span> {l.text}</li>;
+              })}
+            </ul>
+          </div>
+        ) : unplaced.length > 0 && !staleNow ? (
           <div className="bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 text-xs text-red-700">
             <p className="flex items-center gap-2 font-bold">
               <AlertTriangle className="w-4 h-4 shrink-0" />
-              ติดด่านตรวจ {pageBlockers.length} ข้อ — ออกใบได้ แต่ต้องยืนยันอีกชั้น
+              ติดกฎ {unplaced.length} ข้อ — ข้ามได้ตอนกดยืนยัน
             </p>
             <ul className="mt-1 pl-6 list-disc space-y-0.5">
-              {pageBlockers.map((v, i) => (
-                <li key={`${v.type}-${v.model}-${i}`}>{v.display_message}</li>
+              {unplaced.map((v, i) => (
+                <li key={`${v.type}-${v.model}-${i}`}>{ruleLine(v).text}</li>
               ))}
             </ul>
           </div>
-        )}
+        ) : null}
 
         {/* คนละแกนกับกล่องแดง: ใบยังนำเข้า Odoo ได้หรือไม่ ไม่ใช่ผิดกฎของร้านหรือไม่ */}
         {pageManualReasons.length > 0 && !staleNow && (
@@ -4288,6 +4358,13 @@ export const QuoteRequest: React.FC = () => {
                 {!canIssue && (
                   <span className="text-[11px] text-amber-700 max-w-[320px]">{issueBlockedBecause()}</span>
                 )}
+                {/* บอกล่วงหน้าว่ากดแล้วจะเจออะไร — แทนกล่องแดงเหนือใบที่ถอดไป (แบบ A) · ไม่ใช่ปุ่ม: รายการอยู่ที่ป้ายต้นเหตุ + modal */}
+                {canIssue && blockers.length > 0 && (
+                  <span className="inline-flex items-center gap-1 h-6 px-2.5 rounded-full border border-red-200 bg-red-50 text-[11px] font-bold text-red-700 whitespace-nowrap">
+                    <AlertTriangle className="w-3 h-3 shrink-0" />
+                    ข้ามกฎ {blockers.length} ข้อ
+                  </span>
+                )}
                 {/* พรีวิว PDF อยู่แถวเดียวกับปุ่มยืนยัน (เจ้าของสั่ง 2026-09-23) — ปุ่มเดียวเสมอ ดู PdfPreviewButton */}
                 <PdfPreviewButton groups={groups} busy={pdfBusy} onOpen={(co) => void openPdfPreview(co)} />
                 <Button variant="danger" tone="soft" icon={Ban} disabled={confirming} onClick={resetAll}>
@@ -4326,7 +4403,7 @@ export const QuoteRequest: React.FC = () => {
       {/* ชั้นยืนยันอีกชั้นก่อนออกใบจริง — เด้งเฉพาะตอนที่มีอะไรให้รับทราบ (ดู requestConfirm) */}
       {confirmOpen && (
         <ConfirmIssueModal
-          violations={blockers}
+          violations={blockers.map((v) => ({ ...v, line: ruleLine(v) }))}
           manualReasons={manualReasons}
           approvalRequired={approvalRequired}
           note={approvalNote}

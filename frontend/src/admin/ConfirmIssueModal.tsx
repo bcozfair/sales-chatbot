@@ -20,11 +20,15 @@
 //                               ⇒ **ถูกกันออกจากไฟล์ปกติ** ไปอยู่เมนู "ต้องแก้มือก่อน"
 //                               ⇒ ไม่ต้องติ๊ก เพราะไม่ได้ขออนุญาตข้ามอะไร แค่บอกให้รู้ว่าจะเกิดอะไร
 //
-//  ถ้อยคำของแต่ละบรรทัดมาจาก server ทั้งหมด (`display_message`) — หน้าจอไม่ประกอบประโยคเอง
-//  ด้วยเหตุผลเดียวกับที่ `buildViolationDisplay` มีอยู่: สองที่ที่พูดคนละคำคือสองที่ที่ต้องแก้คนละรอบ
+//  ถ้อยคำ: ส่วนที่ 0 (ขออนุมัติ) ใช้ `display_message` ของ server · ส่วนที่ 1/2 ใช้บรรทัดสั้นของหน้าเว็บ
+//  (`line` — `ruleLine()` ใน QuoteRequest.tsx · แบบ A ที่เจ้าของเลือก 2026-09-25) เพราะประโยคของ server
+//  เป็นของ LINE ("…กรุณาติดต่อแอดมิน") ซึ่งไม่มีความหมายกับคนที่เป็นแอดมิน · ส่วนสินค้าของ `line` ใช้คำ
+//  ชุดเดียวกับป้ายที่แถว ⇒ modal กับแถวยังพูดคำเดียวกัน
+//
+//  modal นี้เปิดเฉพาะ role ที่ **ข้ามได้** — ข้อที่ role นี้ข้ามไม่ได้ (blocked_keys) ปุ่มยืนยันจางตั้งแต่บนจอ
 // ─────────────────────────────────────────────────────────────────────────────
 import React, { useId, useState } from 'react';
-import { AlertTriangle, Ban, BadgeCheck, CheckCircle2, Pencil, Send } from 'lucide-react';
+import { AlertTriangle, BadgeCheck, CheckCircle2, Pencil, Send } from 'lucide-react';
 import { Modal } from './Modal';
 import { Button } from './Button';
 
@@ -32,12 +36,19 @@ export interface IssueViolation {
   type: string;
   model: string;
   display_message: string;
+  /** บรรทัดสั้นของหน้าเว็บ (กลุ่ม · ข้อความ) — ไม่มี = ใช้ display_message */
+  line?: { group: string; text: string };
 }
 
 export interface IssueManualReason {
   kind: string;
+  value?: string | null;
   display_message: string;
 }
+
+/** เรื่องแก้มือหนึ่งเรื่องแบบสั้น — เครดิตที่ตั้งเองพูดด้วยค่าจริง ชนิดอื่นยังใช้ประโยคของ server */
+const manualShort = (r: IssueManualReason) =>
+  r.kind === 'payment_terms_override' && r.value ? `เครดิต “${r.value}” ตั้งเอง` : r.display_message;
 
 interface Props {
   violations: IssueViolation[];
@@ -70,8 +81,8 @@ export const ConfirmIssueModal: React.FC<Props> = ({
   const needAck = violations.length > 0;
   const title = [
     needApproval ? `ต้องขออนุมัติราคา ${approvalRequired.length} รายการ` : '',
-    violations.length > 0 ? `ติดด่านตรวจ ${violations.length} ข้อ` : '',
-    manualReasons.length > 0 ? `ต้องแก้มือใน Odoo ${manualReasons.length} เรื่อง` : '',
+    violations.length > 0 ? `ข้ามกฎ ${violations.length} ข้อ` : '',
+    manualReasons.length > 0 ? 'ต้องแก้มือใน Odoo' : '',
   ].filter(Boolean).join(' · ');
 
   return (
@@ -79,7 +90,7 @@ export const ConfirmIssueModal: React.FC<Props> = ({
       icon={AlertTriangle}
       tone="danger"
       size="lg"
-      title={`${needApproval ? 'ส่งขออนุมัติราคา' : 'ยืนยันออกใบ'} — ${title}`}
+      title={`${needApproval ? 'ส่งขออนุมัติราคา' : 'ยืนยันออกใบ'} · ${title}`}
       onClose={busy ? undefined : onCancel}
       footer={
         <>
@@ -114,11 +125,19 @@ export const ConfirmIssueModal: React.FC<Props> = ({
         </>
       }
     >
-      <div className="p-5 space-y-4 text-xs">
-        <p className="text-slate-600">
-          {needApproval ? 'ใบที่จะขออนุมัติ ' : 'ใบที่จะออก '}
+      <div className="p-5 space-y-3 text-xs">
+        {/* ข้อเท็จจริงของการกด — บรรทัดเดียว (เดิมเป็นรายการ 3 ข้อท้ายกล่อง) · ขออนุมัติยังเป็นรายการเต็ม
+            เพราะผลของการกดต่างจากปกติทั้งหมด (ได้คำขอ ไม่ได้ใบ) */}
+        <p className="text-slate-600 leading-relaxed">
+          {needApproval ? 'ขออนุมัติ ' : 'ออก '}
           <b className="text-slate-900">{quoteLabels.length} ใบ</b>
           {quoteLabels.length > 0 && <span className="text-slate-500"> ({quoteLabels.join(' · ')})</span>}
+          {!needApproval && (
+            <>
+              {' · '}ออกเลขแล้ว<b className="text-slate-900">ย้อนกลับไม่ได้</b>
+              {violations.length > 0 && ' · ชื่อผู้ข้ามกฎถูกบันทึกไว้กับใบ'}
+            </>
+          )}
         </p>
 
         {needApproval && (
@@ -147,63 +166,42 @@ export const ConfirmIssueModal: React.FC<Props> = ({
           </section>
         )}
 
+        {/* กฎที่จะข้าม — หนึ่งบรรทัดต่อข้อ มีคอลัมน์กลุ่ม (ลูกค้า/สินค้า) ให้กวาดตาได้ไว */}
         {violations.length > 0 && (
-          <section className="space-y-1.5">
-            {/* ไม่ใช้ `uppercase` เพราะหัวข้อฝั่งล่างมีคำว่า Odoo อยู่ — มันจะกลายเป็น "ODOO"
-                ซึ่งเป็นคนละคำกับชื่อระบบที่ทุกจอในแอปเรียก (docs/design.md หัวข้อ 4) */}
-            <h4 className="flex items-center gap-1.5 text-[11px] font-bold tracking-wide text-slate-500">
-              <Ban className="w-3.5 h-3.5" />
-              ส่วนที่ 1 · กฎที่จะทะลุ — ต้องรับทราบ
-            </h4>
-            <ul className="bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 list-disc space-y-1 text-red-700">
-              {violations.map((v, i) => (
-                <li key={`${v.type}-${v.model}-${i}`} className="ml-1">{v.display_message}</li>
-              ))}
-            </ul>
-          </section>
-        )}
-
-        {manualReasons.length > 0 && (
-          <section className="space-y-1.5">
-            <h4 className="flex items-center gap-1.5 text-[11px] font-bold tracking-wide text-slate-500">
-              <AlertTriangle className="w-3.5 h-3.5" />
-              ส่วนที่ 2 · ต้องแก้มือใน Odoo — แค่บอกให้รู้
-            </h4>
-            <ul className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 list-disc space-y-1 text-amber-800">
-              {manualReasons.map((r, i) => (
-                <li key={`${r.kind}-${i}`} className="ml-1">{r.display_message}</li>
-              ))}
-            </ul>
-          </section>
-        )}
-
-        <div className="space-y-1.5">
-          <p className="text-slate-600">{needApproval ? 'กดส่งแล้วจะเกิดสิ่งเหล่านี้:' : 'กดยืนยันแล้วจะเกิดสิ่งเหล่านี้:'}</p>
-          <ul className="pl-5 list-disc space-y-1 text-slate-600 leading-relaxed">
-            {needApproval ? (
-              <>
-                <li>
-                  ใบชุดนี้ถูกบันทึกเป็น <b className="text-slate-900">ร่างที่รออนุมัติ</b> —
-                  <b className="text-slate-900"> ยังไม่มีเลขที่ใบและยังไม่มี PDF</b>
-                </li>
-                <li>ผู้มีสิทธิ์อนุมัติจะเห็นคำขอในเมนู “อนุมัติราคา” — อนุมัติเมื่อไหร่ ใบจะถูกออกให้ทันที</li>
-                <li>ถ้าไม่อนุมัติ คำขอจะกลับมาที่เมนูเดียวกันพร้อมเหตุผล ให้แก้แล้วส่งใหม่หรือยกเลิกได้</li>
-                <li>ระหว่างรอ <b className="text-slate-900">แก้ใบชุดนี้ไม่ได้</b> — ต้องยกเลิกคำขอก่อน</li>
-              </>
-            ) : (
-              <li>ออกเลขที่ใบจริง <b className="text-slate-900">ย้อนกลับไม่ได้</b> (แก้ได้ด้วยการทำ revision ใบใหม่เท่านั้น)</li>
-            )}
-            {violations.length > 0 && (
-              <li>บันทึกชื่อผู้ยืนยัน เวลา และรายการกฎที่ทะลุครบทุกข้อไว้กับใบ — กรองดูย้อนหลังได้ที่หน้าประวัติ</li>
-            )}
-            {manualReasons.length > 0 && (
-              <li>
-                ใบชุดนี้ <b className="text-slate-900">จะไม่อยู่ในไฟล์ส่งออก Odoo ชุดปกติ</b> —
-                ต้องแก้ใน Odoo ก่อน แล้วส่งออกจากเมนู “ต้องแก้มือก่อน”
+          <ul aria-label="กฎที่จะข้าม" className="bg-red-50 border border-red-200 rounded-xl px-3 py-1.5 text-red-700 divide-y divide-dashed divide-red-200">
+            {violations.map((v, i) => (
+              <li key={`${v.type}-${v.model}-${i}`} className="grid grid-cols-[3.25rem_1fr] gap-2 py-1">
+                <span className="text-[10.5px] font-bold text-slate-500 pt-px">{v.line?.group ?? 'กฎ'}</span>
+                <span className="min-w-0 break-words">{v.line?.text ?? v.display_message}</span>
               </li>
-            )}
+            ))}
           </ul>
-        </div>
+        )}
+
+        {/* คนละแกนกับกฎ: ใบยังนำเข้า Odoo ได้หรือไม่ — ไม่ต้องติ๊ก แค่บอกให้รู้ว่าใบจะไปอยู่ไหน */}
+        {manualReasons.length > 0 && (
+          <p className="flex items-start gap-1.5 text-amber-800 leading-relaxed">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+            <span>
+              {manualReasons.map(manualShort).join(' · ')} ⇒ ใบไปอยู่คิว <b>“ต้องแก้มือก่อน”</b> ไม่อยู่ในไฟล์ Odoo ชุดปกติ
+            </span>
+          </p>
+        )}
+
+        {needApproval && (
+          <div className="space-y-1.5">
+            <p className="text-slate-600">กดส่งแล้วจะเกิดสิ่งเหล่านี้:</p>
+            <ul className="pl-5 list-disc space-y-1 text-slate-600 leading-relaxed">
+              <li>
+                ใบชุดนี้ถูกบันทึกเป็น <b className="text-slate-900">ร่างที่รออนุมัติ</b> —
+                <b className="text-slate-900"> ยังไม่มีเลขที่ใบและยังไม่มี PDF</b>
+              </li>
+              <li>ผู้มีสิทธิ์อนุมัติจะเห็นคำขอในเมนู “อนุมัติราคา” — อนุมัติเมื่อไหร่ ใบจะถูกออกให้ทันที</li>
+              <li>ถ้าไม่อนุมัติ คำขอจะกลับมาที่เมนูเดียวกันพร้อมเหตุผล ให้แก้แล้วส่งใหม่หรือยกเลิกได้</li>
+              <li>ระหว่างรอ <b className="text-slate-900">แก้ใบชุดนี้ไม่ได้</b> — ต้องยกเลิกคำขอก่อน</li>
+            </ul>
+          </div>
+        )}
       </div>
     </Modal>
   );
