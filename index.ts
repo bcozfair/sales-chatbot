@@ -142,6 +142,7 @@ import {
   WebQuoteError,
   listSalespersonsForWeb,
   listPaymentTermOptions,
+  listSourceOptions as listWebQuoteSourceOptions,
   proposeFromText,
   getQuoteParty,
   matchQuoteContact,
@@ -2948,6 +2949,11 @@ app.get('/api/admin/webquote/discount-history', adminAuthMiddleware, requireCapa
  * เป็น endpoint แยกแทนที่จะแปะไปกับพรีวิว เพราะมันเป็นรายการระดับระบบที่โหลดครั้งเดียวตอน
  * เปิดหน้า ไม่ได้ขึ้นกับใบที่กำลังกรอก · แคช 5 นาทีอยู่ในเซอร์วิส
  */
+/** ตัวเลือกของช่อง Source (คอลัมน์ K ของไฟล์ Odoo) — รายการอยู่ที่ ODOO_SOURCE_OPTIONS ที่เดียว */
+app.get('/api/admin/webquote/sources', adminAuthMiddleware, requireCapability('quote.create'), (_req: any, res: any) => {
+  res.json(listWebQuoteSourceOptions());
+});
+
 app.get('/api/admin/webquote/payment-terms', adminAuthMiddleware, requireCapability('quote.create'), async (req: any, res: any) => {
   try {
     res.json({ terms: await listPaymentTermOptions() });
@@ -3102,6 +3108,7 @@ app.post('/api/admin/webquote/drafts', adminAuthMiddleware, requireCapability('q
       reviseFrom: req.body?.revise_from,
       paymentTermsOverride: req.body?.payment_terms_override,
       delivery: req.body?.delivery,
+      sourceId: req.body?.source_id,
       // คำรับทราบจากโมดัล — server ตรวจกฎใหม่เองแล้วเทียบ ไม่ได้เชื่อว่า "ส่งมาแปลว่าผ่าน"
       acknowledgedViolations: req.body?.acknowledged_violations,
       adminUsername: req.admin?.username ?? null,
@@ -4313,7 +4320,7 @@ app.get('/api/admin/quotations/export', adminAuthMiddleware, requireCapability('
     const built = await withTransaction(async (client) => {
       const result = await client.query(
         `SELECT q.id, q.quotation_no, q.created_at, q.updated_at, q.customer_details, q.item_details, q.employee_details,
-                q.delivery_terms,
+                q.delivery_terms, q.source_id,
                 ${SP_NAME_SQL} AS salesperson_name, ${ODOO_EXPORT_SALES_TEAM_COL} AS customer_sales_team,
                 s.employee_quotation_id AS salesperson_employee_quotation_id,
                 ${ODOO_EXPORT_RAW_NAME_COLS}
