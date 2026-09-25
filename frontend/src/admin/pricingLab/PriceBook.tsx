@@ -568,7 +568,7 @@ const Count: React.FC<{ n: number | null }> = ({ n }) =>
 
 /** รหัสย่อยที่รู้ความหมายแล้วแต่ช่องราคา/ค่าที่เทียบยังว่าง — หน้าคิดราคาขึ้น "ยังไม่มีราคา" จนกว่าจะกรอก */
 const PendingPill: React.FC = () => (
-  <span className="ml-1.5 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 align-middle text-[10.5px] font-medium text-amber-700">
+  <span className="ml-1.5 inline-block whitespace-nowrap rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 align-middle text-[10.5px] font-medium text-amber-700">
     ยังไม่มีราคา
   </span>
 );
