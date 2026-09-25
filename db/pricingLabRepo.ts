@@ -65,8 +65,10 @@ export function clean(raw: unknown): SubCode | null {
 
   if (effect === 'flat' || effect === 'basePrice') {
     const amount = num(r.amount);
-    if (amount === undefined) return null;
-    out.amount = amount;
+    // `flat` ที่ช่องเงินว่าง = "รู้แล้วว่าแปลว่าอะไร แต่ยังไม่มีราคา" (เจ้าของสั่ง 2026-09-25: หัว S/E/SS/SB ของ TS_-08
+    // "ใส่ค่าว่างไว้ก่อน ค่อยกำหนดภายหลังผ่าน ui") ⇒ engine ขึ้น "ยังไม่มีราคา" ไม่ใช่ +0 · `basePrice` ว่างไม่ได้
+    if (amount === undefined) { if (effect === 'basePrice') return null; }
+    else out.amount = amount;
   }
   if (effect === 'percent') {
     const percent = num(r.percent);
@@ -89,9 +91,10 @@ export function clean(raw: unknown): SubCode | null {
   if (effect === 'setAxis') {
     const axis = str(r.axis);
     const value = str(r.value);
-    if (!axis || !value) return null;
+    if (!axis) return null;
     out.axis = axis;
-    out.value = value;
+    // ค่าว่าง = ยังไม่ได้กำหนดว่าเทียบค่าไหน (เกลียวมิลของ TS_-08/10 — เจ้าของสั่ง 2026-09-25) ⇒ "ยังไม่มีราคา"
+    if (value) out.value = value;
   }
   if (effect === 'option') {
     // ชื่อ option ของกฎที่จะเปิด — ไม่มี = แถวนี้ไม่ทำอะไร แต่ตัวอ่านรหัสจะนับว่า "อ่านออก" ⇒ ต้องปฏิเสธ

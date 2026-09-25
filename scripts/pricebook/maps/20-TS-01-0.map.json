@@ -24,7 +24,7 @@
       "kind": "perUnit",
       "dim": "cable_m",
       "step": 1,
-      "round": "ceil",
+      "round": "floor",
       "unit": " m",
       "byAxis": "cable",
       "ratesFrom": { "sheet": "TS-21+22+25", "col": "B", "keyCol": "A", "rows": [26, 29] },

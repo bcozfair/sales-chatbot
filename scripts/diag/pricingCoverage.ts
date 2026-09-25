@@ -19,6 +19,8 @@
  */
 import { pool } from '../../config/db.js';
 import { NoBook, loadBookFrom } from '../pricebook/bookSource.js';
+import { listSubCodes } from '../../db/pricingLabRepo.js';
+import { withSubCodes } from '../../services/pricingLab/bookStore.js';
 import { parseProductCode, unknownParts } from '../../services/pricingLab/code.js';
 
 const GREEN = '\x1b[32m', RED = '\x1b[31m', DIM = '\x1b[2m', BOLD = '\x1b[1m', RESET = '\x1b[0m';
@@ -46,8 +48,10 @@ async function main(): Promise<void> {
   let book;
   try {
     const loaded = await loadBookFrom();
-    book = loaded.book;
-    console.log(`${DIM}สมุดราคาที่ใช้: ${loaded.label}${RESET}\n`);
+    // เล่มจากฐาน ⇒ รวมตารางรหัสย่อยในฐานแบบเดียวกับหน้าจอ — ไม่รวม = "อ่านครบ" ต่ำกว่าที่จออ่านได้จริง
+    // (ท้ายรหัส TS_-08/10 ทั้งหมดอยู่ในตารางนั้น · เจอ 2026-09-25)
+    book = loaded.from === 'db' ? withSubCodes(loaded.book, await listSubCodes()) : loaded.book;
+    console.log(`${DIM}สมุดราคาที่ใช้: ${loaded.label}${loaded.from === 'db' ? ' + ตารางรหัสย่อยในฐาน' : ''}${RESET}\n`);
   } catch (e) {
     if (!(e instanceof NoBook)) throw e;
     console.log(`${DIM}${e.message}${RESET}`);

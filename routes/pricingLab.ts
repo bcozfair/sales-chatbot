@@ -350,7 +350,19 @@ function modelBriefs(book: PriceBook | undefined) {
     const options = [...new Map(
       m.adders.flatMap((a) => (a.when && 'option' in a.when ? [[a.when.option, a.label] as const] : []))
     )].map(([key, label]) => ({ key, label }));
-    return { code: m.code, name, label: m.label, sheet: m.sheet, aliases: m.aliases ?? [], others, excel: excelReady(m), options };
+    // `axes` = ค่าที่แต่ละแกนรับได้ (ชื่อหัวแถว/หัวคอลัมน์ · ค่าของราคาแยกตามแกน) — ชื่ออย่างเดียว ไม่มีราคา
+    // ให้ช่อง "ตั้งเป็นค่าอะไร" ของรหัสย่อยเป็นตัวเลือก (เกลียวมิล M8 → คอลัมน์เกลียวไหน · เจ้าของสั่ง 2026-09-25)
+    const axes: Record<string, Set<string>> = {};
+    const put = (axis: string, v: string) => { if (v !== '') (axes[axis] ??= new Set()).add(v); };
+    if (m.base.kind === 'matrix') {
+      const names = m.base.axes;
+      for (const key of Object.keys(m.base.cells)) key.split(' | ').forEach((v, i) => put(names[i]!, v));
+    }
+    for (const a of m.adders) if (a.byAxis) for (const k of Object.keys(a.rates ?? {})) put(a.byAxis, k);
+    return {
+      code: m.code, name, label: m.label, sheet: m.sheet, aliases: m.aliases ?? [], others, excel: excelReady(m), options,
+      axes: Object.fromEntries(Object.entries(axes).map(([k, v]) => [k, [...v]])),
+    };
   });
 }
 

@@ -62,17 +62,23 @@ export const SubCodeModal: React.FC<Props> = ({
   const family = familyOf(modelCode);
   // กฎที่เปิดได้ — ของรุ่นในช่อง "ใช้กับรุ่นไหน" ถ้าเลือกรุ่นเดียว ไม่งั้นของรุ่นที่กำลังคิดอยู่
   // (ขอบเขตทั้งตระกูล/ทุกรุ่น: รุ่นที่ไม่มีกฎนั้นจะขึ้นแดงเองที่ตัวอ่านรหัส ไม่คิดเงินเงียบ ๆ)
-  const optionChoices = (models.find((m) => m.code === scope) ?? models.find((m) => m.code === modelCode))?.options ?? [];
+  const scopeModel = models.find((m) => m.code === scope) ?? models.find((m) => m.code === modelCode);
+  const optionChoices = scopeModel?.options ?? [];
+  // ค่าที่ช่องนั้นรับได้ (หัวคอลัมน์เกลียว · ชนิดสาย) — ชื่ออย่างเดียว · ไม่มีในรายการ = พิมพ์เองได้เหมือนเดิม
+  const axisChoices = scopeModel?.axes?.[axis.trim()] ?? [];
   /** ตัวที่ลงท้ายด้วยตัวเลข (S000) ตั้งเป็นแม่แบบตัวเดียวครอบได้ทั้งชุด S000–S999 */
   const digits = /\d/.test(subCode);
   const asPattern = pattern ? subCode.replace(/\d/g, '#') : subCode;
 
   const draft: SubCode = useMemo(() => {
     const d: SubCode = { subCode: asPattern, match: pattern ? 'pattern' : 'exact', scope, reads, effect };
-    if (effect === 'flat' || effect === 'basePrice') d.amount = Number(amount) || 0;
+    // `flat` ที่เว้นว่าง = ยังไม่มีราคา (ไม่ใช่ 0) — หน้าคิดราคาขึ้น "ยังไม่มีราคา" จนกว่าจะกรอก
+    if (effect === 'flat' || effect === 'basePrice') {
+      if (effect === 'basePrice' || amount.trim() !== '') d.amount = Number(amount) || 0;
+    }
     if (effect === 'percent') d.percent = Number(percent) || 0;
     if (effect === 'perUnit') { d.rate = Number(rate) || 0; d.dim = dim; }
-    if (effect === 'setAxis') { d.axis = axis; d.value = value; }
+    if (effect === 'setAxis') { d.axis = axis; if (value) d.value = value; }
     if (effect === 'option') d.value = value;
     return d;
   }, [asPattern, pattern, scope, reads, effect, amount, percent, rate, dim, axis, value]);
@@ -144,7 +150,7 @@ export const SubCodeModal: React.FC<Props> = ({
         <>
           <Button variant="neutral" onClick={onClose} disabled={busy}>ยกเลิก</Button>
           <Button variant="primary" onClick={() => void save()} busy={busy}
-                  disabled={!reads.trim() || (effect === 'option' && !value)}>
+                  disabled={!reads.trim() || (effect === 'option' && !value) || (effect === 'setAxis' && !axis.trim())}>
             บันทึก
           </Button>
         </>
@@ -182,6 +188,9 @@ export const SubCodeModal: React.FC<Props> = ({
               </label>
               <input id="sc-amount" className={fld} type="number" value={amount}
                      onChange={(e) => setAmount(e.target.value)} />
+              {effect === 'flat' && (
+                <p className="text-[11px] text-slate-400 mt-1">เว้นว่าง = ยังไม่มีราคา (หน้าคิดราคาจะแจ้งว่ายังไม่มีราคา ไม่คิดเป็น 0)</p>
+              )}
             </div>
           )}
           {effect === 'percent' && (
@@ -226,7 +235,16 @@ export const SubCodeModal: React.FC<Props> = ({
               </div>
               <div>
                 <label className={lab} htmlFor="sc-value">ตั้งเป็นค่าอะไร</label>
-                <input id="sc-value" className={fld} value={value} onChange={(e) => setValue(e.target.value)} />
+                {axisChoices.length > 0 ? (
+                  <select id="sc-value" className={fld} value={value} onChange={(e) => setValue(e.target.value)}>
+                    <option value="">— ยังไม่กำหนด (ยังไม่มีราคา) —</option>
+                    {value && !axisChoices.includes(value) && <option value={value}>{value}</option>}
+                    {axisChoices.map((v) => <option key={v} value={v}>{v}</option>)}
+                  </select>
+                ) : (
+                  <input id="sc-value" className={fld} value={value} onChange={(e) => setValue(e.target.value)} />
+                )}
+                <p className="text-[11px] text-slate-400 mt-1">เว้นว่าง = ยังไม่มีราคา</p>
               </div>
             </>
           )}

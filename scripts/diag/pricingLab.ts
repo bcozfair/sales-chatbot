@@ -135,7 +135,13 @@ async function main() {
     reason.length > 0 && ![...axisKeys].some((k) => k.length > 2 && reason.includes(k)), reason);
 
   console.log(`\n${BOLD}4. ตัวตรวจรูปแถว (clean)${RESET}`);
-  ok('flat ที่ไม่มีจำนวนเงิน ⇒ ปฏิเสธ', clean({ subCode: 'X', effect: 'flat' }) === null);
+  // เดิมปฏิเสธ — ตั้งแต่ 2026-09-25 ช่องเงินว่าง = "ยังไม่มีราคา" (เจ้าของสั่งให้ใส่ค่าว่างไว้แล้วกำหนดทีหลังจากจอ)
+  // ข้อที่ต้องคงไว้คือ **ว่างต้องไม่กลายเป็น 0** · ราคาตั้งต้น (basePrice) ว่างยังปฏิเสธเหมือนเดิม
+  ok('flat ที่ไม่มีจำนวนเงิน ⇒ เก็บเป็น "ยังไม่มีราคา" ไม่ใช่ 0', (() => {
+    const sc = clean({ subCode: 'X', effect: 'flat' });
+    return !!sc && sc.amount === undefined;
+  })());
+  ok('basePrice ที่ไม่มีจำนวนเงิน ⇒ ปฏิเสธ', clean({ subCode: 'X', effect: 'basePrice' }) === null);
   ok('ผลกับราคาที่ไม่รู้จัก ⇒ ปฏิเสธ', clean({ subCode: 'X', effect: 'wat', amount: 1 }) === null);
   ok('percent ที่ค้าง amount มาจากการสลับ effect ⇒ ตัด amount ทิ้ง',
     clean({ subCode: 'X', effect: 'percent', percent: 10, amount: 999 })?.amount === undefined);

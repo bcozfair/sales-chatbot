@@ -16,6 +16,8 @@ import { parseProductCode } from '../../services/pricingLab/code.js';
 import { computePrice, formatOutcome, resolveModel } from '../../services/pricingLab/engine.js';
 import type { ProductConfig } from '../../services/pricingLab/types.js';
 import { NoBook, loadBookFrom } from './bookSource.js';
+import { listSubCodes } from '../../db/pricingLabRepo.js';
+import { withSubCodes } from '../../services/pricingLab/bookStore.js';
 
 const argv = process.argv.slice(2);
 // เล่มปัจจุบันในฐาน · `--book <ไฟล์.json>` / `--data <dir>` ใช้แทนได้ (ดู bookSource.ts)
@@ -23,8 +25,10 @@ const loaded = await loadBookFrom(argv).catch((e: unknown) => {
   if (e instanceof NoBook) { console.error(e.message); process.exit(1); }
   throw e;
 });
-const book = loaded.book;
-console.log(`สมุดราคาที่ใช้: ${loaded.label}`);
+// เล่มจากฐาน ⇒ รวมตารางรหัสย่อยในฐานด้วยแบบเดียวกับหน้าจอ (`bookWithDb` ใน routes/pricingLab.ts) — ไม่รวม =
+// ผลต่างจากหน้าคำนวณราคาเงียบ ๆ (ท้ายรหัส TS_-08/10 ขึ้นแดงทั้งที่จอคิดได้ · เจอ 2026-09-25)
+const book = loaded.from === 'db' ? withSubCodes(loaded.book, await listSubCodes()) : loaded.book;
+console.log(`สมุดราคาที่ใช้: ${loaded.label}${loaded.from === 'db' ? ' + ตารางรหัสย่อยในฐาน' : ''}`);
 
 function collect(flag: string): string[] {
   const out: string[] = [];
@@ -72,11 +76,11 @@ if (argv.includes('--subcodes')) {
   for (const sc of rows) {
     const money =
       sc.effect === 'flat' || sc.effect === 'basePrice'
-        ? ` ${(sc.amount ?? 0).toLocaleString()} บาท`
+        ? sc.amount === undefined ? ' (ยังไม่มีราคา)' : ` ${sc.amount.toLocaleString()} บาท`
         : sc.effect === 'percent'
           ? ` ${sc.percent}%`
           : sc.effect === 'setAxis'
-            ? ` ${sc.axis} = ${sc.value}`
+            ? ` ${sc.axis} = ${sc.value ?? '(ยังไม่ได้กำหนด)'}`
             : sc.effect === 'option'
               ? ` เปิดกฎ ${sc.value}`
               : '';

@@ -35,6 +35,13 @@ export interface SubCode {
   note?: string;
 }
 
+/**
+ * แถวที่ "รู้ความหมายแล้วแต่ยังไม่มีราคา" — `flat` ที่ไม่มีจำนวนเงิน / `setAxis` ที่ยังไม่ได้บอกค่า
+ * (กติกาเดียวกับ engine ฝั่ง backend · เจ้าของสั่ง 2026-09-25 ให้ใส่ค่าว่างไว้แล้วกำหนดทีหลังจากจอ)
+ */
+export const subCodePending = (s: SubCode): boolean =>
+  (s.effect === 'flat' && s.amount === undefined) || (s.effect === 'setAxis' && !s.value);
+
 export interface ModelBrief {
   /** รหัสรุ่นในฐาน — ตัวที่ส่งกลับไปตอนแก้/บันทึก */
   code: string;
@@ -51,6 +58,9 @@ export interface ModelBrief {
   excel?: boolean;
   /** กฎของรุ่นที่รหัสย่อยแบบ "เปิดกฎ" เลือกได้ — ชื่ออย่างเดียว ไม่มีราคา (`modelBriefs` ฝั่ง backend) */
   options?: { key: string; label: string }[];
+  /** ค่าที่แต่ละแกนรับได้ (หัวแถว/หัวคอลัมน์ของตารางราคาตั้ง · ค่าของราคาแยกตามแกน) — ชื่ออย่างเดียว ไม่มีราคา
+   *  ใช้เป็นตัวเลือกของรหัสย่อยแบบ "ตั้งค่าให้ช่อง" เช่นเกลียวมิล M8 → คอลัมน์เกลียวไหน */
+  axes?: Record<string, string[]>;
 }
 
 /** `GET /api/admin/pricing/overview` — หน้าคิดราคาได้แค่นี้ ของงานแก้ราคาอยู่ที่ `Overview` */

@@ -9,7 +9,7 @@ import { SubCodeModal } from './SubCodeModal';
 import { BookImportModal } from './BookImportModal';
 import { ModelPriceEditor } from './ModelPriceEditor';
 import { SheetEditor } from './SheetEditor';
-import { EFFECT_TH, type ModelBrief, type Overview, type SubCode } from './types';
+import { EFFECT_TH, subCodePending, type ModelBrief, type Overview, type SubCode } from './types';
 
 /**
  * หน้า "สมุดราคา" — ทุกอย่างที่ **แก้ราคา** ของโมดูลคิดราคาสินค้า
@@ -459,6 +459,8 @@ export const PriceBook: React.FC<Props> = ({ canQuote, onOpenQuote }) => {
                         {EFFECT_TH[s.effect]}
                         {s.amount !== undefined && ` ${s.amount.toLocaleString()} บาท`}
                         {s.percent !== undefined && ` ${s.percent}%`}
+                        {s.effect === 'setAxis' && s.value && ` → ${s.value}`}
+                        {subCodePending(s) && <PendingPill />}
                       </td>
                       <td className="px-4 py-2.5 font-mono text-slate-600">{s.scope}</td>
                       <td className="px-4 py-2.5 text-slate-500">
@@ -488,6 +490,7 @@ export const PriceBook: React.FC<Props> = ({ canQuote, onOpenQuote }) => {
                   <div className="flex gap-2 items-center flex-wrap">
                     <span className="font-mono font-bold text-[13px] text-slate-900">{s.subCode}</span>
                     <span className="text-[11px] text-slate-600">{EFFECT_TH[s.effect]}</span>
+                    {subCodePending(s) && <PendingPill />}
                     <span className="text-[11px] text-slate-400">ใช้กับ <span className="font-mono">{s.scope}</span></span>
                   </div>
                   <div className="text-xs text-slate-700 mt-1.5">{s.reads || '—'}</div>
@@ -562,6 +565,13 @@ const Count: React.FC<{ n: number | null }> = ({ n }) =>
   typeof n === 'number'
     ? <>{n.toLocaleString('th-TH')}</>
     : <span className="text-slate-300" title="นับไม่สำเร็จ — ลองเปิดหน้านี้ใหม่">—</span>;
+
+/** รหัสย่อยที่รู้ความหมายแล้วแต่ช่องราคา/ค่าที่เทียบยังว่าง — หน้าคิดราคาขึ้น "ยังไม่มีราคา" จนกว่าจะกรอก */
+const PendingPill: React.FC = () => (
+  <span className="ml-1.5 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 align-middle text-[10.5px] font-medium text-amber-700">
+    ยังไม่มีราคา
+  </span>
+);
 
 /** ป้าย "แบบ Excel" — ชีตนี้เปิดเป็นตารางหน้าตาเหมือนในไฟล์ราคา */
 const ExcelBadge: React.FC = () => (

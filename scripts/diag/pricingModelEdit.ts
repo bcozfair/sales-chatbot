@@ -11,7 +11,7 @@
  * รันโดยไม่เขียนอะไรลงฐาน — อ่านเล่มปัจจุบัน (SELECT) แล้วทุกอย่างอยู่ในหน่วยความจำ
  * (ทางบันทึกลงฐานของ `PUT /model` พิสูจน์ที่ `diag:pricing-db` ข้อ 6)
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { NoBook, loadBookFrom } from '../pricebook/bookSource.js';
 import { computePrice, resolveModel } from '../../services/pricingLab/engine.js';
 import { parseProductCode } from '../../services/pricingLab/code.js';
@@ -593,7 +593,8 @@ if (ts01 && ts010) {
   check('หน้าชีตรู้ค่ามาตรฐานของเกลียว', JSON.stringify(v9.axisDefaults) === JSON.stringify([{ axis: 'thread', axisTh: 'ขนาดเกลียว', value: '1/4”' }]),
     JSON.stringify(v9.axisDefaults));
   check('ยังเปิดแบบชีต Excel ได้', excelReady(b9.models['TSK-01']!) && excelReady(b9.models['TSK-01-0']!));
-  check('ไฟล์ catalog-subcodes.json ผ่านตัวตรวจทุกแถว (TS_-01 12 + แกน 6 · TS_-08 5 · TS_-10 5)', cat.length === 23, String(cat.length));
+  check('ไฟล์ catalog-subcodes.json ผ่านตัวตรวจทุกแถว (TS_-01 12 + แกน 6 · TS_-08 5 + หัวค่าว่าง 4 + เกลียวมิล 10 · TS_-10 5 + เกลียวมิล 12)',
+    cat.length === 49, String(cat.length));
 
   // ── ราคาสายที่ตารางรหัสย่อยตั้งให้ ต้องมีช่องบนหน้าสมุดราคาเสมอ (เจ้าของ 2026-09-25: "ต้องสามารถแก้ไขผ่าน ui ได้")
   const rowsOf = (b: PriceBook, code: string) =>
@@ -692,10 +693,14 @@ if (!ts08 || !ts10) {
   const cat = loadCatalogSubcodes();
   const same = (x: { subCode: string; scope: string }, y: { subCode: string; scope: string }) =>
     x.subCode.toUpperCase() === y.subCode.toUpperCase() && x.scope === y.scope;
-  // เล่มในฐานก่อนเขียนยังไม่มีค่ามาตรฐานสาย PVC ของ TS-10 (แมป 16 มีแล้ว) — เติมให้เหมือนกันทั้งสองทาง
+  // เล่มในฐานก่อนเขียนยังไม่มีค่ามาตรฐานสาย PVC ของ TS-10 (แมป 16 มีแล้ว) · ราคาสาย TS 160 ของ TS-10 (เจ้าของสั่ง
+  // 2026-09-25 "ใช้ 160 เท่า TS_-01 ไปก่อน" — อยู่ในฐานเท่านั้น เล่มจาก --data ไม่มี) · ค่าสายปัดลง (แมปมีแล้ว ฐานก่อน
+  // `--rounding` ยังปัดขึ้น) — เติมให้เหมือนกันทั้งสองทาง ด่านจึงให้ผลเดียวกัน
   const b11: PriceBook = {
     ...book,
-    models: { ...book.models, 'TSP-10': { ...ts10, axisDefaults: { ...ts10.axisDefaults, cable: 'สายพีวีซี' } } },
+    models: { ...book.models, 'TSP-10': { ...ts10, axisDefaults: { ...ts10.axisDefaults, cable: 'สายพีวีซี' },
+      adders: ts10.adders.map((a) => (a.id === 'cable_over_1m'
+        ? { ...a, round: 'floor' as const, rates: { ...a.rates, 'สายเทปล่อนหุ้มชีลด์': a.rates?.['สายเทปล่อนหุ้มชีลด์'] ?? 160 } } : a)) } },
     subCodes: [...(book.subCodes ?? []).filter((x) => !cat.some((c) => same(c, x))), ...cat],
   };
   const run = (code: string, b: PriceBook = b11) => { const p = parseProductCode(code, b); return { p, r: computePrice(p.cfg!, b) }; };
@@ -718,9 +723,22 @@ if (!ts08 || !ts10) {
   const e2 = run('TSP-08(S4)4x100-2-BU');
   check('TSP-08(S4)4x100-2-BU — 2 element แกน 4 mm ⇒ กฎห้ามเดิมของรุ่นทำงาน (option จากรหัสย่อยเข้าก่อน constraint)',
     e2.r.status !== 'priced' && e2.r.violations.some((v) => v.id === 'ELEM2_MIN_DIA'), e2.r.violations.map((v) => v.id).join('|'));
-  const eu = run('TSP-08(S4)6x100-EU');
-  check('TSP-08(S4)6x100-EU — หัว E ไม่มีราคาใน Excel ⇒ ขึ้นแดงทั้งท่อน ไม่คิดเงินเงียบ ๆ',
-    eu.p.parts.some((x) => x.text === 'EU' && x.kind === 'unknown'), parts(eu.p));
+  // หัว S/E/SS/SB — Excel ไม่มีราคา · เจ้าของสั่ง 2026-09-25 "ใส่ค่าว่างไว้ก่อน ค่อยกำหนดภายหลังผ่าน ui"
+  // ⇒ อ่านออกครบ แต่ "ยังไม่มีราคา" (ไม่ใช่ +0 และไม่ใช่ขึ้นแดง)
+  const pendingOf = (r: ReturnType<typeof run>['r']) => r.violations.filter((v) => v.id.startsWith('SUBCODE_PENDING:'));
+  for (const code of ['TSP-08(S4)6x100-EU', 'TSP-08(S4)6x100-SU', 'TSP-08(S4)6x100-SSU', 'TSP-08(S4)6x100-SBU']) {
+    const x = run(code);
+    const pend = pendingOf(x.r);
+    check(`${code} — อ่านครบ · ยังไม่มีราคาหัวนี้ ⇒ ไม่ได้ราคา (noRate) ไม่ใช่คิด +0`,
+      !x.p.parts.some((y) => y.kind === 'unknown') && x.r.status !== 'priced' && pend.length === 1 && pend[0]!.noRate === true
+        && /ยังไม่มีราคา/.test(pend[0]!.message),
+      `${x.r.status} ${x.r.violations.map((v) => v.message).join('|')} · ${parts(x.p)}`);
+  }
+  // แอดมินกรอกเงินที่แถว S ทีหลัง ⇒ คิดได้ทันทีโดยไม่ต้องแก้อะไรอื่น
+  const filledS: PriceBook = { ...b11, subCodes: (b11.subCodes ?? []).map((x) => (x.subCode === 'S' && x.scope === 'TSP-08' ? { ...x, amount: 300 } : x)) };
+  const fs = run('TSP-08(S4)6x100-SU', filledS);
+  check('  กรอกราคาหัว S = 300 จากจอ ⇒ TSP-08(S4)6x100-SU = 1,680 + 300', fs.r.status === 'priced' && fs.r.unitPrice === 1980,
+    `${fs.r.status} ${fs.r.unitPrice}`);
   const xu = run('TSP-08(S4)6x100-XU');
   check('  ท่อนที่อ่านได้ไม่ครบทุกตัวอักษร (XU) ⇒ ไม่ใช้ส่วนที่อ่านได้ (ไม่มี U[noPrice] ลอย)',
     xu.p.parts.some((x) => x.text === 'XU' && x.kind === 'unknown') && !xu.p.parts.some((x) => x.text === 'U'), parts(xu.p));
@@ -731,10 +749,44 @@ if (!ts08 || !ts10) {
   check('  บรรทัดค่าสายบอกว่าชนิดสายมาจากค่ามาตรฐาน', /ค่ามาตรฐาน/.test(d.r.breakdown.map((l) => l.detail ?? '').join(' ')),
     d.r.breakdown.map((l) => l.detail).join('|'));
   const tsu = run('TSP-10(S2)5x55+5MTSU');
-  check('TSP-10(S2)5x55+5MTSU — อ่าน TS ออก แต่ TS-10 ยังไม่มีราคาสายนี้ ⇒ ไม่ได้ราคา (ไม่ใช่คิดเป็นเทปล่อนธรรมดา)',
-    tsu.r.status !== 'priced' && tsu.p.parts.some((x) => x.text === 'TS' && x.kind === 'axis')
-      && tsu.r.violations.some((v) => /เทปล่อนหุ้มชีลด์/.test(v.message)),
-    `${tsu.r.status} ${tsu.r.violations.map((v) => v.message).join('|')}`);
+  const tu5 = run('TSP-10(S2)5x55+5MTU');
+  check('TSP-10(S2)5x55+5MTSU — TS = เทปล่อนหุ้มชีลด์ 160/ม. (เจ้าของสั่ง 2026-09-25) ⇒ ถูกกว่าเทปล่อน 180 อยู่ 4 ม. × 20',
+    tsu.r.status === 'priced' && tu5.r.status === 'priced' && tsu.p.parts.some((x) => x.text === 'TS' && x.kind === 'axis')
+      && tsu.r.unitPrice === tu5.r.unitPrice - 4 * 20,
+    `${tsu.r.status} ${tsu.r.unitPrice} vs ${tu5.r.unitPrice} ${tsu.r.violations.map((v) => v.message).join('|')}`);
+  const cu = run('TSP-10(S2)5x55+5MCU');
+  check('TSP-10(S2)5x55+5MCU — สาย C ของ TS-10 ยังไม่มีราคา ⇒ ไม่ได้ราคา (ไม่ใช่คิดเป็นพีวีซี)',
+    cu.r.status !== 'priced' && cu.r.violations.some((v) => v.noRate && /ซิลิโคน/.test(v.message)),
+    `${cu.r.status} ${cu.r.violations.map((v) => v.message).join('|')}`);
+
+  // ค่าสายเกินมาตรฐาน **นับเฉพาะเมตรเต็ม** — เจ้าของสั่ง 2026-09-25: "สายยาวกว่า 1 M บวกเพิ่มตามราคาสาย" หมายถึง
+  // "ยาวกว่าสาย std เพิ่มขึ้นตั้งแต่ 1 M ขึ้นไป" (std 1.5 เริ่มคิดที่ 2.5) และแบบนี้ทุกรุ่น ⇒ `round: 'floor'`
+  price('TSP-10(S2)6x100+1.5MPU', 1535, 'สาย 1.5 M เกินมาตรฐาน 0.5 M (ไม่ถึง 1 M) ⇒ ไม่คิดค่าสาย');
+  price('TSP-10(S2)6x100+2.5MPU', 1635, 'สาย 2.5 M เกิน 1.5 M ⇒ คิด 1 เมตร (พีวีซี 100) ไม่ใช่ 2');
+  price('TSP-10(S2)6x100+2MPU', 1635, 'สาย 2 M เกินพอดี 1 M ⇒ คิด 1 เมตร');
+  for (const f of readdirSync(new URL('../pricebook/maps/', import.meta.url))) {
+    const spec = JSON.parse(readFileSync(new URL(`../pricebook/maps/${f}`, import.meta.url), 'utf8')) as { code: string; adders?: Adder[] };
+    const cab = spec.adders?.find((a) => a.id === 'cable_over_1m');
+    if (cab) check(`แมป ${f}: ค่าสายเกินมาตรฐานปัดลง (นับเมตรเต็ม)`, cab.round === 'floor', String(cab.round));
+  }
+
+  // เกลียวมิลของ TS_-08/10 — ชีตมีแต่เกลียวนิ้ว · เจ้าของสั่ง 2026-09-25 ใส่ค่าว่างไว้ก่อน ⇒ อ่านออก "ยังไม่มีราคา"
+  // และ **ห้ามมีข้อความ "รหัสไม่ได้บอกเกลียว"** (รหัสบอกแล้ว — ที่ขาดคือราคา)
+  for (const code of ['TSP-08(M8)6x100-BU', 'TSP-08(M16)6x100-U', 'TSP-10(M12)6x100+1MPU', 'TSP-10(M6)6x100+2MTU']) {
+    const x = run(code);
+    const pend = pendingOf(x.r);
+    check(`${code} — อ่านครบ · เกลียวมิลยังไม่ได้กำหนดคอลัมน์ ⇒ ยังไม่มีราคา ข้อความเดียว`,
+      !x.p.parts.some((y) => y.kind === 'unknown') && x.r.status !== 'priced' && pend.length === 1 && /เกลียว/.test(pend[0]!.message)
+        && !x.r.violations.some((v) => v.id === 'NO_BASE_PRICE' || v.missing),
+      `${x.r.status} ${x.r.violations.map((v) => `${v.id}:${v.message}`).join('|')} · ${parts(x.p)}`);
+  }
+  // แอดมินเลือกคอลัมน์ให้ M8 ทีหลัง ⇒ ราคาตั้งมาจากคอลัมน์นั้นทันที (ไม่ได้พิมพ์ตัวเลขใหม่)
+  const s2 = run('TSP-08(S2)6x100-BU');
+  const s2Thread = s2.r.status === 'priced' ? parseProductCode('TSP-08(S2)6x100-BU', b11).cfg?.axes?.thread : undefined;
+  const filledM8: PriceBook = { ...b11, subCodes: (b11.subCodes ?? []).map((x) => (x.subCode === 'M8' && x.scope === 'TSP-08' ? { ...x, value: s2Thread } : x)) };
+  const m8 = run('TSP-08(M8)6x100-BU', filledM8);
+  check(`  เลือกให้ M8 เทียบคอลัมน์ ${s2Thread ?? '?'} จากจอ ⇒ ราคาเท่ารหัส (S2) เป๊ะ`,
+    !!s2Thread && m8.r.status === 'priced' && m8.r.unitPrice === s2.r.unitPrice, `${m8.r.status} ${m8.r.unitPrice} vs ${s2.r.unitPrice}`);
 
   // แถวที่เปิดกฎที่รุ่นนั้นไม่มี (ตั้งผิดรุ่น/ขอบเขตกว้างเกิน) — ต้องขึ้นแดง ไม่ใช่ "อ่านครบ" ทั้งที่ไม่ได้คิดเงิน
   const wrong: PriceBook = { ...b11, subCodes: [...(b11.subCodes ?? []),
@@ -745,10 +797,21 @@ if (!ts08 || !ts10) {
 
   check('clean(): แถว "เปิดกฎ" ที่ไม่บอกว่าเปิดกฎไหน ⇒ ปฏิเสธ', clean({ subCode: 'B', scope: 'TSP-08', effect: 'option' }) === null);
   check('clean(): แถว "เปิดกฎ" เก็บชื่อ option ไว้', clean({ subCode: 'B', scope: 'TSP-08', effect: 'option', value: 'head:alu_l' })?.value === 'head:alu_l');
+  const blankFlat = clean({ subCode: 'S', scope: 'TSP-08', effect: 'flat', reads: 'หัว S' });
+  check('clean(): บวกเงินที่ช่องเงินว่าง ⇒ เก็บไว้เป็น "ยังไม่มีราคา" (ไม่ใช่ 0)', !!blankFlat && blankFlat.amount === undefined, JSON.stringify(blankFlat));
+  check('clean(): ราคาตั้งต้นที่ช่องเงินว่าง ⇒ ปฏิเสธ', clean({ subCode: 'Q', scope: 'TSP-08', effect: 'basePrice' }) === null);
+  const blankAxis = clean({ subCode: 'M8', scope: 'TSP-08', effect: 'setAxis', axis: 'thread' });
+  check('clean(): ตั้งค่าให้ช่องที่ยังไม่บอกค่า ⇒ เก็บไว้เป็น "ยังไม่มีราคา"', !!blankAxis && blankAxis.axis === 'thread' && blankAxis.value === undefined, JSON.stringify(blankAxis));
+  check('clean(): ตั้งค่าให้ช่องที่ไม่บอกช่อง ⇒ ปฏิเสธ', clean({ subCode: 'M8', scope: 'TSP-08', effect: 'setAxis' }) === null);
 
   const { book: back11 } = await readUploaded(Buffer.from(makeTemplate(b11, '2026-09-25')));
   const bRow = back11?.subCodes?.find((x) => x.subCode === 'B' && x.scope === 'TSP-08');
   check('แม่แบบ .xlsx ไป-กลับ ⇒ แถว "เปิดกฎ" ยังเป็นเปิดกฎ head:alu_l', bRow?.effect === 'option' && bRow.value === 'head:alu_l', JSON.stringify(bRow));
+  const sRow = back11?.subCodes?.find((x) => x.subCode === 'S' && x.scope === 'TSP-08');
+  const m8Row = back11?.subCodes?.find((x) => x.subCode === 'M8' && x.scope === 'TSP-08');
+  check('แม่แบบ .xlsx ไป-กลับ ⇒ แถวค่าว่างยังว่าง (หัว S ไม่มีเงิน · M8 ไม่มีค่า) ไม่กลายเป็น 0',
+    sRow?.effect === 'flat' && sRow.amount === undefined && m8Row?.effect === 'setAxis' && m8Row.axis === 'thread' && m8Row.value === undefined,
+    `${JSON.stringify(sRow)} ${JSON.stringify(m8Row)}`);
 }
 
 console.log(`\n${'─'.repeat(70)}`);

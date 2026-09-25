@@ -405,9 +405,16 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
   }
   // รหัสย่อยที่ "เซ็ตค่าให้ช่อง" ต้องมีผลก่อนหาราคาตั้ง ไม่งั้นตารางจะถูกค้นด้วยค่าเก่า
   const subCodes = matchedSubCodes(book, model, cfg.options ?? []);
+  // รหัสย่อยที่ "รู้ความหมายแล้วแต่ยังไม่มีราคา" — ช่องเงินของ `flat` ว่าง / ค่าที่ `setAxis` จะตั้งว่าง
+  // (เจ้าของสั่ง 2026-09-25: หัว S/E/SS/SB และเกลียวมิลของ TS_-08/10 "ใส่ค่าว่างไว้ก่อน ค่อยกำหนดภายหลังผ่าน ui")
+  // ⇒ ขึ้น "ยังไม่มีราคา" แบบเดียวกับอัตราที่ขาด · **ห้ามคิดเป็น +0** และห้ามปล่อยให้ค่ามาตรฐานของแกนนั้นมาแทน
+  // (เกลียวมิลที่ถูกเติมเป็นเกลียวมาตรฐานเงียบ ๆ = ราคาผิดที่ดูเหมือนถูก)
+  const pending = subCodes.filter((s) => (s.effect === 'flat' && s.amount === undefined) || (s.effect === 'setAxis' && !s.value));
+  const pendingAxes = new Set(pending.flatMap((s) => (s.effect === 'setAxis' && s.axis ? [s.axis] : [])));
   for (const sc of subCodes) {
     if (sc.effect === 'setAxis' && sc.axis) {
-      axes[sc.axis] = sc.value ?? '';
+      if (sc.value) axes[sc.axis] = sc.value;
+      else delete axes[sc.axis];
       delete defaultedBy[sc.axis];
     }
   }
@@ -424,7 +431,14 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
     if (v !== undefined) dims[d.name] = v;
   }
 
-  const violations: Violation[] = [];
+  const violations: Violation[] = pending.map((s) => ({
+    id: 'SUBCODE_PENDING:' + s.subCode,
+    level: 'block' as const,
+    noRate: true,
+    message: `${s.reads || s.subCode} (${s.subCode}): ยังไม่มีราคา — ${
+      s.effect === 'setAxis' ? `ยังไม่ได้กำหนดว่าคิดราคาเท่า${axisLabel(s.axis ?? '')}ไหน` : 'ยังไม่ได้ใส่จำนวนเงิน'
+    } (ตั้งที่ตารางรหัสย่อย)`,
+  }));
   for (const c of model.constraints) {
     if (c.disabled) continue;
     if (evalPredicate(c.when, axes, dims, options)) {
@@ -454,7 +468,10 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
         detail: ownBase[0].reads
       }
     : computeBase(model, book, axes, dims, new Set([model.code]));
-  if (!base.ok) {
+  const baseWaits = model.base.kind === 'matrix' && model.base.axes.some((a) => pendingAxes.has(a));
+  if (!base.ok && baseWaits) {
+    // ราคาตั้งหาไม่ได้เพราะรหัสย่อยยังไม่ได้บอกค่าของแกนตาราง — ข้อความ "ยังไม่มีราคา" ข้างบนบอกครบแล้ว
+  } else if (!base.ok) {
     violations.push({
       id: 'NO_BASE_PRICE', level: 'block', message: base.reason ?? 'ไม่มีราคาฐาน',
       ...(base.missing ? { missing: true } : {}),
@@ -473,6 +490,7 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
     // (ส่งออกไป Excel แล้วยังเห็น เปิดกลับมาใช้ได้) แค่ไม่มีผลกับราคา
     const fromSubCodes = subCodes
       .filter((s) => s.effect === 'flat' || s.effect === 'percent' || s.effect === 'perUnit')
+      .filter((s) => !pending.includes(s))
       .map(subCodeAsAdder);
     const ordered = [
       ...model.adders.map((a) => withVariantPrice(a, variant)),
@@ -488,6 +506,8 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
         violations.push({ id: a.id, level: 'warn', message: r.partial, partial: true });
         continue;
       }
+      // แกนที่รอรหัสย่อยกำหนดค่า — ฟ้องไปแล้วครั้งเดียวข้างบน ไม่ต้องขึ้น "รหัสไม่ได้บอก" ซ้ำ
+      if (r.missing && a.byAxis && pendingAxes.has(a.byAxis)) continue;
       if (r.blocked) {
         violations.push({
           id: a.id, level: 'block', message: r.blocked,

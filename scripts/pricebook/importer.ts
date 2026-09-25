@@ -9,6 +9,7 @@
 //    … --from-json pricebook/book.json --apply [--replace-all]                  ย้ายเล่มของยุคไฟล์เข้าฐาน
 //    … --data <dir> --extras-only [--apply --by <username>]                      เติมของรอบตาราง (ค่ามาตรฐานเมื่อรหัสไม่ระบุ · หน้าตา) ลงเล่มปัจจุบัน ไม่แตะตัวเลขราคา
 //    … --data <dir> --new-rules [--apply --by <username>]                        เติม "กฎบวกเพิ่มที่แมปเพิ่งมี" ลงเล่มปัจจุบัน ไม่แก้กฎ/ราคาเดิมสักช่อง
+//    … --data <dir> --rounding [--apply --by <username>]                         ปรับ "วิธีปัดเศษ" ของกฎเดิมให้ตรงแมป ไม่แตะตัวเลขราคาสักช่อง
 //    … --data <dir> --out <ไฟล์.json>                                           เขียนเป็นไฟล์ (ไม่แตะฐาน)
 //
 //  **`--data` ไม่มีค่าเริ่มต้นโดยตั้งใจ** — ยุคไฟล์ตั้งต้นที่ `data/` ซึ่งถูกเสิร์ฟออกเว็บโดยไม่ตรวจสิทธิ์
@@ -711,6 +712,63 @@ async function applyNewRules(fromFile: PriceBook, opts: { apply: boolean; by: st
   return 0;
 }
 
+/**
+ * `--rounding` — ปรับ **วิธีปัดเศษ** (`round`) ของกฎบวกเพิ่มที่มีอยู่แล้ว (id เดียวกัน) ให้ตรงกับแมป
+ * **ช่องอื่นของกฎคงเดิมทุกไบต์** — อัตราที่แอดมินแก้จากจอ (สาย TS 160 ที่อยู่ในฐานเท่านั้น) ไม่หาย
+ *
+ * ครั้งแรกที่ใช้: ค่าสายส่วนที่เกินมาตรฐาน ปัดขึ้น → **ปัดลง** ทุกรุ่น (เจ้าของสั่ง 2026-09-25 —
+ * *"สายยาวกว่า 1 M บวกเพิ่มตามราคาสาย" หมายถึง "ยาวกว่าสาย std เพิ่มขึ้นตั้งแต่ 1 M ขึ้นไป" · ความหมายแบบนี้ทุกรุ่น*)
+ * ⇒ std 1 M: `+1.5M` ไม่คิด · `+2M`/`+2.5M` คิด 1 เมตร · std 1.5 M เริ่มคิดที่ 2.5 M
+ * แยกจาก `--extras-only` เพราะวิธีปัดเปลี่ยนราคาของรหัสที่ยาวเป็นเศษเมตร (คนละคำสัญญากับ "ไม่แตะราคา")
+ */
+async function applyRounding(fromFile: PriceBook, opts: { apply: boolean; by: string | null }): Promise<number> {
+  const state = await readBookState();
+  if (!state) {
+    console.error('ยังไม่มีสมุดราคาในฐาน — --rounding ใช้ได้เฉพาะเล่มที่มีอยู่แล้ว');
+    return 1;
+  }
+  const ROUND_TH: Record<string, string> = { ceil: 'ปัดขึ้น', floor: 'ปัดลง', exact: 'ไม่ปัด' };
+  const th = (r: string | undefined) => ROUND_TH[r ?? 'ceil'] ?? r;   // ไม่ระบุ = ปัดขึ้น (ค่าตั้งต้นของ engine)
+  const models = { ...state.book.models };
+  const changed: string[] = [];
+  for (const [code, m] of Object.entries(state.book.models)) {
+    const f = fromFile.models[code];
+    if (!f) continue;
+    const notes: string[] = [];
+    const adders = m.adders.map((a) => {
+      const g = f.adders.find((x) => x.id === a.id);
+      if (!g || a.kind !== 'perUnit' || g.kind !== 'perUnit' || (g.round ?? 'ceil') === (a.round ?? 'ceil')) return a;
+      notes.push(`${a.id} "${a.label}": ${th(a.round)} → ${th(g.round)}`);
+      const next: Adder = { ...a, round: g.round };
+      if (g.round === undefined) delete next.round;
+      return next;
+    });
+    if (!notes.length) continue;
+    models[code] = withFields(m, { adders });
+    changed.push(code);
+    console.log(`\n${code}:`);
+    for (const n of notes) console.log(`  ${n}`);
+  }
+  if (changed.length === 0) {
+    console.log('\nวิธีปัดเศษในฐานตรงกับแมปทุกกฎแล้ว — ไม่มีอะไรต้องเขียน');
+    return 0;
+  }
+  if (!opts.apply) {
+    console.log(`\n(ยังไม่ได้เขียนลงฐาน — ${changed.length} รุ่น · ใส่ --apply --by <username> เพื่อบันทึก · ไม่แตะตัวเลขราคา)`);
+    return 0;
+  }
+  const at = new Date().toISOString();
+  const revision = await commitBookChange({
+    parent: state.revision,
+    kind: 'model',
+    next: { ...state.book, models, edited: { at, by: opts.by ?? undefined, note: 'ปรับวิธีปัดเศษของกฎเดิมตามแมป (ค่าสายเกินมาตรฐานนับเฉพาะเมตรเต็ม — เจ้าของสั่ง 2026-09-25) — ไม่แตะตัวเลขราคา' } },
+    changed,
+    by: opts.by,
+  });
+  console.log(`\nบันทึกแล้ว — การบันทึกครั้งที่ ${revision} (${changed.join(', ')})`);
+  return 0;
+}
+
 async function main(): Promise<number> {
   const args = process.argv.slice(2);
   const val = (flag: string): string | undefined => {
@@ -725,6 +783,7 @@ async function main(): Promise<number> {
   const replaceAll = args.includes('--replace-all');
   const extrasOnly = args.includes('--extras-only') || args.includes('--layout-only');
   const newRules = args.includes('--new-rules');
+  const rounding = args.includes('--rounding');
 
   if (!dataDir === !fromJson) {
     console.error('ต้องบอกที่มาของสมุดราคาอย่างใดอย่างหนึ่ง:');
@@ -768,6 +827,7 @@ async function main(): Promise<number> {
 
   if (extrasOnly) return applyExtrasOnly(book, { apply, by });
   if (newRules) return applyNewRules(book, { apply, by });
+  if (rounding) return applyRounding(book, { apply, by });
 
   if (outFile) {
     writeFileSync(resolve(outFile), JSON.stringify(book, null, 2), 'utf8');
