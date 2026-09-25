@@ -3430,6 +3430,17 @@ export const QuoteRequest: React.FC = () => {
    * ⇒ ห้ามเอาสองอันนี้มารวมนับเป็นตัวเลขเดียว ใบเดียวติดได้ทั้งคู่
    */
   const manualReasons = staleNow ? [] : (preview?.odoo_manual_reasons ?? []);
+  /**
+   * กล่องบนจอเหลือเฉพาะเรื่องที่ **แถว Term Payment ยังไม่ได้บอก** (เจ้าของสั่ง 2026-09-25 · ลดความรก)
+   * ลูกค้าติดด่านเครดิต กับ เครดิตที่ตั้งทับ มีบรรทัดของมันอยู่ใต้ช่อง Term Payment แล้ว
+   * ⇒ สองข้อนี้ขึ้นครั้งเดียวใน modal ยืนยัน · **modal ยังได้ `blockers`/`manualReasons` ครบทุกข้อ**
+   * (ต้องติ๊กรับทราบ/รู้ว่าใบจะไปคิวแก้มือเหมือนเดิม) และสีปุ่มยืนยันยังคิดจากชุดเต็ม
+   * ด่านเครดิตซ่อนได้เฉพาะตอนแถว Term Payment มีคำเตือนจริง (`credit_hold`) — ก้อนนั้นอ่านไม่ได้
+   * (คืน null) แล้วยังซ่อน = ไม่มีที่ไหนบนจอบอกเลย
+   */
+  const holdInTerms = !!(preview?.customer ?? partyBlock)?.credit_hold;
+  const pageBlockers = blockers.filter((v) => !(v.type === 'CUSTOMER_CREDIT_HOLD' && holdInTerms));
+  const pageManualReasons = manualReasons.filter((r) => r.kind !== 'payment_terms_override');
 
   /**
    * ป้ายใต้ชื่อรายการ — ตัวเดียวใช้ทั้งตารางในฟอร์มและตารางใบร่าง ไม่งั้นสองจอจะอธิบาย
@@ -3496,7 +3507,7 @@ export const QuoteRequest: React.FC = () => {
 
   /** ปุ่มที่จางอยู่เฉย ๆ โดยไม่บอกเหตุผล คือปุ่มที่ผู้ใช้สรุปว่าระบบพัง */
   const issueBlockedBecause = (): string => {
-    if (!spUserId) return 'เลือกพนักงานขายที่จะออกใบในนามก่อน';
+    if (!spUserId) return 'กรุณากรอกข้อมูลครบก่อน';
     if (rows.length === 0) return 'ยังไม่มีรายการในใบ — เพิ่มสินค้าก่อน';
     if (unresolved > 0) return `ยังมี ${unresolved} รายการที่ยังไม่ได้เลือกสินค้า`;
     if (customerId === null || contactId === null) return 'ยังไม่ได้เลือกบริษัทและผู้ติดต่อ';
@@ -4110,14 +4121,14 @@ export const QuoteRequest: React.FC = () => {
 
         {/* ติดกฎ = **ออกใบได้ แต่ต้องยืนยันอีกชั้น** (2026-09-15) — บทสรุปบรรทัดแรกต้องตรงกับสิ่งที่
             ปุ่มทำจริง ไม่งั้นจอบอกว่า "ออกไม่ได้" แล้วปุ่มออกใบได้ = จอที่ไม่มีใครเชื่ออีกเลย */}
-        {blockers.length > 0 && !staleNow && (
+        {pageBlockers.length > 0 && !staleNow && (
           <div className="bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 text-xs text-red-700">
             <p className="flex items-center gap-2 font-bold">
               <AlertTriangle className="w-4 h-4 shrink-0" />
-              ติดด่านตรวจ {blockers.length} ข้อ — ออกใบได้ แต่ต้องยืนยันอีกชั้น
+              ติดด่านตรวจ {pageBlockers.length} ข้อ — ออกใบได้ แต่ต้องยืนยันอีกชั้น
             </p>
             <ul className="mt-1 pl-6 list-disc space-y-0.5">
-              {blockers.map((v, i) => (
+              {pageBlockers.map((v, i) => (
                 <li key={`${v.type}-${v.model}-${i}`}>{v.display_message}</li>
               ))}
             </ul>
@@ -4125,14 +4136,14 @@ export const QuoteRequest: React.FC = () => {
         )}
 
         {/* คนละแกนกับกล่องแดง: ใบยังนำเข้า Odoo ได้หรือไม่ ไม่ใช่ผิดกฎของร้านหรือไม่ */}
-        {manualReasons.length > 0 && !staleNow && (
+        {pageManualReasons.length > 0 && !staleNow && (
           <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 text-xs text-amber-800">
             <p className="flex items-center gap-2 font-bold">
               <AlertTriangle className="w-4 h-4 shrink-0" />
-              ต้องแก้มือใน Odoo ก่อนนำเข้า {manualReasons.length} เรื่อง
+              ต้องแก้มือใน Odoo ก่อนนำเข้า {pageManualReasons.length} เรื่อง
             </p>
             <ul className="mt-1 pl-6 list-disc space-y-0.5">
-              {manualReasons.map((r, i) => (
+              {pageManualReasons.map((r, i) => (
                 <li key={`${r.kind}-${i}`}>{r.display_message}</li>
               ))}
             </ul>
