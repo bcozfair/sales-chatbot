@@ -118,6 +118,8 @@ export interface ApprovalReloadPayload {
     remark?: string | null;
     is_manual_service?: boolean;
   }[];
+  /** ชื่อ/ราคาของบรรทัดค่าขนส่งที่กฎเติม — ไม่อยู่ใน `items` แต่แก้ทับได้ ต้องตามกลับมาด้วย */
+  auto_fee?: { name: string; price: number } | null;
 }
 
 // ── รูปร่างข้อมูลที่ backend ส่งมา ───────────────────────────────────────────
@@ -1356,10 +1358,31 @@ interface DocGroup {
  * ทุกอย่างที่เอกสารต้องใช้เพื่อ "เป็นฟอร์ม" มัดรวมเป็นก้อนเดียว — prop เรียงกัน 20 ตัวไม่มีใครอ่าน
  * และไม่ต้องกลัวว่าก้อนใหม่ทุกเรนเดอร์จะทำให้ช้า เพราะเอกสารต้องวาดใหม่อยู่แล้วทุกครั้งที่ตัวเลขขยับ
  */
+/** หนึ่งบรรทัดที่ส่งให้ /preview · /drafts · /preview-pdf (= WebQuoteItemInput ฝั่ง server) */
+interface ItemPayload {
+  product_template_id: number | null;
+  model: string;
+  quantity: number;
+  price: number | null;
+  discount_1: number;
+  discount_2: number;
+  remark: string;
+  name?: string;
+  is_auto_fee?: boolean;
+}
+
+/** ชื่อ/ราคาที่คนแก้ทับบรรทัดค่าขนส่งของกฎ — เก็บเป็นข้อความเหมือนช่องกรอกของแถวอื่น */
+type AutoFeeOv = { name: string; price: string };
+
 interface DocCtx {
   customer: PreviewResult['customer'] | null;
   identity: QuoteIssuerIdentity | null;
   svcCfg: ServiceCfg | null;
+  /** ค่าที่แก้ทับบรรทัดค่าขนส่งของกฎ — null = ใช้ชื่อ/ราคาจากหน้าตั้งค่า */
+  autoFeeOv: AutoFeeOv | null;
+  /** `base` = บรรทัดที่ผลตรวจโชว์อยู่ ใช้เติมช่องที่ยังไม่ได้แตะ (แก้ชื่อแล้วราคาต้องไม่หาย) */
+  editAutoFee: (base: PreviewItem, patch: Partial<AutoFeeOv>) => void;
+  resetAutoFee: () => void;
   /** ผลตรวจของแต่ละแถว (จับคู่ด้วย `Row.key` มาแล้ว) — ไม่มี = แถวนี้ยังไม่เคยผ่านการตรวจ */
   matched: Map<string, PreviewItem>;
   staleNow: boolean;
@@ -1833,9 +1856,17 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
             );
           })}
 
-          {/* บรรทัดที่ระบบเติมให้เอง (สินค้าพ่วง · ค่าขนส่งอัตโนมัติ) — แก้ในใบไม่ได้ เพราะเจ้าของมัน
-              คือกฎฝั่ง server แต่ต้องเห็น ไม่งั้นยอดรวมจะอธิบายไม่ได้ */}
-          {g.extras.map((it, i) => (
+          {/* บรรทัดที่ระบบเติมให้เอง (สินค้าพ่วง · ค่าขนส่งอัตโนมัติ) — ลบไม่ได้ เพราะเจ้าของมันคือกฎ
+              ฝั่ง server แต่ต้องเห็น ไม่งั้นยอดรวมจะอธิบายไม่ได้
+              · ค่าขนส่งของกฎ **แก้ชื่อ/ราคาทับได้** (เจ้าของสั่ง 2026-09-25 · หน้า LIFF แก้ได้มาก่อนแล้ว)
+                แต่ยังเป็นของกฎ: ยอดถึงเกณฑ์เมื่อไหร่ถอดออกเอง ค่าที่แก้ไว้ส่งไปเป็น `is_auto_fee` */}
+          {g.extras.map((it, i) => {
+            const fee = it.is_shipping_fee && !it.is_manual_service && !!ctx.svcCfg;
+            const ov = ctx.autoFeeOv;
+            // ปุ่มคืนค่าโผล่เมื่อค่าต่างจากหน้าตั้งค่าจริง ๆ — ใบที่เปิดกลับมาแก้ก็พกค่ามาด้วย แต่ไม่ได้แปลว่ามีคนแก้
+            const feeEdited =
+              fee && !!ov && (ov.name.trim() !== ctx.svcCfg!.default_item_name || num(ov.price) !== ctx.svcCfg!.default_price);
+            return (
             <tr
               key={`x-${g.co}-${it.model}-${i}`}
               className="block md:table-row border-b border-slate-100 last:border-0 py-2 md:py-0 bg-slate-50/70"
@@ -1845,7 +1876,28 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
               </td>
               <td className="block md:table-cell align-top px-4 md:pl-0 md:pr-3 py-1 md:py-2">
                 {/* ค่าบริการ/ค่าขนส่งใช้รหัสสินค้าร่วมกันทั้งระบบ ⇒ ตัวที่ต้องอ่านคือชื่อรายการ */}
-                {it.is_shipping_fee || it.is_manual_service ? (
+                {fee ? (
+                  <div className="space-y-1 pt-1">
+                    <div className="flex items-center gap-1.5">
+                      <ServiceNameField
+                        value={ov?.name ?? it.name}
+                        presets={ctx.svcCfg?.name_presets ?? []}
+                        onChange={(name) => ctx.editAutoFee(it, { name })}
+                      />
+                      {feeEdited && (
+                        <Button
+                          type="button"
+                          size="icon-sm"
+                          icon={RotateCcw}
+                          onClick={ctx.resetAutoFee}
+                          title="ใช้ชื่อและราคาจากหน้าตั้งค่า"
+                          aria-label="ใช้ชื่อและราคาจากหน้าตั้งค่า"
+                        />
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-400">{it.model}</p>
+                  </div>
+                ) : it.is_shipping_fee || it.is_manual_service ? (
                   <>
                     <p className="font-semibold text-slate-800 text-[13px]">{it.name}</p>
                     <p className="text-[11px] text-slate-400">{it.model}</p>
@@ -1867,7 +1919,20 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
                 <span className={inner}>{money(it.quantity)} Pcs</span>
               </td>
               <td data-k="หน่วยละ" className={cellC}>
-                <span className={inner}>{money2(it.price)}</span>
+                <span className={inner}>
+                  {fee ? (
+                    <input
+                      value={ov?.price ?? String(it.price)}
+                      onChange={(e) => ctx.editAutoFee(it, { price: e.target.value })}
+                      inputMode="decimal"
+                      placeholder={money2(ctx.svcCfg!.default_price)}
+                      aria-label="ราคาค่าขนส่ง"
+                      className={`${inp} w-[92px]`}
+                    />
+                  ) : (
+                    money2(it.price)
+                  )}
+                </span>
               </td>
               <td data-k="ส่วนลด" className={cellC}>
                 <span className={inner}>
@@ -1883,7 +1948,8 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx }> = ({ g, ctx }) => {
                 </span>
               </td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
 
@@ -2271,6 +2337,9 @@ export const QuoteRequest: React.FC = () => {
   /** ลายเซ็นของข้อมูลที่ถูกตรวจไปแล้ว — ต่างจากของปัจจุบันเมื่อไหร่ = ผลที่เห็นเก่าแล้ว */
   const [previewSig, setPreviewSig] = useState('');
   const [svcCfg, setSvcCfg] = useState<ServiceCfg | null>(null);
+  /** ชื่อ/ราคาที่แก้ทับบรรทัดค่าขนส่งของกฎ — อยู่นอก `rows` เพราะบรรทัดนั้นไม่ใช่แถวของฟอร์ม
+   *  (กฎเป็นคนตัดสินว่ามีหรือไม่มี) · ค้างไว้แม้บรรทัดหายไปตอนยอดถึงเกณฑ์ ยอดลดลงอีกก็กลับมาเป็นค่าที่แก้ไว้ */
+  const [autoFeeOv, setAutoFeeOv] = useState<AutoFeeOv | null>(null);
 
   // ── ค่าที่แอดมินตั้งทับของที่ระบบหามาให้ (2026-09-14) ──
   //
@@ -2337,6 +2406,7 @@ export const QuoteRequest: React.FC = () => {
     setPreviewAt('');
     setPaymentTerms(null);
     setDeliveryOv({});
+    setAutoFeeOv(null);
     setApprovalSent(null);
     setApprovalNote('');
     setReplacesRequestId(null);
@@ -2384,6 +2454,7 @@ export const QuoteRequest: React.FC = () => {
       setCustomerId(data.customer_id ?? null);
       setContactId(data.contact_id ?? null);
       setPaymentTerms(String(data.payment_terms_override ?? '').trim() || null);
+      setAutoFeeOv(data.auto_fee ? { name: data.auto_fee.name, price: String(num(data.auto_fee.price)) } : null);
       setApprovalNote(String(data.note ?? ''));
       setReplacesRequestId(String(data.request_id));
     })();
@@ -2771,7 +2842,7 @@ export const QuoteRequest: React.FC = () => {
   //  สิ่งที่เห็นตรงกับฟอร์ม ณ ตอนนี้หรือเปล่า (ไม่ใช่แค่ "เคยตรวจแล้ว")
   const itemsPayload = useMemo(
     () =>
-      rows.map((r) => ({
+      rows.map((r): ItemPayload => ({
         product_template_id: r.productTemplateId,
         model: r.model,
         quantity: num(r.quantity) || 1,
@@ -2781,8 +2852,25 @@ export const QuoteRequest: React.FC = () => {
         remark: r.remark || '',
         // ชื่อส่งไปเฉพาะบรรทัดค่าบริการ — สินค้าจริงเอาชื่อจาก DB เสมอ (กติกาของ resolveItems)
         ...(r.isService ? { name: r.name } : {}),
-      })),
-    [rows],
+      })).concat(
+        // ค่าที่แก้ทับค่าขนส่งของกฎ — ส่งเป็นบรรทัดค่าบริการที่ติดธง is_auto_fee ⇒ server ยังให้กฎ
+        // ตัดสินว่าบรรทัดนี้อยู่ไหม แค่ใช้ชื่อ/ราคานี้แทน · มีบรรทัดที่คนเพิ่มเองอยู่แล้ว = ไม่ส่ง
+        // (ค่าบริการมีได้บรรทัดเดียว และกฎไม่เติมซ้อนบรรทัดที่คนเพิ่ม)
+        autoFeeOv && svcCfg && !rows.some((r) => r.isService)
+          ? [{
+              product_template_id: svcCfg.product_id,
+              model: svcCfg.model,
+              quantity: 1,
+              price: num(autoFeeOv.price) || null,
+              discount_1: 0,
+              discount_2: 0,
+              remark: '',
+              name: autoFeeOv.name,
+              is_auto_fee: true,
+            }]
+          : [],
+      ),
+    [rows, autoFeeOv, svcCfg],
   );
 
   /** กำหนดส่งที่ตั้งเอง ในรูปที่ทั้ง /preview และ /drafts รับ — ใบที่ไม่ได้ตั้งไม่ต้องส่งไป */
@@ -3298,6 +3386,10 @@ export const QuoteRequest: React.FC = () => {
           isService: it.is_manual_service === true,
         })),
       );
+      // ค่าขนส่งของกฎไม่กลับเข้าแถว (ข้างบน) แต่ชื่อ/ราคาที่ใบเดิมใช้ต้องตามมา — คนอาจแก้ทับไว้
+      // ถ้ากฎยังเข้าเงื่อนไข ใบแก้ไขจะได้ค่าเดิม · ไม่เข้าแล้ว บรรทัดก็หายเองเหมือนเดิม
+      const oldFee = (q?.items ?? []).find((it) => it.is_shipping_fee && it.is_manual_service !== true);
+      setAutoFeeOv(oldFee ? { name: String(oldFee.name ?? ''), price: String(num(oldFee.price)) } : null);
       // บริษัทที่เลือกไว้ต้องมีอยู่ในลิสต์ ไม่งั้น <select> โชว์ "ยังไม่เลือก" ทั้งที่ id ตั้งอยู่แล้ว
       const cid = q?.customer_id ?? null;
       setCustomerOptions(cid ? [{ id: cid, display_name: q?.company_name ?? '' }] : []);
@@ -3405,6 +3497,10 @@ export const QuoteRequest: React.FC = () => {
     customer: preview?.customer ?? partyBlock,
     identity,
     svcCfg,
+    autoFeeOv,
+    editAutoFee: (base, patch) =>
+      setAutoFeeOv((cur) => ({ name: cur?.name ?? base.name, price: cur?.price ?? String(base.price), ...patch })),
+    resetAutoFee: () => setAutoFeeOv(null),
     matched: matched.byRow,
     staleNow,
     previewing,

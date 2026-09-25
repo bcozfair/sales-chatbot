@@ -621,10 +621,16 @@ export async function loadRequestIntoForm(params: {
   note: string | null;
   decision_note: string | null;
   items: any[];
+  /**
+   * ชื่อ/ราคาของบรรทัดค่าขนส่งที่กฎเติมให้ (ถ้ามี) — ไม่เข้า `items` ตามกติกาข้างล่าง แต่คนแก้ชื่อ/ราคา
+   * มันได้ตั้งแต่ 2026-09-25 ⇒ ส่งแยกไปให้ฟอร์มตั้งค่าทับกลับ ไม่งั้นส่งใหม่ทีไรค่าที่แก้ไว้หายทุกที
+   */
+  auto_fee: { name: string; price: number } | null;
 }> {
   const rows = await loadRequestRows(params.requestId, params.actor);
   const pa = rows[0]?.price_approval || {};
   const items: any[] = [];
+  let autoFee: { name: string; price: number } | null = null;
   for (const row of rows) {
     if (row.status !== 'draft') continue;
     const enriched = await enrichQuotationData(row);
@@ -632,7 +638,10 @@ export async function loadRequestIntoForm(params: {
     // ตอนออกใบจริงมันจะถูกขยายซ้ำอีกชุด — กติกาเดียวกับฝั่ง revise ของหน้าเว็บ
     for (const it of (enriched.items ?? [])) {
       if (it?.is_optional) continue;
-      if (it?.is_shipping_fee && !it?.is_manual_service) continue;
+      if (it?.is_shipping_fee && !it?.is_manual_service) {
+        if (!autoFee) autoFee = { name: String(it.name ?? ''), price: Number(it.price) || 0 };
+        continue;
+      }
       items.push(it);
     }
   }
@@ -646,6 +655,7 @@ export async function loadRequestIntoForm(params: {
     note: pa.note ?? null,
     decision_note: pa.decision_note ?? null,
     items,
+    auto_fee: autoFee,
   };
 }
 
