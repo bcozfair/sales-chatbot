@@ -206,9 +206,14 @@ export function candidateReport(header: string, candidates: Product[]): string {
 export { normalize as normalizeProductCode };
 
 // ─────────────────────────────────────────────
-//  Main findProduct
+//  Main findProduct = ขั้นค้นเดิมทุกขั้น → ด่าน "ลำดับของรหัส" (ข้างล่าง)
 // ─────────────────────────────────────────────
 export async function findProduct(codeRaw: any, chatContext?: string): Promise<FindProductResult> {
+  const result = await findProductStages(codeRaw, chatContext);
+  return applySequenceGuard(String(codeRaw || '').trim(), result);
+}
+
+async function findProductStages(codeRaw: any, chatContext?: string): Promise<FindProductResult> {
   const codeTrimmed = String(codeRaw || '').trim();
 
   if (!codeTrimmed) {
@@ -277,6 +282,118 @@ export async function findProduct(codeRaw: any, chatContext?: string): Promise<F
     console.warn('[findProduct] pg_trgm unavailable, using legacy search:', pgError.message);
     return legacySearch(codeTrimmed, qNorm);
   }
+}
+
+// ─────────────────────────────────────────────
+//  ด่าน "ลำดับของรหัส" — กันผลที่ผิดซีรีส์ (เพิ่ม 2026-09-25 · เจ้าของเลือก "แบบ A")
+//
+//  ปัญหา: Stage 1.5 ค้นด้วย "เลขที่ยาวที่สุด" ตัวเดียว แล้วเทียบแค่ตัวอักษร ⇒ `PMV25.01.024`
+//  ค้นด้วย `024` + `pmv` ได้ `PMV12.00024` (ผิดซีรีส์ เลข 25/01 ไม่ถูกดูเลย) และ `pmv25.c220`
+//  ค้นด้วย `220` ได้ 10 แถวแรกเป็น PMV250… ทั้งหมด ⇒ `PMV25C.01220` ไม่เคยได้เป็นตัวเลือก
+//
+//  กติกา: รหัสที่เซลส์พิมพ์แบ่งเป็นช่วงตัวอักษร/ตัวเลข (`pmv25.c220` → pmv|25|c|220) รุ่นที่
+//  "เข้าข่าย" คือรุ่นที่ขึ้นต้นด้วยช่วงแรกและมีทุกช่วงเรียงตามลำดับ (แทรกได้ ≤ 4 ตัว) —
+//    · ผลเดิมเลือกรุ่นที่เข้าข่ายอยู่แล้ว          → ไม่แตะ (ไม่ query เพิ่มด้วย)
+//    · ผลเดิมเลือกรุ่นที่ไม่เข้าข่าย แต่มีรุ่นที่เข้าข่าย → **ไม่เลือกแทนให้** เปลี่ยนเป็นให้เซลส์เลือก
+//      (รุ่นที่เข้าข่ายก่อน รุ่นเดิมท้ายสุด)
+//    · ผลเดิมเป็นรายการให้เลือก                     → ตัวที่เข้าข่ายของเดิมคงลำดับเดิม แทรกรุ่นที่
+//      เข้าข่ายต่อท้ายพวกนั้น (≤ 3 ตัวถ้ายังมีของเดิมที่ไม่เข้าข่าย — ไม่ดันของเดิมหลุดทั้งหมด)
+//  ⚠️ ห้ามเปลี่ยนเป็น "ตัดจุด/ขีดแล้วตรง = เลือกให้เลย" (แบบ B ที่ไม่ได้เลือก): ตัดตัวคั่นแล้ว
+//  สินค้า 136 กลุ่ม / 274 รุ่นชนกัน และบางคู่คนละของจริง (`…+1.5m` กับ `…+15m`)
+//
+//  ทดลองก่อนเขียน (2026-09-25 · รหัสจริง 2,543 ตัว = AI สกัด 531 + ดึงจากข้อความจริง 2,000 + เคสเป้าหมาย):
+//  เหมือนเดิม 2,464 · เลือกผิด → ให้เลือก 8 (ไล่ดูแล้ว ผลเดิมผิดชัดทั้ง 8 เช่น `PEV4000` → `VT-4000`) ·
+//  เรียงตัวเลือกใหม่ 71 · ไม่มีรายการไหนถูกเลือกให้ใหม่ · query เพิ่ม p50 3 ms / p95 8 ms
+//  ล้มเหลวด้วยเหตุใดก็ตาม = คืนผลเดิม · export ไว้ให้ `scripts/diag/findProductSequence.ts` เรียกตรง
+// ─────────────────────────────────────────────
+const SEQ_MAX_EXTRA = 4;
+const SEQ_MAX_INSERT_WITH_ORIGINALS = 3;
+const THAI_CHARS = /[฀-๿]/g;
+const MODEL_NORM_SQL = `LOWER(REGEXP_REPLACE(COALESCE(model, ''), '[\\s,\\(\\)]', '', 'g'))`;
+
+/** ช่วงตัวอักษร/ตัวเลข แบ่งจากรหัสที่ยังมีตัวคั่น — "25.01.024" ต้องเป็น 25|01|024 ไม่ใช่ 2501024 */
+function codeRuns(code: string): string[] {
+  return normalize(code).replace(THAI_CHARS, '').match(/[a-z]+|[0-9]+/g) ?? [];
+}
+function codeSkeleton(code: string): string {
+  return normalize(code).replace(THAI_CHARS, '').replace(/[^a-z0-9]/g, '');
+}
+function followsSequence(runs: string[], model: string): boolean {
+  const m = normalize(model);
+  if (!m.startsWith(runs[0]!)) return false;
+  let i = runs[0]!.length;
+  for (const r of runs.slice(1)) {
+    const j = m.indexOf(r, i);
+    if (j < 0) return false;
+    i = j + r.length;
+  }
+  return true;
+}
+
+export async function applySequenceGuard(code: string, result: FindProductResult): Promise<FindProductResult> {
+  try {
+    const runs = codeRuns(code);
+    const sk = codeSkeleton(code);
+    if (sk.length < 5 || runs.length < 2 || !runs.some((r) => /[a-z]/.test(r)) || !runs.some((r) => /\d/.test(r))) {
+      return result;
+    }
+    if (result.found && result.product && followsSequence(runs, result.product.model || '')) return result;
+
+    const { rows } = await pool.query<Product>(
+      `SELECT * FROM products
+        WHERE is_system_item = false AND ${MODEL_NORM_SQL} LIKE $1
+        ORDER BY quantity_on_hand_unreserved DESC
+        LIMIT 300`,
+      [runs.join('%') + '%']
+    );
+    const extraOf = (p: Product) => codeSkeleton(p.model || '').length - sk.length;
+    const seq = dedupeByModel(rows.filter((p) => extraOf(p) <= SEQ_MAX_EXTRA)).sort(
+      (a, b) => extraOf(a) - extraOf(b) ||
+        Number(b.quantity_on_hand_unreserved || 0) - Number(a.quantity_on_hand_unreserved || 0)
+    );
+    if (seq.length === 0) return result;
+
+    if (result.found && result.product) {
+      const candidates = dedupeByModel([...seq.slice(0, CANDIDATE_LIMIT - 1), result.product]);
+      console.log(`[findProduct] sequence: "${code}" ${result.product.model} ไม่ตรงลำดับ → ให้เลือก ${candidates.map((c) => c.model).join(' | ')}`);
+      return {
+        found: false,
+        candidates,
+        report: candidateReport(`⚠️ พบหลายรุ่นที่ตรงกับ "${code}" กรุณาระบุเพิ่มเติม`, candidates),
+      };
+    }
+
+    const orig = result.candidates || [];
+    const ok = orig.filter((p) => followsSequence(runs, p.model || ''));
+    const bad = orig.filter((p) => !followsSequence(runs, p.model || ''));
+    const known = new Set(orig.map((p) => normalize(p.model || '')));
+    const added = seq.filter((p) => !known.has(normalize(p.model || '')))
+      .slice(0, bad.length ? SEQ_MAX_INSERT_WITH_ORIGINALS : CANDIDATE_LIMIT);
+    const candidates = dedupeByModel([...ok, ...added, ...bad]).slice(0, CANDIDATE_LIMIT);
+    const key = (list: Product[]) => list.slice(0, CANDIDATE_LIMIT).map((p) => normalize(p.model || '')).join('|');
+    if (key(candidates) === key(orig)) return result;
+
+    console.log(`[findProduct] sequence: "${code}" เรียงตัวเลือกใหม่ ${candidates.map((c) => c.model).join(' | ')}`);
+    const header = orig.length ? (result.report.split('\n')[0] || '') : '';
+    return {
+      found: false,
+      candidates,
+      report: candidateReport(header || `⚠️ พบหลายรุ่นที่ตรงกับ "${code}" กรุณาระบุเพิ่มเติม`, candidates),
+    };
+  } catch (err: any) {
+    console.warn('[findProduct] sequence: ข้าม — ใช้ผลเดิม:', err?.message || err);
+    return result;
+  }
+}
+
+function dedupeByModel(rows: Product[]): Product[] {
+  const seen = new Set<string>();
+  return rows.filter((p) => {
+    const k = normalize(p.model || '');
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
 }
 
 // ─────────────────────────────────────────────
