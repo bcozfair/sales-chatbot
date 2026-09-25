@@ -470,21 +470,33 @@ export async function getCompanyDiscountHistory(
   limit = 3,
 ): Promise<DiscountOrderRow[]> {
   try {
-    const { rows } = await pool.query(
-      `SELECT s.order_reference,
-              to_char(s.order_date AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD') AS order_date,
-              s.total_amount, s.total_discount, s.invoice_status
-         FROM sale_orders s
-        WHERE s.contact_id IN (SELECT contact_id FROM customers_data_view WHERE company_id = $1)
-        ORDER BY s.order_date DESC NULLS LAST, s.order_reference DESC
-        LIMIT $2`,
-      [companyId, Math.min(Math.max(1, limit), 20)],
-    );
-    return rows as DiscountOrderRow[];
+    return await queryCompanyDiscountHistory(companyId, limit);
   } catch (err) {
     logErr('getCompanyDiscountHistory', err);
     return [];
   }
+}
+
+/**
+ * ตัวเดียวกับ `getCompanyDiscountHistory` แต่ **โยน error ออกไป** แทนการคืน `[]`
+ * — หน้าขอใบเสนอราคาต้องแยก "ไม่เคยมีใบ" ออกจาก "อ่านไม่สำเร็จ" (คืน `[]` ทั้งคู่ = จอบอกว่า
+ * ลูกค้าไม่เคยซื้อทั้งที่ฐานล่ม) · หน้า "ข้อมูลลูกค้า" ยังใช้ตัวที่กลืน error เหมือนเดิม
+ */
+export async function queryCompanyDiscountHistory(
+  companyId: number,
+  limit = 3,
+): Promise<DiscountOrderRow[]> {
+  const { rows } = await pool.query(
+    `SELECT s.order_reference,
+            to_char(s.order_date AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD') AS order_date,
+            s.total_amount, s.total_discount, s.invoice_status
+       FROM sale_orders s
+      WHERE s.contact_id IN (SELECT contact_id FROM customers_data_view WHERE company_id = $1)
+      ORDER BY s.order_date DESC NULLS LAST, s.order_reference DESC
+      LIMIT $2`,
+    [companyId, Math.min(Math.max(1, limit), 20)],
+  );
+  return rows as DiscountOrderRow[];
 }
 
 /** ประวัติส่วนลดของหลายบริษัทพร้อมกัน — ใช้ตอนวาดตารางทั้งหน้า */

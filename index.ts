@@ -150,6 +150,7 @@ import {
   previewQuotePdf as previewWebQuotePdf,
   reviseQuotation as reviseWebQuotation,
   getCustomerSalesOwner,
+  getCustomerDiscountHistory,
 } from './services/webQuoteService.js';
 import {
   getClientIp,
@@ -2925,6 +2926,19 @@ app.get('/api/admin/webquote/sales-owner', adminAuthMiddleware, requireCapabilit
     res.json({ owner: await getCustomerSalesOwner(req.query?.customer_id) });
   } catch (err: any) {
     sendWebQuoteError(res, 'GET /api/admin/webquote/sales-owner', err);
+  }
+});
+
+/**
+ * ส่วนลดทั้งบิลของ 3 ใบสั่งขายล่าสุดของบริษัทนี้ — แถว "ส่วนลดเดิม" ในหัวใบของหน้าขอใบเสนอราคา
+ * ข้อมูลชุดเดียวกับหน้า "ข้อมูลลูกค้า" แต่คร่อมด้วย `quote.create` ไม่ใช่ `page.customers`
+ * เพราะคนออกใบต้องเห็นแม้ไม่ได้เปิดสิทธิ์หน้าข้อมูลลูกค้า (เซลส์) · อ่านอย่างเดียว
+ */
+app.get('/api/admin/webquote/discount-history', adminAuthMiddleware, requireCapability('quote.create'), async (req: any, res: any) => {
+  try {
+    res.json({ discount: await getCustomerDiscountHistory(req.query?.customer_id) });
+  } catch (err: any) {
+    sendWebQuoteError(res, 'GET /api/admin/webquote/discount-history', err);
   }
 });
 
