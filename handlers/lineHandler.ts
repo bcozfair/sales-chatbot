@@ -27,6 +27,7 @@ import {
   isCustomerInfoIncomplete
 } from '../utils/flexTemplates.js';
 import { findProduct } from '../services/productService.js';
+import { applyThaiSuffixVariants } from '../services/thaiSuffixVariant.js';
 // เฟส C — "ข้อความดิบ → ร่างใบ" ย้ายไปอยู่ที่นี่ทั้งก้อน (เดิมอยู่กลาง handleEvent ~265 บรรทัด)
 // buildResolvedItem ยังถูกเรียกจากเส้นทางกดเลือกรุ่น (postback) ในไฟล์นี้ด้วย จึง import กลับมา
 import { extractQuoteFromText, buildResolvedItem } from '../services/quoteExtraction.js';
@@ -1632,8 +1633,12 @@ export async function handleEvent(
           return { codeRaw, result };
         });
         const infoResults = await Promise.all(infoPromises);
+        // รุ่นที่ต่างกันแค่คำไทยท้ายชื่อ (เช่น "ดูดออก") — ขั้นเดียวกับทางออกใบใน quoteExtraction
+        // (กติกาเต็มอยู่หัวไฟล์ thaiSuffixVariant.ts · ล้มเหลว = ใช้ผลเดิมของ findProduct)
+        const infoRows = infoResults.map(({ codeRaw, result }) => ({ item: { model: codeRaw }, result }));
+        await applyThaiSuffixVariants(infoRows, content);
 
-        for (const { codeRaw, result } of infoResults) {
+        for (const { item: { model: codeRaw }, result } of infoRows) {
           if (result.found && result.product) {
             const dbProduct = result.product;
             const price = Number(dbProduct.sales_price) || 0;
