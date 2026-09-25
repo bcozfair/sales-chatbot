@@ -7,6 +7,7 @@
 
    ครอบ: เปิดหน้าช่องว่าง → เลือกบริษัท → ระบบเติม + ป้าย "ระบบเลือก" → บริษัทที่หาเซลส์ไม่ได้
    → ช่องว่าง + กล่องเหลือง → เลือกเอง → ป้าย "เลือกเอง" → เปลี่ยนบริษัทแล้วไม่ถูกเขียนทับ
+   → กด "ระบบเลือกอัตโนมัติ" บนสุดของรายการ → กลับเป็นเซลส์ของบริษัทปัจจุบัน + ป้าย "ระบบเลือก"
    · ทำซ้ำที่ 1280px และ 390px (390px ชื่อต้องไม่ถูกตัดจนอ่านไม่ออก)
    + API: role salesperson เรียก /sales-owner ไม่ได้ (403)
 
@@ -89,6 +90,15 @@ ok('customer_id ผิดรูป → 400', bad.status === 400, `HTTP ${bad.sta
 // --no-sandbox: PMSV ปิด unprivileged user namespace ⇒ Chrome เปิด sandbox ไม่ได้ (วัด 2026-09-24)
 const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
 
+/**
+ * ป้ายในช่อง — อ่านจาก span ที่ข้อความตรงเป๊ะ ไม่ใช่ `includes` ของทั้งช่อง เพราะคำตั้งต้นของช่อง
+ * ("ระบบเลือกอัตโนมัติ หรือเลือกเอง") มีทั้งคำว่า "ระบบเลือก" และ "เลือกเอง" อยู่ในตัว
+ */
+const chipOf = (page: Page) =>
+  page.$eval('[aria-label="พนักงานขายที่จะออกใบในนาม"]', (el) =>
+    [...el.querySelectorAll('span')].map((s) => s.textContent).find((t) => t === 'ระบบเลือก' || t === 'เลือกเอง') ?? '');
+const PLACEHOLDER = 'ระบบเลือกอัตโนมัติ หรือเลือกเอง';
+const AUTO_ROW = 'ระบบเลือกอัตโนมัติ';
 /** ข้อความในช่อง "ออกในนาม" (ช่องที่ aria-label = พนักงานขายที่จะออกใบในนาม) */
 const spFieldText = (page: Page) =>
   page.$eval('[aria-label="พนักงานขายที่จะออกใบในนาม"]', (el) => (el.textContent || '').replace(/\s+/g, ' ').trim());
@@ -111,14 +121,24 @@ async function pickCustomer(page: Page, ref: string) {
   await page.screenshot({ path: `${SHOTS}so-pick-fail.png`, fullPage: true });
   throw new Error(`ค้นบริษัท ${ref} ไม่เจอในช่องเลือกบริษัท (ภาพ: mockup/shots/so-pick-fail.png)`);
 }
-async function waitFor(page: Page, pred: (t: string) => boolean, ms = 8000): Promise<string> {
-  let t = '';
+/** รอจนป้ายในช่องเป็นค่าที่ต้องการ ('' = ไม่มีป้าย) แล้วคืนข้อความทั้งช่อง */
+async function waitChip(page: Page, want: string, ms = 8000): Promise<string> {
   for (let i = 0; i < ms / 200; i++) {
-    t = await spFieldText(page);
-    if (pred(t)) return t;
+    if ((await chipOf(page)) === want) break;
     await wait(200);
   }
-  return t;
+  return spFieldText(page);
+}
+/** แถวในรายการที่กางอยู่ของช่อง "ออกในนาม" */
+const listRows = (page: Page) =>
+  page.evaluate(() => {
+    const box = document.querySelector('[aria-label="พนักงานขายที่จะออกใบในนาม"]')?.parentElement;
+    return [...(box?.querySelectorAll('button') ?? [])].map((b) => (b.textContent || '').trim());
+  });
+async function openSpList(page: Page) {
+  await page.$eval('[aria-label="พนักงานขายที่จะออกใบในนาม"]', (el) => el.scrollIntoView({ block: 'center' }));
+  await page.click('[aria-label="พนักงานขายที่จะออกใบในนาม"]');
+  await wait(300);
 }
 const noticeText = (page: Page) =>
   page.evaluate(() => [...document.querySelectorAll('div')].map((d) => d.textContent || '')
@@ -137,12 +157,12 @@ for (const width of [1280, 390]) {
   await page.waitForSelector('[aria-label="พนักงานขายที่จะออกใบในนาม"]', { timeout: 15000 });
 
   const t0 = await spFieldText(page);
-  ok('เปิดหน้า: ช่องว่าง ไม่มีป้าย', t0.includes('เลือกพนักงานขาย') && !t0.includes('ระบบเลือก') && !t0.includes('เลือกเอง'), t0);
+  ok('เปิดหน้า: ช่องว่าง ไม่มีป้าย', t0.includes(PLACEHOLDER) && (await chipOf(page)) === '', t0);
 
   if (good) {
     await pickCustomer(page, good.ref);
-    const t1 = await waitFor(page, (t) => t.includes('ระบบเลือก'));
-    ok('เลือกบริษัท → เติมเซลส์ + ป้าย "ระบบเลือก"', t1.includes(good.owner.name) && t1.includes('ระบบเลือก'), t1);
+    const t1 = await waitChip(page, 'ระบบเลือก');
+    ok('เลือกบริษัท → เติมเซลส์ + ป้าย "ระบบเลือก"', t1.includes(good.owner.name) && (await chipOf(page)) === 'ระบบเลือก', t1);
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.screenshot({ path: `${SHOTS}so-auto-${width}.png` });
     {
@@ -166,33 +186,63 @@ for (const width of [1280, 390]) {
   }
   if (none) {
     await pickCustomer(page, none.ref);
-    const t2 = await waitFor(page, (t) => !t.includes('ระบบเลือก'));
+    const t2 = await waitChip(page, '');
     const n = await noticeText(page);
-    ok('บริษัทที่หาเซลส์ไม่ได้ → ช่องว่าง (ไม่ค้างคนของบริษัทก่อน)', t2.includes('เลือกพนักงานขาย') && !t2.includes('ระบบเลือก'), t2);
+    ok('บริษัทที่หาเซลส์ไม่ได้ → ช่องว่าง (ไม่ค้างคนของบริษัทก่อน)', t2.includes(PLACEHOLDER) && (await chipOf(page)) === '', t2);
     ok('  และมีกล่องบอกเหตุผล', n.includes('เลือกพนักงานขายเองก่อนออกใบ'), n.slice(0, 80));
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.screenshot({ path: `${SHOTS}so-none-${width}.png` });
   }
   // เลือกเอง → ป้าย "เลือกเอง" → เปลี่ยนบริษัทแล้วไม่ถูกเขียนทับ
-  await page.$eval('[aria-label="พนักงานขายที่จะออกใบในนาม"]', (el) => el.scrollIntoView({ block: 'center' }));
-  await page.click('[aria-label="พนักงานขายที่จะออกใบในนาม"]');
-  await wait(300);
-  const manualName = await page.evaluate(() => {
+  await openSpList(page);
+  const rows0 = await listRows(page);
+  ok('รายการมีแถว "ระบบเลือกอัตโนมัติ" เป็นแถวแรก', rows0[0]?.startsWith(AUTO_ROW) === true, rows0[0]);
+  // พิมพ์ค้น ⇒ แถวนี้ต้องหาย (มันไม่ใช่ชื่อคน)
+  await page.keyboard.type('คุณ', { delay: 20 });
+  await wait(200);
+  ok('  พิมพ์ค้นแล้วแถวนั้นหาย', !(await listRows(page)).some((t) => t.startsWith(AUTO_ROW)));
+  await page.keyboard.press('Escape');
+  await openSpList(page);
+  // ตัวที่เลือกเอง = คนแรกที่ไม่ใช่คนที่ระบบเติมไว้ ⇒ พิสูจน์ได้จริงว่ากด "อัตโนมัติ" แล้วชื่อเปลี่ยนกลับ
+  const manualName = await page.evaluate((auto, avoid) => {
     const box = document.querySelector('[aria-label="พนักงานขายที่จะออกใบในนาม"]')?.parentElement;
-    const btn = box?.querySelectorAll('button')[0] as HTMLButtonElement | undefined;
+    const btn = [...(box?.querySelectorAll('button') ?? [])].find((b) => {
+      const t = b.textContent || '';
+      return !t.startsWith(auto) && !(avoid && t.includes(avoid));
+    }) as HTMLButtonElement | undefined;
     const name = btn?.querySelector('span')?.textContent ?? '';
     btn?.click();
     return name.trim();
-  });
-  const t3 = await waitFor(page, (t) => t.includes('เลือกเอง'));
-  ok('เลือกเอง → ป้าย "เลือกเอง"', t3.includes(manualName) && t3.includes('เลือกเอง'), t3);
+  }, AUTO_ROW, good2?.owner?.name ?? '');
+  const t3 = await waitChip(page, 'เลือกเอง');
+  ok('เลือกเอง → ป้าย "เลือกเอง"', t3.includes(manualName) && (await chipOf(page)) === 'เลือกเอง', t3);
   if (good2) {
     await pickCustomer(page, good2.ref);
     await wait(2000);   // ให้เวลา /sales-owner ตอบ ถ้าระบบจะเขียนทับ มันต้องทับภายในนี้
     const t4 = await spFieldText(page);
-    ok('เปลี่ยนบริษัทหลังเลือกเอง → ไม่ถูกเขียนทับ', t4.includes(manualName) && t4.includes('เลือกเอง'), t4);
+    ok('เปลี่ยนบริษัทหลังเลือกเอง → ไม่ถูกเขียนทับ', t4.includes(manualName) && (await chipOf(page)) === 'เลือกเอง', t4);
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.screenshot({ path: `${SHOTS}so-manual-${width}.png` });
+
+    // กลับไปให้ระบบเลือก — ต้องได้เซลส์ของบริษัท "ปัจจุบัน" (good2) ไม่ใช่ของรายแรก
+    await openSpList(page);
+    await page.screenshot({ path: `${SHOTS}so-list-${width}.png` });
+    await page.evaluate((auto) => {
+      const box = document.querySelector('[aria-label="พนักงานขายที่จะออกใบในนาม"]')?.parentElement;
+      const btn = [...(box?.querySelectorAll('button') ?? [])].find((b) => (b.textContent || '').startsWith(auto));
+      (btn as HTMLButtonElement | undefined)?.click();
+    }, AUTO_ROW);
+    const t5 = await waitChip(page, 'ระบบเลือก');
+    ok('กด "ระบบเลือกอัตโนมัติ" → กลับเป็นเซลส์ของบริษัทปัจจุบัน + ป้าย "ระบบเลือก"',
+      t5.includes(good2.owner.name) && (await chipOf(page)) === 'ระบบเลือก', t5);
+    const rows1 = (await openSpList(page), await listRows(page));
+    ok('  แถว "ระบบเลือกอัตโนมัติ" มีเครื่องหมายว่ากำลังใช้อยู่',
+      await page.evaluate((auto) => {
+        const box = document.querySelector('[aria-label="พนักงานขายที่จะออกใบในนาม"]')?.parentElement;
+        const btn = [...(box?.querySelectorAll('button') ?? [])].find((b) => (b.textContent || '').startsWith(auto));
+        return !!btn?.querySelector('svg.lucide-check');
+      }, AUTO_ROW), rows1[0]);
+    await page.keyboard.press('Escape');
   }
   await page.close();
 }

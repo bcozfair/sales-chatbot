@@ -2061,6 +2061,10 @@ export const QuoteRequest: React.FC = () => {
     setSpSource('manual');
     setSpNotice(null);
   }, []);
+  /** เซลส์ที่ระบบได้จากใบเดิมตอนกด "แก้ใบเดิม" — ปุ่ม "ระบบเลือกอัตโนมัติ" คืนค่านี้ (null = ใบเดิมไม่มีคนที่ออกได้) */
+  const reviseSpRef = useRef<string | null>(null);
+  /** เพิ่มทีละ 1 เพื่อสั่งให้ effect เติมจากลูกค้าถามใหม่ แม้บริษัทจะเป็นรายเดิม */
+  const [spAutoNonce, setSpAutoNonce] = useState(0);
   const onReadyChange = useCallback((v: boolean) => setProfileReady(v), []);
   /** ตัวตนที่จะไปขึ้นช่องลงนามของใบ — คอมโพเนนต์แถบบนโหลดมาแล้ว ไม่ยิง API ซ้ำที่นี่ */
   const [identity, setIdentity] = useState<QuoteIssuerIdentity | null>(null);
@@ -2190,6 +2194,7 @@ export const QuoteRequest: React.FC = () => {
       setSpSource(null);
       setSpNotice(null);
       setReviseNeedsPick(false);
+      reviseSpRef.current = null;
     }
   };
 
@@ -2291,7 +2296,26 @@ export const QuoteRequest: React.FC = () => {
       }
     })();
     return () => { cancelled = true; };
-  }, [customerId, reviseFrom, canPickAnySp, authHeaders]);
+  }, [customerId, reviseFrom, canPickAnySp, authHeaders, spAutoNonce]);
+
+  // "ระบบเลือกอัตโนมัติ" บนสุดของรายการ = ทิ้งค่าที่เลือกเองแล้วกลับไปใช้กติกาเดียวกับตอนเติมเอง
+  //  · แก้ใบเดิม = เซลส์ของใบเดิม (จำไว้ตอน revise ไม่ยิง API ซ้ำ)
+  //  · ใบใหม่ = ถามเซลส์ของลูกค้าใหม่ผ่าน effect ข้างบน (ยังไม่เลือกลูกค้า = ช่องว่างรอไว้)
+  const onSpAuto = useCallback(() => {
+    // ตั้ง ref ทันที ไม่รอ render — effect ที่ถูกปลุกด้วย nonce ต้องไม่เห็นค่า 'manual' ค้าง
+    spSourceRef.current = null;
+    setSpNotice(null);
+    if (reviseFrom) {
+      const sp = reviseSpRef.current;
+      setSpUserId(sp ?? '');
+      setSpSource(sp ? 'quotation' : null);
+      if (!sp) setSpNotice('เซลส์ของใบเดิมออกใบในนามไม่ได้แล้ว — เลือกพนักงานขายเองก่อนออกใบ');
+      return;
+    }
+    setSpUserId('');
+    setSpSource(null);
+    setSpAutoNonce((n) => n + 1);
+  }, [reviseFrom]);
 
   // โหลดผู้ติดต่อทุกครั้งที่บริษัทเปลี่ยน — endpoint เดิมของ LIFF ใช้ได้ตรง ๆ (§0.3)
   useEffect(() => {
@@ -3092,6 +3116,7 @@ export const QuoteRequest: React.FC = () => {
       if (canPickAnySp) {
         setSpUserId(String(data.sp_user_id ?? ''));
         setSpSource(pickedForRevise ? 'manual' : 'quotation');
+        reviseSpRef.current = pickedForRevise ? null : String(data.sp_user_id ?? '') || null;
         setSpNotice(null);
         setReviseNeedsPick(false);
       }
@@ -3307,6 +3332,8 @@ export const QuoteRequest: React.FC = () => {
         spUserId={spUserId}
         onSpUserIdChange={setSpUserId}
         onSpPick={onSpPick}
+        onSpAuto={canPickAnySp ? onSpAuto : undefined}
+        spAutoHint={reviseFrom ? 'ตามใบเดิม' : 'ตามลูกค้า'}
         spBadge={spSource === null ? null : spSource === 'manual' ? 'manual' : 'system'}
         spNotice={spNotice}
         onReadyChange={onReadyChange}

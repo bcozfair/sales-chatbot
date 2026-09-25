@@ -26,7 +26,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { PersonComboBox, type PersonOption } from './PersonComboBox';
-import { AlertTriangle, Lock, Loader2, Trash2, Upload, User, UserCog } from 'lucide-react';
+import { AlertTriangle, Check, Lock, Loader2, Sparkles, Trash2, Upload, User, UserCog } from 'lucide-react';
 
 const BRAND = 'var(--brand-fg)';
 
@@ -84,6 +84,13 @@ interface Props {
   onSpUserIdChange: (userId: string) => void;
   /** คนกดเลือกเองจาก combobox — แยกจาก onSpUserIdChange เพราะหน้าแม่ต้องรู้ว่า "คนเลือก" ไม่ใช่ระบบ */
   onSpPick?: (userId: string) => void;
+  /**
+   * คนกด "ระบบเลือกอัตโนมัติ" บนสุดของรายการ — ทิ้งค่าที่เลือกเองแล้วให้ระบบเติมใหม่ (ตามลูกค้า /
+   * ตามใบเดิม) · ไม่ส่ง = ไม่มีแถวนี้ (role salesperson ไม่มี combobox อยู่แล้ว)
+   */
+  onSpAuto?: () => void;
+  /** คำท้ายแถว "ระบบเลือกอัตโนมัติ" บอกว่าระบบจะเลือกจากอะไร เช่น "ตามลูกค้า" / "ตามใบเดิม" */
+  spAutoHint?: string;
   /** `system` = ระบบเลือก (เติมจากลูกค้า/ใบเดิม) · `manual` = เลือกเอง · null = ไม่มีป้าย */
   spBadge?: SpBadge | null;
   /** เหตุผลที่ระบบเติมให้ไม่ได้ — ขึ้นเป็นกล่องเหลืองใต้แถบ ให้คนรู้ว่าต้องเลือกเอง */
@@ -155,7 +162,7 @@ const NotReadyCard: React.FC<{ role: string }> = ({ role }) => (
 );
 
 export const QuoteIssuerProfile: React.FC<Props> = ({
-  spUserId, onSpUserIdChange, onSpPick, spBadge, spNotice, onReadyChange, onIdentityChange,
+  spUserId, onSpUserIdChange, onSpPick, onSpAuto, spAutoHint, spBadge, spNotice, onReadyChange, onIdentityChange,
 }) => {
   const { token, user } = useAuth();
   const role = user?.role ?? 'admin';
@@ -423,7 +430,25 @@ export const QuoteIssuerProfile: React.FC<Props> = ({
             options={spOptions}
             onPick={(o) => (onSpPick ?? onSpUserIdChange)(o.id)}
             badge={selectedSp ? badge : undefined}
-            placeholder="เลือกพนักงานขายที่จะออกใบในนาม"
+            leading={
+              onSpAuto ? (
+                // ติ๊กถูก = ตอนนี้ระบบเป็นคนเลือก (หรือยังรอลูกค้าอยู่) · ไม่ทาพื้นเขียวซ้ำกับแถวชื่อคน
+                // ที่ถูกเลือกอยู่ ไม่งั้นมีสองแถวที่ดูเหมือน "ตัวที่เลือก" พร้อมกัน
+                <button
+                  type="button"
+                  onClick={onSpAuto}
+                  className={`w-full text-left px-3.5 py-2.5 text-sm flex items-center gap-2 hover:bg-slate-100 ${
+                    spBadge !== 'manual' ? 'text-[var(--brand-fg)] font-semibold' : 'text-slate-700'
+                  }`}
+                >
+                  <Sparkles className="w-4 h-4 shrink-0" />
+                  <span className="truncate">ระบบเลือกอัตโนมัติ</span>
+                  {spAutoHint && <span className="text-xs font-normal text-slate-500 whitespace-nowrap">{spAutoHint}</span>}
+                  {spBadge !== 'manual' && <Check className="w-4 h-4 shrink-0 ml-auto" />}
+                </button>
+              ) : undefined
+            }
+            placeholder={onSpAuto ? 'ระบบเลือกอัตโนมัติ หรือเลือกเอง' : 'เลือกพนักงานขายที่จะออกใบในนาม'}
             emptyText="ไม่พบพนักงานขายชื่อ รหัส หรือเบอร์นี้"
             ariaLabel="พนักงานขายที่จะออกใบในนาม"
             invalid={!spUserId}
