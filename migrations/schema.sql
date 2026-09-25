@@ -1058,6 +1058,9 @@ CREATE TABLE public.quotations (
     -- NULL = ใบที่ยืนยันก่อนเฟส H ⇒ export ตกกลับไป join customers_data_view สดแบบเดิม
     -- ตรึงที่นี่เพราะผู้ติดต่อหายจาก view ได้ทีหลัง แล้วช่อง I จะว่างเงียบ ๆ (plan §5.7)
     customer_sales_team text,
+    -- K: source_id ของไฟล์นำเข้า Odoo ที่คนออกใบเลือกจากหน้าเว็บ (ODOO_SOURCE_OPTIONS)
+    -- NULL = ใบจาก LINE / ใบที่ออกก่อน 2026-09-25 ⇒ export ใช้ค่าตั้งต้น (ODOO_EXPORT_SOURCE = Sales)
+    source_id text,
     CONSTRAINT quotations_delivery_days_override_check CHECK (
         (delivery_days_override IS NULL)
         OR ((delivery_days_override >= 0) AND (delivery_days_override <= 3650))

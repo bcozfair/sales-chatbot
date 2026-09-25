@@ -362,6 +362,7 @@ export const PriceApprovals: React.FC = () => {
         contact_id: data.contact_id ?? null,
         company_name: data.company_name ?? null,
         payment_terms_override: data.payment_terms_override ?? null,
+        source_id: data.source_id ?? null,
         note: data.note ?? null,
         items: data.items ?? [],
         auto_fee: data.auto_fee ?? null,

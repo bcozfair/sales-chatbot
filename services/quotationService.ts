@@ -815,6 +815,12 @@ export interface DraftQuoteOverrides {
    * ⇒ ค่าอัตโนมัติของสองใบไม่เท่ากันอยู่แล้ว การตั้งทับจึงต้องแยกใบตามไปด้วย
    */
   delivery?: Partial<Record<'PM' | 'THT', { type?: DeliveryTypeKey | null; days?: number | null }>>;
+  /**
+   * source_id ของไฟล์นำเข้า Odoo (คอลัมน์ K) ที่คนออกใบเลือก — **ค่าเดียวทุกใบในชุด** (PM/THT)
+   * ไม่ส่ง/null = คอลัมน์เป็น NULL ⇒ export ใช้ค่าตั้งต้น (ใบจาก LINE ทุกใบเป็นแบบนี้)
+   * ตรวจค่ามาแล้วจากผู้เรียก (`parseSourceId` ใน webQuoteService.ts) — ที่นี่แค่บันทึก
+   */
+  sourceId?: string | null;
 }
 
 export async function insertDraftQuotations(
@@ -1095,6 +1101,7 @@ export async function insertDraftQuotations(
       employee_details: employeeDetails,
       customer_id: customerId || null,
       contact_id: contactId || null,
+      source_id: overrides?.sourceId ?? null,
       ...deliveryOf('PM')
     });
   }
@@ -1112,6 +1119,7 @@ export async function insertDraftQuotations(
       employee_details: employeeDetails,
       customer_id: customerId || null,
       contact_id: contactId || null,
+      source_id: overrides?.sourceId ?? null,
       ...deliveryOf('THT')
     });
   }
@@ -1140,8 +1148,9 @@ export async function insertDraftQuotations(
             user_id, total_sum, status,
             customer_details, item_details, salesperson_id, employee_details,
             customer_id, contact_id,
-            delivery_type_override, delivery_days_override
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            delivery_type_override, delivery_days_override,
+            source_id
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
           RETURNING *
         `, [
           q.user_id, q.total_sum, q.status,
@@ -1149,7 +1158,8 @@ export async function insertDraftQuotations(
           q.customer_id,
           q.contact_id,
           q.delivery_type_override,
-          q.delivery_days_override
+          q.delivery_days_override,
+          q.source_id
         ]);
         if (res.rows[0]) rows.push(res.rows[0]);
       }

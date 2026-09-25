@@ -618,6 +618,8 @@ export async function loadRequestIntoForm(params: {
   company_name: string | null;
   contact_name: string | null;
   payment_terms_override: string | null;
+  /** Source ของไฟล์ Odoo ที่คำขอเดิมเลือกไว้ — ส่งใหม่แล้วต้องได้ค่าเดิม ไม่ใช่กลับเป็น Sales */
+  source_id: string | null;
   note: string | null;
   decision_note: string | null;
   items: any[];
@@ -652,6 +654,7 @@ export async function loadRequestIntoForm(params: {
     company_name: rows[0]?.customer_details?.customer_name ?? null,
     contact_name: rows[0]?.customer_details?.contact_name ?? null,
     payment_terms_override: rows[0]?.customer_details?.payment_terms_override ?? null,
+    source_id: rows[0]?.source_id ?? null,
     note: pa.note ?? null,
     decision_note: pa.decision_note ?? null,
     items,

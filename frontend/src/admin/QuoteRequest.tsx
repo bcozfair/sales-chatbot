@@ -106,6 +106,8 @@ export interface ApprovalReloadPayload {
   contact_id: number | null;
   company_name: string | null;
   payment_terms_override: string | null;
+  /** Source ของไฟล์ Odoo ที่คำขอเดิมเลือกไว้ — null = ใบนั้นไม่ได้ระบุ (ใช้ค่าตั้งต้น) */
+  source_id?: string | null;
   note: string | null;
   items: {
     product_id?: number | null;
@@ -235,6 +237,8 @@ interface DraftQuote {
   quote_company?: 'PM' | 'THT';
   /** null = เครดิตของใบต้นทางคือของลูกค้าจริง ๆ ไม่ได้ถูกทับ */
   payment_terms_override?: string | null;
+  /** quotations.source_id — ร่าง revise ถือค่าของใบต้นทางมาให้ */
+  source_id?: string | null;
   delivery_type_override?: string | null;
   delivery_days_override?: number | null;
 }
@@ -1274,6 +1278,55 @@ const ServiceNameField: React.FC<{
 const pctText = (v: number) => `${v % 1 === 0 ? v.toFixed(0) : v.toFixed(2)}%`;
 
 /**
+ * แถว "Source" ใต้ "ส่วนลดเดิม" — ค่าของคอลัมน์ K (source_id) ในไฟล์นำเข้า Odoo ของใบนี้
+ * (แบบ B ของ mockup `quote-source` · เจ้าของเลือก 2026-09-25)
+ *
+ * · ค่าเดียวใช้กับทุกใบในชุด (PM/THT) ⇒ มีช่องเดียวในหัวใบแรก และบอกไว้เมื่อชุดแตกเป็นสองใบ
+ * · เปลี่ยนจากค่าตั้งต้นแล้วขอบน้ำเงิน + ↺ — ภาษาเดียวกับช่อง Term Payment ตอนตั้งเอง
+ * · **ไม่พิมพ์ลง PDF** และไม่แตะตัวเลขในใบ · รายการมาจาก server (`/webquote/sources`) ที่เดียว
+ */
+const SourceField: React.FC<{
+  value: string;
+  options: string[];
+  defaultValue: string;
+  multiDoc: boolean;
+  onChange: (v: string) => void;
+}> = ({ value, options, defaultValue, multiDoc, onChange }) => {
+  const changed = value !== defaultValue;
+  // ค่าที่โหลดมาจากใบต้นทางแต่ถูกถอดออกจากรายการไปแล้ว ต้องยังโชว์ได้ ไม่งั้นช่องขึ้นค่าแรกแทนเงียบ ๆ
+  const opts = options.includes(value) ? options : [...options, value];
+  return (
+    <span className="block min-w-0">
+      <span className="flex items-center gap-1">
+        <select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          aria-label="Source ของใบนี้ (ไฟล์ Odoo)"
+          className={`h-7 pl-2 pr-6 max-w-[12rem] rounded-lg border bg-card text-[11px] font-semibold text-slate-800 outline-none ${
+            changed ? 'border-blue-600' : 'border-slate-300'
+          }`}
+        >
+          {opts.map((o) => (
+            <option key={o} value={o}>{o}</option>
+          ))}
+        </select>
+        {changed && (
+          <Button
+            type="button"
+            size="icon-sm"
+            icon={RotateCcw}
+            onClick={() => onChange(defaultValue)}
+            title={`กลับเป็น ${defaultValue}`}
+            aria-label={`กลับเป็น ${defaultValue}`}
+          />
+        )}
+      </span>
+      {multiDoc && <span className="block mt-0.5 text-[10.5px] text-slate-400">ใช้กับทั้งใบ PM และ THT</span>}
+    </span>
+  );
+};
+
+/**
  * แถว "ส่วนลดเดิม" ใต้ "สถานที่ส่งของ" — เจ้าของเลือกแบบ C ของ mockup `discount-history`
  * แล้วสั่งย้ายมาไว้ตรงนี้ (2026-09-25): ปุ่ม `30%, 30%, 25% ▾` กดแล้วกางตาราง 3 ใบ
  *
@@ -1662,6 +1715,11 @@ interface DocCtx {
   /** แถว "ส่วนลดเดิม" ใต้ "สถานที่ส่งของ" */
   discount: DiscountState;
   retryDiscount: () => void;
+  /** แถว "Source" ใต้ "ส่วนลดเดิม" — ค่าเดียวของทั้งชุด */
+  sourceId: string;
+  sourceOpts: string[];
+  sourceDefault: string;
+  setSourceId: (v: string) => void;
   // ── แถบเพิ่มรายการท้ายตาราง ──
   addProductRow: (h: SearchHit) => void;
   addRow: () => void;
@@ -1897,6 +1955,15 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx; firstLabel?: string }>
           <DocField label="สถานที่ส่งของ">{cust?.address || '—'}</DocField>
           <DocField label="ส่วนลดเดิม">
             <DiscountHistoryField state={ctx.discount} onRetry={ctx.retryDiscount} />
+          </DocField>
+          <DocField label="Source">
+            <SourceField
+              value={ctx.sourceId}
+              options={ctx.sourceOpts}
+              defaultValue={ctx.sourceDefault}
+              multiDoc={ctx.multiDoc}
+              onChange={ctx.setSourceId}
+            />
           </DocField>
         </div>
       </div>
@@ -2623,6 +2690,14 @@ export const QuoteRequest: React.FC = () => {
   /** `null` = ใช้เครดิตของลูกค้าตามเดิม */
   const [paymentTerms, setPaymentTerms] = useState<string | null>(null);
   /**
+   * Source ของไฟล์ Odoo (คอลัมน์ K) — ค่าเดียวทั้งชุด ไม่ผูกกับบริษัท (เปลี่ยนบริษัท/สร้างร่างใหม่
+   * ไม่ล้าง เพราะคนเลือกได้ตั้งแต่ใบยังว่าง) · กลับเป็นค่าตั้งต้นเมื่อเริ่มใบใหม่ทั้งใบเท่านั้น
+   * รายการ + ค่าตั้งต้นมาจาก server — อ่านไม่ได้ก็ยังมีค่าตั้งต้นให้ออกใบได้
+   */
+  const [sourceDefault, setSourceDefault] = useState('Sales');
+  const [sourceOpts, setSourceOpts] = useState<string[]>(['Sales']);
+  const [sourceId, setSourceId] = useState('Sales');
+  /**
    * ลูกค้าเครดิตที่ไม่มีบิลเกินเกณฑ์ → ตั้ง Term Payment เป็นค่าที่ server แนะนำ (Cash) ให้ **ครั้งเดียว
    * ต่อการเลือกบริษัท** (เจ้าของสั่ง 2026-09-25) · จำ "บริษัทที่ตัดสินไปแล้ว" ไว้ ⇒ คนกด ↺ กลับไปใช้
    * เครดิตแล้วระบบไม่ตั้งกลับให้อีก · ใบที่โหลดมาจากใบต้นทาง (แก้ใบเดิม/ส่งขออนุมัติใหม่) ถือว่า
@@ -2691,6 +2766,7 @@ export const QuoteRequest: React.FC = () => {
     holdDecidedFor.current = null;
     setPaymentTerms(null);
     setDeliveryOv({});
+    setSourceId(sourceDefault);
     setAutoFeeOv(null);
     setApprovalSent(null);
     setApprovalNote('');
@@ -2742,6 +2818,8 @@ export const QuoteRequest: React.FC = () => {
       setContactQuery('');
       holdDecidedFor.current = data.customer_id ?? null;
       setPaymentTerms(String(data.payment_terms_override ?? '').trim() || null);
+      // null = คำขอเดิมไม่ได้ระบุ ⇒ ค่าตั้งต้นของช่อง (ซึ่งตอนนี้ยังเป็นค่าเริ่มของ state)
+      if (String(data.source_id ?? '').trim()) setSourceId(String(data.source_id).trim());
       setAutoFeeOv(data.auto_fee ? { name: data.auto_fee.name, price: String(num(data.auto_fee.price)) } : null);
       setApprovalNote(String(data.note ?? ''));
       setReplacesRequestId(String(data.request_id));
@@ -3369,6 +3447,28 @@ export const QuoteRequest: React.FC = () => {
     return () => { cancelled = true; };
   }, [authHeaders]);
 
+  // ตัวเลือกของช่อง Source — รายการอยู่ที่ server ที่เดียว (ODOO_SOURCE_OPTIONS) ซึ่งเป็นตัวที่ตรวจค่าด้วย
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/admin/webquote/sources', { headers: authHeaders });
+        if (!res.ok) return;
+        const d = await res.json();
+        if (cancelled || !Array.isArray(d?.sources) || d.sources.length === 0) return;
+        const def = String(d.default ?? d.sources[0]);
+        setSourceOpts(d.sources.map(String));
+        // ยังไม่มีใครแตะช่อง (ยังเป็นค่าเริ่มของ state) ⇒ ใช้ค่าตั้งต้นของ server
+        setSourceId((cur) => (cur === sourceDefault ? def : cur));
+        setSourceDefault(def);
+      } catch {
+        /* อ่านไม่ได้ = เหลือค่าตั้งต้นตัวเดียว ออกใบได้ตามปกติ */
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- โหลดครั้งเดียวต่อบัญชี ไม่ผูกกับค่าที่เลือก
+  }, [authHeaders]);
+
   /** ค่าบริการมีได้บรรทัดเดียวต่อการเสนอราคา — ทั้งที่แอดมินเพิ่มเองและที่กฎเติมให้ */
   const serviceRow = rows.find((r) => r.isService) ?? null;
   const autoFeeShown = preview?.service_line.auto_applied === true;
@@ -3681,6 +3781,8 @@ export const QuoteRequest: React.FC = () => {
           // ค่าชุดเดียวกับที่ส่งให้ /preview — ถ้าสองที่ส่งไม่เท่ากัน ใบที่ออกจะไม่ใช่ใบที่เห็น
           payment_terms_override: paymentTerms,
           delivery: deliveryPayload,
+          // Source ของไฟล์ Odoo — ค่าเดียวทุกใบในชุด (server เก็บลง quotations.source_id)
+          source_id: sourceId,
           // คำรับทราบจากโมดัล — คีย์มาจาก server (ไม่ประกอบเอง) และ server ตรวจกฎใหม่แล้วเทียบอีกที
           // ⇒ ข้อที่เพิ่งโผล่หลังจากคนกดรับทราบ (ของหมดระหว่างทาง) ยังตอบ 422 เหมือนเดิม
           acknowledged_violations: preview?.override_keys ?? [],
@@ -3811,6 +3913,8 @@ export const QuoteRequest: React.FC = () => {
       // 30 Days อยู่แล้วและไม่มีใครแก้ ต้องไม่ขึ้นป้าย "ตั้งเอง" ให้คนอ่านสับสน
       holdDecidedFor.current = cid;
       setPaymentTerms(String(q?.payment_terms_override ?? '').trim() || null);
+      // Source ของใบต้นทาง (ร่าง revise ถือค่ามาให้) · ใบเก่าที่ไม่ได้ระบุ = ค่าตั้งต้น
+      setSourceId(String(q?.source_id ?? '').trim() || sourceDefault);
       setDeliveryOv(
         ((data.quotes ?? []) as DraftQuote[]).reduce<
           Partial<Record<'PM' | 'THT', { type: DeliveryTypeKey | null; days: number | null }>>
@@ -3928,6 +4032,10 @@ export const QuoteRequest: React.FC = () => {
       setDiscHist(null);
       setDiscRetry((n) => n + 1);
     },
+    sourceId,
+    sourceOpts,
+    sourceDefault,
+    setSourceId,
     applyBulk,
     dismissBulk,
     rowTagsOf,

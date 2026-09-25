@@ -76,6 +76,7 @@ import { resolveCustomerSalesOwner, resolveQuotationSalesOwner, type SalesOwner 
 import { queryCompanyDiscountHistory } from '../db/dataDirectoryRepo.js';
 import { summarizeDiscounts, type DiscountSummary } from './dataDirectoryService.js';
 import { checkCreditHold } from './creditHoldService.js';
+import { ODOO_SOURCE_OPTIONS, DEFAULT_ODOO_SOURCE } from './odooSaleOrderExport.js';
 
 /**
  * งบเวลาต่อ 1 คำขอของหน้าเว็บ
@@ -492,6 +493,28 @@ export function parsePaymentTermsOverride(raw: any): string | null {
   return s;
 }
 
+/**
+ * source_id ของไฟล์ Odoo ที่คนออกใบเลือก — `null` = ไม่ได้ส่งมา (export ใช้ค่าตั้งต้น)
+ *
+ * ค่านอก `ODOO_SOURCE_OPTIONS` เป็น 400 ไม่ใช่ "เงียบ ๆ ใช้ Sales แทน" — Odoo จับคู่ด้วยชื่อ
+ * ค่าที่ไม่รู้จักถ้าหลุดถึงไฟล์คือใบตกตอนนำเข้า และถ้าแทนให้เงียบ ๆ ใบจะลงผิดช่องทางโดยไม่มีใครรู้
+ * เทียบแบบตรงตัว (ไม่ lower-case) เพราะค่าที่บันทึกคือค่าที่จะลงไฟล์ทุกอักขระ
+ */
+export function parseSourceId(raw: unknown): string | null {
+  if (raw === undefined || raw === null) return null;
+  const s = String(raw).trim();
+  if (s === '') return null;
+  if (!(ODOO_SOURCE_OPTIONS as readonly string[]).includes(s)) {
+    throw new WebQuoteError('BAD_REQUEST', `Source "${s}" ไม่อยู่ในรายการที่เลือกได้`, 400);
+  }
+  return s;
+}
+
+/** ตัวเลือกของช่อง Source บนหน้าเว็บ — รายการเดียวกับที่ `parseSourceId` ยอมรับ */
+export function listSourceOptions(): { sources: string[]; default: string } {
+  return { sources: [...ODOO_SOURCE_OPTIONS], default: DEFAULT_ODOO_SOURCE };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  ด่านสิทธิ์ของ "ของที่ไม่ใช่กฎ" — เครดิตที่ตั้งทับ และการออกใบในนามคนอื่น
 //
@@ -782,6 +805,8 @@ export async function createDraft(params: {
   paymentTermsOverride?: any;
   /** กำหนดส่งที่ตั้งเอง แยกรายใบ — ไม่ส่ง = ให้ระบบคิดเองทุกใบ */
   delivery?: WebQuoteDeliveryInput[] | null;
+  /** Source ของไฟล์ Odoo (คอลัมน์ K) — ค่าเดียวทุกใบในชุด · ไม่ส่ง = NULL (export ใช้ค่าตั้งต้น) */
+  sourceId?: unknown;
   /**
    * คีย์ของกฎที่คนกดรับทราบไว้ในโมดัล (`override_keys` ที่ /preview ส่งไปให้) — ไม่ส่ง = ไม่รับทราบอะไรเลย
    *
@@ -830,6 +855,7 @@ export async function createDraft(params: {
   const overrides: DraftQuoteOverrides = {
     paymentTerms: parsePaymentTermsOverride(params.paymentTermsOverride),
     delivery: parseDeliveryOverrides(params.delivery),
+    sourceId: parseSourceId(params.sourceId),
   };
   // เครดิตที่ตั้งทับเป็นสิทธิ์ต่างหาก — ปฏิเสธเสียงดังแทนการ "เงียบ ๆ ไม่เอาค่าที่ส่งมา"
   // เพราะคนยิงต้องรู้ว่าใบที่ได้ไม่ใช่ใบที่เขาสั่ง (และมันมีผลกับกฎค่าบริการ + คิวแก้มือ Odoo ด้วย)
@@ -1035,6 +1061,7 @@ export async function createDraft(params: {
         // ค่าที่คนกดตั้งทับระบบ — ต้องตอบได้ย้อนหลังว่า "เครดิตในใบนี้ไม่ตรงกับลูกค้าเพราะใคร"
         payment_terms_override: overrides.paymentTerms,
         delivery_overrides: overrides.delivery ?? null,
+        source_id: overrides.sourceId ?? null,
         // กฎที่คนกดรับทราบเพื่อออกใบทั้งที่ติดด่าน — ตอบได้ย้อนหลังว่า "ใครปล่อยผ่านข้อไหน เมื่อไหร่"
         acknowledged_violations: acknowledgedKeys,
         // คำขออนุมัติราคา — ตอบได้ย้อนหลังว่า "ใบนี้เคยถูกส่งไปขออนุมัติด้วยคำขอไหน"
@@ -1939,7 +1966,11 @@ export async function reviseQuotation(params: {
       revExpanded,
       'draft',
       active.customer_id,
-      active.contact_id
+      active.contact_id,
+      false,
+      // Source ของใบต้นทางตามมาด้วย — ฟอร์มอ่านจากร่างนี้ไปตั้งช่องให้ ไม่งั้น "แก้ใบเดิม"
+      // จะเงียบ ๆ คืนค่าเป็น Sales ทั้งที่ใบเดิมลง Odoo เป็นช่องทางอื่น
+      { sourceId: active.source_id ?? null }
     );
     if (!quotes || quotes.length === 0) {
       throw new WebQuoteError('INSERT_FAILED', 'ไม่สามารถเตรียมใบเสนอราคาเพื่อแก้ไขได้', 500);

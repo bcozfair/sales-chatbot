@@ -47,6 +47,27 @@ export const ODOO_SO_HEADERS = [
   'delivery_time',
 ] as const;
 
+/**
+ * K: ตัวเลือกของ source_id ที่หน้าขอใบเสนอราคาให้เลือกเก็บลงใบ (`quotations.source_id` · 2026-09-25)
+ *
+ * ⚠️ แต่ละค่าต้องตรงกับชื่อ Source ใน Odoo **ทุกอักขระ** (รวมจุดของ `Tel.` และวงเล็บ) — Odoo จับคู่
+ *    ด้วยชื่อ สะกดต่างไปตัวเดียวคือใบตกตอนนำเข้า · ลำดับ = ลำดับใน dropdown (เจ้าของให้มา)
+ * เพิ่ม/ลดตัวเลือก = แก้รายการนี้ที่เดียว — หน้าเว็บอ่านจาก `GET /api/admin/webquote/sources`
+ * และ server ปฏิเสธค่าที่ไม่อยู่ในรายการ ⇒ ค่านอกรายการไม่มีทางถึงไฟล์ export
+ * (ค่าที่เคยบันทึกไปแล้วยังออกไฟล์ตามเดิมแม้จะถอดออกจากรายการทีหลัง)
+ */
+export const ODOO_SOURCE_OPTIONS = [
+  'Sales',
+  'Inside Sales',
+  'Admin (Line)',
+  'Admin (Tel.)',
+  'Admin (E-Mail)',
+  'Marketing (Line OA)',
+] as const;
+
+/** ค่าตั้งต้นของช่อง source_id บนหน้าเว็บ */
+export const DEFAULT_ODOO_SOURCE = 'Sales';
+
 /** ชื่อชีตที่ Odoo อ่าน — มีเว้นวรรคท้ายตาม template ต้นฉบับ */
 export const ODOO_SO_SHEET_NAME = 'Import ';
 
@@ -67,7 +88,10 @@ export interface OdooExportConfig {
    *    ห้ามแก้ให้เหมือนกันเพราะเห็นว่าน่าจะพิมพ์ตก — Odoo จับคู่ภาษีด้วยชื่อแบบตรงตัวทุกอักขระ
    */
   taxByCompany: Record<OdooExportCompany, string>;
-  /** K: source_id — template กำหนดให้ใส่ "Sales" เสมอ */
+  /**
+   * K: source_id ของใบที่ไม่ได้ระบุไว้เอง (`quotations.source_id` เป็น NULL — ใบจาก LINE ทุกใบ
+   * และใบเว็บที่ออกก่อน 2026-09-25) · ใบที่ระบุไว้ใช้ค่าของใบนั้นเสมอ ดู ODOO_SOURCE_OPTIONS
+   */
   sourceId: string;
   /** O: order_line/product_uom — template กำหนดให้เป็น Pcs ทุกแถว ไม่ดูหน่วยจริงของสินค้า */
   uom: string;
@@ -124,6 +148,11 @@ export interface OdooExportQuotationRow {
    * ประเภทและจำนวนวันผิดพร้อมกัน แอดมินกรอกเองใน Odoo สำหรับใบกลุ่มนี้
    */
   delivery_terms?: any;
+  /**
+   * K: source_id ที่คนออกใบเลือกไว้ (`quotations.source_id`) — NULL/ว่าง = ใช้ `config.sourceId`
+   * ซึ่งคือค่าที่ทุกใบเคยได้มาตลอดก่อนมีคอลัมน์นี้
+   */
+  source_id?: string | null;
 }
 
 /** 1 แถวในไฟล์ = 1 รายการสินค้า (ช่องหัวใบเป็นค่าว่างในแถวที่ 2 ขึ้นไปของใบเดียวกัน) */
@@ -409,7 +438,7 @@ export function buildOdooSaleOrderRows(
       // ในฐานข้อมูล หรือใบที่ยังไม่ผูก contact_id ปล่อยเป็นเซลล์ว่าง ไม่ถอยไปใช้สังกัดของเซลล์
       sales_team: clean(quote.customer_sales_team),
       employee_quotation_id: employeeQuotationId,
-      source_id: config.sourceId,
+      source_id: clean(quote.source_id) || config.sourceId,
       note: warrantyNoteText(resolveMinWarrantyDisplay(items)),
       // S/T: อ่านจากค่าที่ตรึงไว้ตอนยืนยันใบเท่านั้น ไม่คำนวณสด — export ตั้งใจไม่แตะสต๊อก
       // และค่าที่ตรึงไว้คือค่าเดียวกับที่พิมพ์ลง PDF ที่ลูกค้าถืออยู่
