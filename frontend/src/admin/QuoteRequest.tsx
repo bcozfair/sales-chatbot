@@ -566,6 +566,11 @@ const ruleLine = (v: PreviewViolation): { group: string; text: string } => {
     return { group: 'ลูกค้า', text: `ไม่มีบิลเครดิตเกิน ${v.dormant_months ?? 12} เดือน${last}` };
   }
   if (v.type === 'SYSTEM_ERROR') return { group: 'ระบบ', text: 'ตรวจกฎไม่สำเร็จ — กด “ตรวจใหม่”' };
+  // ราคาต้องมีทั้งสองตัวเลข — ผู้ขอต้องเห็นว่าห่างจากขั้นต่ำเท่าไหร่ ไม่ใช่แค่ว่า "ต่ำกว่า"
+  if (v.type === 'MIN_PRICE_VIOLATION' && v.min_price !== undefined) {
+    const now = v.price !== undefined ? ` (หลังลด ฿${money2(v.price)})` : '';
+    return { group: 'ราคา', text: `${v.model} — ต่ำกว่าขั้นต่ำ ฿${money2(v.min_price)}${now}` };
+  }
   return { group: 'สินค้า', text: `${v.model} — ${shortViolation(v)}` };
 };
 
@@ -4158,20 +4163,20 @@ export const QuoteRequest: React.FC = () => {
           </div>
         )}
 
-        {/* ราคาต่ำกว่าขั้นต่ำ = **ติ๊กเองไม่ได้** ต้องส่งให้คนอื่นตัดสิน ⇒ กล่องคนละใบกับกล่องแดง
-            ไม่งั้นคนอ่านรวมกันว่า "ติดกฎ แต่กดผ่านได้" ซึ่งเป็นสิ่งที่ปุ่มไม่ทำแล้ว */}
-        {needsApproval && !staleNow && (
+        {/* ราคาต่ำกว่าขั้นต่ำ — ป้ายอยู่ที่แถวแล้ว และปุ่มเปลี่ยนเป็น "ขออนุมัติ" บอกผลของการกดเอง
+            ⇒ กล่องม่วงเหนือใบถอดออก (เจ้าของสั่ง 2026-09-25 · ภาษาเดียวกับแบบ A) รายละเอียดอยู่ใน modal
+            เหลือเฉพาะข้อที่ **ไม่มีแถวรองรับ** — ซ่อนแล้วไม่มีที่ไหนบนจอบอก */}
+        {approvalRequired.some((v) => !onRowKeys.has(ruleKey(v))) && !staleNow && (
           <div className="bg-violet-50 border border-violet-200 rounded-xl px-3 py-2.5 text-xs text-violet-800">
             <p className="flex items-center gap-2 font-bold">
               <BadgeCheck className="w-4 h-4 shrink-0" />
-              ต้องขออนุมัติราคา {approvalRequired.length} รายการ — ออกใบเองไม่ได้
+              ต้องขออนุมัติราคา — ออกใบเองไม่ได้
             </p>
             <ul className="mt-1 pl-6 list-disc space-y-0.5">
-              {approvalRequired.map((v, i) => (
-                <li key={`${v.type}-${v.model}-${i}`}>{v.display_message}</li>
+              {approvalRequired.filter((v) => !onRowKeys.has(ruleKey(v))).map((v, i) => (
+                <li key={`${v.type}-${v.model}-${i}`}>{ruleLine(v).text}</li>
               ))}
             </ul>
-            <p className="mt-1.5 pl-6">กด “ยืนยัน” จะเป็นการ<b>ส่งคำขอ</b>ให้ผู้มีสิทธิ์อนุมัติ — ใบจะออกเมื่อได้รับอนุมัติแล้วเท่านั้น</p>
           </div>
         )}
 
@@ -4382,7 +4387,7 @@ export const QuoteRequest: React.FC = () => {
                 >
                   {confirming
                     ? (needsApproval ? 'กำลังส่งคำขอ...' : 'กำลังออกใบ...')
-                    : (needsApproval ? 'ส่งขออนุมัติราคา' : 'ยืนยัน')}
+                    : (needsApproval ? 'ขออนุมัติ' : 'ยืนยัน')}
                 </Button>
               </>
             )}
@@ -4393,7 +4398,7 @@ export const QuoteRequest: React.FC = () => {
           {!issued && !requested && (
             <p className="basis-full text-[10.5px] text-slate-400">
               {needsApproval
-                ? 'ใบนี้ยังไม่ถูกบันทึกลงระบบ — กด “ยืนยัน” จะเป็นการส่งคำขออนุมัติราคา ยังไม่ออกเลขที่ใบ'
+                ? 'ใบนี้ยังไม่ถูกบันทึกลงระบบ — กด “ขออนุมัติ” จะส่งคำขอให้ผู้อนุมัติ ยังไม่ออกเลขที่ใบ'
                 : 'ใบนี้ยังไม่ถูกบันทึกลงระบบ — กด “ยืนยัน” เมื่อไหร่จึงจะออกเลขที่และบันทึกจริง'}
             </p>
           )}
@@ -4405,7 +4410,7 @@ export const QuoteRequest: React.FC = () => {
         <ConfirmIssueModal
           violations={blockers.map((v) => ({ ...v, line: ruleLine(v) }))}
           manualReasons={manualReasons}
-          approvalRequired={approvalRequired}
+          approvalRequired={approvalRequired.map((v) => ({ ...v, line: ruleLine(v) }))}
           note={approvalNote}
           onNoteChange={setApprovalNote}
           quoteLabels={groups.map((g) => g.label)}

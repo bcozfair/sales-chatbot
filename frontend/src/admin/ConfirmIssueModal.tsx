@@ -20,7 +20,7 @@
 //                               ⇒ **ถูกกันออกจากไฟล์ปกติ** ไปอยู่เมนู "ต้องแก้มือก่อน"
 //                               ⇒ ไม่ต้องติ๊ก เพราะไม่ได้ขออนุญาตข้ามอะไร แค่บอกให้รู้ว่าจะเกิดอะไร
 //
-//  ถ้อยคำ: ส่วนที่ 0 (ขออนุมัติ) ใช้ `display_message` ของ server · ส่วนที่ 1/2 ใช้บรรทัดสั้นของหน้าเว็บ
+//  ถ้อยคำ: ทุกส่วนใช้บรรทัดสั้นของหน้าเว็บ (ส่วนที่ 0 ย่อตามเจ้าของสั่ง 2026-09-25 เช่นกัน)
 //  (`line` — `ruleLine()` ใน QuoteRequest.tsx · แบบ A ที่เจ้าของเลือก 2026-09-25) เพราะประโยคของ server
 //  เป็นของ LINE ("…กรุณาติดต่อแอดมิน") ซึ่งไม่มีความหมายกับคนที่เป็นแอดมิน · ส่วนสินค้าของ `line` ใช้คำ
 //  ชุดเดียวกับป้ายที่แถว ⇒ modal กับแถวยังพูดคำเดียวกัน
@@ -28,7 +28,7 @@
 //  modal นี้เปิดเฉพาะ role ที่ **ข้ามได้** — ข้อที่ role นี้ข้ามไม่ได้ (blocked_keys) ปุ่มยืนยันจางตั้งแต่บนจอ
 // ─────────────────────────────────────────────────────────────────────────────
 import React, { useId, useState } from 'react';
-import { AlertTriangle, BadgeCheck, CheckCircle2, Pencil, Send } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Pencil, Send } from 'lucide-react';
 import { Modal } from './Modal';
 import { Button } from './Button';
 
@@ -80,9 +80,9 @@ export const ConfirmIssueModal: React.FC<Props> = ({
   // การบังคับติ๊กในกรณีที่ไม่มีอะไรให้ยอมรับ คือการฝึกให้คนติ๊กโดยไม่อ่าน
   const needAck = violations.length > 0;
   const title = [
-    needApproval ? `ต้องขออนุมัติราคา ${approvalRequired.length} รายการ` : '',
+    needApproval ? `ราคา ${approvalRequired.length} รายการ` : '',
     violations.length > 0 ? `ข้ามกฎ ${violations.length} ข้อ` : '',
-    manualReasons.length > 0 ? 'ต้องแก้มือใน Odoo' : '',
+    manualReasons.length > 0 ? 'แก้มือใน Odoo' : '',
   ].filter(Boolean).join(' · ');
 
   return (
@@ -90,7 +90,7 @@ export const ConfirmIssueModal: React.FC<Props> = ({
       icon={AlertTriangle}
       tone="danger"
       size="lg"
-      title={`${needApproval ? 'ส่งขออนุมัติราคา' : 'ยืนยันออกใบ'} · ${title}`}
+      title={`${needApproval ? 'ขออนุมัติ' : 'ยืนยันออกใบ'} · ${title}`}
       onClose={busy ? undefined : onCancel}
       footer={
         <>
@@ -120,50 +120,41 @@ export const ConfirmIssueModal: React.FC<Props> = ({
             disabled={needAck && !acked}
             onClick={onConfirm}
           >
-            {needApproval ? 'ส่งขออนุมัติราคา' : 'ยืนยัน'}
+            {needApproval ? 'ขออนุมัติ' : 'ยืนยัน'}
           </Button>
         </>
       }
     >
       <div className="p-5 space-y-3 text-xs">
-        {/* ข้อเท็จจริงของการกด — บรรทัดเดียว (เดิมเป็นรายการ 3 ข้อท้ายกล่อง) · ขออนุมัติยังเป็นรายการเต็ม
-            เพราะผลของการกดต่างจากปกติทั้งหมด (ได้คำขอ ไม่ได้ใบ) */}
+        {/* ข้อเท็จจริงของการกด — บรรทัดเดียวทั้งสองกรณี (เจ้าของสั่ง 2026-09-25 · เดิมขออนุมัติเป็นรายการ 4 ข้อ) */}
         <p className="text-slate-600 leading-relaxed">
           {needApproval ? 'ขออนุมัติ ' : 'ออก '}
           <b className="text-slate-900">{quoteLabels.length} ใบ</b>
           {quoteLabels.length > 0 && <span className="text-slate-500"> ({quoteLabels.join(' · ')})</span>}
-          {!needApproval && (
+          {needApproval ? (
+            <>
+              {' · '}ได้เป็น<b className="text-slate-900">ร่างรออนุมัติ</b> ยังไม่มีเลขที่ใบ/PDF · อนุมัติแล้วออกใบให้ทันที ·
+              ระหว่างรอแก้ใบไม่ได้
+            </>
+          ) : (
             <>
               {' · '}ออกเลขแล้ว<b className="text-slate-900">ย้อนกลับไม่ได้</b>
-              {violations.length > 0 && ' · ชื่อผู้ข้ามกฎถูกบันทึกไว้กับใบ'}
             </>
           )}
+          {violations.length > 0 && ' · ชื่อผู้ข้ามกฎถูกบันทึกไว้กับใบ'}
         </p>
 
+        {/* ราคาที่ต้องให้ผู้อนุมัติตัดสิน — รูปเดียวกับรายการกฎ (หนึ่งบรรทัดต่อข้อ) แต่สีม่วง เพราะจบคนละแบบ:
+            ข้อนี้ติ๊กเองไม่ได้ ส่วนรายการแดงข้างล่างติ๊กรับทราบแล้วข้ามได้ */}
         {needApproval && (
-          <section className="space-y-1.5">
-            <h4 className="flex items-center gap-1.5 text-[11px] font-bold tracking-wide text-slate-500">
-              <BadgeCheck className="w-3.5 h-3.5" />
-              ต้องขออนุมัติราคา — ติ๊กรับทราบเองไม่ได้
-            </h4>
-            <ul className="bg-violet-50 border border-violet-200 rounded-xl px-4 py-2.5 list-disc space-y-1 text-violet-800">
-              {approvalRequired.map((v, i) => (
-                <li key={`${v.type}-${v.model}-${i}`} className="ml-1">{v.display_message}</li>
-              ))}
-            </ul>
-            <label htmlFor={noteId} className="block font-bold text-slate-700">
-              เหตุผลที่ขอขายต่ำกว่าราคาขั้นต่ำ (ผู้อนุมัติจะอ่านข้อความนี้)
-            </label>
-            <textarea
-              id={noteId}
-              rows={2}
-              value={note}
-              disabled={busy}
-              onChange={(e) => onNoteChange(e.target.value)}
-              placeholder="เช่น ลูกค้าเทียบราคากับเจ้าอื่น · ปิดยอดสิ้นเดือน · ของค้างสต็อกนาน"
-              className="w-full bg-card border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-[var(--brand-fg)] focus:ring-2 focus:ring-[var(--brand-fg)]/10"
-            />
-          </section>
+          <ul aria-label="ราคาที่ต้องขออนุมัติ" className="bg-violet-50 border border-violet-200 rounded-xl px-3 py-1.5 text-violet-800 divide-y divide-dashed divide-violet-200">
+            {approvalRequired.map((v, i) => (
+              <li key={`${v.type}-${v.model}-${i}`} className="grid grid-cols-[3.25rem_1fr] gap-2 py-1">
+                <span className="text-[10.5px] font-bold text-slate-500 pt-px">{v.line?.group ?? 'ราคา'}</span>
+                <span className="min-w-0 break-words">{v.line?.text ?? v.display_message}</span>
+              </li>
+            ))}
+          </ul>
         )}
 
         {/* กฎที่จะข้าม — หนึ่งบรรทัดต่อข้อ มีคอลัมน์กลุ่ม (ลูกค้า/สินค้า) ให้กวาดตาได้ไว */}
@@ -188,18 +179,21 @@ export const ConfirmIssueModal: React.FC<Props> = ({
           </p>
         )}
 
+        {/* เหตุผลอยู่ท้ายสุด ติดกับแถบปุ่ม — อ่านรายการครบแล้วค่อยพิมพ์ แล้วกดต่อได้เลย */}
         {needApproval && (
-          <div className="space-y-1.5">
-            <p className="text-slate-600">กดส่งแล้วจะเกิดสิ่งเหล่านี้:</p>
-            <ul className="pl-5 list-disc space-y-1 text-slate-600 leading-relaxed">
-              <li>
-                ใบชุดนี้ถูกบันทึกเป็น <b className="text-slate-900">ร่างที่รออนุมัติ</b> —
-                <b className="text-slate-900"> ยังไม่มีเลขที่ใบและยังไม่มี PDF</b>
-              </li>
-              <li>ผู้มีสิทธิ์อนุมัติจะเห็นคำขอในเมนู “อนุมัติราคา” — อนุมัติเมื่อไหร่ ใบจะถูกออกให้ทันที</li>
-              <li>ถ้าไม่อนุมัติ คำขอจะกลับมาที่เมนูเดียวกันพร้อมเหตุผล ให้แก้แล้วส่งใหม่หรือยกเลิกได้</li>
-              <li>ระหว่างรอ <b className="text-slate-900">แก้ใบชุดนี้ไม่ได้</b> — ต้องยกเลิกคำขอก่อน</li>
-            </ul>
+          <div className="space-y-1">
+            <label htmlFor={noteId} className="block font-bold text-slate-700">
+              เหตุผลที่ขอ <span className="font-normal text-slate-500">(ผู้อนุมัติจะอ่านข้อความนี้)</span>
+            </label>
+            <textarea
+              id={noteId}
+              rows={2}
+              value={note}
+              disabled={busy}
+              onChange={(e) => onNoteChange(e.target.value)}
+              placeholder="เช่น ลูกค้าเทียบราคากับเจ้าอื่น · ปิดยอดสิ้นเดือน · ของค้างสต็อกนาน"
+              className="w-full bg-card border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-[var(--brand-fg)] focus:ring-2 focus:ring-[var(--brand-fg)]/10"
+            />
           </div>
         )}
       </div>
