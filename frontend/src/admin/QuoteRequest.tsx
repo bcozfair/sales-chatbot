@@ -557,6 +557,10 @@ const CreditField: React.FC<{
             <span className="text-slate-500 shrink-0">เครดิต</span>
           </>
         )}
+        {/* ป้าย "ค่าเดิม" สีแบรนด์แทนคำว่า "(ของลูกค้า)" (เจ้าของสั่ง 2026-09-25 · ภาษาเดียวกับป้าย "ส่วนลดเดิม")
+            <option> ของ select จริงแต่งสีไม่ได้ ⇒ วางป้ายทับไว้ในกรอบช่อง (pointer-events-none คลิกทะลุไปที่ช่อง)
+            และโชว์เฉพาะตอนใช้ค่าของลูกค้า — พอตั้งเองแล้วขอบน้ำเงินกับบรรทัด ✏️ ข้างล่างบอกแทน */}
+        <span className="relative inline-flex min-w-0">
         <select
           value={!overridden ? '' : custom ? '__other' : effective}
           onChange={(e) => {
@@ -566,16 +570,24 @@ const CreditField: React.FC<{
             onChange(v === '' ? null : v);
           }}
           aria-label="เครดิตของใบนี้"
-          className={`${bare ? 'h-8' : 'h-7'} pl-2 pr-6 rounded-lg border bg-card text-[11px] font-semibold text-slate-800 outline-none max-w-[10rem] ${
-            overridden ? 'border-blue-600' : 'border-slate-300'
+          className={`${bare ? 'h-8' : 'h-7'} pl-2 rounded-lg border bg-card text-[11px] font-semibold text-slate-800 outline-none ${
+            overridden ? 'pr-6 max-w-[10rem] border-blue-600' : 'pr-[4.5rem] max-w-[13rem] border-slate-300'
           }`}
         >
-          <option value="">{customerValue || 'ไม่มีข้อมูล'} (ของลูกค้า)</option>
-          {options.map((t) => (
+          <option value="">{customerValue || 'ไม่มีข้อมูล'}</option>
+          {/* ค่าเดียวกับของลูกค้าไม่ต้องขึ้นซ้ำในรายการ — เลือกมันก็แค่ "ตั้งเอง" เป็นค่าเดิมแล้วใบไปตกคิวแก้มือเปล่า ๆ
+              (ยกเว้นใบที่ถูกตั้งเป็นค่านั้นไว้แล้ว ต้องยังมีตัวเลือกให้ช่องแสดงค่าได้) */}
+          {options.filter((t) => t !== customerValue || (overridden && effective === t)).map((t) => (
             <option key={t} value={t}>{t}</option>
           ))}
           <option value="__other">อื่น ๆ (พิมพ์เอง)…</option>
         </select>
+        {!overridden && (
+          <span className="pointer-events-none absolute right-6 top-1/2 -translate-y-1/2 inline-flex items-center h-5 px-2 rounded-full border border-[var(--brand-border)] bg-[var(--brand-soft)] text-[10.5px] font-bold text-[var(--brand-fg)]">
+            ค่าเดิม
+          </span>
+        )}
+        </span>
         {custom && (
           <input
             value={effective}
