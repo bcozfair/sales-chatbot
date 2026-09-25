@@ -14,6 +14,7 @@
 //     และบรรทัดค่าบริการที่แอดมินเพิ่มเองต้องรอดไปถึงใบจริง (บรรทัดเดียวเสมอ)
 //  7. เครดิต/กำหนดส่งที่แอดมินตั้งทับ — เปลี่ยนคำตอบของกฎค่าบริการจริง · ลงคอลัมน์/คีย์ถูกที่
 //     · ค่าที่ไม่รู้จักถูกปฏิเสธ 400 · ยืนยันแล้วถูกตรึงเป็น source 'override'
+//     · "แก้ใบเดิม" แล้วร่างยังมีเครดิต/กำหนดส่งที่ตั้งทับ (2026-09-25)
 //  8. ทะลุด่านตรวจได้ (`rule_overrides`) + คิวแก้มือใน Odoo (`odoo_manual_review`)
 //     · ข้อสำคัญที่สุด: **ใบจาก LINE ต้องยังถูกบล็อกเหมือนเดิม** (ปลดล็อกผูกกับใบ ไม่ใช่ endpoint)
 //     · `SYSTEM_ERROR` ทะลุไม่ได้แม้กดรับทราบ · ข้อที่เพิ่งโผล่ยังปฏิเสธ 422
@@ -863,6 +864,28 @@ async function case7() {
     dt.type_source === 'override' && dt.days_source === 'override', `${dt.type_source}/${dt.days_source}`);
   ok('  เครดิตที่ตั้งทับอยู่รอดหลังยืนยัน (confirm ไม่เขียน customer_details ทับ)',
     after?.pt === '30 Days', String(after?.pt));
+
+  // ── จ) "แก้ใบเดิม" ต้องพาค่าที่ตั้งทับมาด้วย (2026-09-25) ──
+  //  ฟอร์มอ่านสองค่านี้จากร่าง revise ไปตั้งช่องให้ ⇒ ร่างได้ null = หน้าจอคืนเป็นค่าอัตโนมัติเงียบ ๆ
+  //  (เคยพลาด: reviseQuotation ส่งไปแค่ sourceId · ใบที่ตั้ง Cash ให้ลูกค้าเครดิตเงียบกลับเป็นเครดิต)
+  const confirmedNo = (await pool.query('SELECT quotation_no FROM quotations WHERE id = $1', [target.id]))
+    .rows[0]?.quotation_no;
+  if (!confirmedNo) {
+    fail++;
+    console.log(`  ${RED}✗${RESET} ข้ามข้อ จ) — ใบที่ยืนยันไม่มีเลขที่`);
+    return;
+  }
+  const revised = await reviseQuotation({ adminId, role: 'admin', spUserId: TEST_SP_USER, quotationNo: confirmedNo });
+  const rev = (await pool.query(
+    `SELECT customer_details->>'payment_terms' AS pt,
+            customer_details->>'payment_terms_override' AS ov,
+            delivery_type_override, delivery_days_override
+       FROM quotations WHERE id = $1`, [revised.draft_quote_id])).rows[0];
+  ok('แก้ใบเดิม → ร่างยังมีเครดิตที่ตั้งทับ (ไม่คืนเป็นของลูกค้า)',
+    rev?.pt === '30 Days' && rev?.ov === '30 Days', `${rev?.pt} / ธง ${rev?.ov}`);
+  ok('  กำหนดส่งที่ตั้งเองตามมาด้วย',
+    rev?.delivery_type_override === 'import' && Number(rev?.delivery_days_override) === 21,
+    `${rev?.delivery_type_override} / ${rev?.delivery_days_override}`);
 }
 
 /**

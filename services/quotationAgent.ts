@@ -120,6 +120,8 @@ export async function handleQuotationEditRequest(params: {
 
   // insert ด้วย revExpanded จาก validateQuotationItems ด้านบน — gate นั้น expand สินค้าพ่วงให้แล้ว
   // (ใบเก่าอาจไม่เคยผ่าน expand — กฎคู่สินค้าหลัก-เสริม ต้องพ่วงให้ครบตอนคัดลอกมาแก้)
+  // ไม่ส่ง overrides (Source/เครดิต/กำหนดส่งที่ตั้งทับ) **โดยตั้งใจ** — เจ้าของเคาะ 2026-09-25 ว่าแก้ใบ
+  // ผ่าน LINE ได้ Source = Sales ทั้งหมด แม้ใบต้นทางจะมาจากหน้าเว็บ · ต่างจาก reviseQuotation ของเว็บ
   let newQuote: any = null;
   try {
     const insertedQuotes = await insertDraftQuotations(

@@ -1456,6 +1456,7 @@ export async function handleEvent(
 
           // insert ด้วย revExpandedItems จาก validateQuotationItems ด้านบน — gate นั้น expand สินค้าพ่วงให้แล้ว
           // (ใบเก่าอาจไม่เคยผ่าน expand — กฎคู่สินค้าหลัก-เสริม ต้องพ่วงให้ครบตอนคัดลอกมาแก้)
+          // ไม่ส่ง overrides โดยตั้งใจ — แก้ใบผ่าน LINE ได้ Source = Sales ทั้งหมด (เจ้าของเคาะ 2026-09-25)
           let newQuote: any = null;
           try {
             const insertedQuotes = await insertDraftQuotations(userId, revisedCustomerName, revExpandedItems, 'draft', quote.customer_id, quote.contact_id);

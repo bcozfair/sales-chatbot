@@ -1968,9 +1968,27 @@ export async function reviseQuotation(params: {
       active.customer_id,
       active.contact_id,
       false,
-      // Source ของใบต้นทางตามมาด้วย — ฟอร์มอ่านจากร่างนี้ไปตั้งช่องให้ ไม่งั้น "แก้ใบเดิม"
-      // จะเงียบ ๆ คืนค่าเป็น Sales ทั้งที่ใบเดิมลง Odoo เป็นช่องทางอื่น
-      { sourceId: active.source_id ?? null }
+      // ค่าที่คนออกใบต้นทางตั้งทับไว้ต้องตามมาทั้งสามตัว — ฟอร์มอ่านจากร่างนี้ไปตั้งช่องให้
+      // (QuoteRequest.tsx ตอนโหลดร่าง revise) ไม่งั้น "แก้ใบเดิม" จะเงียบ ๆ คืนค่าเป็นอัตโนมัติ
+      // ทั้งที่ใบที่ลูกค้าถืออยู่ไม่ได้เขียนแบบนั้น: Source คืนเป็น Sales · เครดิตที่ตั้ง Cash
+      // (เช่น ลูกค้าเครดิตเงียบเกินเกณฑ์) กลับเป็นเครดิตของลูกค้า ค่าบริการหาย ยอดใบเปลี่ยน
+      // (แก้ 2026-09-25 · เดิมส่งแค่ sourceId) · กำหนดส่งตั้งทับรายใบ ⇒ ผูกกับบริษัทของใบต้นทาง
+      // ⚠️ แก้ใบผ่าน LINE (quotationAgent) ไม่ส่งค่าเหล่านี้ **โดยตั้งใจ** — เจ้าของเคาะ 2026-09-25
+      //    ว่าแก้ใบผ่าน LINE ได้ Source = Sales ทั้งหมด
+      {
+        sourceId: active.source_id ?? null,
+        paymentTerms: active.customer_details?.payment_terms_override ?? null,
+        ...(active.quote_company === 'PM' || active.quote_company === 'THT'
+          ? {
+              delivery: {
+                [active.quote_company]: {
+                  type: active.delivery_type_override ?? null,
+                  days: active.delivery_days_override ?? null,
+                },
+              },
+            }
+          : {}),
+      }
     );
     if (!quotes || quotes.length === 0) {
       throw new WebQuoteError('INSERT_FAILED', 'ไม่สามารถเตรียมใบเสนอราคาเพื่อแก้ไขได้', 500);
