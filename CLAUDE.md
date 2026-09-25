@@ -490,7 +490,7 @@ chatbot/
 | สร้าง/ยืนยัน/แก้ใบเสนอราคา | `services/quotationService.ts` · `services/quotationAgent.ts` (แก้ใบเดิม) |
 | หน้าเว็บ "ขอใบเสนอราคา" | `services/webQuoteService.ts` · `webIdentity.ts` · `chatChannel.ts` · `salespersonPicker.ts` |
 | เพิ่มผู้ติดต่อใหม่เอง (`local_contacts`) | `routes/localContacts.ts` · `services/localContacts.ts` · `db/localContactsRepo.ts` |
-| ค้นหา/จับคู่สินค้า/ลูกค้า | `services/productService.ts` · `services/customerService.ts` |
+| ค้นหา/จับคู่สินค้า/ลูกค้า | `services/productService.ts` · `services/thaiSuffixVariant.ts` (รุ่นที่ต่างกันแค่คำไทยท้ายชื่อ เช่น "ดูดออก") · `services/customerService.ts` |
 | ราคา / โปรโมชัน | `utils/pricing.ts` · `utils/promotionValidator.ts` · `services/rules/` |
 | ห้ามเสนอราคา / เครดิตลูกค้า | `services/blacklistService.ts` · `services/creditHoldService.ts` |
 | SQL / ตาราง | `db/repositories.ts` · `migrations/schema.sql` |

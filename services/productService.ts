@@ -187,8 +187,9 @@ export function buildCandidateList<T extends Product>(rows: T[]): T[] {
 
 // ─────────────────────────────────────────────
 //  รายงานข้อความของรายการรุ่นใกล้เคียง — ที่เดียวทั้งสามเส้นทาง (stage 1.3 / stage 2 / legacy)
+//  และ thaiSuffixVariant.ts ที่เรียงรายการใหม่หลัง findProduct
 // ─────────────────────────────────────────────
-function candidateReport(header: string, candidates: Product[]): string {
+export function candidateReport(header: string, candidates: Product[]): string {
   let report = `${header}\n`;
   candidates.forEach((p) => {
     const price = Number(p.sales_price || 0).toLocaleString();

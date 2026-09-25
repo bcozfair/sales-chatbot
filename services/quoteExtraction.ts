@@ -21,6 +21,7 @@
 import { createChatCompletion } from '../config/clients.js';
 import { getRecentMessages, deletePendingQuotations } from '../db/repositories.js';
 import { findProduct, CANDIDATE_LIMIT } from './productService.js';
+import { applyThaiSuffixVariants } from './thaiSuffixVariant.js';
 import { calcNetPrice, round2 } from '../utils/pricing.js';
 
 /** สถานะการ resolve ของสินค้า 1 รายการ — เรียงตามลำดับที่เซลส์พิมพ์เสมอ */
@@ -385,6 +386,11 @@ export async function extractQuoteFromText(params: ExtractQuoteParams): Promise<
             result: mergedResult
           });
         }
+
+        // ── รุ่นที่ต่างกันแค่คำไทยท้ายชื่อ (เช่น "PMV12.00220" กับ "PMV12.00220 ดูดออก") ──
+        // AI มักตัดคำไทยทิ้งจากรหัส ⇒ ย้อนอ่านข้อความจริงแล้วเลือก/เรียงรุ่นให้ตรงกับที่เซลส์พิมพ์
+        // (กติกาเต็มอยู่หัวไฟล์ thaiSuffixVariant.ts · ล้มเหลว = ใช้ผลเดิมของ findProduct)
+        await applyThaiSuffixVariants(productResults, content);
 
         // slots = สถานะการ resolve ต่อรายการ (ตามลำดับเดิม): resolved | กำกวม(มี candidate ให้กดเลือก) | พิมพ์ผิด(ไม่มี candidate)
         const slots: any[] = [];
