@@ -77,7 +77,9 @@ if (argv.includes('--subcodes')) {
           ? ` ${sc.percent}%`
           : sc.effect === 'setAxis'
             ? ` ${sc.axis} = ${sc.value}`
-            : '';
+            : sc.effect === 'option'
+              ? ` เปิดกฎ ${sc.value}`
+              : '';
     console.log(`  ${sc.subCode.padEnd(10)} ${sc.scope.padEnd(10)} ${sc.effect.padEnd(10)}${money}`);
     console.log(`  ${''.padEnd(10)} ${sc.reads}`);
     console.log(`  ${''.padEnd(10)} ที่มา: ${sc.source ?? 'คนตั้งค่าเอง'}${sc.by ? ` · ${sc.by}` : ''}${sc.at ? ` · ${sc.at}` : ''}`);

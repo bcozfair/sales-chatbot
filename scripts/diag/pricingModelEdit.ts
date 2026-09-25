@@ -21,6 +21,7 @@ import { makeTemplate, readUploaded } from '../../services/pricingLab/bookFile.j
 import { applyModels } from '../../services/pricingLab/bookUpdate.js';
 import { checkPriceModel } from '../../services/pricingLab/modelShape.js';
 import { loadCatalogSubcodes } from '../pricebook/seedCatalogSubcodes.js';
+import { clean } from '../../db/pricingLabRepo.js';
 
 let pass = 0;
 const fails: string[] = [];
@@ -592,7 +593,7 @@ if (ts01 && ts010) {
   check('หน้าชีตรู้ค่ามาตรฐานของเกลียว', JSON.stringify(v9.axisDefaults) === JSON.stringify([{ axis: 'thread', axisTh: 'ขนาดเกลียว', value: '1/4”' }]),
     JSON.stringify(v9.axisDefaults));
   check('ยังเปิดแบบชีต Excel ได้', excelReady(b9.models['TSK-01']!) && excelReady(b9.models['TSK-01-0']!));
-  check('ไฟล์ catalog-subcodes.json ผ่านตัวตรวจทุกแถว (12 + แกน 6)', cat.length === 13, String(cat.length));
+  check('ไฟล์ catalog-subcodes.json ผ่านตัวตรวจทุกแถว (TS_-01 12 + แกน 6 · TS_-08 5 · TS_-10 5)', cat.length === 23, String(cat.length));
 
   // ── ราคาสายที่ตารางรหัสย่อยตั้งให้ ต้องมีช่องบนหน้าสมุดราคาเสมอ (เจ้าของ 2026-09-25: "ต้องสามารถแก้ไขผ่าน ui ได้")
   const rowsOf = (b: PriceBook, code: string) =>
@@ -677,6 +678,77 @@ if (ts01 && ts010) {
   check('แม่แบบ .xlsx ไป-กลับ ⇒ กฎความยาวแกนเท่าเดิมทุกค่า (มี source · ไม่กลายเป็นกฎที่คนเพิ่มเอง)',
     canon(back10?.models['TSK-01']?.adders.find((a) => a.id === 'len_l1')) === canon(lenRule) && !!lenRule?.source,
     JSON.stringify(back10?.models['TSK-01']?.adders.find((a) => a.id === 'len_l1')));
+}
+
+console.log('\n── 11. รหัสย่อยแบบ "เปิดกฎ" + ท่อนติดกัน — TS_-08 / TS_-10 ตามแคตตาล็อก (2026-09-25) ──\n');
+
+// แคตตาล็อก TS_-08: ท้ายรหัส = [Element]-[หัวกระโหลก][Ground] เช่น `-2-KBU` · TS_-10: หลัง M = [ชนิดสาย][Ground]
+// ความหมายอยู่ในตารางรหัสย่อย (`catalog-subcodes.json`) · ราคาอยู่ในกฎเดิมของชีต (หัว R9–R11 · 2 element U)
+const ts08 = book.models['TSP-08'];
+const ts10 = book.models['TSP-10'];
+if (!ts08 || !ts10) {
+  check('สมุดมี TSP-08 และ TSP-10', false);
+} else {
+  const cat = loadCatalogSubcodes();
+  const same = (x: { subCode: string; scope: string }, y: { subCode: string; scope: string }) =>
+    x.subCode.toUpperCase() === y.subCode.toUpperCase() && x.scope === y.scope;
+  // เล่มในฐานก่อนเขียนยังไม่มีค่ามาตรฐานสาย PVC ของ TS-10 (แมป 16 มีแล้ว) — เติมให้เหมือนกันทั้งสองทาง
+  const b11: PriceBook = {
+    ...book,
+    models: { ...book.models, 'TSP-10': { ...ts10, axisDefaults: { ...ts10.axisDefaults, cable: 'สายพีวีซี' } } },
+    subCodes: [...(book.subCodes ?? []).filter((x) => !cat.some((c) => same(c, x))), ...cat],
+  };
+  const run = (code: string, b: PriceBook = b11) => { const p = parseProductCode(code, b); return { p, r: computePrice(p.cfg!, b) }; };
+  const parts = (p: ReturnType<typeof parseProductCode>) => p.parts.map((x) => `${x.text}[${x.kind}]`).join(' ');
+  const price = (code: string, want: number, label: string) => {
+    const { p, r } = run(code);
+    const unread = p.parts.filter((x) => x.kind === 'unknown').length;
+    check(`${code} = ${want.toLocaleString()} — ${label}`, r.status === 'priced' && r.unitPrice === want && unread === 0,
+      `${r.status} ${r.unitPrice} ${r.violations.map((v) => v.message).join('|')} · ${parts(p)}`);
+    return { p, r };
+  };
+
+  price('TSP-08(S4)6x100-U', 1680, 'U = Unground ไม่มีราคาเพิ่ม · หัวไม่ระบุ = อลูมิเนียมมาตรฐาน');
+  const bu = price('TSP-08(S4)6x100-BU', 2180, 'BU = หัว B (+500 จาก TS-08!R10) + U');
+  check('  BU แยกเป็นสองท่อนบนจอ (B · U)', parts(bu.p).includes('B[option] U[noPrice]'), parts(bu.p));
+  price('TSP-08(S4)6x100-KBU', 2380, 'ยาวสุดก่อน: KB (+700) + U — ไม่ใช่ K + B (+920)');
+  price('TSP-08(S4)6x100-KU', 2100, 'K = เบกาไลต์ +420');
+  price('TSP-08(S6)8x43-2-BU', 3010, '2 element +750 + หัว B +500 (ราคาตั้งเกลียว 3/4” แกน 8 = 1,760)');
+  price('TSP-08(S4)6x100-2BU', 2930, 'ไม่มีขีดคั่น 2 กับ BU ก็แยกได้');
+  const e2 = run('TSP-08(S4)4x100-2-BU');
+  check('TSP-08(S4)4x100-2-BU — 2 element แกน 4 mm ⇒ กฎห้ามเดิมของรุ่นทำงาน (option จากรหัสย่อยเข้าก่อน constraint)',
+    e2.r.status !== 'priced' && e2.r.violations.some((v) => v.id === 'ELEM2_MIN_DIA'), e2.r.violations.map((v) => v.id).join('|'));
+  const eu = run('TSP-08(S4)6x100-EU');
+  check('TSP-08(S4)6x100-EU — หัว E ไม่มีราคาใน Excel ⇒ ขึ้นแดงทั้งท่อน ไม่คิดเงินเงียบ ๆ',
+    eu.p.parts.some((x) => x.text === 'EU' && x.kind === 'unknown'), parts(eu.p));
+  const xu = run('TSP-08(S4)6x100-XU');
+  check('  ท่อนที่อ่านได้ไม่ครบทุกตัวอักษร (XU) ⇒ ไม่ใช้ส่วนที่อ่านได้ (ไม่มี U[noPrice] ลอย)',
+    xu.p.parts.some((x) => x.text === 'XU' && x.kind === 'unknown') && !xu.p.parts.some((x) => x.text === 'U'), parts(xu.p));
+
+  price('TSP-10(S2)6x100+1MPU', 1535, 'P = พีวีซี · U = Unground · สาย 1 M = มาตรฐาน');
+  price('TSP-10(S4)6x100+3MTU', 1940, 'T = เทปล่อน 180 × 2 M');
+  const d = price('TSP-10(S2)6x100+2M', 1635, 'ไม่บอกชนิดสาย = พีวีซี (แคตตาล็อก Standard for RTD = TS-10!A41)');
+  check('  บรรทัดค่าสายบอกว่าชนิดสายมาจากค่ามาตรฐาน', /ค่ามาตรฐาน/.test(d.r.breakdown.map((l) => l.detail ?? '').join(' ')),
+    d.r.breakdown.map((l) => l.detail).join('|'));
+  const tsu = run('TSP-10(S2)5x55+5MTSU');
+  check('TSP-10(S2)5x55+5MTSU — อ่าน TS ออก แต่ TS-10 ยังไม่มีราคาสายนี้ ⇒ ไม่ได้ราคา (ไม่ใช่คิดเป็นเทปล่อนธรรมดา)',
+    tsu.r.status !== 'priced' && tsu.p.parts.some((x) => x.text === 'TS' && x.kind === 'axis')
+      && tsu.r.violations.some((v) => /เทปล่อนหุ้มชีลด์/.test(v.message)),
+    `${tsu.r.status} ${tsu.r.violations.map((v) => v.message).join('|')}`);
+
+  // แถวที่เปิดกฎที่รุ่นนั้นไม่มี (ตั้งผิดรุ่น/ขอบเขตกว้างเกิน) — ต้องขึ้นแดง ไม่ใช่ "อ่านครบ" ทั้งที่ไม่ได้คิดเงิน
+  const wrong: PriceBook = { ...b11, subCodes: [...(b11.subCodes ?? []),
+    { subCode: 'B', match: 'exact', scope: 'TSP-10', reads: 'หัว B', effect: 'option', value: 'head:alu_l' }] };
+  const w = run('TSP-10(S2)6x100+1MPU-B', wrong);
+  check('แถว "เปิดกฎ" ที่รุ่นไม่มีกฎนั้น ⇒ ท่อนนั้นขึ้นแดง ราคาไม่ขยับ', w.p.parts.some((x) => x.text === 'B' && x.kind === 'unknown') && w.r.unitPrice === 1535,
+    `${w.r.unitPrice} · ${parts(w.p)}`);
+
+  check('clean(): แถว "เปิดกฎ" ที่ไม่บอกว่าเปิดกฎไหน ⇒ ปฏิเสธ', clean({ subCode: 'B', scope: 'TSP-08', effect: 'option' }) === null);
+  check('clean(): แถว "เปิดกฎ" เก็บชื่อ option ไว้', clean({ subCode: 'B', scope: 'TSP-08', effect: 'option', value: 'head:alu_l' })?.value === 'head:alu_l');
+
+  const { book: back11 } = await readUploaded(Buffer.from(makeTemplate(b11, '2026-09-25')));
+  const bRow = back11?.subCodes?.find((x) => x.subCode === 'B' && x.scope === 'TSP-08');
+  check('แม่แบบ .xlsx ไป-กลับ ⇒ แถว "เปิดกฎ" ยังเป็นเปิดกฎ head:alu_l', bRow?.effect === 'option' && bRow.value === 'head:alu_l', JSON.stringify(bRow));
 }
 
 console.log(`\n${'─'.repeat(70)}`);

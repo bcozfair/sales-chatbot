@@ -263,11 +263,39 @@ const add = (c: Ctx, part: CodePart) => c.parts.push(part);
 function readFromTable(c: Ctx, token: string, text: string = token): boolean {
   const sc = findSubCode(c.book, c.model, token);
   if (!sc) return false;
+  if (sc.effect === 'option' && !hasOptionAdder(c.model, sc.value ?? '')) {
+    // แถวที่ตั้งขอบเขตกว้าง (ทั้งตระกูล/ทุกรุ่น) ให้ไปเปิดกฎที่รุ่นนี้ไม่มี — ปล่อยผ่านเท่ากับบอกว่า
+    // "อ่านครบ" ทั้งที่ไม่ได้คิดเงินส่วนนั้นเลย ⇒ ขึ้นแดง
+    add(c, { text, reads: `${sc.reads} — ตั้งให้เปิดกฎ ${sc.value ?? '—'} แต่ ${c.model.sheet ?? c.model.code} ไม่มีกฎนี้`, kind: 'unknown' });
+    return true;
+  }
   c.cfg.options = [...(c.cfg.options ?? []), subCodeOption(token)];
   const kind: CodePart['kind'] =
     sc.effect === 'none' ? 'noPrice' : sc.effect === 'setAxis' ? 'axis' : 'option';
   add(c, { text, reads: sc.reads, kind });
   return true;
+}
+
+/**
+ * ตัดข้อความเป็นท่อนที่ตารางรหัสย่อยรู้จัก **ยาวสุดก่อน** — คืน `undefined` ถ้าเหลือตัวอักษรที่ไม่รู้จัก
+ *
+ * แคตตาล็อกเขียนหลายช่องติดกันโดยไม่มีตัวคั่น: สาย `TSU` = ชนิดสาย TS + Ground U ·
+ * ท้าย TS_-08 `KBU` = หัวกระโหลก KB + Ground U ⇒ ตั้งตารางทีละช่องแล้วให้ตรงนี้ประกอบเอง
+ * ไม่ต้องตั้งทุกคู่ผสม (TS_-08 มีหัว 8 แบบ × Ground 2 แบบ)
+ * **อ่านได้ครบทุกตัวอักษรเท่านั้นถึงจะใช้** — `TSU` ของรุ่นที่ไม่มี `TS` จะกลายเป็น `T` + `SU`
+ * แล้วได้ราคาผิดชนิด เดาแบบนั้นแย่กว่าบอกว่าอ่านไม่ออก
+ */
+function splitKnown(c: Ctx, text: string): { pieces: string[]; rest: string } {
+  const pieces: string[] = [];
+  let rest = text.toUpperCase();
+  while (rest) {
+    let len = rest.length;
+    while (len > 0 && !findSubCode(c.book, c.model, rest.slice(0, len))) len--;
+    if (len === 0) break;
+    pieces.push(rest.slice(0, len));
+    rest = rest.slice(len);
+  }
+  return { pieces, rest };
 }
 
 /** รหัสย่อยที่เหลือจากรหัส ตัดด้วย `-` แล้วยังไม่มีใครอ่าน */
@@ -305,15 +333,7 @@ function readCable(c: Ctx, token: string): boolean {
   // ตัดเป็นท่อนที่ตารางรู้จัก ยาวสุดก่อน — **อ่านได้ครบทุกตัวอักษรเท่านั้นถึงจะใช้** ไม่งั้นทิ้งทั้งท่อน:
   // `TSU` ของ TS_-01-0 (แคตตาล็อกไม่มี TS) จะกลายเป็น `T` + `SU` แล้วได้ราคาสายเทปล่อนทั้งที่
   // อาจเป็นเทปล่อนหุ้มชีลด์ — เดาแบบนั้นแย่กว่าบอกว่าอ่านไม่ออก
-  const pieces: string[] = [];
-  let rest = tail.toUpperCase();
-  while (rest) {
-    let len = rest.length;
-    while (len > 0 && !findSubCode(c.book, c.model, rest.slice(0, len))) len--;
-    if (len === 0) break;
-    pieces.push(rest.slice(0, len));
-    rest = rest.slice(len);
-  }
+  const { pieces, rest } = splitKnown(c, tail);
   if (!rest) {
     for (const p of pieces) readFromTable(c, p);
     return true;
@@ -592,6 +612,12 @@ function readBh(c: Ctx, rest: string): void {
       continue;
     }
     if (readFromTable(c, token)) continue;
+    // หลายช่องติดกันไม่มีตัวคั่น (`BU` = หัว B + Ground U ของ TS_-08) — ครบทุกตัวอักษรถึงจะใช้
+    const split = splitKnown(c, token);
+    if (split.pieces.length > 1 && !split.rest) {
+      for (const p of split.pieces) readFromTable(c, p);
+      continue;
+    }
 
     add(c, { text: token, reads: 'ยังไม่ได้ตั้งค่าว่าแปลว่าอะไร', kind: 'unknown' });
   }
@@ -625,6 +651,12 @@ function readTail(c: Ctx, rest: string, prefix: string): void {
     // `-U` ของ TS-14 เคยเป็นเงื่อนไขฝังในโค้ดตรงนี้ ตอนนี้ย้ายไปเป็นแถวในตารางรหัสย่อยแล้ว
     // (มาจากรหัสมาตรฐานที่ชีตเขียนเอง `TS_- 14 D x100-U`) ⇒ แอดมินเห็นและแก้ได้
     if (readFromTable(c, token)) continue;
+    // หลายช่องติดกันไม่มีตัวคั่น (`BU` = หัว B + Ground U ของ TS_-08) — ครบทุกตัวอักษรถึงจะใช้
+    const split = splitKnown(c, token);
+    if (split.pieces.length > 1 && !split.rest) {
+      for (const p of split.pieces) readFromTable(c, p);
+      continue;
+    }
 
     add(c, { text: token, reads: 'ยังไม่ได้ตั้งค่าว่าแปลว่าอะไร', kind: 'unknown' });
   }

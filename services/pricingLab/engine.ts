@@ -414,6 +414,9 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
   // standard คือสเปกที่รวมอยู่ในราคาตั้งแล้ว ⇒ เป็นค่าตั้งต้นของทุก dim ที่ผู้ใช้ไม่ได้ระบุ
   const dims: Record<string, number> = { ...model.standard, ...(cfg.dims ?? {}) };
   const options = new Set(cfg.options ?? []);
+  // รหัสย่อยที่ "เปิดกฎของรุ่น" (`B` ของ TS_-08 = หัวอลูมิเนียมใหญ่) — ต้องเข้า options ก่อน constraint
+  // เพราะกฎห้ามอย่าง "2 element ต้องแกน 6 mm ขึ้นไป" อ่าน option ตัวเดียวกัน · เงินมาจากกฎเดิม ไม่ใช่จากแถวนี้
+  for (const sc of subCodes) if (sc.effect === 'option' && sc.value) options.add(sc.value);
 
   // ค่าที่คำนวณจากค่าอื่น ต้องมาก่อน constraint และก่อน adder เพราะทั้งคู่อ่านมันได้
   for (const d of model.derivedDims ?? []) {
