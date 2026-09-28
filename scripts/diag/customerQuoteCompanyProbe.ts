@@ -249,7 +249,8 @@ const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] 
 async function open(width: number, hash: string, seedJson: string | null = null) {
   const page = await browser.newPage();
   page.on('pageerror', (e) => { fail++; console.log('  ✗ หน้าพัง:', (e as Error)?.message ?? String(e)); });
-  await page.setViewport({ width, height: 900 });
+  // 390 = มือถือจริง (จอสัมผัส ไม่มี hover) — กล่องลอยของป้ายครอบคลุมต้องเปิดด้วยการแตะ
+  await page.setViewport({ width, height: 900, ...(width < 768 ? { isMobile: true, hasTouch: true } : {}) });
   await page.evaluateOnNewDocument((t, u, p) => {
     sessionStorage.setItem('admin_token', t);
     sessionStorage.setItem('admin_user', u);
@@ -300,6 +301,25 @@ try {
   const dbRow = (await pool.query(`SELECT quote_company, note, created_by FROM customer_quote_company WHERE company_id = $1`, [coA])).rows[0];
   ok('แถวในฐาน: PM · หมายเหตุ · ผู้เพิ่ม', dbRow?.quote_company === 'PM' && dbRow?.note === 'diag-note' && dbRow?.created_by === admin.id);
   ok('คอลัมน์ครอบคลุมนับได้', await until(async () => /\d+ รหัสลูกค้า/.test(await text(page)), 8000));
+  // กล่องลอยของป้าย (แบบ A · mockups/quote-pm-coverage-tooltip.html) — ชี้แล้วขึ้น ออกแล้วหาย
+  const nRelated = (await pool.query(`SELECT count(DISTINCT company_id)::int n FROM customers_data_view
+    WHERE customer_tax_id = (SELECT customer_tax_id FROM customers_data_view WHERE company_id = $1 LIMIT 1)`, [coA])).rows[0].n;
+  const tip = (p: Page) => p.evaluate(() => {
+    const t = document.querySelector('[role="tooltip"]') as HTMLElement | null;
+    if (!t) return null;
+    const r = t.getBoundingClientRect();
+    const rows = [...t.querySelectorAll('.border-t')] as HTMLElement[];
+    return { rows: rows.length, first: rows[0]?.innerText ?? '', left: r.left, right: r.right, vw: innerWidth };
+  });
+  const chipSel = 'table [data-coverage-chip]';
+  await page.hover(chipSel);
+  const t1 = await (async () => { await until(async () => (await tip(page)) !== null, 3000); return tip(page); })();
+  ok('ชี้ป้าย → กล่องลอยขึ้น · จำนวนแถวตรงกับป้าย', !!t1 && t1.rows >= Math.min(2, nRelated) && (await text(page)).includes(`${t1.rows} รหัสลูกค้า`), JSON.stringify(t1?.rows));
+  ok('แถวแรกคือรหัสที่ตั้งไว้ (ป้าย "ที่ตั้งไว้")', !!t1 && t1.first.includes('ที่ตั้งไว้'));
+  ok('กล่องอยู่ในจอ', !!t1 && t1.left >= 0 && t1.right <= t1.vw);
+  await page.screenshot({ path: `${shots}/qpm-tip-1280.png` }).catch(() => {});
+  await page.mouse.move(5, 5);
+  ok('เลื่อนเมาส์ออก → กล่องหาย', await until(async () => (await tip(page)) === null, 3000));
   await page.screenshot({ path: `${shots}/qpm-list-1280.png`, fullPage: true }).catch(() => {});
 
   // บริษัทที่อยู่ในรายการแล้วเพิ่มซ้ำไม่ได้ (รวมสาขา B)
@@ -335,6 +355,23 @@ try {
   await until(async () => (await text(page)).includes('diag-note'));
   ok('390: การ์ดขึ้น · ไม่มี scroll แนวนอน', (await text(page)).includes('diag-note') && (await overflow(page)) <= 0, `${await overflow(page)}px`);
   await page.screenshot({ path: `${shots}/qpm-list-390.png`, fullPage: true }).catch(() => {});
+  {
+    const tipM = () => page.evaluate(() => {
+      const t = document.querySelector('[role="tooltip"]') as HTMLElement | null;
+      if (!t) return null;
+      const r = t.getBoundingClientRect();
+      return { left: r.left, right: r.right, vw: innerWidth };
+    });
+    await until(async () => (await page.$('ul [data-coverage-chip]')) !== null, 8000);
+    await page.tap('ul [data-coverage-chip]');
+    const opened = await until(async () => (await tipM()) !== null, 3000);
+    const tm = await tipM();
+    ok('390: แตะป้าย → กล่องขึ้น · อยู่ในจอ', opened && !!tm && tm.left >= 0 && tm.right <= tm.vw, JSON.stringify(tm));
+    ok('390: เปิดกล่องแล้วไม่มี scroll แนวนอน', (await overflow(page)) <= 0, `${await overflow(page)}px`);
+    await page.screenshot({ path: `${shots}/qpm-tip-390.png` }).catch(() => {});
+    await page.touchscreen.tap(195, 700);
+    ok('390: แตะที่อื่น → กล่องปิด', await until(async () => (await tipM()) === null, 3000));
+  }
   await page.evaluate((co) => (document.querySelector(`button[aria-label^="แก้หมายเหตุของ"][aria-label*="${co}"]`) as HTMLElement | null)?.click(), ctA.customer_name.trim().slice(0, 8));
   await page.waitForSelector('#qpm-edit-note');
   await page.$eval('#qpm-edit-note', (el) => { (el as HTMLInputElement).select(); });
