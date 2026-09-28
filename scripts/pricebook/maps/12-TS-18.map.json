@@ -3,6 +3,7 @@
   "sheet": "TS-18",
   "code": "TS-18",
   "label": "Thermocouple / RTD TS-18 (หน้าแปลน)",
+  "aliases": ["TSK-18", "TSJ-18", "TST-18", "TSP-18", "TSPA-18", "TSZ-18"],
   "standard": { "L1": 100, "L2": 50 },
   "base": {
     "kind": "matrix",

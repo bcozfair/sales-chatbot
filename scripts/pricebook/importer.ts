@@ -799,7 +799,7 @@ async function applyAliases(fromFile: PriceBook, opts: { apply: boolean; by: str
     console.log(`\n${code}:`);
     if (gone.length) console.log(`  ถอด ${gone.join(', ')}`);
     if (added.length) console.log(`  เพิ่ม ${added.join(', ')}`);
-    console.log(`  ⇒ ใช้กับรหัส ${[code, ...now].join(', ')}`);
+    console.log(`  ⇒ ใช้กับรหัส ${[code, ...now].filter((c) => !/^TS-\d/.test(c)).join(', ')}`);   // TS-14 = ชื่อรุ่นในฐาน ไม่ใช่รหัสที่ใช้ได้
   }
   if (changed.length === 0) {
     console.log('\nรายชื่อรหัสในฐานตรงกับแมปทุกรุ่นแล้ว — ไม่มีอะไรต้องเขียน');
@@ -813,7 +813,7 @@ async function applyAliases(fromFile: PriceBook, opts: { apply: boolean; by: str
   const revision = await commitBookChange({
     parent: state.revision,
     kind: 'model',
-    next: { ...state.book, models, edited: { at, by: opts.by ?? undefined, note: 'ปรับรายชื่อรหัสที่ใช้ตารางเดียวกันตามแมป (ถอด TS-01/TS-01-0 — เจ้าของยืนยัน 2026-09-28) — ไม่แตะตัวเลขราคา' } },
+    next: { ...state.book, models, edited: { at, by: opts.by ?? undefined, note: 'ปรับรายชื่อรหัสที่ใช้ตารางเดียวกันตามแมป (แคตตาล็อก ∩ Excel — เจ้าของสั่ง 2026-09-28) — ไม่แตะตัวเลขราคา' } },
     changed,
     by: opts.by,
   });

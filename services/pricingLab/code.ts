@@ -515,14 +515,9 @@ function readTs14(c: Ctx, rest: string, prefix: string, letter: string): void {
  * ⇒ ใช้ D2 (ตัวที่มีสร้อย A/S ติดอยู่จริงในรหัสของจริง) แล้วเตือนเมื่อสองตัวไม่เท่ากัน
  */
 function readTs18(c: Ctx, rest: string, prefix: string, letter: string): void {
-  const sensors = axisValues(c.model, 'sensor');
-  const sHit = matchSensor(sensors, prefix, letter);
-  if (sHit) {
-    c.cfg.axes = { ...c.cfg.axes, sensor: sHit };
-    add(c, { text: prefix, reads: `หัววัด ${sHit}`, kind: 'axis' });
-  } else {
-    add(c, { text: prefix, reads: `ไม่มีหัววัดชนิด ${letter} ในตารางราคา TS-18`, kind: 'unknown' });
-  }
+  // ตัวอ่านหัววัดตัวกลาง — ชีต TS-18 มีกฎ "Type T บวกเพิ่มจาก Type K" (แคตตาล็อก TS_-18 มี T) ซึ่งตัวอ่านเดิม
+  // ของรุ่นนี้ดูแค่คอลัมน์ ⇒ `TST-18` ขึ้น "ไม่มีหัววัด" ทั้งที่ Excel มีราคา (เจอ 2026-09-28 ตอนตั้ง "ใช้กับรหัส" ตามแคตตาล็อก)
+  readSensor(c, prefix, letter);
 
   const paren = rest.match(/^\(([^)]*)\)/);
   if (paren) {
@@ -666,35 +661,26 @@ function readTail(c: Ctx, rest: string, prefix: string): void {
 // ── ตัวหลัก ──────────────────────────────────────────────────────────────────
 
 /**
- * หารุ่นในสมุดราคาจากหัวรหัส — ลองตามลำดับ "ตรงตัว → ตระกูล K → ไม่มีตัวอักษร"
- * เพราะชีตเดียวใช้กับหลายตัวอักษร (TS-04 ใช้กับทั้ง TSK-04 และ TSJ-04 ราคาเท่ากัน)
+ * หารุ่นในสมุดราคาจากหัวรหัส — **ต้องเป็นรหัสที่รุ่นนั้นเขียนไว้ใน "ใช้กับรหัส" (`code` + `aliases`) เท่านั้น**
+ *
+ * เจ้าของสั่ง 2026-09-28: *"รหัสที่ใช้ได้ควรเป็นตัวเลือกที่มีข้อมูลตาม Excel และ pattern การประกอบรหัสตามแคตตาล็อกเท่านั้น"*
+ * ⇒ `aliases` ของแต่ละรุ่น = ชนิดเซนเซอร์ที่แคตตาล็อก TS_-xx มี **และ** ชีต Excel มีราคา (แมปรายชีต) ·
+ * เดิมมีทางถอย "ตรงตัว → TSK → TSP → ไม่มีตัวอักษร" ทำให้รหัสนอกแคตตาล็อกยืมตารางของตัวอื่นแล้วได้ราคาเงียบ ๆ
+ * (`TSR-04` ได้ราคา Type K ทั้งที่ TS_-04 มีแค่ K/J/T · `TSE-06` · `TSZA-08` ฯลฯ) — ถอดทิ้งทั้งหมด
+ * · `TS-<เลข>` ที่ไม่มีตัวอักษรชนิดเซนเซอร์ไม่ใช่รหัสตามแคตตาล็อกของรุ่นไหนเลย (`_` ของ TS_-xx ต้องมีเสมอ)
+ *   แม้รุ่นในสมุดจะชื่อ `TS-14` / `TS-18` (ชื่อรุ่นในฐานเปลี่ยนไม่ได้ — ประวัติราคาผูกกับชื่อนั้น)
+ * · ⚠️ ห้ามเติมทางถอยข้ามตระกูล — เดิมไล่ `BH-<เลข>` ให้ทุกรหัส ⇒ `TSK-01` 1,210 รหัสตกไปใช้ตารางของ
+ *   Band Heater แล้วคืนราคาออกมาเป็นปกติ ไม่มีอะไรฟ้อง (เจอ 2026-09-21)
  */
 function findModel(book: PriceBook, prefix: string, num: string, suffix: string): PriceModel | undefined {
-  // ⚠️ ทางถอยต้องอยู่ใน **ตระกูลเดียวกัน** เท่านั้น — เดิมไล่ `BH-<เลข>` ให้ทุกรหัสรวมทั้งที่
-  //    ขึ้นต้นด้วย TS ⇒ `TSK-01` (เทอร์โมคัปเปิล 1,210 รหัส) ตกไปใช้ตารางราคาของ Band Heater
-  //    `BH-01` แล้วคืนราคาออกมาเป็นปกติ ไม่มีอะไรฟ้อง (เจอ 2026-09-21 ตอนวัดความครอบคลุม)
-  // `TS-<เลข>` ที่ไม่มีตัวอักษรชนิดเซนเซอร์ ไม่ยืมตารางของ TSK/TSP — เจ้าของยืนยัน 2026-09-28 ว่า
-  // TS_-01 ใช้กับ TSK/TSJ/TST/TSP/TSPA/TSZ-01 **ไม่ได้ใช้กับ TS-01** (TS_-01-0 เช่นกัน) ⇒ รหัสแบบนี้
-  // ได้รุ่นเฉพาะที่สมุดราคาเขียนชื่อไว้ตรง ๆ (`TS-14` · ชื่อพ้องของรุ่น) ไม่งั้นไม่มีรุ่น
-  const cands = prefix === 'BH'
-    ? [`BH-${num}${suffix}`, `BH-${num}`]
-    : prefix === 'TS'
-    ? [`TS-${num}${suffix}`, `TS-${num}`]
-    : [
-        `${prefix}-${num}${suffix}`,
-        `${prefix}-${num}`,
-        `TSK-${num}${suffix}`,
-        `TSP-${num}${suffix}`,
-        `TSK-${num}`,
-        `TSP-${num}`,
-        `TS-${num}${suffix}`,
-        `TS-${num}`
-      ];
-  for (const c of cands) {
-    const m = resolveModel(book, c);
-    if (m) return m;
-  }
-  return undefined;
+  if (prefix === 'TS') return undefined;
+  return resolveModel(book, `${prefix}-${num}${suffix}`) ?? resolveModel(book, `${prefix}-${num}`);
+}
+
+/** รุ่นที่ใช้เลขรุ่นนี้ (ไว้บอกคนพิมพ์ว่าตารางนั้นใช้กับรหัสไหน เมื่อหัวรหัสไม่อยู่ในรายชื่อ) */
+function modelsOfNumber(book: PriceBook, num: string): PriceModel[] {
+  const tail = new RegExp(`^TS[A-Z]*-${num}$`);
+  return Object.values(book.models).filter((m) => [m.code, ...(m.aliases ?? [])].some((c) => tail.test(c)));
 }
 
 /**
@@ -745,13 +731,13 @@ export function parseProductCode(input: string, book: PriceBook): ParsedCode {
   const { prefix, num, suffix } = head;
   const model = findModel(book, prefix, num, suffix);
   if (!model) {
-    // `TS-01` ไม่มีรุ่น แต่มีตารางของตระกูลเดียวกันที่มีตัวอักษรเซนเซอร์ ⇒ บอกว่ารหัสไหนใช้ตารางนั้นได้
-    const sibling = prefix === 'TS'
-      ? findModel(book, 'TSK', num, suffix) ?? findModel(book, 'TSP', num, suffix)
-      : undefined;
-    if (sibling) {
+    // หัวรหัสไม่อยู่ในรายชื่อ แต่เลขรุ่นนี้มีตาราง ⇒ บอกว่าตารางนั้นใช้กับรหัสไหน (ไม่ใช่ "ยังไม่มีสมุดราคา")
+    const siblings = prefix === 'BH' ? [] : modelsOfNumber(book, num);
+    if (siblings.length) {
       out.problems.push(
-        `รหัส ${prefix}-${num}${suffix} ไม่มีตัวอักษรชนิดเซนเซอร์ — ตาราง ${sibling.label} ใช้กับรหัส ${[sibling.code, ...(sibling.aliases ?? [])].join(', ')} เท่านั้น`
+        `รหัส ${prefix}-${num}${suffix} ไม่อยู่ในรูปแบบของแคตตาล็อก` +
+          (prefix === 'TS' ? ' (ไม่มีตัวอักษรชนิดเซนเซอร์)' : ` (ไม่มีชนิดเซนเซอร์ ${prefix.slice(2)} ในตารางนี้)`) +
+          ' — ' + siblings.map((m) => `ตาราง ${m.label} ใช้กับรหัส ${[m.code, ...(m.aliases ?? [])].filter((c) => /^(TS[A-Z]+|BH)-/.test(c)).join(', ')} เท่านั้น`).join(' · ')
       );
       return out;
     }
