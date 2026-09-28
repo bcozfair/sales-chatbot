@@ -27,7 +27,8 @@ import {
   type RevisionKind, type SourceFile,
 } from '../../db/pricingBookRepo.js';
 import { checkPriceModel } from './modelShape.js';
-import type { Money, PriceBook, PriceModel } from './types.js';
+import { axisLabel } from './labels.js';
+import type { Adder, Constraint, Money, PriceBook, PriceModel } from './types.js';
 
 /**
  * จำนวนเล่มก่อนหน้าที่ **แสดงบนจอ** ให้กดย้อน — เจ้าของเคาะ 3 (2026-09-21)
@@ -53,19 +54,38 @@ export interface BookDiffRow {
   now: Money | null;
 }
 
+/**
+ * หนึ่งแถวของ "เปลี่ยนนอกช่องราคา" — ตัวเลขราคาเท่าเดิมแต่ **ราคาที่คิดออกมาเปลี่ยนได้**
+ * (วิธีปัดเศษ · เริ่มคิดเมื่อเกิน · ค่ามาตรฐาน · เงื่อนไข · ข้อห้าม …) · ค่าเป็นข้อความพร้อมแสดง
+ *
+ * ทำไมต้องมี (รีวิว 2026-09-25): เดิมหน้าตรวจเทียบแค่ช่องเงิน ⇒ อัปแม่แบบที่ดาวน์โหลดก่อน r9 แล้วจอขึ้น
+ * "เปลี่ยน 0" ทั้งที่กดบันทึกแล้ว `…+2.5M` ขยับจาก 695 เป็น 775 (สายกลับไปปัดขึ้น) และ TS-01 ที่ไม่มีวงเล็บ
+ * กลายเป็นคิดไม่ได้ (เกลียวมาตรฐานหาย) — งาน r7–r10 เปลี่ยนแต่ของประเภทนี้
+ */
+export interface BookDiffRuleRow {
+  model: string;
+  what: string;
+  was: string;
+  now: string;
+}
+
 export interface BookDiffModel {
   model: string;
   label: string;
   changed: number;
   added: number;
   removed: number;
+  /** จำนวนแถวที่เปลี่ยนนอกช่องราคา (`ruleRows`) */
+  rules: number;
 }
 
 export interface BookDiff {
-  summary: { changed: number; added: number; removed: number; same: number };
+  summary: { changed: number; added: number; removed: number; same: number; rules: number };
   models: BookDiffModel[];
   /** ทุกแถวที่ไม่เท่าเดิม — เรียงให้ "หายไป" ขึ้นก่อนเสมอ (ดู `sortRows`) */
   rows: BookDiffRow[];
+  /** เปลี่ยนนอกช่องราคา — แยกจาก `rows` เพราะไม่มี "ส่วนต่าง" เป็นตัวเงินให้โชว์ */
+  ruleRows: BookDiffRuleRow[];
   /** รุ่นที่มีในสมุดเล่มปัจจุบันแต่ไม่มีในไฟล์ ⇒ ไฟล์นี้ไม่ได้แตะมันเลย */
   untouched: string[];
 }
@@ -90,10 +110,114 @@ function flatten(m: PriceModel): Map<string, { kind: BookDiffRow['kind']; value:
     const head = `กฎ: ${a.label} [${a.id}]`;
     if (a.amount !== undefined) out.set(head, { kind: 'adder', value: a.amount });
     if (a.percent !== undefined) out.set(`${head} (%)`, { kind: 'adder', value: a.percent });
+    // อัตราเดียวของกฎต่อหน่วย (สาย BH เกิน 30 CM = 60/ม.) — เดิมไม่อยู่ในนี้ แก้ในไฟล์แล้วจอไม่เห็น
+    if (a.rate !== undefined) out.set(`${head} (ต่อหน่วย)`, { kind: 'adder', value: a.rate });
     for (const [k, v] of Object.entries(a.rates ?? {})) out.set(`${head} · ${k}`, { kind: 'rate', value: v });
   }
 
   return out;
+}
+
+// ── ส่วนต่างนอกช่องราคา ─────────────────────────────────────────────────────
+
+const ROUND_TH: Record<string, string> = { ceil: 'ปัดขึ้น', floor: 'ปัดลง (นับเฉพาะหน่วยเต็ม)', exact: 'ไม่ปัด' };
+
+/** ช่องของกฎที่ไม่ใช่ตัวเงิน แต่เปลี่ยนผลราคาได้ — ชื่อไทยตามที่แอดมินเห็นในไฟล์/หน้าแก้กฎ */
+const ADDER_FIELDS: Array<[keyof Adder, string]> = [
+  ['kind', 'ชนิดกฎ'], ['when', 'เงื่อนไข'], ['dim', 'คิดจาก'], ['over', 'เริ่มคิดเมื่อเกิน'], ['step', 'ทีละ'],
+  // `unit` ไม่อยู่ในนี้ — เป็นป้ายแสดงผลอย่างเดียว และไป-กลับแม่แบบแล้วช่องว่างหน้าคำเปลี่ยนได้ (" m" → "m")
+  ['round', 'วิธีปัด'], ['times', 'คูณ'], ['byAxis', 'ราคาแยกตาม'],
+  ['skipIfNoRate', 'ข้ามเมื่อไม่มีอัตรา'], ['disabled', 'ปิดใช้'], ['order', 'ลำดับการคิด'],
+];
+const CONSTRAINT_FIELDS: Array<[keyof Constraint, string]> = [
+  ['when', 'เงื่อนไข'], ['level', 'ระดับ'], ['message', 'ข้อความ'], ['disabled', 'ปิดใช้'],
+];
+
+function show(v: unknown, field?: string): string {
+  if (v === undefined || v === null) return '—';
+  if (field === 'round' && typeof v === 'string') return ROUND_TH[v] ?? v;
+  if (typeof v === 'boolean') return v ? 'ใช่' : 'ไม่';
+  if (typeof v === 'object') return JSON.stringify(v);
+  return String(v);
+}
+
+/** JSON ที่เรียงคีย์ก่อน — ไป-กลับแม่แบบแล้วลำดับคีย์เปลี่ยนได้ ห้ามนับเป็นการแก้ */
+function stable(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(stable).join(',')}]`;
+  if (v && typeof v === 'object') {
+    return `{${Object.keys(v).filter((k) => (v as Record<string, unknown>)[k] !== undefined).sort()
+      .map((k) => `${JSON.stringify(k)}:${stable((v as Record<string, unknown>)[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(v ?? null);
+}
+const same = (a: unknown, b: unknown): boolean => stable(a) === stable(b);
+
+/** ตัวอักษรท้ายเลขรุ่น — เทียบเฉพาะช่องที่มีผลกับราคา (`source`/`note`/`confirmed` เป็นหมายเหตุ ไม่ใช่ราคา) */
+const variantPricing = (v: PriceModel['variant']) =>
+  v && { suffix: v.suffix, percent: v.percent, order: v.order, adderPrices: v.adderPrices, disabled: v.disabled };
+
+/** ไล่คีย์ของสองแมป แล้วคืนแถวของคีย์ที่ค่าไม่ตรงกัน */
+function mapRows(model: string, prefix: string, a: Record<string, unknown> = {}, b: Record<string, unknown> = {}): BookDiffRuleRow[] {
+  const out: BookDiffRuleRow[] = [];
+  for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    if (!same(a[k], b[k])) out.push({ model, what: `${prefix} ${k}`, was: show(a[k]), now: show(b[k]) });
+  }
+  return out;
+}
+
+/** ของที่เปลี่ยนนอกช่องราคาของรุ่นเดียว — รุ่นที่เพิ่งมีครั้งแรกไม่มีอะไรให้เทียบ */
+function ruleDiff(code: string, cur: PriceModel | undefined, next: PriceModel): BookDiffRuleRow[] {
+  if (!cur) return [];
+  const rows: BookDiffRuleRow[] = [];
+  const push = (what: string, was: unknown, now: unknown, field?: string) => {
+    if (!same(was, now)) rows.push({ model: code, what, was: show(was, field), now: show(now, field) });
+  };
+
+  rows.push(...mapRows(code, 'ค่ามาตรฐาน', cur.standard, next.standard));
+  rows.push(...mapRows(code, 'ค่ามาตรฐานของแกน', cur.axisDefaults, next.axisDefaults));
+  // ไฟล์ไม่มีชีต "ค่าเริ่มต้นตามแกน" = คงของเดิม (`applyModels`) ⇒ ไม่ใช่การลบ ห้ามขึ้นว่าเปลี่ยน
+  if (next.axisDefaultsBy) {
+    for (const axis of new Set([...Object.keys(cur.axisDefaultsBy ?? {}), ...Object.keys(next.axisDefaultsBy)])) {
+      const a = cur.axisDefaultsBy?.[axis];
+      const b = next.axisDefaultsBy[axis];
+      push(`ค่าเริ่มต้นของ ${axisLabel(axis)} ขึ้นกับ`, a?.by, b?.by);
+      rows.push(...mapRows(code, `ค่าเริ่มต้นของ ${axisLabel(axis)} เมื่อ`, a?.values, b?.values));
+    }
+  }
+  // "ใช้กับรหัส" — ตัดสินว่ารหัสไหนหารุ่นนี้เจอ (ตั้งแต่ 2026-09-28 ไม่มีทางถอยข้ามชนิดเซนเซอร์) ⇒ หายไปหนึ่งตัว = รหัสชุดนั้นคิดราคาไม่ได้เลย
+  push('ใช้กับรหัส', cur.aliases, next.aliases);
+  // ค่าแกนที่ "รับผลิตแต่ยังไม่มีราคา" — หายไป = รหัสชุดนั้นเปลี่ยนจาก "ยังไม่มีราคา" เป็น "ไม่รับผลิต"
+  if (cur.base.kind === 'matrix' && next.base.kind === 'matrix') {
+    rows.push(...mapRows(code, 'ค่าที่ยังไม่มีราคา ·', cur.base.unpriced, next.base.unpriced));
+  }
+  push('ค่าที่คำนวณจากค่าอื่น', cur.derivedDims, next.derivedDims);
+  push('ตัวอักษรท้ายเลขรุ่น', variantPricing(cur.variant), variantPricing(next.variant));
+
+  const curAdders = new Map(cur.adders.map((a) => [a.id, a]));
+  const nextAdders = new Map(next.adders.map((a) => [a.id, a]));
+  const hasMoney = (a: Adder) => a.amount !== undefined || a.percent !== undefined || a.rate !== undefined || Object.keys(a.rates ?? {}).length > 0;
+  for (const id of new Set([...curAdders.keys(), ...nextAdders.keys()])) {
+    const a = curAdders.get(id);
+    const b = nextAdders.get(id);
+    const head = `กฎ: ${(b ?? a)!.label} [${id}]`;
+    // กฎที่มีตัวเงินโผล่ในตารางราคาอยู่แล้วตอนเพิ่ม/หาย — ที่ต้องบอกตรงนี้คือกฎที่ไม่มีตัวเงินให้เห็น
+    if (!a || !b) {
+      if (!hasMoney((b ?? a)!)) rows.push({ model: code, what: head, was: a ? 'มี' : '—', now: b ? 'มี' : 'ไม่มีแล้ว' });
+      continue;
+    }
+    for (const [f, name] of ADDER_FIELDS) push(`${head} · ${name}`, a[f], b[f], f);
+  }
+
+  const curC = new Map(cur.constraints.map((c) => [c.id, c]));
+  const nextC = new Map(next.constraints.map((c) => [c.id, c]));
+  for (const id of new Set([...curC.keys(), ...nextC.keys()])) {
+    const a = curC.get(id);
+    const b = nextC.get(id);
+    const head = `ข้อห้าม: ${(b ?? a)!.message} [${id}]`;
+    if (!a || !b) { rows.push({ model: code, what: head, was: a ? 'มี' : '—', now: b ? 'มี' : 'ไม่มีแล้ว' }); continue; }
+    for (const [f, name] of CONSTRAINT_FIELDS) push(`${head} · ${name}`, a[f], b[f]);
+  }
+  return rows;
 }
 
 /**
@@ -115,20 +239,23 @@ function sortRows(rows: BookDiffRow[]): BookDiffRow[] {
  */
 export function diffBooks(current: PriceBook, incoming: PriceBook): BookDiff {
   const rows: BookDiffRow[] = [];
+  const ruleRows: BookDiffRuleRow[] = [];
   const models: BookDiffModel[] = [];
-  let same = 0;
+  let unchanged = 0;
 
   for (const [code, next] of Object.entries(incoming.models)) {
     const cur = current.models[code];
     const before = cur ? flatten(cur) : new Map<string, { kind: BookDiffRow['kind']; value: Money }>();
     const after = flatten(next);
-    const stat: BookDiffModel = { model: code, label: next.label, changed: 0, added: 0, removed: 0 };
+    const rules = ruleDiff(code, cur, next);
+    ruleRows.push(...rules);
+    const stat: BookDiffModel = { model: code, label: next.label, changed: 0, added: 0, removed: 0, rules: rules.length };
 
     for (const [what, a] of after) {
       const b = before.get(what);
       if (!b) { rows.push({ model: code, what, kind: a.kind, was: null, now: a.value }); stat.added++; }
       else if (b.value !== a.value) { rows.push({ model: code, what, kind: a.kind, was: b.value, now: a.value }); stat.changed++; }
-      else same++;
+      else unchanged++;
     }
     for (const [what, b] of before) {
       if (!after.has(what)) { rows.push({ model: code, what, kind: b.kind, was: b.value, now: null }); stat.removed++; }
@@ -144,10 +271,12 @@ export function diffBooks(current: PriceBook, incoming: PriceBook): BookDiff {
       changed: models.reduce((n, m) => n + m.changed, 0),
       added: models.reduce((n, m) => n + m.added, 0),
       removed: models.reduce((n, m) => n + m.removed, 0),
-      same,
+      same: unchanged,
+      rules: ruleRows.length,
     },
     models,
     rows: sortRows(rows),
+    ruleRows,
     untouched,
   };
 }

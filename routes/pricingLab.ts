@@ -253,6 +253,9 @@ pricebookRouter.post('/import/preview', async (req: AdminRequest, res: Response)
     untouched: diff.untouched,
     rows: diff.rows.slice(0, MAX_DIFF_ROWS),
     totalRows: diff.rows.length,
+    // เปลี่ยนนอกช่องราคา (วิธีปัด · ค่ามาตรฐาน · ใช้กับรหัส …) — โควตาแยกจากแถวราคา ไม่งั้นแถวราคาที่เยอะดันมันตกโควตา
+    ruleRows: diff.ruleRows.slice(0, MAX_DIFF_ROWS),
+    totalRuleRows: diff.ruleRows.length,
   });
 });
 
