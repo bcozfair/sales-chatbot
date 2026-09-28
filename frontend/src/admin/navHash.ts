@@ -29,6 +29,8 @@ export type MainTab =
   | 'productsdata' | 'customersdata'
   // คิวงานค้างของโมดูล local_contacts — ผู้ติดต่อที่แอดมินเพิ่มเองแต่ยังไม่มีใน Odoo
   | 'odoocontacts'
+  // บัญชีเสนอในนาม PM — ลูกค้าที่ทุกสินค้าออกเป็นใบ Primus ใบเดียว (2026-09-28)
+  | 'quotepm'
   // กลุ่ม "บันทึกและรายงาน" — 5 หน้าที่อยู่ใต้หัวข้อพับได้อันเดียวกัน
   | 'traffic' | 'apilogs' | 'auditlogs' | 'systemlogs' | 'backups'
   | 'settings';
@@ -65,6 +67,7 @@ export const TAB_SLUG: Record<MainTab, string> = {
   productsdata: 'productsdata',
   customersdata: 'customersdata',
   odoocontacts: 'odoocontacts',
+  quotepm: 'quotepm',
   traffic: 'traffic',
   apilogs: 'apilogs',
   auditlogs: 'audit',

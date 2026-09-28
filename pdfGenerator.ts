@@ -4,6 +4,7 @@ import ThaiBahtText from "thai-baht-text";
 import fs from "fs";
 import path from "path";
 import { resolveQuoteCompany, resolveQuotationDeliveryDays, buildViolationDisplay } from "./services/quotationService.js";
+import { quoteCompanyOverrideOf } from "./services/customerQuoteCompany.js";
 import {
   loadQuotationRules,
   resolveQuotationRule,
@@ -379,9 +380,13 @@ export async function generateQuotationPDF(quoteData: any, quoteNoInput?: string
   // เลข revise (`QP-xxxx-01`) ขึ้นต้นด้วยเลขฐานที่มี prefix ติดมาแล้ว จึงใช้กติกาเดียวกันได้
   //
   // ใบร่างยังไม่มีเลข → คำนวณสดจากสินค้ารายการแรกเหมือนเดิม
+  // ใบร่างที่ตรึงบริษัทไว้ (บัญชีเสนอในนาม PM) ใช้ค่านั้นเลย — ใบรวมที่ขึ้นต้นด้วยสินค้า THT ต้องได้หัว Primus
   let isThemtech = false;
   const itemSourceList = !isIssued && itemsList.length > 0 ? itemsList : [];
-  if (itemSourceList.length > 0) {
+  const forcedCompany = !isIssued ? quoteCompanyOverrideOf(quoteData) : null;
+  if (forcedCompany) {
+    isThemtech = forcedCompany === 'THT';
+  } else if (itemSourceList.length > 0) {
     try {
       const company = await resolveQuoteCompany(itemSourceList[0]);
       isThemtech = (company === 'THT');

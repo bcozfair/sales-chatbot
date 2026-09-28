@@ -52,6 +52,7 @@ import {
   ArrowRight,
   BadgeCheck,
   Ban,
+  Building2,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -178,6 +179,8 @@ interface CustomerRow {
   // จึงเป็น optional — ไม่มีธง = ไม่ขึ้นป้าย ไม่ใช่ "ผ่าน")
   is_blacklisted?: boolean;
   is_credit_hold?: boolean;
+  /** บัญชีเสนอในนาม PM (2026-09-28) — ป้ายอย่างเดียว การแบ่งใบจริง server ตัดสินเอง */
+  forced_quote_company?: 'PM' | 'THT' | null;
 }
 
 /** บริษัทในรูปแบบที่ ComboBox ใช้ได้ — พก CustomerRow ตัวเต็มไปด้วยเพื่อเรนเดอร์ป้ายท้ายบรรทัด */
@@ -281,6 +284,8 @@ interface PreviewItem {
   /** หมายเหตุรายบรรทัดที่แอดมินพิมพ์ */
   remark: string;
   violations: PreviewViolation[];
+  /** บัญชีเสนอในนาม PM — บริษัทที่บรรทัดนี้จะไปอยู่เองถ้าไม่ได้บังคับ · null = อยู่ใบของตัวเองตามปกติ */
+  moved_from?: 'PM' | 'THT' | null;
 }
 
 /** คีย์ประเภทการจัดส่ง — คำที่จะขึ้นจริงมาจาก `delivery_types` ของ server ไม่ได้เขียนไว้ที่นี่ */
@@ -366,6 +371,8 @@ interface PreviewResult {
     has_credit_terms: boolean;
     /** ติดด่านเครดิต (ไม่มีบิลเกินเกณฑ์) · null = ไม่ติด — รูปเดียวกับ `PartyCreditHold` ฝั่ง server */
     credit_hold: CreditHold | null;
+    /** บัญชีเสนอในนาม PM — บริษัทที่ทุกสินค้าของชุดนี้จะไปอยู่ · null = แบ่ง PM/THT ตามสินค้า */
+    forced_quote_company?: 'PM' | 'THT' | null;
     contact_name: string;
     contact_phone: string;
     contact_email: string;
@@ -422,7 +429,7 @@ interface ServiceCfg {
 //  ตารางบวม — ข้อความเต็มอยู่ในกล่องสรุปด้านล่างซึ่งเป็นที่เดียวที่ต้องอ่านครบ
 
 type TagTone = 'ok' | 'warn' | 'bad' | 'info' | 'link';
-type TagKind = 'check' | 'alert' | 'ban' | 'link' | 'truck' | 'wrench' | 'shield';
+type TagKind = 'check' | 'alert' | 'ban' | 'link' | 'truck' | 'wrench' | 'shield' | 'building';
 interface RowTag {
   tone: TagTone;
   kind: TagKind;
@@ -458,6 +465,7 @@ const TAG_ICON: Record<TagKind, React.ComponentType<{ className?: string }>> = {
   truck: Truck,
   wrench: Wrench,
   shield: ShieldCheck,
+  building: Building2,
 };
 
 const TAG_CLASS: Record<TagTone, string> = {
@@ -1039,6 +1047,10 @@ const CustomerFacts: React.FC<{ row: CustomerRow }> = ({ row }) => {
   return (
     <span className="flex items-center gap-2 shrink-0 text-[11px] whitespace-nowrap">
       {row.reference && <span className="text-slate-500">{row.reference}</span>}
+      {/* ไม่ใช่สถานะที่ทำให้ออกใบไม่ได้ ⇒ ขึ้นคู่กับป้ายแดง/เหลืองได้ ไม่อยู่ในสายเลือกอย่างใดอย่างหนึ่งข้างล่าง */}
+      {row.forced_quote_company === 'PM' && (
+        <span className="font-semibold px-2 py-0.5 rounded-full border border-sky-200 bg-sky-50 text-sky-700">ในนาม PM</span>
+      )}
       {row.is_blacklisted ? (
         <span className="flex items-center gap-1 font-semibold px-2 py-0.5 rounded-full border border-red-200 bg-red-50 text-red-700">
           <Ban className="w-3 h-3 shrink-0" />
@@ -1738,6 +1750,8 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx; firstLabel?: string }>
   const q = g.quote;
   const co = q?.company ?? null;
   const cust = ctx.customer;
+  /** บัญชีเสนอในนาม PM — จำนวนบรรทัดในใบนี้ที่ปกติจะไปอยู่อีกใบ */
+  const movedCount = q?.items.filter((it) => it.moved_from).length ?? 0;
   const t = q?.totals ?? null;
   const empty = g.rows.length === 0 && g.extras.length === 0;
 
@@ -1802,6 +1816,14 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx; firstLabel?: string }>
             <>
               <p className="text-[13px] font-extrabold text-slate-800">{co.name_th}</p>
               <p className="text-xs text-slate-500">{co.name_en}</p>
+              {movedCount > 0 && (
+                <p className="mt-1">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-sky-200 bg-sky-50 text-[10.5px] font-semibold text-sky-700">
+                    <Building2 className="w-3 h-3 shrink-0" />
+                    ลูกค้าเสนอราคาในนาม PM · รวมสินค้า {q?.items.find((it) => it.moved_from)?.moved_from} {movedCount} รายการไว้ในใบนี้
+                  </span>
+                </p>
+              )}
               <p className="text-[10.5px] text-slate-400 leading-snug mt-0.5">
                 {deHtml(co.address_lines[0] ?? '')}
                 <br />
@@ -1812,7 +1834,9 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx; firstLabel?: string }>
             <>
               <p className="text-[13px] font-extrabold text-slate-600">ระบบจัดใบให้เองตอนตรวจ</p>
               <p className="text-xs text-slate-500">
-                บรรทัดของ Primus กับ Themtech จะถูกแยกเป็นคนละใบอัตโนมัติ
+                {cust?.forced_quote_company === 'PM'
+                  ? 'ลูกค้ารายนี้เสนอราคาในนาม PM — ทุกบรรทัดอยู่ในใบ Primus ใบเดียว'
+                  : 'บรรทัดของ Primus กับ Themtech จะถูกแยกเป็นคนละใบอัตโนมัติ'}
               </p>
               <p className="text-[10.5px] text-slate-400 leading-snug mt-0.5">
                 หัวบริษัท ที่อยู่ และเลขผู้เสียภาษี มาจากที่เดียวกับที่ไฟล์ PDF ใช้
@@ -1861,6 +1885,14 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx; firstLabel?: string }>
                 busy={ctx.custSearching}
                 facts={(o) => <CustomerFacts row={o.row} />}
               />
+              {cust?.forced_quote_company === 'PM' && (
+                <span className="flex flex-wrap gap-1 mt-1">
+                  <span className="inline-flex items-center gap-1 h-5 px-2 rounded-full border border-sky-200 bg-sky-50 text-[10.5px] font-bold text-sky-700">
+                    <Building2 className="w-3 h-3 shrink-0" />
+                    เสนอราคาในนาม PM เท่านั้น
+                  </span>
+                </span>
+              )}
               {ctx.customerFlags.length > 0 && (
                 <span className="flex flex-wrap gap-1 mt-1">
                   {ctx.customerFlags.map((f) => (
@@ -3346,8 +3378,8 @@ export const QuoteRequest: React.FC = () => {
   // ค่าที่ตั้งทับอยู่ในลายเซ็นด้วย — ไม่งั้นแก้กำหนดส่ง/เครดิตแล้วหน้าจะบอกว่า "ตรวจแล้ว"
   // ทั้งที่ผลที่เห็นคิดจากค่าชุดก่อน (และกฎค่าบริการขึ้นกับเครดิตโดยตรง)
   const sig = useMemo(
-    () => JSON.stringify([customerId, contactId, itemsPayload, paymentTerms, deliveryPayload]),
-    [customerId, contactId, itemsPayload, paymentTerms, deliveryPayload],
+    () => JSON.stringify([customerId, contactId, itemsPayload, paymentTerms, deliveryPayload, reviseFrom]),
+    [customerId, contactId, itemsPayload, paymentTerms, deliveryPayload, reviseFrom],
   );
   const canPreview =
     rows.length > 0 && unresolved === 0 && customerId !== null && contactId !== null;
@@ -3370,6 +3402,8 @@ export const QuoteRequest: React.FC = () => {
           items: itemsPayload,
           payment_terms_override: paymentTerms,
           delivery: deliveryPayload,
+          // แก้ใบเดิม — บัญชีเสนอในนาม PM ยึดใบต้นทาง ต้องแบ่งใบแบบเดียวกับตอนกดออกใบ
+          revise_from: reviseFrom || undefined,
         }),
       });
       if (!res.ok) {
@@ -3394,7 +3428,7 @@ export const QuoteRequest: React.FC = () => {
     } finally {
       setPreviewing(false);
     }
-  }, [canPreview, sig, itemsPayload, customerId, contactId, authHeaders, paymentTerms, deliveryPayload]);
+  }, [canPreview, sig, itemsPayload, customerId, contactId, authHeaders, paymentTerms, deliveryPayload, reviseFrom]);
 
   useEffect(() => {
     if (!canPreview || sig === previewSig) return;
@@ -3627,6 +3661,10 @@ export const QuoteRequest: React.FC = () => {
     } else if (it.linked_to_model) {
       tags.push({ tone: 'link', kind: 'link', text: `พ่วงกับ ${it.linked_to_model}` });
     }
+    // บัญชีเสนอในนาม PM — บรรทัดที่ปกติจะไปอีกใบ บอกให้รู้ว่าย้ายมา (บนจออย่างเดียว ไม่พิมพ์ลง PDF)
+    if (it.moved_from) {
+      tags.push({ tone: 'info', kind: 'building', text: `สินค้า ${it.moved_from} · ออกในใบนี้ตามบัญชีเสนอในนาม PM` });
+    }
     tags.push(
       it.stock >= it.quantity
         ? { tone: 'ok', kind: 'check', text: `พร้อมส่ง คงเหลือ ${money(it.stock)}` }
@@ -3734,6 +3772,7 @@ export const QuoteRequest: React.FC = () => {
           items: itemsPayload,
           payment_terms_override: paymentTerms,
           delivery: deliveryPayload,
+          revise_from: reviseFrom || undefined,
         }),
       });
       if (!res.ok) throw new Error(await readError(res, 'เปิดพรีวิว PDF ไม่สำเร็จ'));

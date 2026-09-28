@@ -25,6 +25,7 @@ import { isBlacklisted } from './blacklistService.js';
 import { checkCreditHold, type CreditHoldResult } from './creditHoldService.js';
 import { getIssuerSnapshot } from './webIdentity.js';
 import { DEFAULT_ODOO_SOURCE } from './odooSaleOrderExport.js';
+import { decideForcedQuoteCompany, quoteCompanyOverrideOf, type QuoteCompany } from './customerQuoteCompany.js';
 import { thaiDateDMY, thaiYearMonth } from '../utils/thaiTime.js';
 import {
   loadQuotationRules,
@@ -435,8 +436,13 @@ export async function allocateQuotationNo(quoteData: any, executor: DbExecutor):
   if (!quoteData?.created_at) {
     throw new Error('[allocateQuotationNo] quoteData.created_at ไม่มีค่า — ไม่สามารถออกเลขได้');
   }
+  // ใบที่ตรึงบริษัทไว้ (บัญชีเสนอในนาม PM) ห้ามถามสินค้ารายการแรก — ใบรวมที่ขึ้นต้นด้วยสินค้า THT
+  // จะได้เลข QT ทั้งที่หัวใบเป็น Primus
   let isThemtech = false;
-  if (quoteData.items && quoteData.items.length > 0) {
+  const forcedCompany = quoteCompanyOverrideOf(quoteData);
+  if (forcedCompany) {
+    isThemtech = forcedCompany === 'THT';
+  } else if (quoteData.items && quoteData.items.length > 0) {
     isThemtech = (await resolveQuoteCompany(quoteData.items[0], executor)) === 'THT';
   }
   const prefix = isThemtech ? 'QT' : 'QP';
@@ -849,17 +855,10 @@ export async function insertDraftQuotations(
   // (มีได้บรรทัดเดียว ⇒ หยิบตัวแรกพอ) ถ้าปล่อยหายตรงนี้ ค่าบริการที่แอดมินเพิ่มจากหน้าเว็บ
   // จะไม่มีวันถึง DB เลยสักครั้ง
   const incomingFee = (itemsForDb || []).find((item: any) => isShippingFeeItem(item, shippingCfg)) ?? null;
+  // การแบ่ง PM/THT ย้ายลงไปทำหลังอ่าน revise_from (ข้อ 2.5) — บัญชีเสนอในนาม PM ต้องรู้ก่อนว่าร่างนี้
+  // เป็น "แก้ใบเดิม" หรือไม่ (แก้ใบเดิมยึดบริษัทของใบต้นทาง ไม่ใช่ค่าตั้งปัจจุบันของลูกค้า)
   const pmItems: any[] = [];
   const thtItems: any[] = [];
-
-  for (const item of items) {
-    const company = await resolveQuoteCompany(item);
-    if (company === 'THT') {
-      thtItems.push(item);
-    } else {
-      pmItems.push(item);
-    }
-  }
 
   // 1. ดึงข้อมูลทีมขาย
   let employeeDetails: any = {
@@ -1082,6 +1081,19 @@ export async function insertDraftQuotations(
     custom_meta: customMetaStr
   };
 
+  // 2.5 แบ่งใบ PM/THT — ลูกค้าในบัญชีเสนอในนาม PM (หรือแก้ใบเดิมที่ตรึงไว้) ได้ใบเดียวทั้งชุด
+  //     `null` = แบ่งตามสินค้าด้วย resolveQuoteCompany เหมือนเดิมทุกไบต์ (ลูกค้าที่ไม่ได้ตั้ง · ใบจาก LINE
+  //     ที่ยังไม่รู้ลูกค้า — ใบพวกนั้นรวมทีหลังตอนเลือกบริษัท ใน updateQuotationCustomerSnapshot)
+  const forcedCompany: QuoteCompany | null = await decideForcedQuoteCompany({ customerId, reviseFrom });
+  for (const item of items) {
+    const company = forcedCompany ?? await resolveQuoteCompany(item);
+    if (company === 'THT') {
+      thtItems.push(item);
+    } else {
+      pmItems.push(item);
+    }
+  }
+
   const draftQuotesToInsert: any[] = [];
 
   /** กำหนดส่งที่ตั้งทับของใบนั้น — ไม่ส่งมา = null ซึ่งคือค่าที่คอลัมน์นี้เคยเป็นมาตลอด */
@@ -1104,6 +1116,7 @@ export async function insertDraftQuotations(
       customer_id: customerId || null,
       contact_id: contactId || null,
       source_id: overrides?.sourceId ?? DEFAULT_ODOO_SOURCE,
+      quote_company_override: forcedCompany,
       ...deliveryOf('PM')
     });
   }
@@ -1122,6 +1135,7 @@ export async function insertDraftQuotations(
       customer_id: customerId || null,
       contact_id: contactId || null,
       source_id: overrides?.sourceId ?? DEFAULT_ODOO_SOURCE,
+      quote_company_override: forcedCompany,
       ...deliveryOf('THT')
     });
   }
@@ -1151,8 +1165,8 @@ export async function insertDraftQuotations(
             customer_details, item_details, salesperson_id, employee_details,
             customer_id, contact_id,
             delivery_type_override, delivery_days_override,
-            source_id
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            source_id, quote_company_override
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
           RETURNING *
         `, [
           q.user_id, q.total_sum, q.status,
@@ -1161,7 +1175,8 @@ export async function insertDraftQuotations(
           q.contact_id,
           q.delivery_type_override,
           q.delivery_days_override,
-          q.source_id
+          q.source_id,
+          q.quote_company_override
         ]);
         if (res.rows[0]) rows.push(res.rows[0]);
       }
@@ -2068,13 +2083,87 @@ export async function updateQuotationCustomerSnapshot(
     [JSON.stringify(customerDetails), JSON.stringify(employeeDetails), salesperson.salesperson_id || null, status, customerId || null, contactId || null, quoteIds]
   );
 
+  // บัญชีเสนอในนาม PM — ใบจาก LINE ถูกแบ่ง PM/THT ไปตั้งแต่ยังไม่รู้ลูกค้า (pending_company) ⇒ ตรงนี้
+  // คือจุดแรกที่รู้ว่าเป็นลูกค้าคนไหน ต้องรวมให้เหลือใบเดียวที่นี่ ไม่งั้นค่าตั้งไม่มีผลกับเส้น LINE เลย
+  const keptIds = await applyForcedQuoteCompany(quoteIds, customerId, customerDetails.revise_from);
+
   const selectRes = await pool.query(
     `SELECT * FROM quotations WHERE id = ANY($1)`,
-    [quoteIds]
+    [keptIds]
   );
   
   const enrichPromises = selectRes.rows.map(q => enrichQuotationData(q));
   return await Promise.all(enrichPromises);
+}
+
+/**
+ * รวมร่างที่แบ่ง PM/THT ไว้แล้วให้เหลือใบเดียว เมื่อลูกค้าอยู่ในบัญชีเสนอในนาม PM — คืน id ที่เหลืออยู่
+ *
+ * ใช้ตอน "เพิ่งรู้ลูกค้า" ของร่างที่แบ่งไปก่อนแล้ว (เส้น LINE: pending_company → เลือกบริษัท)
+ * ส่วนร่างที่สร้างตอนรู้ลูกค้าอยู่แล้ว insertDraftQuotations แบ่งถูกตั้งแต่แรก ไม่ผ่านที่นี่
+ *
+ *   ลูกค้าไม่ได้ตั้ง → ไม่แตะอะไรเลย (คืน id เดิม) · ใบที่ออกเลขแล้ว/ยกเลิก → ไม่แตะ
+ *   ใบเป้าหมาย = ใบที่สินค้ารายการแรกตกบริษัทเดียวกับที่ตั้ง (บรรทัดค่าบริการอยู่ในใบ PM อยู่แล้ว
+ *   ⇒ ไม่ต้องย้าย) · รายการของใบอื่นต่อท้ายตามลำดับ · ใบอื่น **DELETE** (ร่างไม่มีเลข = ลบ ไม่ใช่
+ *   มาร์ก cancelled — กติกาใน CLAUDE.md) · ทั้งหมดในทรานแซกชันเดียว ล้มแล้วใบคงสภาพเดิม
+ *
+ * ล้ม = log แล้วคืน id เดิม (ได้สองใบเหมือนก่อนมีฟีเจอร์ ดีกว่าทำให้การเลือกบริษัทใน LINE พัง)
+ */
+export async function applyForcedQuoteCompany(
+  quoteIds: Array<string | number>,
+  customerId: number | null | undefined,
+  reviseFrom?: string | null
+): Promise<string[]> {
+  const ids = quoteIds.map(String).filter(Boolean);
+  if (ids.length === 0 || !customerId) return ids;
+  const forced = await decideForcedQuoteCompany({ customerId, reviseFrom });
+  if (!forced) return ids;
+
+  const itemsOf = (row: any): any[] => {
+    const v = typeof row.item_details === 'string' ? JSON.parse(row.item_details) : row.item_details;
+    return Array.isArray(v) ? v : [];
+  };
+
+  try {
+    return await withTransaction(async (client) => {
+      const { rows } = await client.query(
+        `SELECT id, item_details, total_sum FROM quotations
+          WHERE id = ANY($1) AND quotation_no IS NULL AND status NOT IN ('confirmed', 'cancelled')
+          ORDER BY created_at, id
+          FOR UPDATE`,
+        [ids]
+      );
+      if (rows.length === 0) return ids;
+
+      let target = rows[0];
+      if (rows.length > 1) {
+        for (const r of rows) {
+          const first = itemsOf(r)[0];
+          if (first && await resolveQuoteCompany(first, client) === forced) { target = r; break; }
+        }
+      }
+      const ordered = [target, ...rows.filter((r: any) => r.id !== target.id)];
+      const mergedItems = ordered.flatMap(itemsOf);
+      const total = ordered.reduce((sum: number, r: any) => sum + (Number(r.total_sum) || 0), 0);
+
+      await client.query(
+        `UPDATE quotations
+            SET item_details = $1, total_sum = $2, quote_company_override = $3, updated_at = NOW()
+          WHERE id = $4`,
+        [JSON.stringify(mergedItems), total, forced, target.id]
+      );
+      const dropped = ordered.slice(1).map((r: any) => r.id);
+      if (dropped.length > 0) {
+        await client.query('DELETE FROM quotations WHERE id = ANY($1)', [dropped]);
+        console.log(`[applyForcedQuoteCompany] ลูกค้า ${customerId} เสนอในนาม ${forced} — รวม ${dropped.length + 1} ใบเป็นใบ ${target.id}`);
+      }
+      const droppedSet = new Set(dropped.map(String));
+      return ids.filter((id) => !droppedSet.has(id));
+    });
+  } catch (err) {
+    console.error('[applyForcedQuoteCompany] รวมใบไม่สำเร็จ — คงใบเดิมไว้:', err);
+    return ids;
+  }
 }
 
 export async function cancelOldRevision(customerName: string, executor: DbExecutor = pool): Promise<void> {
@@ -2162,8 +2251,12 @@ export async function enrichQuotationData(quoteDb: any): Promise<any> {
     }
 
     // หาสังกัดบริษัท (PM หรือ THT) โดยใช้ resolveQuoteCompany ที่เช็คจาก quotation_rules
+    // ใบที่ตรึงบริษัทไว้ (บัญชีเสนอในนาม PM) ชนะเสมอ — ไม่งั้นใบรวมที่ขึ้นต้นด้วยสินค้า THT จะรายงานเป็น THT
     let quoteCompany: 'PM' | 'THT' = 'PM';
-    if (itemDetails.length > 0) {
+    const forcedCompany = quoteCompanyOverrideOf(quoteDb);
+    if (forcedCompany) {
+      quoteCompany = forcedCompany;
+    } else if (itemDetails.length > 0) {
       try {
         quoteCompany = await resolveQuoteCompany(itemDetails[0]);
       } catch (err) {
@@ -2455,7 +2548,10 @@ export async function enrichQuotationData(quoteDb: any): Promise<any> {
 
   let quoteCompany: 'PM' | 'THT' = 'PM';
   try {
-    if (enrichedItems && enrichedItems.length > 0) {
+    const forcedCompany = quoteCompanyOverrideOf(quoteDb);
+    if (forcedCompany) {
+      quoteCompany = forcedCompany;
+    } else if (enrichedItems && enrichedItems.length > 0) {
       quoteCompany = await resolveQuoteCompany(enrichedItems[0]);
     } else {
       quoteCompany = quoteDb.quotation_no?.toUpperCase()?.startsWith('QT') ? 'THT' : 'PM';

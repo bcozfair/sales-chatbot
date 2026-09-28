@@ -99,6 +99,8 @@ const TODAY: Record<Capability, [admin: PermissionMode, approver: PermissionMode
   'page.customersdata':           ['allow', 'allow', 'allow'],
   'page.odoocontacts':            ['allow', 'allow', 'allow'],
   'page.blacklist':               ['allow', 'deny', 'deny'],
+  // บัญชีเสนอในนาม PM (2026-09-28) — หน้าใหม่ เจ้าของเคาะ admin/approver/subadmin
+  'page.quotepm':                 ['allow', 'allow', 'allow'],
   'page.salespersons':            ['allow', 'deny', 'deny'],
   'page.users':                   ['allow', 'deny', 'deny'],
   'page.traffic':                 ['allow', 'deny', 'deny'],

@@ -71,7 +71,8 @@ ok('หน้าเว็บไม่ฝังรายการเอง', !fe.
 const idx = fs.readFileSync('index.ts', 'utf8');
 ok('SQL ของ export เลือก q.source_id', /q\.delivery_terms, q\.source_id,/.test(idx));
 const qs = fs.readFileSync('services/quotationService.ts', 'utf8');
-ok('INSERT ของร่างเขียน source_id', /delivery_type_override, delivery_days_override,\s*source_id\s*\) VALUES \(\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11, \$12\)/.test(qs));
+// คอลัมน์ต่อท้าย source_id ได้ (2026-09-28 เพิ่ม quote_company_override = $13) — ตรวจแค่ว่า source_id ยังอยู่ที่ $12
+ok('INSERT ของร่างเขียน source_id', /delivery_type_override, delivery_days_override,\s*source_id\b[^)]*\) VALUES \(\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11, \$12\b/.test(qs));
 
 // ── หน้าจริง ─────────────────────────────────────────────────────────────────
 const admin = (await pool.query(`SELECT id, username, name, role FROM admin_users WHERE role = 'admin' ORDER BY id LIMIT 1`)).rows[0];

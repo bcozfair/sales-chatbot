@@ -46,6 +46,7 @@ import {
   type DraftQuoteOverrides,
 } from './quotationService.js';
 import { ruleModesOf, can } from '../config/capabilities.js';
+import { decideForcedQuoteCompany, type QuoteCompany } from './customerQuoteCompany.js';
 import { isLocalContactId, ensureDirectoryRow, getLocalContactById } from '../db/localContactsRepo.js';
 import type { Role } from '../config/auth.js';
 import {
@@ -1125,6 +1126,12 @@ export interface WebQuotePreviewItem {
   remark: string;
   /** ข้อกฎที่บรรทัดนี้ติด (จับคู่ด้วยรหัสรุ่น — ถ้อยคำมาจาก buildViolationDisplay ฝั่ง server) */
   violations: Violation[];
+  /**
+   * บริษัทที่บรรทัดนี้ "จะไปอยู่เองถ้าไม่ได้บังคับ" — มีค่าเฉพาะเมื่อลูกค้าอยู่ในบัญชีเสนอในนาม PM
+   * แล้วบรรทัดนี้ถูกย้ายมาจากอีกบริษัท (หน้าจอติดป้ายเล็ก `THT` ให้) · null = อยู่ใบของตัวเองตามปกติ
+   * บนจออย่างเดียว ไม่พิมพ์ลง PDF
+   */
+  moved_from: QuoteCompany | null;
 }
 
 export interface WebQuotePreviewQuote {
@@ -1189,6 +1196,11 @@ export interface WebQuotePreviewResult {
     has_credit_terms: boolean;
     /** ลูกค้าติดด่านเครดิต (ไม่มีบิลเกินเกณฑ์) · `null` = ไม่ติด — ดู `partyCreditHold()` */
     credit_hold: PartyCreditHold | null;
+    /**
+     * บัญชีเสนอในนาม PM — บริษัทที่ทุกสินค้าของชุดนี้จะไปอยู่ · `null` = แบ่ง PM/THT ตามสินค้า
+     * ใน `/preview` เป็นค่าที่ใช้แบ่งใบจริง (แก้ใบเดิม = ค่าของใบต้นทาง) · ใน `/party` เป็นค่าตั้งของลูกค้า
+     */
+    forced_quote_company: QuoteCompany | null;
     contact_name: string;
     contact_phone: string;
     contact_email: string;
@@ -1274,6 +1286,12 @@ export interface WebQuotePreviewParams {
   /** ค่าที่แอดมินตั้งทับ — ต้องเดินทางมาถึงพรีวิวด้วย ไม่งั้นจอกับใบจริงคนละเรื่อง */
   paymentTermsOverride?: any;
   delivery?: WebQuoteDeliveryInput[] | null;
+  /**
+   * เลขที่ใบต้นทางเมื่อกำลัง "แก้ใบเดิม" — บัญชีเสนอในนาม PM ของร่าง revise ยึดใบต้นทาง ไม่ใช่
+   * ค่าตั้งปัจจุบันของลูกค้า (decideForcedQuoteCompany) · ไม่ส่งมา = ใบใหม่
+   * ต้องมาถึงพรีวิวด้วย ไม่งั้นจอโชว์ใบเดียวแต่ /drafts บันทึกสองใบ (หรือกลับกัน)
+   */
+  reviseFrom?: string | null;
 }
 
 /**
@@ -1405,6 +1423,7 @@ async function resolveQuoteParty(params: {
       payment_terms_overridden: paymentTermsOverride !== null,
       has_credit_terms: hasCreditTerms(effectivePaymentTerms),
       credit_hold: await partyCreditHold(resolvedCustomerId, params.role),
+      forced_quote_company: await decideForcedQuoteCompany({ customerId: resolvedCustomerId }),
       contact_name: String(contact.name || ''),
       contact_phone: String(contact.phone || contact.mobile || ''),
       contact_email: String(contact.email || ''),
@@ -1478,6 +1497,7 @@ async function resolveCompanyParty(params: {
     payment_terms_overridden: paymentTermsOverride !== null,
     has_credit_terms: hasCreditTerms(effectivePaymentTerms),
     credit_hold: await partyCreditHold(customerId, params.role),
+    forced_quote_company: await decideForcedQuoteCompany({ customerId }),
     contact_name: '',
     contact_phone: String(customer.phone || ''),
     contact_email: String(customer.email || ''),
@@ -1594,10 +1614,19 @@ async function previewDraftInternal(
     if (Number.isFinite(pid)) modelByProductId.set(pid, String((it as any).model || ''));
   }
 
+  // บัญชีเสนอในนาม PM — ตัวตัดสินเดียวกับ insertDraftQuotations (แก้ใบเดิม = ค่าของใบต้นทาง)
+  // ⇒ สิ่งที่จอแบ่งให้เห็น = สิ่งที่ /drafts จะบันทึก · จำ "บริษัทตามสินค้า" ไว้ติดป้ายบรรทัดที่ถูกย้าย
+  const forcedCompany = await decideForcedQuoteCompany({
+    customerId: resolvedCustomerId,
+    reviseFrom: params.reviseFrom ?? null,
+  });
   const byCompany: Record<'PM' | 'THT', any[]> = { PM: [], THT: [] };
+  const movedFrom = new Map<any, QuoteCompany>();
   for (const it of goodsItems) {
-    const company = await resolveQuoteCompany(it);
-    byCompany[company === 'THT' ? 'THT' : 'PM'].push(it);
+    const natural: QuoteCompany = (await resolveQuoteCompany(it)) === 'THT' ? 'THT' : 'PM';
+    const company = forcedCompany ?? natural;
+    if (company !== natural) movedFrom.set(it, natural);
+    byCompany[company].push(it);
   }
 
   const violationsOf = (model: string) =>
@@ -1630,6 +1659,7 @@ async function previewDraftInternal(
       sales_description: String(snap?.sales_description ?? it.sales_description ?? ''),
       remark: String(snap?.remark ?? it.remark ?? ''),
       violations: violationsOf(model),
+      moved_from: movedFrom.get(it) ?? null,
     };
   };
 
@@ -1722,7 +1752,8 @@ async function previewDraftInternal(
   const grandTotal = round2(quotes.reduce((sum, q) => sum + q.subtotal, 0));
 
   const result: WebQuotePreviewResult = {
-    customer: party.block,
+    // ค่าที่ใช้แบ่งใบจริงของรอบนี้ (แก้ใบเดิมอาจต่างจากค่าตั้งของลูกค้า) — ป้ายบนจอต้องตรงกับใบที่เห็น
+    customer: { ...party.block, forced_quote_company: forcedCompany },
     quotes,
     delivery_types: DELIVERY_TYPES.map((t) => ({ key: t.key, label: t.label })),
     goods_total: goodsTotal,
@@ -1805,6 +1836,9 @@ export async function previewQuotePdf(params: WebQuotePreviewParams & {
   const quoteData: any = {
     id: null,
     quotation_no: '',
+    // ใบร่างยังไม่มีเลข ⇒ pdfGenerator จะถามบริษัทจากสินค้ารายการแรก — บอกตรง ๆ ว่าใบที่พรีวิวคือใบไหน
+    // (ใบรวมของบัญชีเสนอในนาม PM ที่ขึ้นต้นด้วยสินค้า THT ต้องได้หัว Primus)
+    quote_company_override: company,
     created_at: null,
     customer_code: c.reference,
     customer_tax_id: c.tax_id,
