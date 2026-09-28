@@ -3,7 +3,7 @@
   "sheet": "TS-06",
   "code": "TSK-06",
   "label": "Thermocouple TS-06 (เกลียว + หัวกระโหลก)",
-  "aliases": ["TSJ-06", "TS-06"],
+  "aliases": ["TSJ-06", "TST-06", "TSN-06"],
   "standard": { "L1": 100 },
   "base": {
     "kind": "matrix",

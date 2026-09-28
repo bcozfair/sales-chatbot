@@ -3,7 +3,7 @@
   "sheet": "TS-08",
   "code": "TSP-08",
   "label": "RTD TS-08 (เกลียว + หัวกระโหลก)",
-  "aliases": ["TSPA-08", "TSZ-08", "TS-08"],
+  "aliases": ["TSPA-08", "TSZ-08"],
   "standard": { "L1": 100 },
   "base": {
     "kind": "matrix",

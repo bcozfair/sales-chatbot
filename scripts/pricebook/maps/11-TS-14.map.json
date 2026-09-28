@@ -3,6 +3,7 @@
   "sheet": "TS-14",
   "code": "TS-14",
   "label": "Thermocouple TS-14 (Ceramic)",
+  "aliases": ["TSK-14", "TSJ-14", "TSR-14", "TSS-14"],
   "standard": { "L1": 100, "L2": 50 },
   "derivedDims": [
     {

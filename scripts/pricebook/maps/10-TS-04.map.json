@@ -3,7 +3,7 @@
   "sheet": "TS-04",
   "code": "TSK-04",
   "label": "Thermocouple TS-04 (เกลียว)",
-  "aliases": ["TSJ-04", "TS-04"],
+  "aliases": ["TSJ-04", "TST-04", "TSN-04"],
   "standard": { "L1": 100, "cable_m": 1 },
   "axisDefaults": { "cable": "สายสแตนเลสถัก" },
   "base": {

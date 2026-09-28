@@ -122,6 +122,13 @@ const SKIP_YES = 'ข้าม';
 const SKIP_NO = 'ไม่รับทำ';
 /** ค่าแกนที่เป็นสตริงว่าง — ต้องมีคำแทน ไม่งั้นช่องว่างในไฟล์แยกไม่ออกจาก "ไม่ได้กรอก" */
 const BLANK_TOKEN = '(ว่าง)';
+/**
+ * ท้ายหัวคอลัมน์/หัวแถวที่ "รับผลิตแต่ยังไม่มีราคา" (`base.unpriced`) — ต้องมีป้ายกำกับ เพราะคอลัมน์ที่ว่าง
+ * ทั้งคอลัมน์โดยไม่มีป้ายยังแปลว่า "ไม่รับผลิต/ลบทิ้ง" เหมือนเดิม · กรอกราคาแล้วป้ายนี้ลบหรือไม่ลบก็ได้
+ */
+const UNPRICED_MARK = ' — ยังไม่มีราคา';
+const stripUnpriced = (t: string): { value: string; marked: boolean } =>
+  t.endsWith(UNPRICED_MARK) ? { value: t.slice(0, -UNPRICED_MARK.length).trim(), marked: true } : { value: t, marked: false };
 
 const SHEET = {
   readme: 'อ่านก่อนแก้',
@@ -363,6 +370,8 @@ const README_LINES = [
   '2. เพิ่มแถวใหม่ได้เลย ลบแถวได้เลย — แต่ "รหัสรุ่น" ต้องตรงกับชีต รุ่น',
   '3. ช่องราคาที่เว้นว่าง = ไม่รับผลิตขนาดนั้น ไม่ใช่ราคา 0',
   '   ถ้าตั้งใจให้ฟรีจริง ๆ ให้ใส่เลข 0',
+  '   ยกเว้นหัวคอลัมน์/หัวแถวที่ลงท้ายว่า "' + UNPRICED_MARK.trim() + '" = รับผลิตแต่ยังไม่ได้ใส่ราคา',
+  '   (เช่น Type R/S ของ TS-18) กรอกราคาในคอลัมน์นั้นได้เลย จะลบป้ายท้ายหัวหรือไม่ก็ได้',
   '4. กฎที่ยังไม่อยากให้มีผล ให้ใส่ ' + OFF + ' ที่คอลัมน์ "เปิดใช้" แทนการลบแถว',
   '   ลบแล้วจะตามไม่ได้ว่าเมื่อก่อนคิดยังไง',
   '5. เพิ่มชีตของตัวเองได้ ระบบจะข้ามชีตที่ไม่รู้จัก ไม่พัง',
@@ -505,14 +514,20 @@ function baseSheet(m: PriceModel): SheetTable {
     const c = parts.slice(1).join(' | ');
     if (colAxes.length > 0 && !colValues.includes(c)) colValues.push(c);
   }
+  // ค่าที่ตั้งไว้แต่ยังไม่มีราคา — เป็นแถว/คอลัมน์ว่างที่มีป้ายกำกับ ให้แอดมินกรอกแล้วอัปโหลดกลับ
+  const waitRows = (m.base.unpriced?.[rowAxis!] ?? []).filter((v) => !rowValues.includes(v));
+  const waitCols = colAxes.length === 1 ? (m.base.unpriced?.[colAxes[0]!] ?? []).filter((v) => !colValues.includes(v)) : [];
+  rowValues.push(...waitRows);
+  colValues.push(...waitCols);
+  const headOf = (v: string, wait: string[]) => (wait.includes(v) ? v + UNPRICED_MARK : v);
 
   const header = [rowAxis, ...colAxes].join(' \\ ');
   const columns: SheetColumn[] = [{ label: header, width: 16 }];
-  if (colAxes.length > 0) for (const c of colValues) columns.push({ label: c || BLANK_TOKEN, width: 11 });
+  if (colAxes.length > 0) for (const c of colValues) columns.push({ label: headOf(c, waitCols) || BLANK_TOKEN, width: 11 });
   else columns.push({ label: 'ราคา', width: 12 });
 
   const rows: CellValue[][] = rowValues.map((rv) => {
-    const line: CellValue[] = [rv];
+    const line: CellValue[] = [headOf(rv, waitRows)];
     if (colAxes.length > 0) {
       for (const cv of colValues) {
         const cell = m.base.kind === 'matrix' ? m.base.cells[`${rv} | ${cv}`] : undefined;
@@ -1312,12 +1327,20 @@ function readBase(model: PriceModel, name: string, grid: CellValue[][], R: Reade
   const cells: Record<string, Money> = {};
   let filled = 0;
   let blank = 0;
+  // หัวที่มีป้าย "ยังไม่มีราคา" — ตารางสองแกนเท่านั้น (สามแกนหัวคอลัมน์เป็นค่าสองแกนต่อกัน)
+  const waiting: Record<string, string[]> = {};
+  const wait = (axis: string, v: string) => {
+    if (axes.length !== 2) return;
+    (waiting[axis] ??= []).includes(v) || waiting[axis]!.push(v);
+  };
 
   for (let r = headAt + 1; r < grid.length; r++) {
     const row = grid[r] ?? [];
     if (isEmptyRow(row)) continue;
-    const rv = toText(row[firstCol] ?? '');
+    const rowHead = stripUnpriced(toText(row[firstCol] ?? ''));
+    const rv = rowHead.value;
     if (rv === '') continue;
+    if (rowHead.marked) wait(rowAxis, rv);
 
     if (colAxes.length === 0) {
       const priceCol = headRow.findIndex((t) => t === 'ราคา');
@@ -1331,8 +1354,10 @@ function readBase(model: PriceModel, name: string, grid: CellValue[][], R: Reade
     }
 
     for (let c = firstCol + 1; c < headRow.length; c++) {
-      const cv = headRow[c] === BLANK_TOKEN ? '' : headRow[c] ?? '';
       if (headRow[c] === '' || headRow[c] === undefined) continue;
+      const colHead = stripUnpriced(headRow[c]!);
+      const cv = colHead.value === BLANK_TOKEN ? '' : colHead.value;
+      if (colHead.marked) wait(colAxes[0]!, cv);
       const v = toNumber(row[c] ?? null);
       // ช่องว่าง = ไม่รับผลิตขนาดนั้น ⇒ ไม่ใส่คีย์ ไม่ใช่ใส่ 0
       if (v === undefined) {
@@ -1346,7 +1371,14 @@ function readBase(model: PriceModel, name: string, grid: CellValue[][], R: Reade
   }
 
   if (filled === 0) R.err(name, 'อ่านราคาไม่ได้สักช่อง — ตรวจว่าช่องราคาเป็นตัวเลข ไม่ใช่ข้อความ');
-  model.base = { kind: 'matrix', axes, cells };
+  // ค่าที่ได้ราคาแล้วอย่างน้อยหนึ่งช่องไม่นับเป็น "ยังไม่มีราคา" อีก (กติกาเดียวกับ `pruneUnpriced`)
+  const unpriced: Record<string, string[]> = {};
+  for (const [a, vals] of Object.entries(waiting)) {
+    const i = axes.indexOf(a);
+    const rest = vals.filter((v) => !Object.keys(cells).some((k) => k.split(' | ')[i] === v));
+    if (rest.length) unpriced[a] = rest;
+  }
+  model.base = Object.keys(unpriced).length ? { kind: 'matrix', axes, cells, unpriced } : { kind: 'matrix', axes, cells };
   model.importStats = {
     code: model.code,
     sheet: name,

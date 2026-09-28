@@ -39,6 +39,7 @@ import type { Adder, Band, Constraint, DerivedDim, ModelVariant, PriceBook, Pric
 import { pool } from '../../config/db.js';
 import { readBookState } from '../../services/pricingLab/bookStore.js';
 import { BookConflict, BookRejected, commitBookChange, seedBook } from '../../services/pricingLab/bookUpdate.js';
+import { pruneUnpriced } from '../../services/pricingLab/modelEditor.js';
 import type { SourceFile } from '../../db/pricingBookRepo.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -65,6 +66,12 @@ interface MatrixSpec {
    */
   colHeaderRow: number | number[];
   cols: string[];
+  /**
+   * ค่าแกนที่ **รับผลิตแต่ชีตยังไม่มีราคา** — เขียนลงสมุดเป็น `base.unpriced` ให้แอดมินกรอกทีหลัง
+   * (TS-18 หัววัด Type R/S: แคตตาล็อกมี ชีตไม่มีคอลัมน์ · เจ้าของสั่ง 2026-09-28)
+   * ต้องไม่ซ้ำกับหัวคอลัมน์/หัวแถวที่มีราคาอยู่แล้ว — ตัวนำเข้าตรวจให้
+   */
+  unpriced?: Record<string, string[]>;
 }
 
 interface BandedSpec {
@@ -295,6 +302,16 @@ function importSheet(
       });
     }
     base = { kind: 'matrix', axes: spec.axes, cells };
+    if (spec.unpriced) {
+      for (const [axis, vals] of Object.entries(spec.unpriced)) {
+        const i = spec.axes.indexOf(axis);
+        if (i < 0 || spec.axes.length !== 2) throw new Error(`${map.code}: base.unpriced.${axis} — ต้องเป็นแกนของตารางสองแกน`);
+        const have = new Set(Object.keys(cells).map((k) => k.split(' | ')[i]));
+        const dup = vals.filter((v) => have.has(v));
+        if (dup.length) throw new Error(`${map.code}: base.unpriced.${axis} มีราคาในชีตแล้ว (${dup.join(' · ')}) — ถอดออกจาก map`);
+      }
+      base.unpriced = spec.unpriced;
+    }
     layout = readLayout(map, ws, spec, colHeaders);
     defaultsBy = readDefaultsBy(map, ws, spec);
   } else if (map.base.kind === 'banded') {
@@ -791,15 +808,26 @@ async function applyAliases(fromFile: PriceBook, opts: { apply: boolean; by: str
     if (!f) continue;
     const was = m.aliases ?? [];
     const now = f.aliases ?? [];
-    if (JSON.stringify(was) === JSON.stringify(now)) continue;
-    models[code] = withFields(m, { aliases: now });
+    // คอลัมน์ "ยังไม่มีราคา" (`base.unpriced`) มากับรายชื่อรหัส — TSR-18 ใช้ตารางได้ก็ต่อเมื่อมีคอลัมน์ Type R ให้ยืน
+    // ค่าที่แอดมินกรอกราคาในฐานไปแล้วถูกถอดออกเอง (ไม่ทับราคาที่มีอยู่)
+    const base = m.base.kind === 'matrix' && f.base.kind === 'matrix'
+      ? pruneUnpriced({ ...m.base, unpriced: f.base.unpriced })
+      : m.base;
+    const baseMoved = m.base.kind === 'matrix' && base.kind === 'matrix'
+      && JSON.stringify(m.base.unpriced ?? null) !== JSON.stringify(base.unpriced ?? null);
+    if (JSON.stringify(was) === JSON.stringify(now) && !baseMoved) continue;
+    models[code] = withFields(m, { aliases: now, base });
     changed.push(code);
     const gone = was.filter((a) => !now.includes(a));
     const added = now.filter((a) => !was.includes(a));
     console.log(`\n${code}:`);
     if (gone.length) console.log(`  ถอด ${gone.join(', ')}`);
     if (added.length) console.log(`  เพิ่ม ${added.join(', ')}`);
-    console.log(`  ⇒ ใช้กับรหัส ${[code, ...now].join(', ')}`);
+    if (baseMoved && base.kind === 'matrix') {
+      const list = Object.entries(base.unpriced ?? {}).map(([a, v]) => `${a}: ${v.join(', ')}`).join(' · ');
+      console.log(`  ช่องที่รับผลิตแต่ยังไม่มีราคา ⇒ ${list || '(ไม่มี)'}`);
+    }
+    console.log(`  ⇒ ใช้กับรหัส ${[code, ...now].filter((c) => !/^TS-\d/.test(c)).join(', ')}`);   // TS-14 = ชื่อรุ่นในฐาน ไม่ใช่รหัสที่ใช้ได้
   }
   if (changed.length === 0) {
     console.log('\nรายชื่อรหัสในฐานตรงกับแมปทุกรุ่นแล้ว — ไม่มีอะไรต้องเขียน');
@@ -813,7 +841,7 @@ async function applyAliases(fromFile: PriceBook, opts: { apply: boolean; by: str
   const revision = await commitBookChange({
     parent: state.revision,
     kind: 'model',
-    next: { ...state.book, models, edited: { at, by: opts.by ?? undefined, note: 'ปรับรายชื่อรหัสที่ใช้ตารางเดียวกันตามแมป (ถอด TS-01/TS-01-0 — เจ้าของยืนยัน 2026-09-28) — ไม่แตะตัวเลขราคา' } },
+    next: { ...state.book, models, edited: { at, by: opts.by ?? undefined, note: 'ปรับรายชื่อรหัสที่ใช้ตารางเดียวกันตามแมป (แคตตาล็อก ∪ Excel — เจ้าของสั่ง 2026-09-28) + ช่องที่ยังไม่มีราคา — ไม่แตะตัวเลขราคา' } },
     changed,
     by: opts.by,
   });

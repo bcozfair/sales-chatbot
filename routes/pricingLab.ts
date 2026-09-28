@@ -357,6 +357,8 @@ function modelBriefs(book: PriceBook | undefined) {
     if (m.base.kind === 'matrix') {
       const names = m.base.axes;
       for (const key of Object.keys(m.base.cells)) key.split(' | ').forEach((v, i) => put(names[i]!, v));
+      // คอลัมน์ "ยังไม่มีราคา" ก็เป็นค่าที่แกนรับได้ (TS-18 Type R/S) — ชื่ออย่างเดียวเหมือนกัน
+      for (const [a, vals] of Object.entries(m.base.unpriced ?? {})) vals.forEach((v) => put(a, v));
     }
     for (const a of m.adders) if (a.byAxis) for (const k of Object.keys(a.rates ?? {})) put(a.byAxis, k);
     return {

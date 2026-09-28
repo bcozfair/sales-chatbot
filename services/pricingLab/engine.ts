@@ -175,6 +175,8 @@ interface BaseResult {
   reason?: string;
   /** คิดไม่ได้เพราะรหัสไม่ได้บอกค่าแกนของตาราง (ไม่ใช่ไม่รับผลิต) */
   missing?: boolean;
+  /** คิดไม่ได้เพราะค่าแกนนั้น "ตั้งไว้แต่ยังไม่มีราคา" (`unpriced`) — ไม่ใช่ไม่รับผลิต */
+  noRate?: boolean;
   /** วิธีหาราคาตั้งทีละขั้น (ดู `PriceTrace`) */
   steps: string[];
 }
@@ -223,6 +225,18 @@ function computeBase(
           missing: true,
           reason: `รหัสไม่ได้บอก${unknown.map(axisLabel).join(' และ ')} — ตารางราคาตั้งต้องรู้ค่านี้ก่อน`,
           steps,
+        };
+      }
+      // ค่าที่ตั้งไว้ให้กรอกราคาทีหลัง ≠ ช่องที่ชีตเว้นไว้ — อย่างแรก "ยังไม่มีราคา" อย่างหลัง "ไม่รับผลิต"
+      const waiting = base.axes.filter((a) => base.unpriced?.[a]?.includes(axes[a]!));
+      if (waiting.length) {
+        return {
+          ok: false,
+          amount: 0,
+          label: 'ฐานราคา',
+          noRate: true,
+          reason: `ตารางราคาตั้งของ ${model.code} ยังไม่มีราคาของ${waiting.map((a) => `${axisLabel(a)} ${axes[a]}`).join(' · ')} — ใส่ราคาได้ที่หน้าสมุดราคา (แม่แบบ Excel)`,
+          steps: [...steps, `${waiting.map((a) => `${axisLabel(a)} ${axes[a]}`).join(' · ')} ตั้งไว้ในตารางแล้วแต่ยังไม่ได้ใส่ราคา (ไม่ใช่ไม่รับผลิต)`],
         };
       }
       return {
@@ -634,6 +648,7 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
     violations.push({
       id: 'NO_BASE_PRICE', level: 'block', message: base.reason ?? 'ไม่มีราคาฐาน',
       ...(base.missing ? { missing: true } : {}),
+      ...(base.noRate ? { noRate: true } : {}),
     });
   } else {
     running = base.amount;
