@@ -58,6 +58,53 @@ check('ส่งออกแล้วอัปกลับทันที = ไ�
   clean.summary.changed === 0 && clean.summary.added === 0 && clean.summary.removed === 0,
   `เปลี่ยน ${clean.summary.changed} · เพิ่ม ${clean.summary.added} · หาย ${clean.summary.removed}`);
 check('และไม่ใช่เพราะเทียบกับความว่างเปล่า', clean.summary.same > 100, `ช่องที่เท่าเดิม ${clean.summary.same}`);
+check('ส่งออกแล้วอัปกลับทันที = ไม่มีอะไรเปลี่ยนนอกช่องราคาด้วย (ไม่มีแถวลวง)', clean.ruleRows.length === 0,
+  clean.ruleRows.slice(0, 5).map((r) => `${r.model} ${r.what}: ${r.was} → ${r.now}`).join(' · ') || '(ไม่มี)');
+
+// ── 1ข. เปลี่ยนนอกช่องราคา — ตัวเลขเท่าเดิมแต่ราคาที่คิดออกมาเปลี่ยน (รีวิว 2026-09-25) ────────────
+// จำลองแม่แบบที่ดาวน์โหลดก่อน r9: สายยังปัดขึ้น · TS-01 ยังไม่มีเกลียวมาตรฐาน ⇒ ต้องเห็นบนจอ ไม่ใช่ "เปลี่ยน 0"
+{
+  const old = JSON.parse(JSON.stringify(back)) as PriceBook;
+  let touched = '';
+  for (const m of Object.values(old.models)) {
+    const cab = m.adders.find((a) => a.round === 'floor');
+    if (cab && !touched) { cab.round = 'ceil'; touched = `${m.code} [${cab.id}]`; }
+  }
+  const withThread = Object.values(old.models).find((m) => m.axisDefaults?.thread);
+  if (withThread) delete withThread.axisDefaults!.thread;
+  const rateAdder = Object.values(old.models).flatMap((m) => m.adders.map((a) => ({ m, a }))).find(({ a }) => a.rate !== undefined);
+  if (rateAdder) rateAdder.a.rate = rateAdder.a.rate! + 7;
+  const dr = diffBooks(real, old);
+  check('แม่แบบเก่าที่ต่างแค่วิธีปัด/ค่ามาตรฐานของแกน ⇒ ขึ้นใน "เปลี่ยนนอกช่องราคา"',
+    (!touched || dr.ruleRows.some((r) => /วิธีปัด/.test(r.what) && r.now === 'ปัดขึ้น'))
+      && (!withThread || dr.ruleRows.some((r) => r.model === withThread.code && /ค่ามาตรฐานของแกน thread/.test(r.what) && r.now === '—'))
+      && dr.summary.rules === dr.ruleRows.length && dr.summary.rules > 0,
+    `${touched || '(ไม่มีกฎปัดลง)'} · ${withThread?.code ?? '(ไม่มีเกลียวมาตรฐาน)'} · ${dr.ruleRows.map((r) => `${r.model} ${r.what}: ${r.was} → ${r.now}`).join(' | ')}`);
+  check('  สรุปรายรุ่นนับแถวนอกช่องราคาด้วย (ชิปรุ่นไม่ขึ้นว่าไม่มีอะไรเปลี่ยน)',
+    !withThread || (dr.models.find((m) => m.model === withThread.code)?.rules ?? 0) > 0);
+  check('อัตราเดียวของกฎต่อหน่วย (`rate` เช่นสาย BH 60/ม.) ⇒ ขึ้นเป็นราคาเปลี่ยน',
+    !rateAdder || dr.rows.some((r) => r.model === rateAdder.m.code && r.what.includes(`[${rateAdder.a.id}] (ต่อหน่วย)`) && r.now === r.was! + 7),
+    rateAdder ? `${rateAdder.m.code} ${rateAdder.a.id}` : '(ไม่มีกฎที่มี rate)');
+  // "ใช้กับรหัส" หายไปหนึ่งตัว = รหัสชุดนั้นหารุ่นไม่เจออีกเลย · "ยังไม่มีราคา" หาย = กลายเป็นไม่รับผลิต ⇒ ต้องขึ้นทั้งคู่
+  const lost = JSON.parse(JSON.stringify(back)) as PriceBook;
+  const withAlias = Object.values(lost.models).find((m) => (m.aliases?.length ?? 0) > 1);
+  if (withAlias) withAlias.aliases = withAlias.aliases!.slice(1);
+  const withUnpriced = Object.values(lost.models).find((m) => m.base.kind === 'matrix' && m.base.unpriced);
+  if (withUnpriced && withUnpriced.base.kind === 'matrix') delete withUnpriced.base.unpriced;
+  const dl = diffBooks(real, lost);
+  check('"ใช้กับรหัส" หรือ "ค่าที่ยังไม่มีราคา" หายไปในไฟล์ ⇒ ขึ้นใน "เปลี่ยนนอกช่องราคา"',
+    (!withAlias || dl.ruleRows.some((r) => r.model === withAlias.code && r.what === 'ใช้กับรหัส'))
+      && (!withUnpriced || dl.ruleRows.some((r) => r.model === withUnpriced.code && r.what.startsWith('ค่าที่ยังไม่มีราคา'))),
+    dl.ruleRows.map((r) => `${r.model} ${r.what}: ${r.was} → ${r.now}`).join(' | ') || '(ไม่มี)');
+
+  // ไฟล์ที่ไม่มีชีต "ค่าเริ่มต้นตามแกน" = คงของเดิม (applyModels) ⇒ ต้องไม่ขึ้นว่าหาย
+  const noBy = JSON.parse(JSON.stringify(back)) as PriceBook;
+  const byModel = Object.values(noBy.models).find((m) => m.axisDefaultsBy);
+  if (byModel) delete byModel.axisDefaultsBy;
+  const dBy = diffBooks(real, noBy);
+  check('ไฟล์ไม่มีค่าเริ่มต้นตามแกน (แม่แบบรุ่นเก่า) ⇒ ไม่ขึ้นว่าเปลี่ยน เพราะบันทึกแล้วคงของเดิม',
+    !dBy.ruleRows.some((r) => /ค่าเริ่มต้นของ/.test(r.what)), dBy.ruleRows.map((r) => r.what).join(' · ') || '(ไม่มี)');
+}
 
 // ── 2. แก้สองรุ่น แล้วดูว่าส่วนต่างตรงกับที่แก้จริง ──────────────────────────
 //
