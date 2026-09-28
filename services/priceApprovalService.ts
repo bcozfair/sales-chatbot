@@ -279,9 +279,11 @@ export async function getApprovalRequest(params: {
     const enriched = await enrichQuotationData(row);
     quotes.push({
       id: String(row.id),
-      // อักษรนำของเลขที่ใบเป็นตัวแบ่งบริษัทของไฟล์ export อยู่แล้ว — ร่างยังไม่มีเลข
-      // จึงดูจาก snapshot ของบรรทัดแรกแทน (ค่าเดียวกับที่ resolveQuoteCompany ตัดสินตอนแตกใบ)
-      company: String(enriched.items?.[0]?.production ?? '').toUpperCase() === 'THT' ? 'THT' : 'PM',
+      // ร่างยังไม่มีเลข ⇒ ใช้บริษัทที่ enrichQuotationData ตัดสินให้ (ค่าที่ตรึงไว้ก่อน แล้วจึง
+      // resolveQuoteCompany ของสินค้ารายการแรก — ตัวเดียวกับตอนแตกใบ)
+      // เดิมเทียบ `production === 'THT'` ซึ่งไม่ตรงกับค่า production จริงสักค่า (Import(PM) ·
+      // Buy to Sell(THT)) ⇒ ทุกใบในคิวอนุมัติถูกติดป้าย PM (แก้พร้อมบัญชีเสนอในนาม PM 2026-09-28)
+      company: enriched.quote_company === 'THT' ? 'THT' : 'PM',
       total_sum: Number(row.total_sum ?? 0),
       items: enriched.items ?? [],
       customer_name: enriched.customer_name ?? null,

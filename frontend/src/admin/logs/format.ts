@@ -133,6 +133,7 @@ const ENTITY_LABELS: Record<string, string> = {
   shipping_fee: 'ค่าขนส่ง',
   credit_policy: 'นโยบายเครดิต',
   blacklist: 'บัญชีห้ามเสนอราคา',
+  quote_pm: 'บัญชีเสนอในนาม PM',
   admin_user: 'ผู้ใช้งานระบบ',
   salesperson: 'พนักงานขาย',
   sync_setting: 'ตั้งค่าการ sync',

@@ -23,6 +23,7 @@ import { pool, withTransaction, type DbExecutor } from '../config/db.js';
 import { sumLineTotals, round2 } from '../utils/pricing.js';
 import { loadCached } from './rules/cache.js';
 import { resolveQuoteCompany } from './quotationService.js';
+import { quoteCompanyOverrideOf } from './customerQuoteCompany.js';
 
 /** สถานะร่างที่ยังแก้ได้ — ชุดเดียวกับที่ insertDraftQuotations ใช้ลบร่างเดิม */
 const DRAFT_STATUSES = ['pending_company', 'pending_contact', 'draft'];
@@ -281,7 +282,7 @@ export async function applyShippingFeeToQuoteGroup(
   try {
     await withTransaction(async (client) => {
       const { rows } = await client.query(
-        `SELECT id, status, customer_id, customer_details, item_details, total_sum
+        `SELECT id, status, customer_id, customer_details, item_details, total_sum, quote_company_override
            FROM quotations
           WHERE user_id = $1 AND status = ANY($2)
             AND price_approval->>'request_id' IS NOT DISTINCT FROM $3
@@ -326,7 +327,9 @@ export async function applyShippingFeeToQuoteGroup(
         for (let i = 0; i < quotes.length; i++) {
           const first = quotes[i].goodsItems[0];
           if (!first) continue;
-          if (await resolveQuoteCompany(first, client) === 'PM') {
+          // ใบที่ตรึงบริษัทไว้ (บัญชีเสนอในนาม PM) ตอบตามค่าที่ตรึง ไม่ถามสินค้ารายการแรก
+          const company = quoteCompanyOverrideOf(quotes[i].row) ?? await resolveQuoteCompany(first, client);
+          if (company === 'PM') {
             targetIdx = i;
             break;
           }

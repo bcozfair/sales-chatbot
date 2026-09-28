@@ -1062,6 +1062,9 @@ CREATE TABLE public.quotations (
     -- ใบเก่าทั้งหมด backfill เป็น 'Sales' และแถวใหม่ได้ 'Sales' เมื่อไม่ระบุ (เจ้าของสั่ง 2026-09-25)
     -- export ยังถอยไปค่าตั้งต้นเมื่อเจอ NULL (กันไว้ ไม่ควรมีแล้ว)
     source_id text DEFAULT 'Sales'::text,
+    -- บริษัทที่ใบนี้ถูกบังคับให้เป็น (บัญชีเสนอในนาม PM) — คัดลอกจาก customer_quote_company ตอนผูกลูกค้า
+    -- NULL = แบ่ง PM/THT ตามสินค้าเหมือนเดิม · ทุกจุดที่ตัดสินบริษัทของใบอ่านคอลัมน์นี้ก่อน
+    quote_company_override text,
     CONSTRAINT quotations_delivery_days_override_check CHECK (
         (delivery_days_override IS NULL)
         OR ((delivery_days_override >= 0) AND (delivery_days_override <= 3650))
@@ -1069,7 +1072,30 @@ CREATE TABLE public.quotations (
     CONSTRAINT quotations_delivery_type_override_check CHECK (
         (delivery_type_override IS NULL)
         OR (delivery_type_override = ANY (ARRAY['in_stock'::text, 'make_to_order'::text, 'import'::text, 'install'::text]))
+    ),
+    CONSTRAINT quotations_quote_company_override_check CHECK (
+        (quote_company_override IS NULL) OR (quote_company_override = ANY (ARRAY['PM'::text, 'THT'::text]))
     )
+);
+
+
+--
+-- Name: customer_quote_company; Type: TABLE; Schema: public; Owner: -
+--
+-- บัญชีเสนอในนาม PM — บริษัทที่อยู่ในตารางนี้ ทุกสินค้าออกเป็นใบเดียวของบริษัทที่ระบุ (วันนี้ PM เท่านั้น)
+-- มีผลทั้งนิติบุคคล (กติกาเดียวกับบัญชีห้ามเสนอราคา) · ทั้งบริษัทเท่านั้น ไม่มีระดับผู้ติดต่อ
+-- ไม่มี FK — customers/customers_data_view ถูก sync/rebuild ทับทั้งก้อน
+--
+
+CREATE TABLE public.customer_quote_company (
+    company_id    integer PRIMARY KEY,
+    quote_company text NOT NULL DEFAULT 'PM',
+    note          text,
+    created_by    integer,
+    created_at    timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at    timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT customer_quote_company_company_id_check CHECK (company_id > 0),
+    CONSTRAINT customer_quote_company_quote_company_check CHECK (quote_company = ANY (ARRAY['PM'::text, 'THT'::text]))
 );
 
 

@@ -4,6 +4,7 @@ import { Login } from './Login';
 import { Users } from './Users';
 import { RolePermissions } from './RolePermissions';
 import { Blacklist } from './Blacklist';
+import { QuotePmList } from './QuotePmList';
 import { CreditPolicy } from './CreditPolicy';
 import { ChangePasswordModal } from './ChangePasswordModal';
 import { Promotions } from './Promotions';
@@ -38,6 +39,7 @@ import {
   Tag,
   UserCheck,
   UserPlus,
+  Building2,
   FileText,
   Sliders,
   SlidersHorizontal,
@@ -186,6 +188,8 @@ const NAV_GROUPS: { key: string; label: string; icon: typeof LayoutDashboard; it
       // "ข้อมูลลูกค้า" ที่อยู่เหนือมัน · ตัวเลขข้างเมนู = คนที่ยังไม่มีใน Odoo (เจ้าของเคาะ 2026-09-21)
       { tab: 'odoocontacts', label: 'ผู้ติดต่อเพิ่มเอง', icon: UserPlus, roles: ['admin', 'approver', 'subadmin'], cap: 'page.odoocontacts' },
       { tab: 'blacklist', label: 'บัญชีห้ามเสนอราคา', icon: Ban, roles: ['admin', 'user'], cap: 'page.blacklist' },
+      // รายชื่อลูกค้าที่ระบบใช้ตัดสินใจแบบเดียวกับบัญชีข้างบน (2026-09-28 · เจ้าของตั้งชื่อเมนูเอง)
+      { tab: 'quotepm', label: 'บัญชีเสนอในนาม PM', icon: Building2, roles: ['admin', 'approver', 'subadmin'], cap: 'page.quotepm' },
     ],
   },
   {
@@ -238,6 +242,7 @@ const PAGE_TITLES: Record<MainTab, string> = {
   productsdata: 'ข้อมูลสินค้า',
   customersdata: 'ข้อมูลลูกค้า & ผู้ติดต่อ',
   odoocontacts: 'ผู้ติดต่อที่ต้องคีย์เข้า Odoo',
+  quotepm: 'บัญชีเสนอในนาม PM',
   traffic: 'รายงานการใช้งาน',
   apilogs: 'บันทึกการเรียก API',
   auditlogs: 'บันทึกการแก้ไข',
@@ -846,6 +851,10 @@ function AdminContent() {
           ) : effectiveTab === 'odoocontacts' ? (
             <div className="animate-fade-in">
               <OdooContacts />
+            </div>
+          ) : effectiveTab === 'quotepm' ? (
+            <div className="animate-fade-in">
+              <QuotePmList />
             </div>
           ) : effectiveTab === 'salespersons' ? (
             <div className="animate-fade-in">

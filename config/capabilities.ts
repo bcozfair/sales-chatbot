@@ -87,6 +87,7 @@ export type PageCapability =
   | 'page.customersdata'
   | 'page.odoocontacts'
   | 'page.blacklist'
+  | 'page.quotepm'
   | 'page.salespersons'
   | 'page.users'
   | 'page.traffic';
@@ -474,6 +475,17 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     // (AdminApp.tsx: roles: ['admin', 'user']) ปิดช่องนี้ = บัญชีทั่วไปเข้าระบบมาแล้วไม่เหลืออะไรเลย
     defaults: { admin: 'allow', approver: 'deny', subadmin: 'deny', salesperson: 'deny', user: 'allow' },
     enforcedAt: '/api/admin/blacklist/* (8 เส้น)',
+  },
+  {
+    // บัญชีเสนอในนาม PM (2026-09-28) — ลูกค้าในรายการนี้ทุกสินค้าออกเป็นใบ Primus ใบเดียว
+    // เจ้าของเคาะ: admin · approver · subadmin ตั้งได้ · หน้าใหม่ ⇒ ไม่มีใครเสียสิทธิ์ที่เคยมี
+    // ป้าย "ในนาม PM" บนหน้าขอใบเสนอราคา/ข้อมูลลูกค้าไม่ผูกกับช่องนี้ (อ่านอย่างเดียว ใครออกใบก็เห็น)
+    key: 'page.quotepm',
+    group: 'page',
+    label: 'บัญชีเสนอในนาม PM',
+    modes: SWITCH,
+    defaults: switchFor('allow', 'allow', 'allow', 'deny'),
+    enforcedAt: '/api/admin/quote-pm/* (6 เส้น)',
   },
   {
     key: 'page.salespersons',

@@ -66,6 +66,8 @@ interface CustomerRow {
   last_order_at: string | null;
   contact_count?: number;
   blacklisted?: boolean;
+  /** บัญชีเสนอในนาม PM (ขยายทั้งนิติบุคคล) — ป้ายอ่านอย่างเดียว */
+  quote_pm?: boolean;
   discount?: DiscountSummary | null;
 }
 
@@ -387,6 +389,7 @@ export const CustomersDirectory: React.FC = () => {
                             <td className={tdCls}>
                               <div className="font-medium text-slate-800 flex items-center gap-1.5 flex-wrap">
                                 {r.contact_name?.trimEnd() || <span className="text-slate-400">—</span>}
+                                {r.quote_pm && <span className="px-1.5 py-0.5 rounded-md border text-[10px] font-semibold bg-sky-50 text-sky-700 border-sky-200">ในนาม PM</span>}
                                 {r.blacklisted && <span className="px-1.5 py-0.5 rounded-md border text-[10px] font-semibold bg-red-50 text-red-700 border-red-200">ห้ามเสนอราคา</span>}
                                 {r.source === 'saleorder' && <span className="px-1.5 py-0.5 rounded-md border text-[10px] font-semibold bg-amber-50 text-amber-700 border-amber-200">ใบสั่งขาย</span>}
                               </div>
@@ -451,6 +454,7 @@ export const CustomersDirectory: React.FC = () => {
                     {view === 'contact' && (
                       <div className="font-medium text-slate-800 text-sm flex items-center gap-1.5 flex-wrap">
                         {r.contact_name?.trimEnd() || '—'}
+                        {r.quote_pm && <span className="px-1.5 py-0.5 rounded-md border text-[10px] font-semibold bg-sky-50 text-sky-700 border-sky-200">ในนาม PM</span>}
                         {r.blacklisted && <span className="px-1.5 py-0.5 rounded-md border text-[10px] font-semibold bg-red-50 text-red-700 border-red-200">ห้ามเสนอราคา</span>}
                       </div>
                     )}

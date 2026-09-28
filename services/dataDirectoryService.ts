@@ -21,6 +21,7 @@ import {
   type ProductDirectoryFilter, type CustomerDirectoryFilter, type DiscountOrderRow,
 } from '../db/dataDirectoryRepo.js';
 import { loadProductBlockRules, findBlockingRule, normalizeProductScope } from './rules/index.js';
+import { findForcedQuoteCompanies } from './customerQuoteCompany.js';
 import { loadProductRuleSets, rulesForProduct, type ProductRuleFlags } from './rules/productRuleSets.js';
 
 // ═══════════════════════════ สินค้า ═══════════════════════════
@@ -171,20 +172,40 @@ export function summarizeDiscounts(orders: DiscountOrderRow[]): DiscountSummary 
   return { rows, latestPct, same, trend };
 }
 
+/**
+ * ป้าย "ในนาม PM" — บัญชีเสนอในนาม PM ขยายทั้งนิติบุคคล (ไม่ใช่ company_id ตรง ๆ แบบ `blacklisted`
+ * ของหน้านี้) จึงถามผ่าน findForcedQuoteCompanies query เดียวต่อหน้า ไม่ฝังลง SQL ของรายการ
+ * ล้มแล้วไม่มีป้าย — หน้านี้อ่านอย่างเดียว ป้ายไม่ใช่ด่าน
+ */
+async function quotePmIds(companyIds: number[]): Promise<Set<number>> {
+  try {
+    const m = await findForcedQuoteCompanies(companyIds);
+    return new Set([...m].filter(([, co]) => co === 'PM').map(([id]) => id));
+  } catch (err) {
+    console.error('[dataDirectory] ติดป้ายบัญชีเสนอในนาม PM ไม่สำเร็จ (ไม่มีป้าย):', err);
+    return new Set();
+  }
+}
+
 export async function getCompanyDirectory(f: CustomerDirectoryFilter) {
   const { rows, total } = await listCompanies(f);
   // ส่วนลดเป็นของ "บริษัท" ⇒ ดึงเฉพาะมุมมองบริษัท ไม่ดึงในมุมมองผู้ติดต่อ
-  const history = await getDiscountHistoryForCompanies(rows.map((r) => r.company_id));
+  const [history, pm] = await Promise.all([
+    getDiscountHistoryForCompanies(rows.map((r) => r.company_id)),
+    quotePmIds(rows.map((r) => r.company_id)),
+  ]);
   const items = rows.map((r) => ({
     ...r,
     discount: summarizeDiscounts(history.get(r.company_id) ?? []),
+    quote_pm: pm.has(Number(r.company_id)),
   }));
   return { items, total };
 }
 
 export async function getContactDirectory(f: CustomerDirectoryFilter) {
   const { rows, total } = await listContacts(f);
-  return { items: rows, total };
+  const pm = await quotePmIds(rows.map((r) => r.company_id));
+  return { items: rows.map((r) => ({ ...r, quote_pm: pm.has(Number(r.company_id)) })), total };
 }
 
 /** แผงรายละเอียดของบริษัทหนึ่ง — ผู้ติดต่อทั้งหมด + ประวัติส่วนลด */

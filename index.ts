@@ -88,6 +88,13 @@ import {
   listRelatedContacts,
 } from './services/blacklistService.js';
 import {
+  listQuoteCompanyEntries,
+  addQuoteCompanyEntry,
+  updateQuoteCompanyEntry,
+  removeQuoteCompanyEntry,
+  findForcedQuoteCompanies,
+} from './services/customerQuoteCompany.js';
+import {
   findCreditHeldCompanyIds,
   checkCreditHold,
   getCreditPolicyFresh,
@@ -975,10 +982,19 @@ app.get('/api/customers/search', async (req: any, res: any) => {
       console.error('[customers/search] annotate credit hold failed (ปล่อยผ่าน):', err);
     }
 
+    // บัญชีเสนอในนาม PM — ป้ายอย่างเดียว (หน้าขอใบเสนอราคา) ล้มแล้วไม่มีป้าย การแบ่งใบจริงถามเองอีกที
+    let forcedCompanies = new Map<number, string>();
+    try {
+      forcedCompanies = await findForcedQuoteCompanies(data.map((c: any) => c.id));
+    } catch (err) {
+      console.error('[customers/search] annotate quote company failed (ปล่อยผ่าน):', err);
+    }
+
     res.json(data.map((c: any) => ({
       ...c,
       is_blacklisted: blockedIds.has(Number(c.id)),
       is_credit_hold: creditHeldIds.has(Number(c.id)),
+      forced_quote_company: forcedCompanies.get(Number(c.id)) ?? null,
     })));
   } catch (err: any) {
     console.error("API GET customers search error:", err);
@@ -1423,6 +1439,18 @@ app.put('/api/quotation/:id', express.json(), async (req: any, res: any) => {
       customerDetailsPayload = quote.customer_details;
     }
 
+    // บัญชีเสนอในนาม PM — ตรึงใหม่เฉพาะตอน "เปลี่ยนลูกค้าของใบ" · ไม่เปลี่ยนลูกค้า = คงค่าเดิม
+    // ⇒ เพิ่ม/ลบสินค้าในใบรวมแล้วใบไม่กลับไปถามสินค้ารายการแรก · เส้นนี้แก้ทีละใบ จึงไม่รวมกับใบพี่น้อง
+    // (ใบ PM/THT ที่แตกไว้แล้วยังเป็นสองใบ — การรวมมีที่เดียวคือ updateQuotationCustomerSnapshot)
+    let quoteCompanyOverride = quoteRes.rows[0]?.quote_company_override ?? null;
+    if (resolvedCustomerId && String(resolvedCustomerId) !== String(quoteRes.rows[0]?.customer_id ?? '')) {
+      const { decideForcedQuoteCompany } = await import('./services/customerQuoteCompany.js');
+      quoteCompanyOverride = await decideForcedQuoteCompany({
+        customerId: resolvedCustomerId,
+        reviseFrom: customerDetailsPayload?.revise_from ?? null,
+      });
+    }
+
     // อัปเดตข้อมูลด้วย pool.query
     // เงื่อนไข status กัน TOCTOU: ระหว่าง SELECT ด้านบนกับ UPDATE นี้อาจมี confirm/cancel แทรก
     // ถ้าเขียนทับโดยไม่เช็ค จะดึง status ที่ยืนยันแล้วกลับเป็น draft (rowCount=0 = แพ้ race)
@@ -1437,6 +1465,7 @@ app.put('/api/quotation/:id', express.json(), async (req: any, res: any) => {
         contact_id = $6,
         delivery_days_override = $7,
         delivery_type_override = $8,
+        quote_company_override = $10,
         updated_at = NOW()
       WHERE id = $9 AND status <> 'confirmed' AND status <> 'cancelled'
     `, [
@@ -1450,7 +1479,8 @@ app.put('/api/quotation/:id', express.json(), async (req: any, res: any) => {
       parsedDeliveryOverride === undefined ? (quote.delivery_days_override ?? null) : parsedDeliveryOverride,
       // ประเภทการจัดส่งใช้กติกาเดียวกับจำนวนวัน — client เก่าที่ไม่ส่ง field นี้มาต้องไม่ล้างค่าที่ตั้งไว้
       parsedDeliveryType === undefined ? (quote.delivery_type_override ?? null) : parsedDeliveryType,
-      quoteId
+      quoteId,
+      quoteCompanyOverride
     ]);
 
     if (updRes.rowCount === 0) {
@@ -2556,6 +2586,91 @@ app.get('/api/admin/blacklist/customers/:id/contacts', adminAuthMiddleware, requ
   }
 });
 
+// ═══════════════════ บัญชีเสนอในนาม PM (2026-09-28) ═══════════════════
+// ลูกค้าในรายการนี้ทุกสินค้าออกเป็นใบ Primus ใบเดียว — ตัวแบ่งใบจริงอยู่ที่ decideForcedQuoteCompany
+// (services/customerQuoteCompany.ts) ไม่ใช่ที่นี่ · เส้นพวกนี้แค่จัดการรายการ · ทั้งบริษัทเท่านั้น
+
+app.get('/api/admin/quote-pm', adminAuthMiddleware, requireCapability('page.quotepm'), async (_req: any, res: any) => {
+  try {
+    res.json(await listQuoteCompanyEntries());
+  } catch (err: any) {
+    console.error('GET /api/admin/quote-pm error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+app.post('/api/admin/quote-pm', adminAuthMiddleware, requireCapability('page.quotepm'), express.json(), async (req: any, res: any) => {
+  try {
+    const entry = await addQuoteCompanyEntry({
+      companyId: req.body?.companyId,
+      note: req.body?.note,
+      createdBy: req.admin.id,
+    });
+    if (!entry) return res.status(400).json({ error: 'กรุณาเลือกบริษัท' });
+    res.status(201).json(entry);
+  } catch (err: any) {
+    if (err?.code === '23505') return res.status(409).json({ error: 'บริษัทนี้อยู่ในบัญชีเสนอในนาม PM อยู่แล้ว' });
+    console.error('POST /api/admin/quote-pm error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+app.put('/api/admin/quote-pm/:companyId', adminAuthMiddleware, requireCapability('page.quotepm'), express.json(), async (req: any, res: any) => {
+  try {
+    if (!(await updateQuoteCompanyEntry(req.params.companyId, { note: req.body?.note }))) {
+      return res.status(404).json({ error: 'ไม่พบรายการที่ต้องการแก้ไข' });
+    }
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('PUT /api/admin/quote-pm error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+app.delete('/api/admin/quote-pm/:companyId', adminAuthMiddleware, requireCapability('page.quotepm'), async (req: any, res: any) => {
+  try {
+    if (!(await removeQuoteCompanyEntry(req.params.companyId))) {
+      return res.status(404).json({ error: 'ไม่พบรายการที่ต้องการถอด' });
+    }
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('DELETE /api/admin/quote-pm error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ค้นบริษัทสำหรับ "เพิ่มบริษัท" — ติดธงบริษัทที่อยู่ในรายการแล้ว (รวมสาขาในนิติบุคคลเดียวกัน) ให้เพิ่มซ้ำไม่ได้
+app.get('/api/admin/quote-pm/customers', adminAuthMiddleware, requireCapability('page.quotepm'), async (req: any, res: any) => {
+  try {
+    const rows = await searchCustomersAdmin(String(req.query.q || ''), 30);
+    let forced = new Map<number, string>();
+    try {
+      forced = await findForcedQuoteCompanies(rows.map((r: any) => r.id));
+    } catch (err) {
+      console.error('[quote-pm/customers] annotate failed (ปล่อยผ่าน):', err);
+    }
+    res.json(rows.map((r: any) => ({
+      id: r.id,
+      display_name: r.display_name,
+      reference: r.reference,
+      in_list: forced.has(Number(r.id)),
+    })));
+  } catch (err: any) {
+    console.error('GET /api/admin/quote-pm/customers error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// รหัสลูกค้าทั้งหมดในนิติบุคคลเดียวกัน — ตัวเดียวกับหน้าบัญชีห้ามเสนอราคา (นิยามเดียว db/companyIdentity.ts)
+app.get('/api/admin/quote-pm/customers/:id/related', adminAuthMiddleware, requireCapability('page.quotepm'), async (req: any, res: any) => {
+  try {
+    res.json(await listRelatedCompanies(req.params.id));
+  } catch (err: any) {
+    console.error('GET /api/admin/quote-pm/customers/:id/related error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 // --- API Endpoint: Upload Signature ---
 app.post('/api/admin/signatures/upload', adminAuthMiddleware, requireCapability('page.salespersons'), express.json({ limit: '10mb' }), async (req: any, res: any) => {
   console.log(">>> POST /api/admin/signatures/upload received!");
@@ -3046,6 +3161,8 @@ app.post('/api/admin/webquote/preview', adminAuthMiddleware, requireCapability('
       // ค่าที่แอดมินตั้งทับต้องมาถึงพรีวิวด้วย ไม่งั้นตัวเลขบนจอกับใบที่ออกจริงคนละชุด
       paymentTermsOverride: req.body?.payment_terms_override,
       delivery: req.body?.delivery,
+      // แก้ใบเดิม — บัญชีเสนอในนาม PM ยึดใบต้นทาง ต้องตัดสินแบบเดียวกับ /drafts
+      reviseFrom: typeof req.body?.revise_from === 'string' ? req.body.revise_from.slice(0, 40) : null,
     }));
   } catch (err: any) {
     sendWebQuoteError(res, 'POST /api/admin/webquote/preview', err);
@@ -3073,6 +3190,7 @@ app.post('/api/admin/webquote/preview-pdf', adminAuthMiddleware, requireCapabili
       items: req.body?.items,
       paymentTermsOverride: req.body?.payment_terms_override,
       delivery: req.body?.delivery,
+      reviseFrom: typeof req.body?.revise_from === 'string' ? req.body.revise_from.slice(0, 40) : null,
     });
     res.setHeader('Content-Type', 'application/pdf');
     // ชื่อ ASCII ก่อน แล้วค่อยชื่อไทยแบบ RFC 5987 — เบราว์เซอร์เก่าอ่านตัวแรก ตัวใหม่อ่านตัวหลัง

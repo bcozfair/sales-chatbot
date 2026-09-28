@@ -922,7 +922,12 @@ export async function getQuotationSummaryMessage(quotes: any[]) {
     let isTht = false;
     try {
       const { resolveQuoteCompany } = await import('../services/quotationService.js');
-      if (quote.items && quote.items.length > 0) {
+      const { quoteCompanyOverrideOf } = await import('../services/customerQuoteCompany.js');
+      // ใบที่ตรึงบริษัทไว้ (บัญชีเสนอในนาม PM) — ป้ายต้องตรงกับหัวใบ ไม่ใช่สินค้ารายการแรก
+      const forcedCompany = quoteCompanyOverrideOf(quote);
+      if (forcedCompany) {
+        isTht = forcedCompany === 'THT';
+      } else if (quote.items && quote.items.length > 0) {
         const company = await resolveQuoteCompany(quote.items[0]);
         isTht = (company === 'THT');
       }
