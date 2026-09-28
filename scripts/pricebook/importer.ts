@@ -10,6 +10,7 @@
 //    … --data <dir> --extras-only [--apply --by <username>]                      เติมของรอบตาราง (ค่ามาตรฐานเมื่อรหัสไม่ระบุ · หน้าตา) ลงเล่มปัจจุบัน ไม่แตะตัวเลขราคา
 //    … --data <dir> --new-rules [--apply --by <username>]                        เติม "กฎบวกเพิ่มที่แมปเพิ่งมี" ลงเล่มปัจจุบัน ไม่แก้กฎ/ราคาเดิมสักช่อง
 //    … --data <dir> --rounding [--apply --by <username>]                         ปรับ "วิธีปัดเศษ" ของกฎเดิมให้ตรงแมป ไม่แตะตัวเลขราคาสักช่อง
+//    … --data <dir> --aliases  [--apply --by <username>]                         ปรับ "รายชื่อรหัสที่ใช้ตารางเดียวกัน" ให้ตรงแมป ไม่แตะตัวเลขราคาสักช่อง
 //    … --data <dir> --out <ไฟล์.json>                                           เขียนเป็นไฟล์ (ไม่แตะฐาน)
 //
 //  **`--data` ไม่มีค่าเริ่มต้นโดยตั้งใจ** — ยุคไฟล์ตั้งต้นที่ `data/` ซึ่งถูกเสิร์ฟออกเว็บโดยไม่ตรวจสิทธิ์
@@ -769,6 +770,57 @@ async function applyRounding(fromFile: PriceBook, opts: { apply: boolean; by: st
   return 0;
 }
 
+/**
+ * `--aliases` — ปรับ **รายชื่อรหัสที่ใช้ตารางเดียวกัน** (`aliases`) ของรุ่นในฐานให้ตรงกับแมป
+ * ราคาตั้ง · กฎ · อัตรา คงเดิมทุกไบต์ — เปลี่ยนแค่ว่ารหัสไหนเปิดตารางนี้ได้
+ *
+ * ครั้งแรกที่ใช้: ถอด `TS-01` / `TS-01-0` ออกจาก TSK-01 / TSK-01-0 (เจ้าของยืนยัน 2026-09-28 —
+ * *"TS_-01 ใช้กับรหัส TSK-01, TSJ-01, TST-01, TSP-01, TSPA-01, TSZ-01 ไม่ได้ใช้กับ TS-01"* · TS_-01-0 เช่นกัน)
+ * แยกเป็นธงของตัวเองเพราะรายชื่อนี้ตัดสินว่ารหัสไหนได้ราคา — คนละคำสัญญากับ `--extras-only`
+ */
+async function applyAliases(fromFile: PriceBook, opts: { apply: boolean; by: string | null }): Promise<number> {
+  const state = await readBookState();
+  if (!state) {
+    console.error('ยังไม่มีสมุดราคาในฐาน — --aliases ใช้ได้เฉพาะเล่มที่มีอยู่แล้ว');
+    return 1;
+  }
+  const models = { ...state.book.models };
+  const changed: string[] = [];
+  for (const [code, m] of Object.entries(state.book.models)) {
+    const f = fromFile.models[code];
+    if (!f) continue;
+    const was = m.aliases ?? [];
+    const now = f.aliases ?? [];
+    if (JSON.stringify(was) === JSON.stringify(now)) continue;
+    models[code] = withFields(m, { aliases: now });
+    changed.push(code);
+    const gone = was.filter((a) => !now.includes(a));
+    const added = now.filter((a) => !was.includes(a));
+    console.log(`\n${code}:`);
+    if (gone.length) console.log(`  ถอด ${gone.join(', ')}`);
+    if (added.length) console.log(`  เพิ่ม ${added.join(', ')}`);
+    console.log(`  ⇒ ใช้กับรหัส ${[code, ...now].join(', ')}`);
+  }
+  if (changed.length === 0) {
+    console.log('\nรายชื่อรหัสในฐานตรงกับแมปทุกรุ่นแล้ว — ไม่มีอะไรต้องเขียน');
+    return 0;
+  }
+  if (!opts.apply) {
+    console.log(`\n(ยังไม่ได้เขียนลงฐาน — ${changed.length} รุ่น · ใส่ --apply --by <username> เพื่อบันทึก · ไม่แตะตัวเลขราคา)`);
+    return 0;
+  }
+  const at = new Date().toISOString();
+  const revision = await commitBookChange({
+    parent: state.revision,
+    kind: 'model',
+    next: { ...state.book, models, edited: { at, by: opts.by ?? undefined, note: 'ปรับรายชื่อรหัสที่ใช้ตารางเดียวกันตามแมป (ถอด TS-01/TS-01-0 — เจ้าของยืนยัน 2026-09-28) — ไม่แตะตัวเลขราคา' } },
+    changed,
+    by: opts.by,
+  });
+  console.log(`\nบันทึกแล้ว — การบันทึกครั้งที่ ${revision} (${changed.join(', ')})`);
+  return 0;
+}
+
 async function main(): Promise<number> {
   const args = process.argv.slice(2);
   const val = (flag: string): string | undefined => {
@@ -784,6 +836,7 @@ async function main(): Promise<number> {
   const extrasOnly = args.includes('--extras-only') || args.includes('--layout-only');
   const newRules = args.includes('--new-rules');
   const rounding = args.includes('--rounding');
+  const aliases = args.includes('--aliases');
 
   if (!dataDir === !fromJson) {
     console.error('ต้องบอกที่มาของสมุดราคาอย่างใดอย่างหนึ่ง:');
@@ -828,6 +881,7 @@ async function main(): Promise<number> {
   if (extrasOnly) return applyExtrasOnly(book, { apply, by });
   if (newRules) return applyNewRules(book, { apply, by });
   if (rounding) return applyRounding(book, { apply, by });
+  if (aliases) return applyAliases(book, { apply, by });
 
   if (outFile) {
     writeFileSync(resolve(outFile), JSON.stringify(book, null, 2), 'utf8');

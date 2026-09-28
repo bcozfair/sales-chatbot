@@ -295,6 +295,27 @@ if (!ts01 || !ts010 || ts01.base.kind !== 'matrix') {
   check('หัวตารางแบบที่ชีตเขียน (TS_-01 · TS_-01-0)',
     v.title === 'TS_-01' && modelEditorView(book, ts010).title === 'TS_-01-0', `${v.title}`);
 
+  // เจ้าของยืนยัน 2026-09-28: TS_-01 ใช้กับ TSK/TSJ/TST/TSP/TSPA/TSZ-01 **ไม่ได้ใช้กับ TS-01** (TS_-01-0 เช่นกัน)
+  // ตรวจบนสำเนาที่ถอดชื่อพ้อง TS-01 ออกแล้ว — ไม่ขึ้นกับว่าฐานเขียน --aliases ไปหรือยัง
+  const noGeneric = (m: PriceModel): PriceModel => ({ ...m, aliases: (m.aliases ?? []).filter((a) => !/^TS-/.test(a)) });
+  const strict: PriceBook = { ...book, models: { ...book.models, 'TSK-01': noGeneric(ts01), 'TSK-01-0': noGeneric(ts010) } };
+  const mapAliases = (f: string) => (JSON.parse(readFileSync(`scripts/pricebook/maps/${f}`, 'utf8')) as { aliases?: string[] }).aliases ?? [];
+  check('แมปไม่ได้ผูก TS-01 / TS-01-0 เข้ากับตาราง TS_-01 / TS_-01-0',
+    !mapAliases('19-TS-01.map.json').includes('TS-01') && !mapAliases('20-TS-01-0.map.json').includes('TS-01-0'));
+  check('ถอดชื่อพ้อง TS-01 แล้วหัวตารางยังเป็น TS_-01 · TS_-01-0 (อ่านจากชื่อชีต)',
+    modelEditorView(strict, strict.models['TSK-01']!).title === 'TS_-01' &&
+    modelEditorView(strict, strict.models['TSK-01-0']!).title === 'TS_-01-0');
+  for (const code of ['TS-01(M6)4.8+1M', 'TS-01-0(M5)+1M']) {
+    const p = parseProductCode(code, strict);
+    check(`${code} ไม่ยืมตาราง TSK — ขึ้นว่าตารางใช้กับรหัสไหน`,
+      !p.model && p.problems.some((s) => s.includes('ไม่มีตัวอักษรชนิดเซนเซอร์') && s.includes('TSZ-01')),
+      p.model ?? p.problems.join(' | '));
+  }
+  for (const [code, want] of [['TSK-01(M6)4.8+1M', 'TSK-01'], ['TSPA-01-0(M5)+1M', 'TSK-01-0'], ['TSK-14 6x200+150', 'TS-14']] as const) {
+    const p = parseProductCode(code, strict);
+    check(`${code} ยังได้รุ่น ${want}`, p.model === want, p.model ?? p.problems.join(' | '));
+  }
+
   const K = 'TSK/TSJ | M6x1.0';
   const priceK = (b: PriceBook) => computePrice({ model: 'TSK-01', axes: { sensor: 'TSK/TSJ', thread: 'M6x1.0' } }, b);
   const edited = applyModelEdit(ts01, { cells: { [K]: 175 } }, book);

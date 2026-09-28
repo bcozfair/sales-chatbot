@@ -3,7 +3,7 @@
   "sheet": "TS-01+TS-01-0",
   "code": "TSK-01",
   "label": "Thermocouple / RTD TS-01 (หัวเกลียวสั้น)",
-  "aliases": ["TSJ-01", "TST-01", "TSP-01", "TSPA-01", "TSZ-01", "TS-01"],
+  "aliases": ["TSJ-01", "TST-01", "TSP-01", "TSPA-01", "TSZ-01"],
   "standard": { "dia_mm": 4.8, "cable_m": 1, "L1": 5 },
   "base": {
     "kind": "matrix",

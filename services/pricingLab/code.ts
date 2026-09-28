@@ -673,8 +673,13 @@ function findModel(book: PriceBook, prefix: string, num: string, suffix: string)
   // ⚠️ ทางถอยต้องอยู่ใน **ตระกูลเดียวกัน** เท่านั้น — เดิมไล่ `BH-<เลข>` ให้ทุกรหัสรวมทั้งที่
   //    ขึ้นต้นด้วย TS ⇒ `TSK-01` (เทอร์โมคัปเปิล 1,210 รหัส) ตกไปใช้ตารางราคาของ Band Heater
   //    `BH-01` แล้วคืนราคาออกมาเป็นปกติ ไม่มีอะไรฟ้อง (เจอ 2026-09-21 ตอนวัดความครอบคลุม)
+  // `TS-<เลข>` ที่ไม่มีตัวอักษรชนิดเซนเซอร์ ไม่ยืมตารางของ TSK/TSP — เจ้าของยืนยัน 2026-09-28 ว่า
+  // TS_-01 ใช้กับ TSK/TSJ/TST/TSP/TSPA/TSZ-01 **ไม่ได้ใช้กับ TS-01** (TS_-01-0 เช่นกัน) ⇒ รหัสแบบนี้
+  // ได้รุ่นเฉพาะที่สมุดราคาเขียนชื่อไว้ตรง ๆ (`TS-14` · ชื่อพ้องของรุ่น) ไม่งั้นไม่มีรุ่น
   const cands = prefix === 'BH'
     ? [`BH-${num}${suffix}`, `BH-${num}`]
+    : prefix === 'TS'
+    ? [`TS-${num}${suffix}`, `TS-${num}`]
     : [
         `${prefix}-${num}${suffix}`,
         `${prefix}-${num}`,
@@ -740,6 +745,16 @@ export function parseProductCode(input: string, book: PriceBook): ParsedCode {
   const { prefix, num, suffix } = head;
   const model = findModel(book, prefix, num, suffix);
   if (!model) {
+    // `TS-01` ไม่มีรุ่น แต่มีตารางของตระกูลเดียวกันที่มีตัวอักษรเซนเซอร์ ⇒ บอกว่ารหัสไหนใช้ตารางนั้นได้
+    const sibling = prefix === 'TS'
+      ? findModel(book, 'TSK', num, suffix) ?? findModel(book, 'TSP', num, suffix)
+      : undefined;
+    if (sibling) {
+      out.problems.push(
+        `รหัส ${prefix}-${num}${suffix} ไม่มีตัวอักษรชนิดเซนเซอร์ — ตาราง ${sibling.label} ใช้กับรหัส ${[sibling.code, ...(sibling.aliases ?? [])].join(', ')} เท่านั้น`
+      );
+      return out;
+    }
     out.problems.push(
       `ยังไม่มีสมุดราคาของรุ่น ${prefix}-${num}${suffix} — สมุดเล่มนี้แปลงมาจากชีต ${Object.values(book.models)
         .map((m) => m.sheet)

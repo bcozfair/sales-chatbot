@@ -3,7 +3,7 @@
   "sheet": "TS-01+TS-01-0",
   "code": "TSK-01-0",
   "label": "Thermocouple / RTD TS-01-0 (เกลียวมิลสั้น M4–M10)",
-  "aliases": ["TSJ-01-0", "TST-01-0", "TSP-01-0", "TSPA-01-0", "TSZ-01-0", "TS-01-0"],
+  "aliases": ["TSJ-01-0", "TST-01-0", "TSP-01-0", "TSPA-01-0", "TSZ-01-0"],
   "standard": { "cable_m": 1 },
   "base": {
     "kind": "matrix",

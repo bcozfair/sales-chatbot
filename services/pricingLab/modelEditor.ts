@@ -264,10 +264,16 @@ function defaultOptions(book: PriceBook | undefined, m: PriceModel, axis: string
   return [...new Set(m.adders.filter((a) => a.byAxis === axis).flatMap((a) => knownRateKeys(book, m, a)))];
 }
 
-/** `TSK-01` + ชื่อพ้อง `TS-01` → `TS_-01` (แบบที่หัวชีตเขียน) */
+/**
+ * `TSK-01` ในชีต `TS-01+TS-01-0` → `TS_-01` (แบบที่หัวชีตเขียน) — `_` = ตัวอักษรชนิดเซนเซอร์
+ *
+ * เดิมอ่านจากชื่อพ้อง `TS-01` แต่เจ้าของยืนยัน 2026-09-28 ว่าตารางนี้ **ไม่ได้ใช้กับ TS-01** ⇒ ชื่อพ้องนั้นถูกถอด
+ * หัวจึงมาจากชื่อชีตแทน ซึ่งคือที่มาของหัวตารางจริงอยู่แล้ว
+ */
 function sheetTitle(m: PriceModel, name: string): string {
-  const generic = (m.aliases ?? []).find((a) => /^TS-/.test(a));
-  return generic ? generic.replace(/^TS-/, 'TS_-') : name;
+  const own = /^TS[A-Z]+(-.+)$/.exec(m.code);
+  const inSheet = own && (m.sheet ?? '').split(/[+,]/).some((s) => s.trim() === `TS${own[1]}`);
+  return inSheet ? `TS_${own![1]}` : name;
 }
 
 export function modelEditorView(book: PriceBook, m: PriceModel): EditorView {
