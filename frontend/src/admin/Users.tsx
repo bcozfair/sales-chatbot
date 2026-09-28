@@ -270,16 +270,14 @@ export const Users: React.FC = () => {
                         {isSelf && <div className="text-[11px] text-slate-400">บัญชีของคุณ</div>}
                       </td>
                       <td className="px-4 py-2.5">
-                        <div>{row.name}</div>
-                        {row.salesperson_ids.length > 0 && (
-                          <div className="mt-0.5 flex flex-wrap gap-1">
-                            {row.salesperson_ids.map((code) => (
-                              <span key={code} className={`${SALES_CODE_CHIP} text-[11px]`}>
-                                เซลส์<span className="font-mono">{code}</span>
-                              </span>
-                            ))}
-                          </div>
-                        )}
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <span>{row.name}</span>
+                          {row.salesperson_ids.map((code) => (
+                            <span key={code} className={`${SALES_CODE_CHIP} text-[11px]`}>
+                              เซลส์<span className="font-mono">{code}</span>
+                            </span>
+                          ))}
+                        </div>
                       </td>
                       <td className="px-4 py-2.5">
                         <span
