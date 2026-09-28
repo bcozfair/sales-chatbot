@@ -28,6 +28,9 @@ dist/
 
 # สำเนาทดสอบที่ scripts/diag/customerSearchEval.ts สร้างตอนรันแล้วลบทิ้ง
 services/__customerServiceEval.gen.ts
+# สำเนาทดสอบของ scripts/diag/customerCacheMemo.ts (สร้างตอนรันแล้วลบทิ้ง)
+services/__cacheMemoBase.gen.ts
+services/__cacheMemoHead.gen.ts
 
 # ชุดข้อมูลที่ scripts/diag/customerSearchEval.ts สร้างเอง — มีคำค้นจริงจากแชท
 # (ชื่อบริษัท/ชื่อผู้ติดต่อลูกค้า) เข้าข่าย PII เหมือน backup/ ด้านบน จึงไม่ commit

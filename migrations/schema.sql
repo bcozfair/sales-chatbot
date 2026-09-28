@@ -374,12 +374,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_local_contacts_company_name
 
 --
 -- Name: clean_text; Type: FUNCTION; Schema: public; Owner: -
--- trim + แปลง 'null'/'' เป็น NULL จริง (ใช้โดย customers_data_view)
+-- trim + แปลง 'null'/'' (ไม่สนตัวพิมพ์) เป็น NULL จริง (ใช้โดย customers_data_view)
+--
+-- ⚠️ เขียนตัวพิมพ์เล็ก/ใหญ่ของ 'null' ครบ 16 แบบ แทน lower(btrim(v)) = ANY(...) โดยตั้งใจ
+--    (2026-09-28 · migration 2026-09-28_02) — lower() บนข้อความไทยแพงตาม collation และถูกเรียก
+--    ~1.4 ล้านครั้งต่อรอบ build · ผลเท่าเดิมทุกค่า: พิสูจน์ 6.1 ล้านค่าจริง diff 0 + ไล่ทุก code point
+--    ว่าไม่มีอักขระนอก ASCII ตัวไหนที่ lower() แล้วกลายเป็น n/u/l · ห้ามย่อกลับเป็น lower()
+--    เพื่อ "ให้อ่านง่าย" และห้ามตัดแบบใดแบบหนึ่งทิ้ง (เช่น 'NULL' จาก Odoo จะหลุดเป็นข้อความ)
 --
 
 CREATE OR REPLACE FUNCTION public.clean_text(v text) RETURNS text
   LANGUAGE sql IMMUTABLE PARALLEL SAFE AS
-$$ SELECT CASE WHEN lower(btrim(v)) = ANY (ARRAY['null', '']) THEN NULL ELSE btrim(v) END $$;
+$$ SELECT CASE WHEN btrim(v) IN ('', 'null', 'Null', 'nUll', 'NUll', 'nuLl', 'NuLl', 'nULl', 'NULl', 'nulL', 'NulL', 'nUlL', 'NUlL', 'nuLL', 'NuLL', 'nULL', 'NULL') THEN NULL ELSE btrim(v) END $$;
 
 
 --
@@ -420,7 +426,7 @@ CREATE INDEX IF NOT EXISTS idx_sale_orders_updated_at    ON public.sale_orders (
 -- ════════════════════════════════════════════════════════════════════
 -- นิยามข้อมูล — เก็บเป็น plain view ตัวเดียว (source of truth)
 -- refresh script สร้างตารางจาก view นี้: CREATE TABLE ... AS SELECT * FROM customers_data_build
--- ⚠️ ห้าม app query view นี้ตรง ๆ (ใช้ ~2 วิ/ครั้ง) — app ต้องอ่าน customers_data_view เสมอ
+-- ⚠️ ห้าม app query view นี้ตรง ๆ (ใช้ ~3 วิ/ครั้ง · วัด 2026-09-28) — app ต้องอ่าน customers_data_view เสมอ
 -- ════════════════════════════════════════════════════════════════════
 CREATE OR REPLACE VIEW public.customers_data_build AS
 WITH latest_so AS (
@@ -694,22 +700,58 @@ ent_last AS (
 --
 -- ⚠️ customers ที่ sync จาก Odoo ไม่มีรหัสเซลส์มาให้ (gateway ส่งแค่ชื่อ) — ถ้าวันหนึ่ง gateway
 --    ส่งรหัสมา ให้เปลี่ยนต้นทางที่นี่ที่เดียว คนอ่านคอลัมน์นี้ไม่ต้องรู้
--- ⚠️ ขั้นในสุดต้องเรียง/DISTINCT ด้วยค่าดิบ ไม่ใช่ clean_text() — ไม่งั้นใช้ลำดับของ
---    idx_so_salesperson_cover ไม่ได้ (วัด 2026-09-24: index-only scan 255ms) · clean_text ทำที่ชั้นนอก
---    กับแค่ ~132 แถวแทน
+-- ⚠️ ขั้นในสุดต้องเรียง/เทียบด้วยค่าดิบ ไม่ใช่ clean_text() — ไม่งั้นใช้ลำดับของ
+--    idx_so_salesperson_cover ไม่ได้ · clean_text ทำที่ชั้นนอกกับแค่ ~133 แถวแทน
+-- ⚠️ ขั้นในสุดเป็น "skip-scan" (2026-09-28 · migration 2026-09-28_02): ไล่ชื่อดิบที่ไม่ซ้ำทีละชื่อ
+--    ด้วย index (names) แล้วเจาะใบล่าสุดของแต่ละชื่อ 1 ครั้ง (r) แทนการอ่าน index ทั้งก้อน
+--    ~320k แถวด้วย DISTINCT ON · วัด 2026-09-28 บนฐานจริง: ~0.5 วิ → ~0.05 วิ · ผล 133/133 ชื่อตรงกัน
+--    ⚠️ ทั้งสองขั้นพึ่ง idx_so_salesperson_cover (salesperson, order_date DESC) — index นี้หายเมื่อไหร่
+--    แต่ละขั้นกลายเป็น seq scan ทั้งตาราง × 133 ชื่อ ⇒ **ช้ากว่ารูปเดิมมาก** ไม่ใช่แค่กลับไปเท่าเดิม
+--    · "ใบล่าสุด" = order_date DESC NULLS LAST ของรูปเดิม แยกเป็นสองกิ่งให้ตรงลำดับของ index
+--      (DESC ของ index = NULLS FIRST): มีวันที่ก่อน (g=1) · ไม่มีเลยค่อยหยิบแถวที่วันที่ว่าง (g=2)
 -- ⚠️ ผู้อ่านคอลัมน์นี้เพื่อ "เลือกเซลส์ของบริษัท" ต้องยึดแถวแรกที่ salesperson ไม่ว่าง เรียงตาม
 --    contact_id (เจ้าของเคาะ 2026-09-24) — ดู services/customerSalesOwner.ts
 -- ════════════════════════════════════════════════════════════════════
 sp_code AS (
+  WITH RECURSIVE names AS (
+    (SELECT sale_orders.salesperson AS n
+       FROM public.sale_orders
+      WHERE sale_orders.salesperson IS NOT NULL
+      ORDER BY sale_orders.salesperson
+      LIMIT 1)
+    UNION ALL
+    SELECT (SELECT s.salesperson
+              FROM public.sale_orders s
+             WHERE s.salesperson > names.n
+             ORDER BY s.salesperson
+             LIMIT 1) AS salesperson
+      FROM names
+     WHERE names.n IS NOT NULL
+  ),
+  r AS (
+    SELECT names.n AS salesperson, p.salesperson_id, p.order_date
+      FROM names
+      CROSS JOIN LATERAL (
+        SELECT q.salesperson_id, q.order_date
+          FROM ((SELECT s.salesperson_id, s.order_date, 1 AS g
+                   FROM public.sale_orders s
+                  WHERE s.salesperson = names.n AND s.salesperson_id IS NOT NULL AND s.order_date IS NOT NULL
+                  ORDER BY s.order_date DESC
+                  LIMIT 1)
+                UNION ALL
+                (SELECT s.salesperson_id, s.order_date, 2 AS g
+                   FROM public.sale_orders s
+                  WHERE s.salesperson = names.n AND s.salesperson_id IS NOT NULL AND s.order_date IS NULL
+                  LIMIT 1)) q
+         ORDER BY q.g
+         LIMIT 1
+      ) p
+     WHERE names.n IS NOT NULL
+  )
   SELECT DISTINCT ON (public.clean_text(r.salesperson))
          public.clean_text(r.salesperson) AS salesperson,
          r.salesperson_id::text           AS salesperson_id
-    FROM (
-      SELECT DISTINCT ON (salesperson) salesperson, salesperson_id, order_date
-        FROM public.sale_orders
-       WHERE salesperson IS NOT NULL AND salesperson_id IS NOT NULL
-       ORDER BY salesperson, order_date DESC NULLS LAST
-    ) r
+    FROM r
    WHERE public.clean_text(r.salesperson) IS NOT NULL
    ORDER BY public.clean_text(r.salesperson), r.order_date DESC NULLS LAST
 )
