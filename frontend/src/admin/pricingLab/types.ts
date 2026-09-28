@@ -108,6 +108,24 @@ export interface PriceOutcome {
   /** `partial` = กฎข้อนั้นยังไม่รวมในราคา เพราะอ่านค่าในรหัสไม่ออก (ราคาเฉพาะส่วนที่คำนวณได้) */
   violations: { id: string; level: 'block' | 'quoteOnRequest' | 'warn'; message: string; missing?: boolean; noRate?: boolean; partial?: boolean }[];
   bookVersion: string;
+  /** วิธีคิดทีละขั้น — ข้อความทุกบรรทัดเขียนมาจากเซิร์ฟเวอร์ในจุดเดียวกับที่คิดเงิน ดู `PriceTrace` ฝั่ง backend */
+  trace?: PriceTrace;
+}
+
+export interface PriceTrace {
+  inputs: { kind: 'axis' | 'dim' | 'option'; key: string; label: string; value: string; from: string }[];
+  base: { ok: boolean; label: string; steps: string[]; amount?: number };
+  rules: {
+    id: string;
+    label: string;
+    status: 'applied' | 'skipped' | 'blocked' | 'waiting' | 'off';
+    reason?: string;
+    steps: string[];
+    amount?: number;
+    running?: number;
+    source?: string;
+  }[];
+  checks: { message: string; hit: boolean; level: 'block' | 'quoteOnRequest' | 'warn'; condition: string; source?: string }[];
 }
 
 export interface CensusItem {

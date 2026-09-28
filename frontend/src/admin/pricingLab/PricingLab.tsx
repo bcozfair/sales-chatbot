@@ -6,6 +6,7 @@ import { Button } from '../Button';
 import { TableCard, EmptyState, ErrorBox } from '../logs/ui';
 import { errMsg, formatDateTime } from '../logs/format';
 import { SubCodeModal } from './SubCodeModal';
+import { CalcTrace } from './CalcTrace';
 import { type QuoteOverview, type ParsedCode, type PriceOutcome } from './types';
 
 /**
@@ -283,6 +284,9 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
           </TableCard>
         </div>
       )}
+
+      {/* ── 4. วิธีคำนวณทีละขั้น — เต็มความกว้าง เพราะบรรทัดสูตรยาว ────────── */}
+      {result?.outcome && <CalcTrace outcome={result.outcome} />}
 
       {adding && (
         <SubCodeModal

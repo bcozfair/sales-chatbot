@@ -32,10 +32,14 @@ import type {
   ProductConfig,
   RoundMode,
   SubCode,
+  TraceBase,
+  TraceCheck,
+  TraceInput,
+  TraceRule,
   Violation
 } from './types.js';
-import { matchedSubCodes } from './subcodes.js';
-import { axisLabel } from './labels.js';
+import { SUBCODE_PREFIX, matchedSubCodes } from './subcodes.js';
+import { axisLabel, dimLabel, optionLabel } from './labels.js';
 
 /** ปัดเป็นสตางค์ — ตัวเลขในไฟล์ Excel มี float noise จริง 182 เซลล์ (วัด 2026-09-17) */
 function money(n: number): Money {
@@ -51,6 +55,13 @@ function applyRound(n: number, mode: RoundMode = 'ceil'): number {
 function fmt(n: number): string {
   return n.toLocaleString('en-US', { maximumFractionDigits: 2 });
 }
+
+/** คำอธิบายการปัดเศษ — ต้องขึ้นจอทุกครั้ง เพราะ "2.5 ช่วง" คิด 2 หรือ 3 คือคำถามแรกของคนตรวจ */
+const ROUND_TH: Record<RoundMode, string> = {
+  ceil: 'ปัดขึ้น (เศษก็คิดเต็มช่วง)',
+  floor: 'ปัดลง (นับเฉพาะเต็มช่วง)',
+  exact: 'ไม่ปัด',
+};
 
 // ── การหาแถวในตาราง ──────────────────────────────────────────────────────────
 
@@ -86,15 +97,51 @@ export function evalPredicate(
   return false;
 }
 
+/**
+ * เงื่อนไขเป็นภาษาคน **พร้อมค่าจริงของใบนี้** — "ความยาวรวม > 1000 (ใบนี้ 350)" ตรวจได้ด้วยตา
+ * ส่วน "ความยาวรวม > 1000" เฉย ๆ คนตรวจต้องไปไล่หาค่าเองอีกรอบ
+ */
+export function describePredicate(
+  p: Predicate,
+  axes: Record<string, string>,
+  dims: Record<string, number>,
+  options: Set<string>
+): string {
+  const d = (q: Predicate) => describePredicate(q, axes, dims, options);
+  if ('always' in p) return p.always ? 'ทุกกรณี' : 'ไม่มีกรณีไหน';
+  if ('all' in p) return p.all.map(d).join(' และ ');
+  if ('any' in p) return `(${p.any.map(d).join(' หรือ ')})`;
+  if ('not' in p) return `ไม่ใช่ [${d(p.not)}]`;
+  if ('option' in p) return `มี "${optionLabel(p.option)}" (ใบนี้${options.has(p.option) ? 'มี' : 'ไม่มี'})`;
+  if ('in' in p || 'notIn' in p) {
+    const list = 'in' in p ? p.in : p.notIn;
+    return `${axisLabel(p.axis)}${'in' in p ? 'เป็น' : 'ไม่ใช่'} ${list.join(' / ')} (ใบนี้ ${axes[p.axis] || 'ไม่ได้ระบุ'})`;
+  }
+  if ('dim' in p) {
+    const ops = [
+      p.gt !== undefined ? `> ${fmt(p.gt)}` : '',
+      p.gte !== undefined ? `≥ ${fmt(p.gte)}` : '',
+      p.lt !== undefined ? `< ${fmt(p.lt)}` : '',
+      p.lte !== undefined ? `≤ ${fmt(p.lte)}` : '',
+    ].filter(Boolean).join(' และ ');
+    const v = dims[p.dim];
+    return `${dimLabel(p.dim)} ${ops} (ใบนี้ ${v === undefined ? 'ไม่มีค่า' : fmt(v)})`;
+  }
+  return 'เงื่อนไขที่ระบบไม่รู้จัก';
+}
+
 // ── ค่าที่คำนวณมาจากค่าอื่น ───────────────────────────────────────────────────
 
-function computeDerived(d: DerivedDim, dims: Record<string, number>): number | undefined {
+/** `text` = สูตรพร้อมตัวเลขจริง เขียนจากตัวแปรเดียวกับที่คิด (ดู `PriceTrace`) */
+function computeDerived(d: DerivedDim, dims: Record<string, number>): { value: number; text: string } | undefined {
   const args = d.args.map((a) => dims[a]);
   if (args.some((v) => typeof v !== 'number' || Number.isNaN(v))) return undefined;
 
   let raw: number;
+  let text: string;
   if (d.formula === 'sum') {
     raw = args.reduce((s, v) => s + v, 0);
+    text = d.args.map((a, i) => `${dimLabel(a)} ${fmt(args[i]!)}`).join(' + ');
   } else if (d.formula === 'cylinderAreaIn2') {
     // พื้นที่ผิวทรงกระบอกเป็น "ตารางนิ้ว" — สูตรในชีต BH เขียนไว้ตรง ๆ ว่า
     //   600 x 3.14 x 150 / 645 = 438.14 ปัดเป็น 439
@@ -104,10 +151,14 @@ function computeDerived(d: DerivedDim, dims: Record<string, number>): number | u
     const pi = d.consts?.pi ?? 3.14;
     const per = d.consts?.mm2PerIn2 ?? 645;
     raw = (args[0]! * pi * args[1]!) / per;
+    text = `${dimLabel(d.args[0]!)} ${fmt(args[0]!)} × ${pi} × ${dimLabel(d.args[1]!)} ${fmt(args[1]!)} ÷ ${per}`;
   } else {
     return undefined;
   }
-  return applyRound(raw, d.round ?? 'exact');
+  const value = applyRound(raw, d.round ?? 'exact');
+  text += ` = ${fmt(raw)}`;
+  if (value !== raw) text += ` → ${ROUND_TH[d.round ?? 'exact']} = ${fmt(value)}`;
+  return { value, text };
 }
 
 // ── ฐานราคา ─────────────────────────────────────────────────────────────────
@@ -124,6 +175,8 @@ interface BaseResult {
   reason?: string;
   /** คิดไม่ได้เพราะรหัสไม่ได้บอกค่าแกนของตาราง (ไม่ใช่ไม่รับผลิต) */
   missing?: boolean;
+  /** วิธีหาราคาตั้งทีละขั้น (ดู `PriceTrace`) */
+  steps: string[];
 }
 
 function computeBase(
@@ -137,20 +190,28 @@ function computeBase(
 
   if (base.kind === 'ref') {
     if (seen.has(base.model)) {
-      return { ok: false, amount: 0, label: 'ฐานราคา', reason: `สมุดราคาวนกลับมาที่ ${base.model}` };
+      return { ok: false, amount: 0, label: 'ฐานราคา', reason: `สมุดราคาวนกลับมาที่ ${base.model}`, steps: [] };
     }
     seen.add(base.model);
     const parent = resolveModel(book, base.model);
     if (!parent) {
-      return { ok: false, amount: 0, label: 'ฐานราคา', reason: `ไม่มีรุ่น ${base.model} ในสมุดราคา` };
+      return { ok: false, amount: 0, label: 'ฐานราคา', reason: `ไม่มีรุ่น ${base.model} ในสมุดราคา`, steps: [] };
     }
     const r = computeBase(parent, book, axes, dims, seen);
-    return { ...r, label: `${r.label} (ฐานของ ${parent.code})` };
+    return {
+      ...r,
+      label: `${r.label} (ฐานของ ${parent.code})`,
+      steps: [`${model.code} ไม่มีตารางราคาตั้งของตัวเอง — ใช้ของรุ่น ${parent.code}`, ...r.steps],
+    };
   }
 
   if (base.kind === 'matrix') {
     const key = matrixKey(base.axes, axes);
     const cell = base.cells[key];
+    const steps = [
+      `เปิดตารางราคาตั้งของ ${model.code}${model.sheet ? ` (ชีต ${model.sheet})` : ''} — ตารางนี้มี ${base.axes.length} แกน: ${base.axes.map(axisLabel).join(' × ')}`,
+      `ช่องที่ตรงกับใบนี้: ${base.axes.map((a) => `${axisLabel(a)} = ${axes[a] || '(ไม่ได้ระบุ)'}`).join(' · ')}`,
+    ];
     if (cell === undefined) {
       // รหัสไม่ได้บอกค่าของแกนในตาราง (เช่นไม่มีวงเล็บเกลียว) ≠ ชีตเว้นช่องไว้ — คนละคำตอบกับลูกค้า
       const unknown = base.axes.filter((a) => !axes[a]);
@@ -160,7 +221,8 @@ function computeBase(
           amount: 0,
           label: 'ฐานราคา',
           missing: true,
-          reason: `รหัสไม่ได้บอก${unknown.map(axisLabel).join(' และ ')} — ตารางราคาตั้งต้องรู้ค่านี้ก่อน`
+          reason: `รหัสไม่ได้บอก${unknown.map(axisLabel).join(' และ ')} — ตารางราคาตั้งต้องรู้ค่านี้ก่อน`,
+          steps,
         };
       }
       return {
@@ -169,7 +231,8 @@ function computeBase(
         label: 'ฐานราคา',
         // ชีตเว้นช่องนี้ไว้ = ไม่รับผลิต ไม่ใช่ราคา 0
         // คนอ่านบรรทัดนี้คือแอดมินที่กำลังจะตอบลูกค้า ไม่ใช่คนที่เปิดชีตราคาอยู่
-        reason: `ไม่มีราคาสำหรับ ${base.axes.map((a) => `${axisLabel(a)} ${axes[a] ?? '-'}`).join(' · ')} — ไม่รับผลิตขนาดนี้`
+        reason: `ไม่มีราคาสำหรับ ${base.axes.map((a) => `${axisLabel(a)} ${axes[a] ?? '-'}`).join(' · ')} — ไม่รับผลิตขนาดนี้`,
+        steps: [...steps, 'ช่องนี้ในตารางว่าง = ไม่รับผลิต (ไม่ใช่ราคา 0)'],
       };
     }
     return {
@@ -177,14 +240,15 @@ function computeBase(
       amount: money(cell),
       label: `ราคาตั้ง ${model.code}`,
       // ชื่อแกนต้องเป็นคำไทย — คนอ่านบรรทัดนี้คือแอดมินที่ไม่เคยเปิดชีต Excel มาก่อน
-      detail: base.axes.map((a) => `${axisLabel(a)} ${axes[a]}`).join(' · ')
+      detail: base.axes.map((a) => `${axisLabel(a)} ${axes[a]}`).join(' · '),
+      steps: [...steps, `ราคาในช่องนั้น = ${fmt(money(cell))} บาท`],
     };
   }
 
   // banded
   const q = dims[base.quantity];
   if (q === undefined) {
-    return { ok: false, amount: 0, label: 'ฐานราคา', reason: `คำนวณ ${base.quantity} ไม่ได้ — ข้อมูลไม่ครบ` };
+    return { ok: false, amount: 0, label: 'ฐานราคา', reason: `คำนวณ ${base.quantity} ไม่ได้ — ข้อมูลไม่ครบ`, steps: [] };
   }
   const band = findBand(base.bands, q);
   if (!band) {
@@ -192,22 +256,30 @@ function computeBase(
       ok: false,
       amount: 0,
       label: 'ฐานราคา',
-      reason: `${base.quantity} = ${fmt(q)} อยู่นอกทุกช่วงราคาของ ${model.code}`
+      reason: `${base.quantity} = ${fmt(q)} อยู่นอกทุกช่วงราคาของ ${model.code}`,
+      steps: [],
     };
   }
+  const bandName = band.label ?? `${band.min}-${band.max ?? '∞'}`;
+  const bandSteps = [
+    `เปิดตารางช่วงราคาของ ${model.code}${model.sheet ? ` (ชีต ${model.sheet})` : ''} — คิดตาม${dimLabel(base.quantity)}`,
+    `${dimLabel(base.quantity)} ${fmt(q)} อยู่ในช่วง ${bandName}`,
+  ];
   if (band.flat !== undefined) {
     return {
       ok: true,
       amount: money(band.flat),
       label: `ราคาตั้ง ${model.code}`,
-      detail: `${base.quantity} ${fmt(q)} → ช่วง ${band.label ?? `${band.min}-${band.max ?? '∞'}`} เหมา`
+      detail: `${base.quantity} ${fmt(q)} → ช่วง ${bandName} เหมา`,
+      steps: [...bandSteps, `ช่วงนี้ราคาเหมา = ${fmt(money(band.flat))} บาท`],
     };
   }
   return {
     ok: true,
     amount: money(band.rate! * q),
     label: `ราคาตั้ง ${model.code}`,
-    detail: `${base.quantity} ${fmt(q)} × ${fmt(band.rate!)} (ช่วง ${band.label ?? `${band.min}-${band.max ?? '∞'}`})`
+    detail: `${base.quantity} ${fmt(q)} × ${fmt(band.rate!)} (ช่วง ${bandName})`,
+    steps: [...bandSteps, `${fmt(q)} × อัตรา ${fmt(band.rate!)} = ${fmt(money(band.rate! * q))} บาท`],
   };
 }
 
@@ -225,6 +297,10 @@ interface AdderResult {
   /** ข้ามกฎนี้ไปก่อนเพราะอ่านค่าในรหัสไม่ออก — ราคาที่เหลือยังคิดต่อ (ข้อความเตือนอยู่ในนี้) */
   partial?: string;
   skip?: boolean;
+  /** ทำไมถึงข้าม (คู่กับ `skip`) — ขึ้นจอในวิธีคิดทีละขั้น */
+  why?: string;
+  /** วิธีคิดทีละขั้น (ดู `PriceTrace`) — เขียนจากตัวแปรเดียวกับที่คิดเงิน */
+  steps: string[];
 }
 
 function computeAdder(
@@ -235,10 +311,14 @@ function computeAdder(
   dims: Record<string, number>,
   unread: Record<string, string> = {}
 ): AdderResult {
+  const steps: string[] = [];
   if (a.kind === 'percent') {
-    return { amount: money((subtotal * (a.percent ?? 0)) / 100), detail: `${a.percent}% ของ ${fmt(subtotal)}` };
+    const amount = money((subtotal * (a.percent ?? 0)) / 100);
+    steps.push(`ยอดสะสมก่อนข้อนี้ ${fmt(subtotal)} × ${fmt(a.percent ?? 0)}% = ${fmt(amount)} บาท`);
+    return { amount, detail: `${a.percent}% ของ ${fmt(subtotal)}`, steps };
   }
 
+  const unit = a.unit ?? '';
   // ── perUnit: ตัดสินว่า "ต้องคิดเงินไหม" ก่อนไปหาราคา ────────────────────────
   // ลำดับนี้สลับไม่ได้ — ถ้าไปหาราคาก่อน สินค้าที่สเปกตรง Standard เป๊ะ (ไม่ต้องบวกอะไรเลย)
   // จะถูกบล็อกเพียงเพราะชีตเว้นช่อง "บวกเพิ่ม 100 mm ละ" ของขนาดนั้นไว้
@@ -247,10 +327,15 @@ function computeAdder(
   if (a.kind === 'perUnit') {
     const dimName = a.dim ?? '';
     const value = dims[dimName];
-    if (value === undefined) return { amount: 0, skip: true };
+    if (value === undefined) {
+      return { amount: 0, skip: true, why: `ใบนี้ไม่มีค่า${dimLabel(dimName)}`, steps };
+    }
     over = a.over ?? model.standard[dimName] ?? 0;
+    // `over` ที่ไม่ได้ตั้งในกฎ = มาตรฐานของรุ่น (ไม่ใช่ 0 — ดู CLAUDE.md เรื่อง `Adder.over`)
+    const overFrom = a.over !== undefined ? 'ค่าที่กฎนี้กำหนด' : model.standard[dimName] !== undefined ? 'มาตรฐานของรุ่น' : 'ไม่มีมาตรฐาน';
     excess = value - over;
-    if (excess <= 0) return { amount: 0, skip: true };
+    steps.push(`${dimLabel(dimName)} ${fmt(value)}${unit} − ${overFrom} ${fmt(over)}${unit} = ส่วนที่เกิน ${fmt(excess)}${unit}`);
+    if (excess <= 0) return { amount: 0, skip: true, why: 'ไม่เกินมาตรฐาน — รวมอยู่ในราคาตั้งแล้ว', steps };
   }
 
   // หาราคาต่อหน่วย: คงที่ หรือขึ้นกับค่าแกน
@@ -259,33 +344,45 @@ function computeAdder(
     const axisValue = axes[a.byAxis] ?? '';
     rate = a.rates?.[axisValue];
     if (rate === undefined) {
-      if (a.skipIfNoRate) return { amount: 0, skip: true };
+      if (a.skipIfNoRate) {
+        return { amount: 0, skip: true, why: `กฎนี้ไม่มีอัตราของ${axisLabel(a.byAxis)} ${axisValue || '(ไม่ได้ระบุ)'} และตั้งไว้ให้ข้าม`, steps };
+      }
       // ไม่มีค่าแกนเลย = รหัสไม่ได้บอก (ต่างจาก "บอกแล้วแต่ไม่มีราคา" ซึ่งแปลว่าไม่รับทำ)
       // รหัสบอกมาแต่อ่านไม่ออก ⇒ ข้ามกฎนี้แล้วคิดส่วนที่เหลือต่อ พร้อมเตือนว่ายังไม่รวม (เจ้าของสั่ง 2026-09-25:
       // "รหัสที่อ่านไม่ออกให้ขึ้นเตือนไว้ แต่คำนวณเฉพาะส่วนที่คำนวณได้ไปก่อน") · ห้ามเติมค่าตั้งต้นแทน — นั่นคือการเดา
       if (!axisValue && unread[a.byAxis] !== undefined) {
-        return { amount: 0, partial: `${a.label} — ยังไม่รวม: อ่าน "${unread[a.byAxis]}" ในรหัสไม่ออกว่าเป็น${axisLabel(a.byAxis)}อะไร` };
+        return { amount: 0, partial: `${a.label} — ยังไม่รวม: อ่าน "${unread[a.byAxis]}" ในรหัสไม่ออกว่าเป็น${axisLabel(a.byAxis)}อะไร`, steps };
       }
-      if (!axisValue) return { amount: 0, missing: true, blocked: `${a.label}: รหัสไม่ได้บอก${axisLabel(a.byAxis)}` };
-      return { amount: 0, noRate: true, blocked: `${a.label}: ยังไม่มีราคาสำหรับ ${axisLabel(a.byAxis)} ${axisValue}` };
+      if (!axisValue) return { amount: 0, missing: true, blocked: `${a.label}: รหัสไม่ได้บอก${axisLabel(a.byAxis)}`, steps };
+      return { amount: 0, noRate: true, blocked: `${a.label}: ยังไม่มีราคาสำหรับ ${axisLabel(a.byAxis)} ${axisValue}`, steps };
     }
   }
+  const rateFrom = a.byAxis ? `อัตราของ${axisLabel(a.byAxis)} ${axes[a.byAxis]}` : 'อัตราเดียวทุกกรณี';
 
   if (a.kind === 'flat') {
     const amt = a.amount ?? rate ?? 0;
-    return { amount: money(amt) };
+    steps.push(a.amount !== undefined ? `บวกเงินคงที่ ${fmt(money(amt))} บาท` : `บวกเงินคงที่ตาม${rateFrom} = ${fmt(money(amt))} บาท`);
+    return { amount: money(amt), steps };
   }
 
   const step = a.step ?? 1;
+  const round = a.round ?? 'ceil';
   // ปัดขึ้นทั้งบล็อกเสมอตามที่ชีตทำ — ตัวอย่าง TS-14: ส่วนต่าง 250 mm → 3 บล็อก ไม่ใช่ 2.5
-  const units = applyRound(excess / step, a.round ?? 'ceil');
+  const rawUnits = excess / step;
+  const units = applyRound(rawUnits, round);
   const times = a.times ?? 1;
   const amount = money(units * (rate ?? 0) * times);
-  const unit = a.unit ?? '';
   const timesNote = times !== 1 ? ` × ${times}` : '';
+  steps.push(
+    `คิดเป็นช่วงละ ${fmt(step)}${unit}: ${fmt(excess)} ÷ ${fmt(step)} = ${fmt(rawUnits)}` +
+      (units === rawUnits ? ' ช่วง (ลงตัว)' : ` → ${ROUND_TH[round]} = ${fmt(units)} ช่วง`)
+  );
+  steps.push(`${rateFrom}: ${fmt(rate ?? 0)} บาท ต่อ ${fmt(step)}${unit}${times !== 1 ? ` · คูณ ${times} (ตามกฎ)` : ''}`);
+  steps.push(`${fmt(units)} × ${fmt(rate ?? 0)}${timesNote} = ${fmt(amount)} บาท`);
   return {
     amount,
-    detail: `เกิน ${fmt(over)}${unit} อยู่ ${fmt(excess)}${unit} → ${units} × ${fmt(step)}${unit} @${fmt(rate ?? 0)}${timesNote}`
+    detail: `เกิน ${fmt(over)}${unit} อยู่ ${fmt(excess)}${unit} → ${units} × ${fmt(step)}${unit} @${fmt(rate ?? 0)}${timesNote}`,
+    steps,
   };
 }
 
@@ -411,11 +508,14 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
   // (เกลียวมิลที่ถูกเติมเป็นเกลียวมาตรฐานเงียบ ๆ = ราคาผิดที่ดูเหมือนถูก)
   const pending = subCodes.filter((s) => (s.effect === 'flat' && s.amount === undefined) || (s.effect === 'setAxis' && !s.value));
   const pendingAxes = new Set(pending.flatMap((s) => (s.effect === 'setAxis' && s.axis ? [s.axis] : [])));
+  /** แกนไหนถูกรหัสย่อยตัวไหนตั้งค่า — ขึ้นในวิธีคิดทีละขั้น */
+  const setBy: Record<string, string> = {};
   for (const sc of subCodes) {
     if (sc.effect === 'setAxis' && sc.axis) {
       if (sc.value) axes[sc.axis] = sc.value;
       else delete axes[sc.axis];
       delete defaultedBy[sc.axis];
+      setBy[sc.axis] = sc.subCode;
     }
   }
   // standard คือสเปกที่รวมอยู่ในราคาตั้งแล้ว ⇒ เป็นค่าตั้งต้นของทุก dim ที่ผู้ใช้ไม่ได้ระบุ
@@ -426,9 +526,59 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
   for (const sc of subCodes) if (sc.effect === 'option' && sc.value) options.add(sc.value);
 
   // ค่าที่คำนวณจากค่าอื่น ต้องมาก่อน constraint และก่อน adder เพราะทั้งคู่อ่านมันได้
+  const derivedText: Record<string, string> = {};
   for (const d of model.derivedDims ?? []) {
     const v = computeDerived(d, dims);
-    if (v !== undefined) dims[d.name] = v;
+    if (v === undefined) continue;
+    dims[d.name] = v.value;
+    derivedText[d.name] = v.text;
+  }
+
+  // ── วิธีคิดทีละขั้น ①: ค่าที่ใช้คิด และมาจากไหน ──────────────────────────────
+  const inputs: TraceInput[] = [];
+  const axisKeys = new Set([
+    ...(model.base.kind === 'matrix' ? model.base.axes : []),
+    ...Object.keys(axes),
+    ...pendingAxes,
+    ...Object.keys(cfg.unread ?? {}),
+  ]);
+  for (const k of axisKeys) {
+    const waiting = pending.find((s) => s.effect === 'setAxis' && s.axis === k);
+    const unreadText = cfg.unread?.[k];
+    inputs.push({
+      kind: 'axis',
+      key: k,
+      label: axisLabel(k),
+      value: waiting ? 'ยังไม่กำหนด' : axes[k] ?? (unreadText !== undefined ? `อ่าน "${unreadText}" ไม่ออก` : 'ไม่ได้ระบุ'),
+      from: waiting
+        ? `รหัสย่อย ${waiting.subCode} — ยังไม่ได้กำหนดว่าเท่ากับค่าไหน`
+        : setBy[k]
+          ? `รหัสย่อย ${setBy[k]}`
+          : k in given
+            ? 'ระบุในรหัส'
+            : defaultedBy[k]
+              ? `${defaultedBy[k]} — รหัสไม่ได้ระบุ`
+              : unreadText !== undefined ? 'รหัสบอกมาแต่ระบบอ่านไม่ออก' : 'รหัสไม่ได้ระบุ',
+    });
+  }
+  for (const [k, v] of Object.entries(dims)) {
+    const std = model.standard[k];
+    inputs.push({
+      kind: 'dim',
+      key: k,
+      label: dimLabel(k),
+      value: fmt(v),
+      from: derivedText[k]
+        ? `คำนวณ: ${derivedText[k]}`
+        : cfg.dims && k in cfg.dims
+          ? `ระบุในรหัส${std !== undefined ? ` (มาตรฐานของรุ่น ${fmt(std)})` : ''}`
+          : 'มาตรฐานของรุ่น — รหัสไม่ได้ระบุ (รวมอยู่ในราคาตั้งแล้ว)',
+    });
+  }
+  for (const o of options) {
+    if (o.startsWith(SUBCODE_PREFIX)) continue;
+    const by = subCodes.find((sc) => sc.effect === 'option' && sc.value === o);
+    inputs.push({ kind: 'option', key: o, label: optionLabel(o), value: 'มี', from: by ? `รหัสย่อย ${by.subCode}` : 'ระบุในรหัส' });
   }
 
   const violations: Violation[] = pending.map((s) => ({
@@ -439,9 +589,12 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
       s.effect === 'setAxis' ? `ยังไม่ได้กำหนดว่าคิดราคาเท่า${axisLabel(s.axis ?? '')}ไหน` : 'ยังไม่ได้ใส่จำนวนเงิน'
     } (ตั้งที่ตารางรหัสย่อย)`,
   }));
+  const checks: TraceCheck[] = [];
   for (const c of model.constraints) {
     if (c.disabled) continue;
-    if (evalPredicate(c.when, axes, dims, options)) {
+    const hit = evalPredicate(c.when, axes, dims, options);
+    checks.push({ message: c.message, hit, level: c.level, condition: describePredicate(c.when, axes, dims, options), source: c.source });
+    if (hit) {
       violations.push({ id: c.id, level: c.level, message: c.message });
     }
   }
@@ -460,18 +613,24 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
       message: `รหัสย่อยที่ตั้งราคาตั้งต้นมีมากกว่าหนึ่งตัว (${ownBase.map((s) => s.subCode).join(' · ')}) — ใช้ตัวที่ลำดับน้อยที่สุด`
     });
   }
-  const base = ownBase[0]
+  const base: BaseResult = ownBase[0]
     ? {
         ok: true,
         amount: money(ownBase[0].amount ?? 0),
         label: `ราคาตั้งต้นจากรหัสย่อย ${ownBase[0].subCode}`,
-        detail: ownBase[0].reads
+        detail: ownBase[0].reads,
+        steps: [
+          `รหัสย่อย ${ownBase[0].subCode} (${ownBase[0].reads}) ตั้งราคาตั้งต้นเอง = ${fmt(money(ownBase[0].amount ?? 0))} บาท — ไม่ใช้ตารางราคาตั้ง`,
+        ],
       }
     : computeBase(model, book, axes, dims, new Set([model.code]));
   const baseWaits = model.base.kind === 'matrix' && model.base.axes.some((a) => pendingAxes.has(a));
+  const traceBase: TraceBase = { ok: base.ok, label: base.label, steps: [...base.steps] };
   if (!base.ok && baseWaits) {
     // ราคาตั้งหาไม่ได้เพราะรหัสย่อยยังไม่ได้บอกค่าของแกนตาราง — ข้อความ "ยังไม่มีราคา" ข้างบนบอกครบแล้ว
+    traceBase.steps.push('ยังหาราคาตั้งไม่ได้ — รอรหัสย่อยกำหนดค่าของแกนในตาราง (ดู "ค่าที่ใช้คิด")');
   } else if (!base.ok) {
+    traceBase.steps.push(`หาราคาตั้งไม่ได้: ${base.reason ?? 'ไม่มีราคาฐาน'}`);
     violations.push({
       id: 'NO_BASE_PRICE', level: 'block', message: base.reason ?? 'ไม่มีราคาฐาน',
       ...(base.missing ? { missing: true } : {}),
@@ -483,7 +642,17 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
       .map((a) => `${axisLabel(a)} ${axes[a]} = ${defaultedBy[a]} — รหัสไม่ได้ระบุ`);
     const detail = fromDefault.length ? [base.detail, `(${fromDefault.join(' · ')})`].filter(Boolean).join(' ') : base.detail;
     breakdown.push({ step: 'base', label: base.label, detail, amount: base.amount, running });
+    traceBase.amount = base.amount;
+    const std = Object.entries(model.standard);
+    if (std.length && !ownBase[0]) {
+      traceBase.steps.push(
+        `ราคาตั้งนี้รวมสเปกมาตรฐานไว้แล้ว: ${std.map(([k, v]) => `${dimLabel(k)} ${fmt(v)}`).join(' · ')} — ส่วนที่เกินคิดเพิ่มในกฎข้างล่าง`
+      );
+    }
   }
+
+  // ── วิธีคิดทีละขั้น ③: กฎบวกเพิ่มทุกข้อ รวมข้อที่ไม่ได้คิด ────────────────────
+  const rules: TraceRule[] = [];
 
   if (base.ok) {
     // `disabled` ถูกกรองทิ้งตรงนี้ ไม่ใช่ตอนโหลดสมุดราคา — เพื่อให้กฎที่ปิดไว้ยังอยู่ในสมุด
@@ -492,31 +661,64 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
       .filter((s) => s.effect === 'flat' || s.effect === 'percent' || s.effect === 'perUnit')
       .filter((s) => !pending.includes(s))
       .map(subCodeAsAdder);
+    // กฎที่ปิดไว้ยังเข้าคิว — แค่เพื่อให้วิธีคิดทีละขั้นบอกได้ว่า "มีกฎนี้ แต่ปิดอยู่" (ไม่มีผลกับเงิน)
     const ordered = [
       ...model.adders.map((a) => withVariantPrice(a, variant)),
       ...fromSubCodes,
       ...(variant ? [variantAdder(variant)] : [])
     ]
-      .filter((a) => !a.disabled)
       .sort((x, y) => x.order - y.order);
     for (const a of ordered) {
-      if (a.when && !evalPredicate(a.when, axes, dims, options)) continue;
+      const tr: TraceRule = { id: a.id, label: a.label, status: 'applied', steps: [], ...(a.source ? { source: a.source } : {}) };
+      rules.push(tr);
+      if (a.disabled) {
+        tr.status = 'off';
+        tr.reason = 'ปิดไว้ในสมุดราคา — ไม่มีผลกับราคา';
+        continue;
+      }
+      if (a.when) {
+        const hit = evalPredicate(a.when, axes, dims, options);
+        tr.steps.push(`เงื่อนไข: ${describePredicate(a.when, axes, dims, options)} → ${hit ? 'ตรง' : 'ไม่ตรง'}`);
+        if (!hit) {
+          tr.status = 'skipped';
+          tr.reason = 'เงื่อนไขไม่ตรงกับใบนี้';
+          continue;
+        }
+      }
+      if (variant?.adderPrices?.[a.id] !== undefined) {
+        tr.steps.push(`ใช้ราคาของตัวเลือก ${variant.suffix} (${variant.label}) แทนราคาของรุ่นหลัก`);
+      }
       const r = computeAdder(a, model, running, axes, dims, cfg.unread);
+      tr.steps.push(...r.steps);
       if (r.partial) {
         violations.push({ id: a.id, level: 'warn', message: r.partial, partial: true });
+        tr.status = 'waiting';
+        tr.reason = r.partial;
         continue;
       }
       // แกนที่รอรหัสย่อยกำหนดค่า — ฟ้องไปแล้วครั้งเดียวข้างบน ไม่ต้องขึ้น "รหัสไม่ได้บอก" ซ้ำ
-      if (r.missing && a.byAxis && pendingAxes.has(a.byAxis)) continue;
+      if (r.missing && a.byAxis && pendingAxes.has(a.byAxis)) {
+        tr.status = 'waiting';
+        tr.reason = `รอรหัสย่อยกำหนด${axisLabel(a.byAxis)}`;
+        continue;
+      }
       if (r.blocked) {
         violations.push({
           id: a.id, level: 'block', message: r.blocked,
           ...(r.missing ? { missing: true } : {}), ...(r.noRate ? { noRate: true } : {}),
         });
+        tr.status = 'blocked';
+        tr.reason = r.blocked;
         continue;
       }
-      if (r.skip || r.amount === 0) continue;
+      if (r.skip || r.amount === 0) {
+        tr.status = 'skipped';
+        tr.reason = r.why ?? 'คิดได้ 0 บาท';
+        continue;
+      }
       running = money(running + r.amount);
+      tr.amount = r.amount;
+      tr.running = running;
       // บอกให้เห็นว่าอัตรานี้มาจากค่าเริ่มต้น ไม่ใช่จากรหัส — "ทำไมคิดสายสแตนเลส" ต้องตอบได้จากหน้าจอ
       const from = a.byAxis && defaultedBy[a.byAxis]
         ? `${axes[a.byAxis]} (${defaultedBy[a.byAxis]} — รหัสไม่ได้ระบุ)`
@@ -524,6 +726,17 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
       const detail = from ? [r.detail, from].filter(Boolean).join(' · ') : r.detail;
       breakdown.push({ step: a.kind, label: a.label, detail, amount: r.amount, running });
     }
+  }
+  // แถวรหัสย่อยที่ยังไม่มีเงิน ไม่ได้เข้าคิวคิดเงิน (ห้ามเป็น +0) — แต่ต้องโผล่ในวิธีคิดให้เห็นว่ารออยู่
+  for (const sc of pending) {
+    if (sc.effect !== 'flat') continue;
+    rules.push({
+      id: 'sub:' + sc.subCode,
+      label: `${sc.reads || sc.subCode} (${sc.subCode})`,
+      status: 'waiting',
+      reason: 'ยังไม่ได้ใส่จำนวนเงินในตารางรหัสย่อย',
+      steps: [],
+    });
   }
 
   const blocked = violations.some((v) => v.level === 'block');
@@ -536,7 +749,8 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
     unitPrice: blocked ? 0 : running,
     breakdown,
     violations,
-    bookVersion: book.version
+    bookVersion: book.version,
+    trace: { inputs, base: traceBase, rules, checks },
   };
 }
 
@@ -559,6 +773,33 @@ export function formatOutcome(o: PriceOutcome): string {
   for (const v of o.violations) {
     const tag = v.level === 'block' ? '✗' : v.level === 'quoteOnRequest' ? '?' : '!';
     lines.push(`  ${tag} ${v.message}`);
+  }
+  return lines.join('\n');
+}
+
+/** วิธีคิดทีละขั้นเป็นข้อความ — ให้ CLI (`pricebook:calc --code`) พิมพ์ชุดเดียวกับที่หน้าจอเห็น */
+export function formatTrace(o: PriceOutcome): string {
+  const t = o.trace;
+  if (!t) return '';
+  const STATUS: Record<string, string> = {
+    applied: 'คิด', skipped: 'ไม่คิด', blocked: 'คิดไม่ได้', waiting: 'ยังไม่รวม', off: 'ปิดไว้',
+  };
+  const lines: string[] = ['วิธีคิดทีละขั้น', '', '① ค่าที่ใช้คิด'];
+  for (const i of t.inputs) lines.push(`   ${i.label} = ${i.value}   ← ${i.from}`);
+  lines.push('', `② ${t.base.label}${t.base.amount !== undefined ? ` = ${fmt(t.base.amount)}` : ''}`);
+  for (const s of t.base.steps) lines.push(`   · ${s}`);
+  lines.push('', '③ กฎบวกเพิ่ม (ตามลำดับที่คิด)');
+  if (!t.rules.length) lines.push('   (ไม่ได้ตรวจ — ยังหาราคาตั้งไม่ได้)');
+  t.rules.forEach((r, n) => {
+    const money = r.amount !== undefined ? `  +${fmt(r.amount)} → ยอดสะสม ${fmt(r.running ?? 0)}` : '';
+    lines.push(`   ${n + 1}. [${STATUS[r.status]}] ${r.label}${money}`);
+    for (const s of r.steps) lines.push(`        · ${s}`);
+    if (r.reason) lines.push(`        ⇒ ${r.reason}`);
+    if (r.source) lines.push(`        ที่มา: ${r.source}`);
+  });
+  if (t.checks.length) {
+    lines.push('', '④ ข้อห้ามที่ตรวจ');
+    for (const c of t.checks) lines.push(`   ${c.hit ? '✗ ติด' : '✓ ผ่าน'} ${c.message} — ${c.condition}`);
   }
   return lines.join('\n');
 }

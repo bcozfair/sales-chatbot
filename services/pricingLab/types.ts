@@ -461,4 +461,63 @@ export interface PriceOutcome {
   breakdown: BreakdownLine[];
   violations: Violation[];
   bookVersion: string;
+  /** วิธีคิดทีละขั้น ไว้ให้คนตรวจตรรกะ — ดู `PriceTrace` */
+  trace?: PriceTrace;
+}
+
+// ── วิธีคิดทีละขั้น ──────────────────────────────────────────────────────────
+//
+// เจ้าของขอ 2026-09-28: "แสดงวิธีการคำนวณอย่างละเอียดว่ามาจากส่วนไหนบ้าง จะได้ตรวจสอบได้ว่า logic ถูกไหม"
+// `breakdown` ตอบได้แค่ "เงินก้อนนี้เท่าไหร่" — ตอบไม่ได้ว่า 250 mm มาจาก L1 + Sleeve − มาตรฐาน,
+// ปัดขึ้นหรือปัดลง, อัตรามาจากช่องไหน, และ **กฎข้อไหนถูกข้ามไปเพราะอะไร** ซึ่งเป็นของที่ผิดเงียบที่สุด
+// ⇒ ทุกข้อความในนี้ถูกเขียน **ในจุดเดียวกับที่คิดเงินจริง** (`computePrice`) จากตัวแปรชุดเดียวกัน
+// ห้ามเขียนตัวคิดคำอธิบายแยกอีกชุด ไม่งั้นวันหนึ่งคำอธิบายกับตัวเลขจะไม่ตรงกันแล้วคนตรวจจะเชื่อคำอธิบาย
+
+/** หนึ่งค่าที่ใช้คิด และมาจากไหน (ในรหัส · ค่ามาตรฐานของรุ่น · รหัสย่อย · คำนวณจากค่าอื่น) */
+export interface TraceInput {
+  kind: 'axis' | 'dim' | 'option';
+  key: string;
+  label: string;
+  value: string;
+  from: string;
+}
+
+export interface TraceBase {
+  ok: boolean;
+  label: string;
+  steps: string[];
+  amount?: Money;
+}
+
+export interface TraceRule {
+  id: string;
+  label: string;
+  /**
+   * applied = บวกเงินจริง · skipped = ตรวจแล้วไม่ต้องคิด (เงื่อนไขไม่ตรง / ไม่เกินมาตรฐาน)
+   * · blocked = คิดไม่ได้ · waiting = ยังไม่ได้รวม (รอราคา/อ่านรหัสไม่ออก) · off = ปิดไว้ในสมุดราคา
+   */
+  status: 'applied' | 'skipped' | 'blocked' | 'waiting' | 'off';
+  /** ประโยคสั้น ๆ ว่าทำไมได้สถานะนี้ (ไม่มีเมื่อ applied) */
+  reason?: string;
+  steps: string[];
+  amount?: Money;
+  running?: Money;
+  /** ที่มาในชีต (`Adder.source`) */
+  source?: string;
+}
+
+export interface TraceCheck {
+  message: string;
+  hit: boolean;
+  level: Constraint['level'];
+  condition: string;
+  source?: string;
+}
+
+export interface PriceTrace {
+  inputs: TraceInput[];
+  base: TraceBase;
+  /** กฎทุกข้อของรุ่นตามลำดับที่คิด **รวมข้อที่ไม่ได้คิด** — ข้อที่ถูกข้ามคือที่ที่ราคาผิดได้เงียบที่สุด */
+  rules: TraceRule[];
+  checks: TraceCheck[];
 }

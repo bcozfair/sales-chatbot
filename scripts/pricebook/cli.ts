@@ -13,7 +13,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { parseProductCode } from '../../services/pricingLab/code.js';
-import { computePrice, formatOutcome, resolveModel } from '../../services/pricingLab/engine.js';
+import { computePrice, formatOutcome, formatTrace, resolveModel } from '../../services/pricingLab/engine.js';
 import type { ProductConfig } from '../../services/pricingLab/types.js';
 import { NoBook, loadBookFrom } from './bookSource.js';
 import { listSubCodes } from '../../db/pricingLabRepo.js';
@@ -57,7 +57,10 @@ if (codeArg) {
   if (parsed.cfg) {
     console.log(`สเปกที่อ่านได้: ${JSON.stringify(parsed.cfg)}`);
     console.log('');
-    console.log(formatOutcome(computePrice(parsed.cfg, book)));
+    const outcome = computePrice(parsed.cfg, book);
+    console.log(formatOutcome(outcome));
+    console.log('');
+    console.log(formatTrace(outcome));
     console.log('');
   }
   process.exit(parsed.cfg ? 0 : 1);
