@@ -915,6 +915,75 @@ if (!ts08 || !ts10) {
     `${JSON.stringify(sRow)} ${JSON.stringify(m8Row)}`);
 }
 
+// ── เกลียวที่บอกมาแล้ว · สายที่เกินไม่ถึงเมตร (2026-09-25 หลัง deploy) ─────────────────────────────
+// ตรวจแบบเทียบกันเองในเล่มเดียวกัน ไม่ผูกกับตัวเลขในฐาน — ราคาเปลี่ยนได้ แต่ความสัมพันธ์ต้องจริงเสมอ
+console.log('\n── 12. เกลียวที่อ่านไม่ออก / เกลียวนิ้วไม่มีเครื่องหมาย · สายเกินไม่ถึงเมตร · BH ─────────\n');
+{
+  const run = (code: string) => { const p = parseProductCode(code, book); return { p, r: computePrice(p.cfg!, book) }; };
+  const why = (x: ReturnType<typeof run>) => `${x.r.status} ${x.r.unitPrice} ${x.r.violations.map((v) => `${v.id}:${v.message}`).join('|')}`;
+  if (!book.models['TSK-01'] || !book.models['TSK-01-0']) {
+    console.log('  (ข้าม — สมุดไม่มี TSK-01/TSK-01-0)');
+  } else {
+    // เจ้าของสั่ง 2026-09-25: `(5/16)` ที่ไม่มีเครื่องหมายนิ้ว = `5/16”` · เดิมตกไปคิดเกลียวมาตรฐาน 1/4” (240 แทน 270 · 81 รหัสจริง)
+    const bare = run('TSJ-01(5/16)4.8+2M');
+    const inch = run('TSJ-01(5/16”)4.8+2M');
+    const quarter = run('TSJ-01(1/4”)4.8+2M');
+    check('TSJ-01(5/16)4.8+2M — ไม่มีเครื่องหมายนิ้ว ⇒ ราคาเท่า (5/16”) เป๊ะ',
+      bare.r.status === 'priced' && inch.r.status === 'priced' && bare.r.unitPrice === inch.r.unitPrice
+        && !bare.p.parts.some((x) => x.kind === 'unknown'), `${why(bare)} vs ${why(inch)}`);
+    check('  และไม่ใช่ราคาของเกลียวมาตรฐาน 1/4”', quarter.r.status !== 'priced' || quarter.r.unitPrice !== bare.r.unitPrice,
+      `${why(bare)} vs ${why(quarter)}`);
+    // บอกเกลียวมาแล้วแต่ตารางไม่มี ⇒ ห้ามเติมเกลียวมาตรฐานของรุ่น (1/4” · M5) แล้วคิดราคาของเกลียวคนละขนาด
+    for (const code of ['TSK-01(M12)+2M', 'TSK-01(S1)+2M', 'TSK-01-0(15)+2M']) {
+      const x = run(code);
+      const raw = code.match(/\([^)]*\)/)![0];
+      check(`${code} — ตารางไม่มีเกลียวนี้ ⇒ ไม่ได้ราคา และบอกว่า "อ่าน ${raw} ไม่ออก" ไม่ใช่ "รหัสไม่ได้ระบุ"`,
+        x.r.status !== 'priced' && x.r.violations.some((v) => v.missing && v.message.includes(`"${raw}"`))
+          && !x.r.breakdown.some((b) => /ค่ามาตรฐานของรุ่น/.test(b.detail ?? '')), why(x));
+    }
+    const plain = run('TSK-01+2M');
+    const std = run('TSK-01(1/4”)+2M');
+    check('TSK-01+2M (ไม่มีวงเล็บ) ⇒ ยังคิดเกลียวมาตรฐาน 1/4” เหมือนเดิม', plain.r.status === 'priced' && plain.r.unitPrice === std.r.unitPrice,
+      `${why(plain)} vs ${why(std)}`);
+  }
+  const ts04 = Object.keys(book.models).find((k) => k === 'TSJ-04' || k === 'TSK-04');
+  if (ts04) {
+    const both = run('TSJ-04(20G)7.8x5.56+1M');
+    check('TSJ-04(20G)… — ขาดสองแกน ⇒ ข้อความบอกครบทั้ง "อ่านเกลียวไม่ออก" และ "ไม่ได้บอกขนาดแกน"',
+      both.r.violations.some((v) => v.message.includes('"(20G)"') && /ไม่ได้บอกขนาดแกน/.test(v.message)), why(both));
+  }
+  if (Object.keys(book.models).some((k) => /^TS.-11$/.test(k))) {
+    // ค่าสายนับเมตรเต็ม ⇒ เกินไม่ถึงเมตรไม่ต้องคิดเงินสาย จึงไม่ต้องรู้ชนิดสาย (เดิมบล็อก 135 รหัสจริง)
+    const x15 = run('TSJ-11 6x30+1.5M');
+    const x1 = run('TSJ-11 6x30+1M');
+    check('TSJ-11 6x30+1.5M — สายเกินไม่ถึงเมตร ไม่บอกชนิดสาย ⇒ คิดได้ ราคาเท่าสาย 1 M', x15.r.status === 'priced' && x15.r.unitPrice === x1.r.unitPrice,
+      `${why(x15)} vs ${why(x1)}`);
+    check('  การ์ดวิธีคำนวณบอกเหตุผลที่ไม่คิดค่าสาย (เกินไม่ถึงช่วงเต็ม)', /นับเฉพาะช่วงเต็ม/.test(JSON.stringify(x15.r.trace ?? '')),
+      JSON.stringify(x15.r.trace ?? null).slice(0, 200));
+    const x25 = run('TSJ-11 6x30+2.5M');
+    check('  TSJ-11 6x30+2.5M — เกินเต็มเมตรแล้วต้องรู้ชนิดสาย ⇒ ยังไม่ได้ราคา (ไม่ใช่ข้ามค่าสายไปเงียบ ๆ)',
+      x25.r.status !== 'priced' && x25.r.violations.some((v) => /ชนิดสาย/.test(v.message)), why(x25));
+  }
+  if (Object.keys(book.models).some((k) => /^TS.-04$/.test(k))) {
+    const f = run('TSK-04(S2)5x100+1.2MF');
+    check('TSK-04(S2)5x100+1.2MF — สายเกินไม่ถึงเมตร ⇒ ไม่มีเตือน "ยังไม่รวม" ค่าสาย', !f.r.violations.some((v) => /ยังไม่รวม/.test(v.message)), why(f));
+  }
+}
+// BH ใช้กติกาเดิมของชีต: "Standard ออกสายยาว 30 CM · ถ้าความยาวสายเกิน 30 CM บวกเพิ่มเมตรละ 60 บาท (คูณ 2 เพราะใช้ 2 เส้น)"
+// (`BH!A19:A20` · เจ้าของยืนยัน 2026-09-25) ⇒ **ปัดขึ้น** ไม่ใช่นับเมตรเต็มแบบ TS — ห้ามรวมเข้ากับ `--rounding` ของ TS
+{
+  const spec = JSON.parse(readFileSync(new URL('../pricebook/maps/01-BH-01.map.json', import.meta.url), 'utf8')) as { adders?: Adder[] };
+  const cab = spec.adders?.find((a) => a.id === 'cable_over_30cm');
+  check('แมป BH-01: สายเกิน 30 CM ปัดขึ้น · ทีละ 100 cm · 60 บาท × 2 เส้น',
+    cab?.round === 'ceil' && cab.step === 100 && cab.rate === 60 && cab.times === 2, JSON.stringify(cab));
+  const inBook = bh01?.adders.find((a) => a.id === 'cable_over_30cm');
+  if (inBook) check('เล่มในฐาน BH-01: สายเกิน 30 CM ยังปัดขึ้น', (inBook.round ?? 'ceil') === 'ceil', String(inBook.round));
+  // BH-03 **ไม่ใช้** กฎนี้ (เจ้าของตอบ 2026-09-28) — ชีตเขียนไว้เฉพาะบล็อก BH-01/02 (`A19:C20`) · ห้ามเติมให้ "ครบซีรีส์"
+  const bh03Map = JSON.parse(readFileSync(new URL('../pricebook/maps/03-BH-03.map.json', import.meta.url), 'utf8')) as { adders?: Adder[] };
+  check('BH-03 ไม่มีกฎสายเกิน 30 CM (ทั้งแมปและเล่มในฐาน)',
+    !bh03Map.adders?.some((a) => a.id === 'cable_over_30cm') && !bh03?.adders.some((a) => a.id === 'cable_over_30cm'));
+}
+
 console.log(`\n${'─'.repeat(70)}`);
 console.log(`ผล: ผ่าน ${pass} · ตก ${fails.length}`);
 console.log('─'.repeat(70));

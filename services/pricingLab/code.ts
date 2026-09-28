@@ -109,6 +109,15 @@ function matchValue(values: string[], raw: string): string | undefined {
 }
 
 /**
+ * เกลียวนิ้วที่ไม่มีเครื่องหมายนิ้ว: `(5/16)` = `5/16”` (เจ้าของสั่ง 2026-09-25) — เฉพาะรูปเศษส่วนเท่านั้น
+ * เลขเดี่ยวอย่าง `(15)` ไม่ใช่ขนาดเกลียวนิ้วที่ตารางใช้ ⇒ ปล่อยให้เป็น "อ่านไม่ออก" ตามเดิม
+ */
+function matchInchThread(values: string[], raw: string): string | undefined {
+  if (!/^\d+\/\d+$/.test(norm(raw))) return undefined;
+  return matchValue(values, norm(raw) + '"');
+}
+
+/**
  * เกลียวมิล: รหัสเขียนแค่ `M6` แต่หัวคอลัมน์เขียนระยะพิตช์ด้วย (`M6x1.0`)
  * และ TS-01!C16:D16 เขียนกำกับเองว่าพิตช์อีกแบบ (`*M8x1.25` `*M10x1.5`) **ใช้ราคาเดียวกัน**
  * ⇒ จับคู่ด้วยเลขหลัง M เท่านั้น และ **ต้องเหลือค่าเดียว** ไม่งั้นถือว่าอ่านไม่ออก
@@ -406,7 +415,7 @@ function readTsGeneric(c: Ctx, rest: string, prefix: string): void {
         hit = hit ?? matchValue(threads, cand);
       }
     } else {
-      hit = matchValue(threads, raw) ?? matchMetricThread(threads, raw);
+      hit = matchValue(threads, raw) ?? matchInchThread(threads, raw) ?? matchMetricThread(threads, raw);
     }
     if (hit) {
       c.cfg.axes = { ...c.cfg.axes, thread: hit };
@@ -414,12 +423,16 @@ function readTsGeneric(c: Ctx, rest: string, prefix: string): void {
     } else if (readFromTable(c, raw, `(${raw})`)) {
       // มีแถวในตารางรหัสย่อยแล้ว — จบตรงนี้
     } else if (/^M\d/i.test(raw)) {
+      c.cfg.unread = { ...c.cfg.unread, thread: `(${raw})` };
       add(c, {
         text: `(${raw})`,
         reads: `เกลียวมิล ${raw.toUpperCase()} — ตารางราคา ${c.model.sheet ?? c.model.code} มีแต่เกลียวนิ้ว ยังไม่ได้ตั้งค่าว่าคิดเท่าไหร่`,
         kind: 'unknown'
       });
     } else {
+      // บอกมาแล้วแต่อ่านไม่ออก ≠ ไม่ได้บอก — ต้องจำไว้ ไม่งั้น engine เติมเกลียวมาตรฐานของรุ่น (1/4” · M5)
+      // แล้วคิดราคาของเกลียวคนละขนาดโดยบรรทัดราคาเขียนว่า "รหัสไม่ได้ระบุ" (เจอ 81 รหัสจริง · 2026-09-25)
+      c.cfg.unread = { ...c.cfg.unread, thread: `(${raw})` };
       add(c, { text: `(${raw})`, reads: 'อ่านไม่ออกว่าเป็นเกลียวขนาดไหน', kind: 'unknown' });
     }
     rest = rest.slice(paren[0].length);

@@ -239,6 +239,9 @@
       "dims": {
         "L1": 150,
         "cable_m": 3
+      },
+      "unread": {
+        "thread": "(M8)"
       }
     },
     "expectStatus": "notManufacturable",

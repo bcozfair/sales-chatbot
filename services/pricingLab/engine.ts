@@ -203,7 +203,8 @@ function computeBase(
   book: PriceBook,
   axes: Record<string, string>,
   dims: Record<string, number>,
-  seen: Set<string>
+  seen: Set<string>,
+  unread: Record<string, string> = {}
 ): BaseResult {
   const base = model.base;
 
@@ -216,7 +217,7 @@ function computeBase(
     if (!parent) {
       return { ok: false, amount: 0, label: 'ฐานราคา', reason: `ไม่มีรุ่น ${base.model} ในสมุดราคา`, steps: [] };
     }
-    const r = computeBase(parent, book, axes, dims, seen);
+    const r = computeBase(parent, book, axes, dims, seen, unread);
     return {
       ...r,
       label: `${r.label} (ฐานของ ${parent.code})`,
@@ -234,6 +235,21 @@ function computeBase(
     if (cell === undefined) {
       // รหัสไม่ได้บอกค่าของแกนในตาราง (เช่นไม่มีวงเล็บเกลียว) ≠ ชีตเว้นช่องไว้ — คนละคำตอบกับลูกค้า
       const unknown = base.axes.filter((a) => !axes[a]);
+      // บอกมาแล้วแต่อ่านไม่ออก (`(M12)` บนรุ่นที่มีแต่เกลียวนิ้ว) ≠ ไม่ได้บอก — คนอ่านต้องรู้ว่าต้องแก้รหัส ไม่ใช่เติมรหัส
+      const unreadable = unknown.filter((a) => unread[a] !== undefined);
+      if (unreadable.length) {
+        const unsaid = unknown.filter((a) => unread[a] === undefined);
+        const said = unreadable.map((a) => `อ่าน "${unread[a]}" ในรหัสไม่ออกว่าเป็น${axisLabel(a)}อะไร`);
+        const notSaid = unsaid.length ? [`รหัสไม่ได้บอก${unsaid.map(axisLabel).join(' และ ')}`] : [];
+        return {
+          ok: false,
+          amount: 0,
+          label: 'ฐานราคา',
+          missing: true,
+          reason: `${[...said, ...notSaid].join(' · ')} — ตารางราคาตั้งต้องรู้ค่านี้ก่อน`,
+          steps,
+        };
+      }
       if (unknown.length) {
         return {
           ok: false,
@@ -355,6 +371,10 @@ function computeAdder(
   // จะถูกบล็อกเพียงเพราะชีตเว้นช่อง "บวกเพิ่ม 100 mm ละ" ของขนาดนั้นไว้
   let excess = 0;
   let over = 0;
+  const step = a.step ?? 1;
+  const round = a.round ?? 'ceil';
+  let rawUnits = 0;
+  let units = 0;
   if (a.kind === 'perUnit') {
     const dimName = a.dim ?? '';
     const value = dims[dimName];
@@ -367,6 +387,14 @@ function computeAdder(
     excess = value - over;
     steps.push(`${dimLabel(dimName)} ${fmt(value)}${unit} − ${overFrom} ${fmt(over)}${unit} = ส่วนที่เกิน ${fmt(excess)}${unit}`);
     if (excess <= 0) return { amount: 0, skip: true, why: 'ไม่เกินมาตรฐาน — รวมอยู่ในราคาตั้งแล้ว', steps };
+    // ปัดก่อนไปหาอัตรา — กฎที่ปัดลง (ค่าสายนับเฉพาะเมตรเต็ม) ได้ 0 ช่วงเมื่อเกินไม่ถึงช่วง ⇒ ไม่ต้องคิดเงิน
+    // จึงไม่ต้องรู้ชนิดสาย · ถ้าไปหาอัตราก่อน `+1.5M` จะถูกบล็อกว่า "ไม่ได้บอกชนิดสาย" (136 รหัสจริง · 2026-09-25)
+    rawUnits = excess / step;
+    units = applyRound(rawUnits, round);
+    if (units <= 0) {
+      steps.push(`คิดเป็นช่วงละ ${fmt(step)}${unit}: ${fmt(excess)} ÷ ${fmt(step)} = ${fmt(rawUnits)} → ${ROUND_TH[round]} = 0 ช่วง`);
+      return { amount: 0, skip: true, why: `เกินไม่ถึง ${fmt(step)}${unit} — กฎนี้นับเฉพาะช่วงเต็ม จึงไม่คิดเงิน`, steps };
+    }
   }
 
   // หาราคาต่อหน่วย: คงที่ หรือขึ้นกับค่าแกน
@@ -396,11 +424,8 @@ function computeAdder(
     return { amount: money(amt), steps };
   }
 
-  const step = a.step ?? 1;
-  const round = a.round ?? 'ceil';
-  // ปัดขึ้นทั้งบล็อกเสมอตามที่ชีตทำ — ตัวอย่าง TS-14: ส่วนต่าง 250 mm → 3 บล็อก ไม่ใช่ 2.5
-  const rawUnits = excess / step;
-  const units = applyRound(rawUnits, round);
+  // ปัดขึ้นทั้งบล็อกเป็นค่าตั้งต้นตามที่ชีตทำ — ตัวอย่าง TS-14: ส่วนต่าง 250 mm → 3 บล็อก ไม่ใช่ 2.5
+  // (`units` คิดไว้แล้วข้างบน ก่อนหาอัตรา)
   const times = a.times ?? 1;
   const amount = money(units * (rate ?? 0) * times);
   const timesNote = times !== 1 ? ` × ${times}` : '';
@@ -663,7 +688,7 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
           `รหัสย่อย ${ownBase[0].subCode} (${ownBase[0].reads}) ตั้งราคาตั้งต้นเอง = ${fmt(money(ownBase[0].amount ?? 0))} บาท — ไม่ใช้ตารางราคาตั้ง`,
         ],
       }
-    : computeBase(model, book, axes, dims, new Set([model.code]));
+    : computeBase(model, book, axes, dims, new Set([model.code]), cfg.unread);
   const baseWaits = model.base.kind === 'matrix' && model.base.axes.some((a) => pendingAxes.has(a));
   const traceBase: TraceBase = { ok: base.ok, label: base.label, steps: [...base.steps] };
   if (!base.ok && baseWaits) {
