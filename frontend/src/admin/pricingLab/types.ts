@@ -96,6 +96,8 @@ export interface CatalogFamilySpec {
   layout: CatalogLayoutItem[];
   slots: Record<string, CatalogSlot>;
   shapes?: { code: string; label: string; dims: SizeKey[] }[];
+  /** สิ่งที่ต้องบวกเพิ่ม (ไม่อยู่ในรหัส) — `code` คือค่าที่ส่งกลับไปใน `BhForm.addons` */
+  addons?: CatalogOption[];
 }
 export interface BhForm {
   family: BhFamily;
@@ -108,6 +110,8 @@ export interface BhForm {
   conn?: string;
   term?: string;
   amp?: string;
+  /** สิ่งที่ต้องบวกเพิ่มที่ติ๊กไว้ — ไม่อยู่ในรหัส */
+  addons?: string[];
   mat?: string;
   extras?: { text: string; after: string; glue?: boolean }[];
 }

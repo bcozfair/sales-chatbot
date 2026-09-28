@@ -35,7 +35,7 @@
 import type { PriceBook, PriceModel, ProductConfig } from './types.js';
 import { resolveModel } from './engine.js';
 import { findSubCode, subCodeOption } from './subcodes.js';
-import { AMP, BH_CATALOG, SHAPE_AXIS, bhSpec, buildBhCode, sameBhCode, type BhFamily, type BhForm, type SizeKey } from './catalogBh.js';
+import { ADDONS, AMP, BH_CATALOG, SHAPE_AXIS, bhSpec, buildBhCode, sameBhCode, type BhFamily, type BhForm, type SizeKey } from './catalogBh.js';
 
 /** หนึ่งรหัสย่อยในรหัสสินค้า พร้อมคำอธิบายว่าระบบอ่านมันว่าอะไร — ใช้โชว์ให้คนตรวจก่อนเชื่อราคา */
 export interface CodePart {
@@ -73,9 +73,13 @@ export interface ParsedCode {
   form?: BhForm;
 }
 
-/** ตัวเลือกที่ **รหัสไม่ได้บอก** แต่คนเลือกมาจากช่องกรอก — วันนี้มีตัวเดียวคือขนาดเต๋า 10A/30A ของ BH */
+/**
+ * ตัวเลือกที่ **รหัสไม่ได้บอก** แต่คนเลือกมาจากช่องกรอกของ BH — ขนาดเต๋า 10A/30A และสิ่งที่ต้องบวกเพิ่ม
+ * (สาย Silicone · สายถักสแตนเลส · ท่อเฟ็กส์ — ค่าคือ `ADDONS[].code`)
+ */
 export interface CodePicks {
   amp?: string;
+  addons?: string[];
 }
 
 // ── ตัวช่วยเล็ก ๆ ────────────────────────────────────────────────────────────
@@ -708,6 +712,8 @@ function readBh(c: Ctx, num: string, suffix: string, rest: string, picks: CodePi
     add(c, { text: '', reads: 'การออกขั้วไฟไม่ระบุ = ออกน็อต + ฝาครอบ (มาตรฐานของ BH-03) — คิดค่าออกน็อตตามปกติ', kind: 'option' });
   }
 
+  readAddons();
+
   // ช่องกรอกต้องประกอบกลับเป็นรหัสเดิมเป๊ะ — ไม่งั้นแก้ช่องเดียวแล้วรหัสส่วนอื่นเปลี่ยนตามเงียบ ๆ
   // (รหัสที่เขียนนอกรูปแบบ เช่น `BH-02-S` · ไม่มีหน่วย W · `220x800W`) ⇒ ไม่มีช่อง หน้าจอแสดงแบบอ่านทีละท่อนเหมือนเดิม
   if (!spec || noForm || (form.watt === undefined && form.wattText === undefined)) return undefined;
@@ -754,7 +760,7 @@ function readBh(c: Ctx, num: string, suffix: string, rest: string, picks: CodePi
       add(c, { text: token, reads: `การต่อใช้งานแบบ${T === 'SE' ? 'อนุกรม' : 'ขนาน'} — ไม่มีผลกับราคา`, kind: 'noPrice' });
       return;
     }
-    if (form.term === undefined && form.mat === undefined && termCodes.has(T) && (strip || !/^[123]$/.test(T))) {
+    if (form.term === undefined && form.mat === undefined && termCodes.has(T)) {
       form.term = T;
       last = 'term';
       readTerm(T);
@@ -793,6 +799,35 @@ function readBh(c: Ctx, num: string, suffix: string, rest: string, picks: CodePi
       return;
     }
     add(c, { text: token, reads: 'ยังไม่ได้ตั้งค่าว่าแปลว่าอะไร', kind: 'unknown' });
+  }
+
+  /**
+   * สิ่งที่ต้องบวกเพิ่มที่ติ๊กมา (ไม่อยู่ในรหัส) — เปิดกฎของสมุดราคาที่ `when.option` ตรงกัน · ราคาอยู่ที่กฎ ไม่ใช่ที่นี่
+   * กฎทั้งสามคิดต่อเมตรจาก `cable_extra_m` = **ความยาวสายส่วนที่เกินมาตรฐานของรุ่น** เป็นเมตร (ไม่ปัด) แล้วกฎปัดขึ้นเอง
+   * (เจ้าของตอบ 2026-09-28: "นับเฉพาะส่วนที่เกิน 30 cm แล้วเศษเมตรปัดขึ้นเป็นเมตรเต็ม") · มาตรฐานอ่านจาก `standard.cable_cm`
+   * ที่แอดมินแก้ได้ ไม่ฝัง 30 ไว้ในโค้ด · ไม่ได้บอกความยาวสาย (น็อต/ปลั๊ก/เต๋า) = สายมาตรฐาน = ไม่เกิน = 0 บาท
+   */
+  function readAddons(): void {
+    const picked = (spec?.addons ?? ADDONS).filter((a) => picks.addons?.includes(a.code));
+    if (!picked.length) return;
+    form.addons = picked.map((a) => a.code);
+    const std = c.model.standard.cable_cm;
+    const cm = c.cfg.dims?.cable_cm ?? std;
+    if (std !== undefined && cm !== undefined) {
+      c.cfg.dims = { ...c.cfg.dims, cable_extra_m: Math.max(0, cm - std) / 100 };
+    }
+    const over = std !== undefined && cm !== undefined && cm > std
+      ? `สายยาว ${cm} CM เกินมาตรฐาน ${std} CM — คิดเมตรละตามส่วนที่เกิน ปัดขึ้นเป็นเมตรเต็ม`
+      : `สายไม่เกินมาตรฐาน ${std ?? '—'} CM — ยังไม่มีค่าเพิ่ม`;
+    for (const a of picked) {
+      const rule = c.model.adders.some((r) => r.when && 'option' in r.when && r.when.option === a.code);
+      if (rule) {
+        c.cfg.options = [...(c.cfg.options ?? []), a.code];
+        add(c, { text: '', reads: `${a.label} (ติ๊กในช่องบวกเพิ่ม — รหัสไม่ได้บอก) · ${over}`, kind: 'option' });
+      } else {
+        add(c, { text: '', reads: `${a.label} — ${c.model.sheet ?? c.model.code} ยังไม่มีราคาข้อนี้ ยังไม่รวมในราคา`, kind: 'unknown' });
+      }
+    }
   }
 
   function readTerm(T: string): void {

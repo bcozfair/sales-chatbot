@@ -194,6 +194,27 @@ export const CatalogTemplate: React.FC<Props> = ({ catalog, form, onChange, onFa
       <div className="mt-2.5 flex flex-wrap items-start gap-1 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 pt-3 pb-2">
         {items}
       </div>
+      {/* ชีตมีราคาเมตรละ แต่แคตตาล็อกและรหัสไม่มีท่อนนี้ ⇒ ติ๊กแยกใต้รหัส และบอกว่าไม่ถูกพิมพ์ลงรหัส (แบบเดียวกับขนาดเต๋า) */}
+      {spec.addons?.length ? (
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12.5px] text-slate-700">
+          <span className="text-slate-500">บวกเพิ่ม (ไม่อยู่ในรหัส · คิดเมตรละตามสายส่วนที่เกินมาตรฐาน)</span>
+          {spec.addons.map((a) => {
+            const on = form.addons?.includes(a.code) ?? false;
+            return (
+              <label key={a.code} className="inline-flex items-center gap-1.5 cursor-pointer select-none">
+                <input
+                  type="checkbox" className="h-4 w-4 accent-[var(--brand)]" checked={on} aria-label={a.label}
+                  onChange={() => {
+                    const cur = form.addons ?? [];
+                    set({ addons: on ? cur.filter((x) => x !== a.code) : [...cur, a.code] }, true);
+                  }}
+                />
+                {a.label}
+              </label>
+            );
+          })}
+        </div>
+      ) : null}
     </div>
   );
 };

@@ -124,6 +124,27 @@ for (const width of [1280, 390]) {
   body = await text();
   ok('เลือก 30A → รวมในราคาแล้ว รหัสยังลงท้าย -T', !body.includes('ยังไม่รวมในราคา') && (await codeValue()).endsWith('-T'), await codeValue());
 
+  // สิ่งที่ต้องบวกเพิ่ม — ติ๊กแล้วราคาเปลี่ยน รหัสไม่เปลี่ยน · พิมพ์รหัสเดิมซ้ำแล้วค่าที่ติ๊กไม่หาย
+  await choose('การออกขั้วไฟ', '2');
+  const before = await text();
+  const codeBefore = await codeValue();
+  await page.click('input[aria-label="สายถักสแตนเลส"]');
+  await settle();
+  body = await text();
+  ok('ติ๊กสายถักสแตนเลส → ราคาเปลี่ยน รหัสไม่เปลี่ยน · การ์ดคำนวณมีบรรทัดสายถัก',
+    body !== before && (await codeValue()) === codeBefore && body.includes('สายถักสแตนเลส'), await codeValue());
+  await typeCode(await codeValue());
+  ok('พิมพ์รหัสเดิมซ้ำ → ช่องติ๊กยังติ๊กอยู่',
+    await page.$eval('input[aria-label="สายถักสแตนเลส"]', (el) => (el as HTMLInputElement).checked));
+  await page.click('input[aria-label="สายถักสแตนเลส"]');
+  await settle();
+
+  const [bh03] = await page.$$('xpath/.//button[.//b[text()="BH-03"]]');
+  await bh03!.click();
+  await settle();
+  await choose('การออกขั้วไฟ', '1');
+  ok('BH-03 เลือกออกสาย 1 M ได้ → รหัสลงท้าย -1', (await codeValue()).endsWith('-1') && !(await text()).includes('ระบบอ่านรหัสนี้ว่าอะไร'), await codeValue());
+
   const [bh02] = await page.$$('xpath/.//button[.//b[text()="BH-02"]]');
   await bh02!.click();
   await settle();

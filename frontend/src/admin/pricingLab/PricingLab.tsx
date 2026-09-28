@@ -102,9 +102,9 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
 
   /**
    * คิดราคา — จากรหัสที่พิมพ์ (`code`) หรือจากช่องกรอก (`form`)
-   * ขนาดเต๋าที่เลือกไว้ส่งไปกับรหัสด้วย (`picks`) เพราะมันไม่อยู่ในรหัส — พิมพ์รหัสเดิมซ้ำแล้วค่าที่เลือกต้องไม่หาย
+   * ขนาดเต๋าและสิ่งที่ต้องบวกเพิ่มที่เลือกไว้ส่งไปกับรหัสด้วย (`picks`) เพราะมันไม่อยู่ในรหัส — พิมพ์รหัสเดิมซ้ำแล้วค่าที่เลือกต้องไม่หาย
    */
-  const send = useCallback(async (body: { code?: string; form?: BhForm; picks?: { amp?: string } }) => {
+  const send = useCallback(async (body: { code?: string; form?: BhForm; picks?: { amp?: string; addons?: string[] } }) => {
     const mine = ++seq.current;
     setBusy(true);
     setError('');
@@ -128,11 +128,12 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
   }, [jsonHeaders]);
 
   const amp = form?.amp;
+  const addons = form?.addons;
   const quote = useCallback((input: string) => {
     if (!input.trim()) return;
     if (typing.current) clearTimeout(typing.current);
-    void send({ code: input, ...(amp ? { picks: { amp } } : {}) });
-  }, [send, amp]);
+    void send({ code: input, picks: { ...(amp ? { amp } : {}), ...(addons?.length ? { addons } : {}) } });
+  }, [send, amp, addons]);
 
   /** แก้ช่องกรอก — ช่องเลือกส่งทันที · ช่องพิมพ์หน่วงไว้ให้พิมพ์จบก่อน */
   const editForm = useCallback((next: BhForm, now?: boolean) => {
