@@ -10,8 +10,8 @@
    **อ่านอย่างเดียว** — หน้านี้ยิงแค่ `GET /overview` กับ `POST /quote` (ไม่มีทางเขียนสมุดราคา) จึงไม่ต้องมีด่านกันเครื่อง
    แบบ `diag:pb-ui` · ใช้บัญชี admin ตัวแรกในฐานออก token ชั่วคราว 1 ชั่วโมง
 
-   ต้องมี API ของทรีนี้รันอยู่ที่ PB_PORT (ค่าเริ่มต้น 3098) — **ห้ามใช้ 5180** (พรีวิวร่วมที่เจ้าของเปิด/ปิดเอง):
-     PORT=3098 PREVIEW_MODE=1 npx tsx index.ts        (PREVIEW_MODE = ไม่เริ่มตัวตั้งเวลา sync)
+   ต้องมี API ของทรีนี้รันอยู่ที่ PB_PORT (ค่าเริ่มต้น 3099 · 3098 เป็นของโปรเซสอื่นบน PMSV) — **ห้ามใช้ 5180** (พรีวิวร่วมที่เจ้าของเปิด/ปิดเอง):
+     PORT=3099 PREVIEW_MODE=1 npx tsx index.ts        (PREVIEW_MODE = ไม่เริ่มตัวตั้งเวลา sync)
      npm run diag:pricing-catalog-ui
    ⚠️ ผลขึ้นกับเล่มในฐาน: ก่อนรัน `importer.ts --catalog` รหัส BH-02 คิดพื้นที่ไม่ได้ (ด่านบอกไว้ในผล ไม่นับตก)
    ───────────────────────────────────────────────────────────────────────────── */
@@ -24,7 +24,7 @@ import { getJwtSecret } from '../../config/jwt.js';
 import { readBookState } from '../../services/pricingLab/bookStore.js';
 import { catalogRulesChanges, catalogRulesFromMaps } from '../pricebook/catalogRules.js';
 
-const PORT = Number(process.env.PB_PORT ?? 3098);
+const PORT = Number(process.env.PB_PORT ?? 3099);
 const BASE = `http://localhost:${PORT}`;
 const GREEN = '\x1b[32m', RED = '\x1b[31m', DIM = '\x1b[2m', RESET = '\x1b[0m';
 let pass = 0;
@@ -139,15 +139,14 @@ for (const width of [1280, 390]) {
   await page.click('input[aria-label="สายถักสแตนเลส"]');
   await settle();
 
-  const [bh03] = await page.$$('xpath/.//button[.//b[text()="BH-03"]]');
-  await bh03!.click();
-  await settle();
+  ok('เลือกรุ่นจาก dropdown ในช่อง "รุ่น" (ไม่มีการ์ดแยกแล้ว) · มี 4 รุ่น',
+    (await page.$$eval('select[aria-label="รุ่น"] option', (os) => os.length)) === 4
+      && (await page.$$('xpath/.//button[.//b[text()="BH-03"]]')).length === 0);
+  await choose('รุ่น', 'BH-03');
   await choose('การออกขั้วไฟ', '1');
   ok('BH-03 เลือกออกสาย 1 M ได้ → รหัสลงท้าย -1', (await codeValue()).endsWith('-1') && !(await text()).includes('ระบบอ่านรหัสนี้ว่าอะไร'), await codeValue());
 
-  const [bh02] = await page.$$('xpath/.//button[.//b[text()="BH-02"]]');
-  await bh02!.click();
-  await settle();
+  await choose('รุ่น', 'BH-02');
   ok('สลับเป็น BH-02 → มีช่อง Shape', (await page.$('select[aria-label="Shape"]')) !== null);
   await choose('Shape', 'C');
   ok('Shape C → เหลือช่อง D1 ช่องเดียว · รหัสขึ้นต้น BH-02C',

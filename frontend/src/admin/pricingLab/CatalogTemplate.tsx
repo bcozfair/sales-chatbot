@@ -102,8 +102,16 @@ export const CatalogTemplate: React.FC<Props> = ({ catalog, form, onChange, onFa
   };
 
   items.push(
+    // เจ้าของสั่ง 2026-09-28: ย้ายการ์ดเลือกรุ่นมาเป็น dropdown ในช่อง "รุ่น" — หัวรหัสก็คือช่องแรกของรหัสอยู่แล้ว
     <Slot key="head" cap="รุ่น">
-      <span className="h-9 flex items-center px-2.5 rounded-lg bg-slate-100 font-mono text-[14px] font-bold text-slate-900">{spec.head}</span>
+      <select
+        className={`${INPUT} pl-2 pr-1`}
+        value={form.family}
+        aria-label="รุ่น"
+        onChange={(e) => e.target.value !== form.family && onFamily(e.target.value as BhForm['family'])}
+      >
+        {catalog.map((s) => <option key={s.family} value={s.family}>{`${s.head} · ${s.short}`}</option>)}
+      </select>
     </Slot>,
   );
   // BH-02: ท่อนที่ติดหลังหัวรหัสอยู่หลังช่อง Shape (ตัวอักษรรูปทรงเป็นส่วนหนึ่งของหัวรหัส)
@@ -178,20 +186,7 @@ export const CatalogTemplate: React.FC<Props> = ({ catalog, form, onChange, onFa
 
   return (
     <div>
-      <div className="flex gap-1.5 flex-wrap">
-        {catalog.map((s) => (
-          <button key={s.family} type="button" onClick={() => s.family !== form.family && onFamily(s.family)}
-                  className={`text-left px-2.5 py-1 rounded-lg border ${
-                    s.family === form.family
-                      ? 'border-[var(--brand-border-strong)] bg-[var(--brand-soft)]'
-                      : 'border-slate-200 bg-card hover:border-[var(--brand-border)]'
-                  }`}>
-            <b className="block text-[12.5px] text-slate-900">{s.family}</b>
-            <span className="block text-[11px] text-slate-500">{s.short}</span>
-          </button>
-        ))}
-      </div>
-      <div className="mt-2.5 flex flex-wrap items-start gap-1 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 pt-3 pb-2">
+      <div className="flex flex-wrap items-start gap-1 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 pt-3 pb-2">
         {items}
       </div>
       {/* ชีตมีราคาเมตรละ แต่แคตตาล็อกและรหัสไม่มีท่อนนี้ ⇒ ติ๊กแยกใต้รหัส และบอกว่าไม่ถูกพิมพ์ลงรหัส (แบบเดียวกับขนาดเต๋า) */}
