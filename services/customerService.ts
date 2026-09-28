@@ -234,7 +234,19 @@ function startCustomerCacheLoad(): Promise<any[]> {
         TRIM(salesperson) AS salesperson
       FROM customers_data_view
       ORDER BY company_id, contact_id`);
+    // norm_name/trigrams เป็นฟังก์ชันบริสุทธิ์ของ display_name ตัวเดียว ⇒ ชื่อที่เคยคำนวณแล้ว
+    // ยืมผลจาก cache รอบก่อนได้โดยไม่ต้องเดาว่าแถวไหน "เปลี่ยน" (คีย์ = input ทั้งหมดของการคำนวณ)
+    // แต่ละรอบ sync ชื่อเปลี่ยนจริงไม่กี่แถวจาก ~53k — วัด 2026-09-28: บล็อก event loop 456 → 152 ms
+    // cache ว่าง (บูต/หลัง clear) = คำนวณใหม่ทั้งหมดเหมือนเดิม · Map นี้อยู่แค่รอบเดียว ไม่สะสม
+    // ⚠️ Set ของ trigrams (และค่าใน entry) ถูกใช้ร่วมข้ามรอบ cache — **ห้ามแก้ entry หรือ Set ใน cache
+    //    ตรง ๆ** (add/delete/กำหนดค่าทับ) ไม่งั้นจะเปลี่ยนผลของรอบอื่นไปด้วยเงียบ ๆ · ผู้อ่านต้อง copy ก่อนแก้
+    //    เหมือนที่ searchCustomersNormalized ทำ · ถ้าเพิ่ม field ที่คำนวณจาก input อื่นนอกจาก display_name
+    //    ต้องเติมลงคีย์ของ memo ด้วย · gate: npm run diag:customer-cache-memo
+    const prevByName = new Map<string | null, { norm_name: string; trigrams: Set<string> }>();
+    if (customerCache) for (const p of customerCache.rows) prevByName.set(p.display_name, p);
     const cached = rows.map((r: any) => {
+      const hit = prevByName.get(r.display_name);
+      if (hit) return { ...r, norm_name: hit.norm_name, trigrams: hit.trigrams };
       const norm_name = normalizeCompanyNameTS(r.display_name);
       return { ...r, norm_name, trigrams: trigramsOf(norm_name) };
     });

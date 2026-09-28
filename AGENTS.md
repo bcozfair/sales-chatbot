@@ -448,6 +448,7 @@ docker compose exec -T db psql -U "$PG_USER" -d "$PG_DATABASE" -c "SELECT …"  
 **ไฟล์ที่เพิ่มเข้ามาหลังวันที่วัด** (ตารางข้างบนยังเป็นตัวเลขของ 2026-09-12 ไม่ได้วัดใหม่ทั้งชุด) —
 วัดรายตัวด้วย grep ข้างบนเมื่อ 2026-09-15 ได้ 0 ทั้งสี่ตัว ⇒ รันบน PMSV ได้ (`backupHealth.mjs` ไม่แตะ DB เลย):
 `webDecisionParity.ts` · `salespersonDedupeSmoke.ts` · `migrationsAudit.mjs` · `backupHealth.mjs`
+· `customerCacheMemo.ts` (2026-09-28 · grep ได้ 0 · SELECT อย่างเดียว แต่เขียนไฟล์สำเนา `services/__cacheMemo*.gen.ts` แล้วลบเอง)
 
 **`scripts/dev/` คือของที่ห้ามรันบน PMSV ทั้งโฟลเดอร์** — ต่างจาก `scripts/diag/` ตรงที่มันตั้งใจ
 เขียนข้อมูลปลอมลงฐานและ commit เพื่อ **จำลองสถานการณ์** (`seedPhaseH.ts` เพิ่ม/ลบแถวใน
@@ -573,6 +574,7 @@ TS ไต่ `node_modules` ขึ้นไปตามลำดับ ⇒ `<ท
 | แตะอะไร | gate |
 | --- | --- |
 | การจับคู่ลูกค้า | `npm run diag:customer-search` (เทียบ baseline — **ห้าม `--refresh-corpus` ตอนเทียบ**) และ `tsx scripts/evalCustomerSearch.ts` (54 เคส · `wrong-auto-select` ต้องเป็น 0 · **ห้าม `--mine` ตอนเทียบ**) |
+| cache ค้นหาลูกค้าในหน่วยความจำ (`startCustomerCacheLoad` · memo ของ `norm_name`/`trigrams`) | `npm run diag:customer-cache-memo` — โหลดซ้ำของโค้ดปัจจุบันต้อง deep-equal กับโหลดสดของ **โค้ดก่อนแก้** บนแถวชุดเดียวกัน ทุกฉาก + พฤติกรรม gen/TTL/โหลดซ้อน/ล้ม ต้องเหมือนกัน (อ่านฐานอย่างเดียว ~3 นาที · base เลือกเองแบบ `diag:line-parity`) |
 | อะไรที่เกี่ยวกับวันที่ | `npm run diag:date-filter` |
 | flow ยืนยัน / การออกเลขใบ | `npm run diag:confirm-race` (ต้องเปิด server ก่อน) · **บวก `diag:odoo-export` ทั้ง qp/qt** ตั้งแต่เฟส H เพราะการยืนยันเขียนช่อง Sales Team ของไฟล์ export ลงใบด้วย |
 | กฎสต็อก / validation ของใบ | `npm run diag:stock-rule` · `diag:stock-rule-put` · `diag:quote-validation` |

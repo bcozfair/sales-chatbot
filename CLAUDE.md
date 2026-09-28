@@ -169,7 +169,8 @@ npm run logworker                                          # worker เขีย
 - **`customers_data_view` เป็น "ตารางจริง" ไม่ใช่ materialized view แล้ว** (ตั้งแต่ migration
   `2026-08-06_01_customers_data_fast_refresh.sql`) — **ห้ามสั่ง `REFRESH MATERIALIZED VIEW`
   กับมันอีก** วิธี refresh คือ **build + swap**: สร้างตารางใหม่ทั้งก้อนจาก view
-  `customers_data_build` (~2.1s ไม่ล็อกใคร) แล้วสลับชื่อใน transaction เดียว (ถือ
+  `customers_data_build` (CTAS ~3.1 วิ ไม่ล็อกใคร · วัด 2026-09-28 · `build` ใน log รวม index+ANALYZE
+  ด้วย — ก่อนจูนอยู่ที่ 4.8–5.8 วิ) แล้วสลับชื่อใน transaction เดียว (ถือ
   AccessExclusiveLock ระดับ ms) — ตรรกะทั้งหมดอยู่ที่ `scripts/sync/refreshCustomerDirectory.ts`
   ที่เดียว เรียกจากทั้ง CLI sync และ `services/syncService.ts`
   **ทำไมเลิกใช้ `REFRESH … CONCURRENTLY`:** วัดบน prod ได้ **10.0–11.5 วิ** ทั้งที่ query เองใช้
@@ -179,7 +180,12 @@ npm run logworker                                          # worker เขีย
   และ build+swap ต้องไม่ไปอยู่ใน transaction ของคนอื่น · ฟังก์ชันนี้ **ห้าม throw** เพราะเป็น guard
   ท้าย sync · มัน **ข้ามรอบเองถ้าข้อมูลต้นทางไม่ขยับ** ⇒ migration ที่แก้แค่นิยาม view ต้องส่ง
   `{ force: true }` ไม่งั้นจะดูเหมือนรันแล้วแต่ไม่มีอะไรเปลี่ยน
-  **ห้ามให้แอป query `customers_data_build` ตรง ๆ** (~2 วิ/ครั้ง) — แอปอ่าน `customers_data_view` เสมอ
+  **ห้ามให้แอป query `customers_data_build` ตรง ๆ** (~3 วิ/ครั้ง) — แอปอ่าน `customers_data_view` เสมอ
+  **จูนแล้ว 2026-09-28 (`2026-09-28_02` · CTAS 4.1 → 3.1 วิ · ผลเท่าเดิมทุกไบต์):** `clean_text` เขียน 'null'
+  ครบ 16 ตัวพิมพ์แทน `lower()` (ห้ามย่อกลับ) · `sp_code` เป็น skip-scan ที่ **พึ่ง `idx_so_salesperson_cover`**
+  (index หาย = ช้ากว่ารูปเดิมมาก) · cache ค้นหาลูกค้ายืม `norm_name`/`trigrams` ของรอบก่อนตาม
+  `display_name` ⇒ **ห้ามแก้ entry/Set ใน cache ตรง ๆ** · gate `npm run diag:customer-cache-memo`
+  (เทียบกับโค้ดก่อนแก้ อ่านฐานอย่างเดียว ~3 นาที)
   **ตั้งแต่ 2026-09-18 view มี Arm 3**: ผู้ติดต่อที่แอดมินเพิ่มเอง (`local_contacts`) ⇒ `source='local'`
   · `comp`/`own_last`/`own_credit`/`ent_keys` **ยังอ่าน `base` เหมือนเดิม ห้ามเปลี่ยนเป็น `all_rows`**
   ไม่งั้นผู้ติดต่อที่เพิ่งเพิ่มจะขยับค่าระดับบริษัทและคำตอบของด่านเครดิตได้ · แถวใหม่ต้องเขียนสองที่

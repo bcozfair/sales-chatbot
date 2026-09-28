@@ -363,7 +363,9 @@ SELECT to_regclass('public.customers_data_view')  AS matview,
        to_regclass('public.pricing_models')                                                   AS pricing_models,
        (pg_get_viewdef('public.customers_data_build'::regclass) LIKE '%sp_code%')             AS cdv_sp_view,
        EXISTS(SELECT 1 FROM information_schema.columns
-              WHERE table_name='customers_data_view' AND column_name='salesperson_id')        AS cdv_sp_id;"
+              WHERE table_name='customers_data_view' AND column_name='salesperson_id')        AS cdv_sp_id,
+       (pg_get_functiondef('public.clean_text(text)'::regprocedure) LIKE '%nUlL%')           AS clean_text_fast,
+       (pg_get_viewdef('public.customers_data_build'::regclass) LIKE '%RECURSIVE names%')     AS cdv_sp_skipscan;"
 ```
 > ⚠️ **`sp_employee_qid` กับ `admin_maker` เป็นคนละตาราง ชื่อคอลัมน์บังเอิญเหมือนกัน** —
 > `salesperson.employee_quotation_id` (ใบจาก LINE) กับ `admin_users.employee_quotation_id`
@@ -442,6 +444,22 @@ done
   ⚠️ **ห้ามสลับลำดับ** — โค้ดใหม่ขึ้นก่อนตารางมีคอลัมน์ ⇒ `ensureDirectoryRow()` INSERT เกินจำนวนคอลัมน์
   = **เพิ่มผู้ติดต่อใหม่จากหน้าเว็บไม่ได้** · ส่วนตารางมีคอลัมน์แต่โค้ดยังเก่าปลอดภัย (INSERT ขาดท้ายได้ NULL)
   รายละเอียด: `docs/plan-web-quote-auto-salesperson.md` §6
+- **ข้อยกเว้น: `2026-09-28_02_cdv_build_speedup.sql` รันได้ทุกเวลา "ยกเว้น :x0:00–:x0:45" และสลับลำดับกับ deploy ได้**
+  `CREATE OR REPLACE FUNCTION clean_text` + `CREATE OR REPLACE VIEW customers_data_build` (แก้ catalog ล้วน จบในไม่กี่ ms)
+  จูนความเร็ว build (CTAS 4.1 → 3.1 วิ) โดย **ผลของ view เท่าเดิมทุกไบต์** (พิสูจน์บนฐานจริง 2026-09-28)
+  ⇒ **ไม่ต้อง refresh `{force:true}`** และไม่มีโค้ดคู่ — ขึ้นก่อนหรือหลัง deploy ก็ได้
+  · **ก่อนรัน** index `idx_so_salesperson_cover` ต้องมี: `SELECT indisvalid FROM pg_index WHERE indexrelid =
+    'public.idx_so_salesperson_cover'::regclass;` ต้องได้ `t` — ไม่มี index นี้ `sp_code` รูปใหม่ **ช้ากว่าเดิมมาก**
+  · **รันนอกช่วง :x0:00–:x0:45** — ช่วงนั้นรอบ sync กำลังอ่าน view · ไฟล์ตั้ง `lock_timeout = 5s` ไว้ ถ้าชนจะ
+    error เรื่อง lock แทนการต่อคิว ⇒ รอพ้นช่วงแล้วรันซ้ำทั้งไฟล์ได้เลย
+  · **ตรวจหลังรัน:** `clean_text_fast` และ `cdv_sp_skipscan` ในคำสั่งข้างบนต้องเป็น `t` · แล้วรอรอบ sync ที่
+    rebuild จริงรอบถัดไป: `docker compose logs --since 30m app | grep 'customers_data_view rebuilt'` —
+    จำนวนแถวและแยก `odoo`/`saleorder` ต้องต่อเนื่องจากรอบก่อน (ขยับได้เท่าที่ข้อมูล sync เข้ามาจริง
+    ไม่ใช่กระโดด) และ `build` ต้องลดลงราว 1 วิ (ก่อนจูน 4.8–5.8 วิ วัด 2026-09-28) · ตัวเลขเดียวกันดูได้จาก
+    `SELECT refreshed_at, build_ms, row_count FROM customers_data_view_state;` · ปิดท้ายด้วย
+    `npm run diag:web-sales-owner` ต้องเขียวหมด (ข้อ 2b เทียบ `salesperson_id` ทั้งตารางกับ `sale_orders`)
+  · ถอยกลับ: รันท่อน `clean_text` + `customers_data_build` จาก `migrations/schema.sql` ของคอมมิตก่อนหน้า
+    (ผลเท่ากันจึงไม่ต้อง refresh เช่นกัน)
 - **ข้อยกเว้น: `2026-09-02_03_quotations_odoo_import_link.sql` รันได้ทุกเวลา และรัน "ก่อน" deploy โค้ดใหม่ได้**
   เพิ่ม `quotations.odoo_imported_at` / `odoo_so_id` = สถานะ "นำเข้า Odoo แล้ว" ของหน้าประวัติใบเสนอราคา
   `ADD COLUMN` nullable ไม่มี DEFAULT บนตาราง ~1.3k แถว จบในไม่กี่ ms

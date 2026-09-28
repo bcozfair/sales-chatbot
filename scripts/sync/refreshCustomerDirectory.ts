@@ -9,7 +9,7 @@ import { fmtDur, fmtNum, slog } from './syncLog.js';
  *    migrations/changes/2026-08-06_01_customers_data_fast_refresh.sql) — ห้ามสั่ง
  *    REFRESH MATERIALIZED VIEW กับมันอีก
  *
- * กลไก build + swap: สร้างตารางใหม่ทั้งก้อนจาก view customers_data_build (ไม่ล็อกใคร ~2.1 วิ)
+ * กลไก build + swap: สร้างตารางใหม่ทั้งก้อนจาก view customers_data_build (ไม่ล็อกใคร · CTAS ~3.1 วิ วัด 2026-09-28)
  * แล้วสลับชื่อใน transaction เดียว (ถือ AccessExclusiveLock ระดับ ms)
  *   ทำไมไม่ใช้ REFRESH MATERIALIZED VIEW CONCURRENTLY อีก: วัดบน prod ได้ 10.0–11.5 วิ
  *   ทั้งที่ query เองใช้ ~3 วิ — ส่วนต่างคือ Postgres ต้องสร้าง temp table 82k แถว
@@ -31,7 +31,7 @@ import { fmtDur, fmtNum, slog } from './syncLog.js';
 const BUILD_SETTINGS = [
   "SET work_mem = '128MB'",
   'SET jit = off',
-  // build ปกติ ~2–3 วิ; เผื่อไว้กว้างเพื่อกันตายกลางคันตอนเครื่องโหลดสูง แต่ยังมีเพดาน
+  // CTAS ปกติ ~3–4 วิ (วัด 2026-09-28); เผื่อไว้กว้างเพื่อกันตายกลางคันตอนเครื่องโหลดสูง แต่ยังมีเพดาน
   "SET statement_timeout = '120s'",
 ];
 
