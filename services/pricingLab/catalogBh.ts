@@ -56,9 +56,8 @@ export interface CatalogFamilySpec {
   family: BhFamily;
   /** ตัวหน้าที่ตายตัวของรหัส */
   head: string;
+  /** ชื่อรุ่นตามแคตตาล็อก (อังกฤษ ไม่แปล — เจ้าของสั่ง 2026-09-28) · โผล่เฉพาะในรายการของ dropdown "รุ่น" */
   name: string;
-  /** คำอธิบายสั้นบนปุ่มเลือกรุ่น */
-  short: string;
   layout: CatalogLayoutItem[];
   slots: Record<string, CatalogSlot>;
   /** มีเฉพาะ BH-02 — ท่อน `size` วาดตามขนาดของรูปทรงที่เลือก */
@@ -189,7 +188,7 @@ const ELECTRIC: CatalogLayoutItem[] = [{ sep: '-' }, { slot: 'volt' }, { sep: '-
 
 export const BH_CATALOG: CatalogFamilySpec[] = [
   {
-    family: 'BH-01', head: 'BH-01', name: 'Band Heater', short: 'ฮีตเตอร์รัดท่อ',
+    family: 'BH-01', head: 'BH-01', name: 'Band Heater',
     layout: [{ slot: 'id' }, { sep: 'x' }, { slot: 'h' }, ...ELECTRIC, { sep: '-' }, { slot: 'term' }, { sep: '-' }, { slot: 'mat' }],
     slots: {
       id: { ...SIZE_SLOTS.id, hint: 'เล็กสุด 25 mm' },
@@ -202,7 +201,7 @@ export const BH_CATALOG: CatalogFamilySpec[] = [
     addons: ADDONS,
   },
   {
-    family: 'BH-01C', head: 'BH-01C', name: '2 Piece Band Heater', short: 'รัดท่อ 2 ชิ้น',
+    family: 'BH-01C', head: 'BH-01C', name: '2 Piece Band Heater',
     layout: [{ slot: 'id' }, { sep: 'x' }, { slot: 'h' }, ...ELECTRIC, { sep: '-' }, { slot: 'conn' }, { sep: '-' }, { slot: 'term' }, { sep: '-' }, { slot: 'mat' }],
     slots: {
       id: { ...SIZE_SLOTS.id, hint: 'เล็กสุด 60 mm' },
@@ -216,7 +215,7 @@ export const BH_CATALOG: CatalogFamilySpec[] = [
     addons: ADDONS,
   },
   {
-    family: 'BH-02', head: 'BH-02', name: 'Strip Heater', short: 'แผ่นเรียบ',
+    family: 'BH-02', head: 'BH-02', name: 'Strip Heater',
     layout: [{ slot: 'shape' }, { slot: 'size' }, ...ELECTRIC, { sep: '-' }, { slot: 'term' }, { sep: '-' }, { slot: 'mat' }],
     shapes: SHAPES,
     slots: {
@@ -230,7 +229,7 @@ export const BH_CATALOG: CatalogFamilySpec[] = [
     addons: ADDONS,
   },
   {
-    family: 'BH-03', head: 'BH-03', name: 'Ceramic Band Heater', short: 'รัดท่อเซรามิก',
+    family: 'BH-03', head: 'BH-03', name: 'Ceramic Band Heater',
     layout: [{ slot: 'id' }, { sep: 'x' }, { slot: 'h' }, ...ELECTRIC, { sep: '-' }, { slot: 'term' }],
     slots: {
       id: { ...SIZE_SLOTS.id, hint: 'เล็กสุด 65 mm' },

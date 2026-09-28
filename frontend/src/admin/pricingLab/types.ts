@@ -92,7 +92,6 @@ export interface CatalogFamilySpec {
   family: BhFamily;
   head: string;
   name: string;
-  short: string;
   layout: CatalogLayoutItem[];
   slots: Record<string, CatalogSlot>;
   shapes?: { code: string; label: string; dims: SizeKey[] }[];

@@ -1,5 +1,5 @@
 import React from 'react';
-import { X } from 'lucide-react';
+import { ChevronDown, X } from 'lucide-react';
 import type { BhForm, CatalogFamilySpec, CatalogSlot, SizeKey } from './types';
 
 /**
@@ -36,6 +36,36 @@ const Sep: React.FC<{ t: string }> = ({ t }) => (
   <span className="h-9 flex items-center font-mono text-[14px] font-bold text-slate-500">{t}</span>
 );
 
+/**
+ * dropdown ที่ตอนปิดโชว์ **แค่รหัส** ส่วนคำอธิบายโผล่เฉพาะในรายการ (เจ้าของสั่ง 2026-09-28)
+ * `<select>` ของเบราว์เซอร์โชว์ข้อความของตัวเลือกเดียวกับในรายการเสมอ ⇒ ซ่อนตัวอักษรของ select แล้ววางรหัสทับ
+ * (select ตัวจริงยังรับคลิก/คีย์บอร์ด และ aria อ่านข้อความเต็มได้ตามเดิม) · กว้างตามรหัสที่ยาวสุด ไม่ใช่คำอธิบาย
+ */
+interface CodeOption { value: string; code: string; text?: string }
+const CodeSelect: React.FC<{
+  label: string; value: string; options: CodeOption[]; placeholder?: string; onChange: (v: string) => void;
+}> = ({ label, value, options, placeholder, onChange }) => {
+  const cur = options.find((o) => o.value === value);
+  const ch = Math.max(placeholder?.length ?? 0, ...options.map((o) => o.code.length)) + 4;
+  return (
+    <div className="relative font-mono text-[14px]" style={{ width: `${ch}ch` }}>
+      <select className={`${INPUT} w-full pl-2 pr-6 text-transparent appearance-none cursor-pointer`} value={value} aria-label={label}
+              onChange={(e) => onChange(e.target.value)}>
+        {placeholder !== undefined && <option className="bg-card text-slate-900" value="">{placeholder}</option>}
+        {options.map((o) => (
+          <option key={o.value} className="bg-card text-slate-900" value={o.value}>{o.text ? `${o.code} · ${o.text}` : o.code}</option>
+        ))}
+      </select>
+      <span aria-hidden="true"
+            className={`pointer-events-none absolute inset-y-0 left-0 flex items-center pl-2 font-semibold ${cur ? 'text-slate-900' : 'text-slate-400'}`}>
+        {cur?.code ?? placeholder}
+      </span>
+      {/* ลูกศรของเบราว์เซอร์ใช้สีตัวอักษร ⇒ หายไปพร้อมข้อความที่ซ่อน จึงวาดเอง */}
+      <ChevronDown aria-hidden="true" className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+    </div>
+  );
+};
+
 export const CatalogTemplate: React.FC<Props> = ({ catalog, form, onChange, onFamily }) => {
   const spec = catalog.find((s) => s.family === form.family);
   if (!spec) return null;
@@ -56,12 +86,14 @@ export const CatalogTemplate: React.FC<Props> = ({ catalog, form, onChange, onFa
 
   const choice = (key: 'shape' | 'term' | 'mat' | 'conn' | 'amp', slot: CatalogSlot) => (
     <Slot key={key} cap={slot.label} hint={slot.hint}>
-      <select
-        className={`${INPUT} pl-2 pr-1`}
+      <CodeSelect
+        label={slot.label}
         value={form[key] ?? ''}
-        aria-label={slot.label}
-        onChange={(e) => {
-          const v = e.target.value;
+        placeholder={key === 'amp' ? '— เลือก —' : undefined}
+        options={(slot.options ?? []).map((o) => (key === 'amp'
+          ? { value: o.code, code: o.label }
+          : { value: o.code, code: o.code || 'None', text: o.label }))}
+        onChange={(v) => {
           if (key === 'shape') {
             // เปลี่ยนรูปทรง = ขนาดคนละชุด (W×L · D1 · D1×D2) — เติมค่าที่ยังไม่มีให้คิดราคาได้ทันที
             const dims = spec.shapes?.find((s) => s.code === v)?.dims ?? [];
@@ -72,12 +104,7 @@ export const CatalogTemplate: React.FC<Props> = ({ catalog, form, onChange, onFa
             set({ [key]: v || undefined, ...(key === 'term' && v !== 'T' ? { amp: undefined } : {}) }, true);
           }
         }}
-      >
-        {key === 'amp' && <option value="">— เลือก —</option>}
-        {slot.options?.map((o) => (
-          <option key={o.code} value={o.code}>{key === 'amp' ? o.label : `${o.code || 'None'} · ${o.label}`}</option>
-        ))}
-      </select>
+      />
     </Slot>
   );
 
@@ -104,14 +131,12 @@ export const CatalogTemplate: React.FC<Props> = ({ catalog, form, onChange, onFa
   items.push(
     // เจ้าของสั่ง 2026-09-28: ย้ายการ์ดเลือกรุ่นมาเป็น dropdown ในช่อง "รุ่น" — หัวรหัสก็คือช่องแรกของรหัสอยู่แล้ว
     <Slot key="head" cap="รุ่น">
-      <select
-        className={`${INPUT} pl-2 pr-1`}
+      <CodeSelect
+        label="รุ่น"
         value={form.family}
-        aria-label="รุ่น"
-        onChange={(e) => e.target.value !== form.family && onFamily(e.target.value as BhForm['family'])}
-      >
-        {catalog.map((s) => <option key={s.family} value={s.family}>{`${s.head} · ${s.short}`}</option>)}
-      </select>
+        options={catalog.map((s) => ({ value: s.family, code: s.head, text: s.name }))}
+        onChange={(v) => v !== form.family && onFamily(v as BhForm['family'])}
+      />
     </Slot>,
   );
   // BH-02: ท่อนที่ติดหลังหัวรหัสอยู่หลังช่อง Shape (ตัวอักษรรูปทรงเป็นส่วนหนึ่งของหัวรหัส)

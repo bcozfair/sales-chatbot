@@ -109,6 +109,15 @@ for (const width of [1280, 390]) {
   ok('ช่องได้ค่าจากรหัส (การต่อ PL · ขั้วไฟ PL2)',
     (await page.$eval('select[aria-label="การต่อใช้งาน"]', (el) => (el as HTMLSelectElement).value)) === 'PL'
     && (await page.$eval('select[aria-label="การออกขั้วไฟ"]', (el) => (el as HTMLSelectElement).value)) === 'PL2');
+  // ปิดอยู่โชว์แค่รหัส · คำอธิบายอยู่ในรายการ · ชื่อรุ่นเป็นอังกฤษตามแคตตาล็อก (เจ้าของสั่ง 2026-09-28)
+  const shown = (label: string) => page.$eval(`select[aria-label="${label}"]`, (el) => {
+    const sel = el as HTMLSelectElement;
+    return { face: el.nextElementSibling?.textContent ?? '', color: getComputedStyle(sel).color, opt: sel.selectedOptions[0]?.textContent ?? '' };
+  });
+  const [m, t] = [await shown('รุ่น'), await shown('การออกขั้วไฟ')];
+  ok('dropdown ปิดอยู่โชว์แค่รหัส · รายการมีคำอธิบาย · ชื่อรุ่นอังกฤษตามแคตตาล็อก',
+    m.face === 'BH-01C' && t.face === 'PL2' && /rgba\(0, 0, 0, 0\)|transparent/.test(t.color)
+      && m.opt === 'BH-01C · 2 Piece Band Heater' && t.opt.startsWith('PL2 · '), `${m.face} | ${t.face} | ${m.opt}`);
   ok('ราคาตรงตัวอย่างในชีต 13,490', body.includes('13,490'));
 
   await setNumber('ความสูง H', '200');
