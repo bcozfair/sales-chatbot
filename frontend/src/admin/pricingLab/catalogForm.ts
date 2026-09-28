@@ -15,6 +15,7 @@ export function formForFamily(spec: CatalogFamilySpec, prev?: BhForm): BhForm {
     watt: prev?.watt ?? 1000,
     term: keep('term'),
     amp: keep('term') === 'T' ? prev?.amp : undefined,
+    addons: prev?.addons?.filter((a) => spec.addons?.some((o) => o.code === a)),
     mat: keep('mat'),
     conn: keep('conn'),
     extras: [],

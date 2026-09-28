@@ -7,6 +7,7 @@
  *   2. **ตัวเลือกทุกตัวของแคตตาล็อกไปถึงราคา** — ไม่มีตัวไหนตกเป็น "อ่านไม่ออก" เงียบ ๆ
  *   3. **คำตอบของเจ้าของ 2026-09-28 ห้าข้อ** เป็นจริงในตัวคิดราคา (สูตรพื้นที่ BH-02 · C +20% · T เลือก 10A/30A ·
  *      ID เล็กสุดตามแคตตาล็อก · BH-03 ไม่ระบุขั้วไฟ = คิดค่าน็อต)
+ *   4. **สิ่งที่ต้องบวกเพิ่มนอกรหัส** (สาย Silicone · สายถักสแตนเลส · ท่อเฟ็กส์ — คำตอบชุดที่สอง 2026-09-28)
  *
  * ไม่มี golden ของราคา (CLAUDE.md) — ข้อ 3 เทียบ "ความสัมพันธ์" ที่ต้องจริงเสมอไม่ว่าราคาในฐานเป็นเท่าไหร่
  * (C = ฐาน × 1.2 · 30A − 10A = ส่วนต่างของสองกฎในเล่มเดียวกัน · ขนาดเล็กกว่าเกณฑ์ = ติดข้อห้าม)
@@ -22,7 +23,7 @@ import { catalogRulesFromMaps, withCatalogRules } from '../pricebook/catalogRule
 import { loadCatalogSubcodes } from '../pricebook/seedCatalogSubcodes.js';
 import { listSubCodes } from '../../db/pricingLabRepo.js';
 import { withSubCodes } from '../../services/pricingLab/bookStore.js';
-import { parseProductCode } from '../../services/pricingLab/code.js';
+import { parseProductCode, type CodePicks } from '../../services/pricingLab/code.js';
 import { computePrice } from '../../services/pricingLab/engine.js';
 import { BH_CATALOG, buildBhCode, sameBhCode, sizeKeys, type BhForm } from '../../services/pricingLab/catalogBh.js';
 import type { SubCode } from '../../services/pricingLab/types.js';
@@ -49,7 +50,7 @@ async function main(): Promise<void> {
   const book = withSubCodes(withCatalogRules(loaded.book, catalogRulesFromMaps()), mergeSeed(dbSubs, loadCatalogSubcodes()));
   console.log(`สมุดราคาที่ใช้: ${loaded.label} + กติกาแคตตาล็อกจากแมป + รหัสย่อยจากแคตตาล็อก (ในหน่วยความจำ)`);
 
-  const price = (code: string, picks = {}) => {
+  const price = (code: string, picks: CodePicks = {}) => {
     const p = parseProductCode(code, book, picks);
     return { p, o: p.cfg ? computePrice(p.cfg, book) : null };
   };
@@ -174,6 +175,42 @@ async function main(): Promise<void> {
   const ex = price('BH-01 140x170-220-2500W-T(HPT)-Z');
   check('ท่อนนอกแคตตาล็อกกลับไปที่เดิมตอนประกอบรหัส', ex.p.form !== undefined && buildBhCode(ex.p.form) === 'BH-01 140x170-220-2500W-T(HPT)-Z',
     ex.p.form ? buildBhCode(ex.p.form) : '');
+
+  // ── 5. สิ่งที่ต้องบวกเพิ่ม (ไม่อยู่ในรหัส) — เจ้าของตอบ 2026-09-28 ─────────────────
+  // ความสัมพันธ์ที่ต้องจริงเสมอ ไม่ใช่ตัวเลขราคา: คิดเฉพาะส่วนที่เกินสายมาตรฐาน ปัดขึ้นเป็นเมตรเต็ม · ติ๊กได้พร้อมกัน ·
+  // เลือกได้ทุกขั้วไฟ · รหัสไม่เปลี่ยน · BH-03 ออกสาย 1/2/3 ได้
+  section('5. สิ่งที่ต้องบวกเพิ่ม (สาย Silicone · สายถักสแตนเลส · ท่อเฟ็กส์) — ไม่อยู่ในรหัส');
+  const ADD: [string, string][] = [['cable:silicone', 'cable_silicone'], ['cable:ss_braid', 'cable_ss_braid'], ['flex_tube', 'flex_tube']];
+  const B = 'BH-01 180x110-240-2540W';
+  for (const [code, id] of ADD) {
+    const one = price(`${B}-1`, { addons: [code] });
+    const three = price(`${B}-3`, { addons: [code] });
+    const half = price(`${B}+1.5M`, { addons: [code] });
+    const a1 = rule(one.o, id)?.amount ?? NaN;
+    check(`${id}: สาย 1 M = 1 เมตร (เกิน 70 cm ปัดขึ้น) และราคาเพิ่มเท่ากฎข้อนี้พอดี`, rule(one.o, id)?.status === 'applied' && a1 > 0
+      && (one.o?.unitPrice ?? 0) - (price(`${B}-1`).o?.unitPrice ?? 0) === a1, `+${a1}`);
+    check(`${id}: สาย 3 M = 3 เมตร · 1.5 M = 2 เมตร`, rule(three.o, id)?.amount === a1 * 3 && rule(half.o, id)?.amount === a1 * 2,
+      `${rule(three.o, id)?.amount} · ${rule(half.o, id)?.amount}`);
+    const std = price(B, { addons: [code] });
+    check(`${id}: สายมาตรฐาน 30 cm = ไม่มีค่าเพิ่ม`, rule(std.o, id)?.status !== 'applied' && std.o?.unitPrice === price(B).o?.unitPrice);
+    const nut = price(`${B}-N`, { addons: [code] });
+    check(`${id}: ออกน็อตยังติ๊กได้ (อ่านออก ไม่เพิ่มเงิน)`, nut.p.form?.addons?.includes(code) === true
+      && !nut.p.parts.some((x) => x.kind === 'unknown') && nut.o?.unitPrice === price(`${B}-N`).o?.unitPrice);
+    const c01 = price(`BH-01C-600x150-380-4950W-PL-1`, { addons: [code] });
+    check(`${id}: BH-01C คิดอัตราเดียวกับ BH-01 (ชีตคอลัมน์ C ไม่คูณสอง)`, rule(c01.o, id)?.amount === a1, `${rule(c01.o, id)?.amount}`);
+  }
+  const all = price(`${B}-2`, { addons: ADD.map(([c]) => c) });
+  const none = price(`${B}-2`);
+  const sum = ADD.reduce((t, [, id]) => t + (rule(all.o, id)?.amount ?? NaN), 0);
+  check('ติ๊กทั้งสามพร้อมกัน = บวกทั้งสามข้อ', (all.o?.unitPrice ?? 0) - (none.o?.unitPrice ?? 0) === sum, `+${sum}`);
+  check('ติ๊กแล้วรหัสไม่เปลี่ยน (อยู่นอกรหัส)', all.p.form !== undefined && buildBhCode(all.p.form) === `${B}-2`
+    && all.p.form.addons?.length === 3);
+  check('ค่าที่ไม่อยู่ในรายการถูกทิ้ง', price(`${B}-2`, { addons: ['nut', 'x'] }).o?.unitPrice === none.o?.unitPrice);
+  const b31 = price('BH-03 160x47-220-1500W-3', { addons: ['cable:ss_braid'] });
+  check('BH-03 ออกสาย 3 M อ่านเป็นช่องขั้วไฟ (ไม่คิดค่าน็อต · ไม่มีค่าสายเกิน)', b31.p.form?.term === '3' && !b31.p.parts.some((x) => x.kind === 'unknown')
+    && rule(b31.o, 'nut')?.status !== 'applied' && !b31.o?.trace?.rules.some((r) => r.id.startsWith('cable_over') && r.status === 'applied'));
+  check('BH-03 ออกสาย 3 M + สายถักสแตนเลส = 3 เมตร', rule(b31.o, 'cable_ss_braid')?.status === 'applied'
+    && rule(b31.o, 'cable_ss_braid')?.amount === (rule(price('BH-03 160x47-220-1500W-1', { addons: ['cable:ss_braid'] }).o, 'cable_ss_braid')?.amount ?? NaN) * 3);
 
   console.log(`\n${fail ? RED : GREEN}${pass} ผ่าน · ${fail} ตก${RESET}`);
 }

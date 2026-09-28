@@ -8,8 +8,8 @@ import {
   NO_BOOK_MESSAGE, bookStatus, loadBookState, tokenOf, withSubCodes, type BookState,
 } from '../services/pricingLab/bookStore.js';
 import { computePrice } from '../services/pricingLab/engine.js';
-import { parseProductCode } from '../services/pricingLab/code.js';
-import { AMP, BH_CATALOG, bhSpec, buildBhCode, type BhForm, type SizeKey } from '../services/pricingLab/catalogBh.js';
+import { parseProductCode, type CodePicks } from '../services/pricingLab/code.js';
+import { ADDONS, AMP, BH_CATALOG, bhSpec, buildBhCode, type BhForm, type SizeKey } from '../services/pricingLab/catalogBh.js';
 import { displayName } from '../services/pricingLab/labels.js';
 import { productsPerModel } from '../services/pricingLab/bookCoverage.js';
 import {
@@ -395,6 +395,12 @@ pricingLabRouter.get('/overview', async (_req: AdminRequest, res: Response) => {
  * ช่องกรอกที่หน้าจอส่งมา → `BhForm` ที่ปลอดภัย — รับเฉพาะช่องที่แคตตาล็อกของรุ่นนั้นมี ค่าเลือกต้องอยู่ในรายการ
  * ตัวเลขต้องเป็นบวก · ข้อความสั้น ⇒ รหัสที่ประกอบได้ยาวไม่เกินที่ `/quote` รับอยู่แล้ว
  */
+/** สิ่งที่ต้องบวกเพิ่มที่ติ๊กมา — รับเฉพาะตัวที่แคตตาล็อกของรุ่นนั้นมี (ไม่อยู่ในรหัส จึงต้องกรองที่นี่) */
+function cleanAddons(allowed: { code: string }[] | undefined, raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return (allowed ?? []).map((a) => a.code).filter((code) => raw.includes(code));
+}
+
 function cleanForm(raw: unknown): BhForm | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const r = raw as Record<string, unknown>;
@@ -422,6 +428,8 @@ function cleanForm(raw: unknown): BhForm | undefined {
     if (v) form[slot] = v;
   }
   if (typeof r.amp === 'string' && AMP.some((a) => a.code === r.amp)) form.amp = r.amp;
+  const addons = cleanAddons(spec.addons, r.addons);
+  if (addons.length) form.addons = addons;
   if (Array.isArray(r.extras)) {
     form.extras = r.extras.slice(0, 12).flatMap((e) => {
       if (!e || typeof e !== 'object') return [];
@@ -630,9 +638,12 @@ pricingLabRouter.post('/quote', async (req: AdminRequest, res: Response) => {
   const form = req.body?.form !== undefined ? cleanForm(req.body.form) : undefined;
   if (req.body?.form !== undefined && !form) return res.status(400).json({ error: 'ช่องที่กรอกไม่ตรงกับแคตตาล็อก' });
   const code = form ? buildBhCode(form) : typeof req.body?.code === 'string' ? req.body.code.trim() : '';
-  // ขนาดเต๋า 10A/30A ไม่อยู่ในรหัส — มากับช่องกรอก หรือส่งมาคู่กับรหัสที่พิมพ์ (จำค่าที่เลือกไว้ตอนพิมพ์รหัสใหม่)
+  // ขนาดเต๋า 10A/30A และสิ่งที่ต้องบวกเพิ่มไม่อยู่ในรหัส — มากับช่องกรอก หรือส่งมาคู่กับรหัสที่พิมพ์
+  // (จำค่าที่เลือกไว้ตอนพิมพ์รหัสใหม่) · ตัวอ่านรหัสกรองซ้ำตามรุ่นที่อ่านได้อีกชั้น
   const ampRaw = form?.amp ?? req.body?.picks?.amp;
-  const picks = typeof ampRaw === 'string' && AMP.some((a) => a.code === ampRaw) ? { amp: ampRaw } : {};
+  const picks: CodePicks = typeof ampRaw === 'string' && AMP.some((a) => a.code === ampRaw) ? { amp: ampRaw } : {};
+  const addons = form?.addons ?? cleanAddons(ADDONS, req.body?.picks?.addons);
+  if (addons.length) picks.addons = addons;
   if (!code) return res.status(400).json({ error: 'ยังไม่ได้ใส่รหัสสินค้า' });
   if (code.length > 200) return res.status(400).json({ error: 'รหัสยาวเกินไป' });
 

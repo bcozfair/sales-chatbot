@@ -63,6 +63,11 @@ export interface CatalogFamilySpec {
   slots: Record<string, CatalogSlot>;
   /** มีเฉพาะ BH-02 — ท่อน `size` วาดตามขนาดของรูปทรงที่เลือก */
   shapes?: CatalogShape[];
+  /**
+   * "สิ่งที่ต้องบวกเพิ่ม" ที่ **ไม่อยู่ในรหัสและไม่อยู่ในแคตตาล็อก** แต่ชีตมีราคา (สาย Silicone · สายถักสแตนเลส · ท่อเฟ็กส์)
+   * `code` = ตัวเลือก (`option`) ที่กฎของสมุดราคาใช้เปิด ⇒ ราคาอยู่ที่สมุดราคาที่เดียว ที่นี่มีแค่ชื่อ
+   */
+  addons?: CatalogOption[];
 }
 
 /** ค่าที่กรอกในช่อง — ตัวเดียวกันทั้งตอนอ่านรหัสออกมาและตอนประกอบรหัสกลับ */
@@ -88,6 +93,8 @@ export interface BhForm {
   term?: string;
   /** ขนาดเต๋าเซรามิก — **ไม่อยู่ในรหัส** ชีตมีสองราคา (เจ้าของสั่ง 2026-09-28 "ต้องเลือกได้ทั้ง 2 แบบ") */
   amp?: string;
+  /** สิ่งที่ต้องบวกเพิ่มที่ติ๊กไว้ (`CatalogFamilySpec.addons[].code`) — **ไม่อยู่ในรหัส** เหมือนขนาดเต๋า */
+  addons?: string[];
   mat?: string;
   /**
    * ท่อนที่อยู่นอกแคตตาล็อก (`S000` · `(HPT)` · `50CM` · `2P`) ตามตำแหน่งที่มันอยู่ในรหัส
@@ -113,8 +120,16 @@ const TERM_STRIP: CatalogOption[] = [
   { code: 'PL5', label: 'ปลั๊ก PL-5' },
   { code: 'T', label: 'เต๋าเซรามิก' },
 ];
+/**
+ * BH-03 — แคตตาล็อกมี None/T/PL2/PL5 · `1` `2` `3` (สายยาว 1/2/3 M) **ไม่อยู่ในตารางการสั่งซื้อ** แต่ขายจริง 13 รหัส
+ * (`BH-03 150x40-220-1000W-1(HPT)` = "สาย 1 M.+หุ้มปลอกถักสแตนเลส") ⇒ เจ้าของสั่งเปิดให้ 2026-09-28
+ * · BH-03 ไม่มีค่าสายเกิน (เจ้าของ 2026-09-25/28) ความยาวสายมีผลแค่กับของบวกเพิ่มที่คิดตามเมตร
+ */
 const TERM_BH03: CatalogOption[] = [
   { code: '', label: 'ออกน็อต + ฝาครอบ' },
+  { code: '1', label: 'สายยาว 1 M' },
+  { code: '2', label: 'สายยาว 2 M' },
+  { code: '3', label: 'สายยาว 3 M' },
   { code: 'T', label: 'ออกเต๋าเซรามิก' },
   { code: 'PL2', label: 'ออกปลั๊ก PL-2 (Aluminium Body)' },
   { code: 'PL5', label: 'ออกปลั๊ก PL-5 (Stainless Body)' },
@@ -133,6 +148,17 @@ const CONN: CatalogOption[] = [
 export const AMP: CatalogOption[] = [
   { code: '10A', label: '10A' },
   { code: '30A', label: '30A' },
+];
+
+/**
+ * "สิ่งที่ต้องบวกเพิ่ม" ของชีต BH แถว 16–18 (เมตรละ) — แคตตาล็อกและรหัสไม่มีท่อนนี้ (รหัสจริงเขียนไว้ในคำอธิบายสินค้า)
+ * เจ้าของตอบ 2026-09-28: เป็นตัวเลือกคิดเพิ่ม **ติ๊กได้พร้อมกัน** · คูณตามความยาว **เฉพาะส่วนที่เกินสายมาตรฐาน 30 cm
+ * ปัดขึ้นเป็นเมตรเต็ม** · เลือกได้ทุกการออกขั้วไฟ (ขั้วไฟที่ไม่มีสาย = ไม่เกินมาตรฐาน = 0 บาท)
+ */
+export const ADDONS: CatalogOption[] = [
+  { code: 'cable:silicone', label: 'สาย Silicone' },
+  { code: 'cable:ss_braid', label: 'สายถักสแตนเลส' },
+  { code: 'flex_tube', label: 'ท่อเฟ็กส์' },
 ];
 
 const AMP_SLOT: CatalogSlot = { label: 'ขนาดเต๋า', kind: 'choice', options: AMP, offCode: true, hint: 'ไม่อยู่ในรหัส — ชีตมีสองราคา' };
@@ -173,6 +199,7 @@ export const BH_CATALOG: CatalogFamilySpec[] = [
       amp: AMP_SLOT,
       mat: { label: 'วัสดุ', kind: 'choice', options: MAT },
     },
+    addons: ADDONS,
   },
   {
     family: 'BH-01C', head: 'BH-01C', name: '2 Piece Band Heater', short: 'รัดท่อ 2 ชิ้น',
@@ -186,6 +213,7 @@ export const BH_CATALOG: CatalogFamilySpec[] = [
       amp: AMP_SLOT,
       mat: { label: 'วัสดุ', kind: 'choice', options: MAT },
     },
+    addons: ADDONS,
   },
   {
     family: 'BH-02', head: 'BH-02', name: 'Strip Heater', short: 'แผ่นเรียบ',
@@ -199,6 +227,7 @@ export const BH_CATALOG: CatalogFamilySpec[] = [
       amp: AMP_SLOT,
       mat: { label: 'วัสดุ', kind: 'choice', options: MAT },
     },
+    addons: ADDONS,
   },
   {
     family: 'BH-03', head: 'BH-03', name: 'Ceramic Band Heater', short: 'รัดท่อเซรามิก',
@@ -210,6 +239,7 @@ export const BH_CATALOG: CatalogFamilySpec[] = [
       term: { label: 'การออกขั้วไฟ', kind: 'choice', options: TERM_BH03 },
       amp: AMP_SLOT,
     },
+    addons: ADDONS,
   },
 ];
 
