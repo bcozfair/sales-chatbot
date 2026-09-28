@@ -54,8 +54,6 @@ export interface ModelBrief {
   others: string[];
   /** จำนวนสินค้าในฐานที่หัวรหัสตกรุ่นนี้ · `null` = นับไม่สำเร็จ · ไม่มีช่องนี้ = หน้าคิดราคา (ไม่ได้นับ) */
   products?: number | null;
-  /** true = เปิดแบบชีต Excel ได้ (หน้าสมุดรายชีต `SheetEditor`) — เกณฑ์อยู่ที่ `excelReady()` ฝั่ง backend */
-  excel?: boolean;
   /** กฎของรุ่นที่รหัสย่อยแบบ "เปิดกฎ" เลือกได้ — ชื่ออย่างเดียว ไม่มีราคา (`modelBriefs` ฝั่ง backend) */
   options?: { key: string; label: string }[];
   /** ค่าที่แต่ละแกนรับได้ (หัวแถว/หัวคอลัมน์ของตารางราคาตั้ง · ค่าของราคาแยกตามแกน) — ชื่ออย่างเดียว ไม่มีราคา
@@ -346,8 +344,6 @@ export interface EditorView {
   name: string;
   /** หัวตารางแบบที่ชีตเขียน (`TS_-01`) */
   title: string;
-  /** เปิดแบบชีต Excel ได้ครบทุกช่อง */
-  excel: boolean;
   /** หน้าตาของชีตรอบตาราง (แสดงผลอย่างเดียว ไม่มีผลกับราคา) — คีย์ = ค่าแกนแถว/คอลัมน์ */
   layout: {
     rowNote: { label: string; values: Record<string, string> } | null;
@@ -370,8 +366,9 @@ export interface EditorView {
         axes: string[];
         axesTh: string[];
         rows: string[];
+        /** ตารางสามแกน (TS-08 · TS-10) = "เกลียว | ชนิด" — หน้าชีตแตกเป็นหัวคอลัมน์สองชั้น */
         cols: string[];
-        /** `cells[แถว][คอลัมน์]` · `null` = ช่องว่าง = ไม่รับผลิต · ตารางสามแกน = `null` */
+        /** `cells[แถว][คอลัมน์]` · `null` = ช่องว่าง = ไม่รับผลิต · ตารางแกนเดียว = `null` */
         cells: (number | null)[][] | null;
       }
     | { kind: 'ref'; model: string };

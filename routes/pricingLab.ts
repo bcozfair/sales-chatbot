@@ -13,7 +13,7 @@ import { ADDONS, AMP, BH_CATALOG, bhSpec, buildBhCode, type BhForm, type SizeKey
 import { displayName } from '../services/pricingLab/labels.js';
 import { productsPerModel } from '../services/pricingLab/bookCoverage.js';
 import {
-  EditRejected, applyModelEdit, applySheetEdit, excelReady, modelEditorView, sheetModels,
+  EditRejected, applyModelEdit, applySheetEdit, modelEditorView, sheetModels,
 } from '../services/pricingLab/modelEditor.js';
 import { makeTemplate, readUploaded, templateFileName } from '../services/pricingLab/bookFile.js';
 import {
@@ -349,7 +349,6 @@ function modelBriefs(book: PriceBook | undefined) {
   if (!book) return [];
   return Object.values(book.models).map((m) => {
     const { name, others } = displayName(m.code, m.aliases ?? []);
-    // `excel` = รุ่นนี้เปิดแบบชีต Excel ได้ (หน้าสมุดรายชีต) — เป็นธงจริง/เท็จ ไม่มีราคาติดไปด้วย
     // `options` = กฎที่รหัสย่อยแบบ "เปิดกฎ" เลือกได้ — ชื่อกฎกับชื่อ option เท่านั้น ไม่มีจำนวนเงิน
     const options = [...new Map(
       m.adders.flatMap((a) => (a.when && 'option' in a.when ? [[a.when.option, a.label] as const] : []))
@@ -366,7 +365,7 @@ function modelBriefs(book: PriceBook | undefined) {
     }
     for (const a of m.adders) if (a.byAxis) for (const k of Object.keys(a.rates ?? {})) put(a.byAxis, k);
     return {
-      code: m.code, name, label: m.label, sheet: m.sheet, aliases: m.aliases ?? [], others, excel: excelReady(m), options,
+      code: m.code, name, label: m.label, sheet: m.sheet, aliases: m.aliases ?? [], others, options,
       axes: Object.fromEntries(Object.entries(axes).map(([k, v]) => [k, [...v]])),
     };
   });

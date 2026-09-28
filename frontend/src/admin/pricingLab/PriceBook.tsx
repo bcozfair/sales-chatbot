@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { BookOpen, CircleDollarSign, Download, FileSpreadsheet, Info, Pencil, Plus, Tag, Undo2, Upload } from 'lucide-react';
+import { BookOpen, CircleDollarSign, Download, FileSpreadsheet, Info, Plus, Tag, Undo2, Upload } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { PageHeader } from '../PageHeader';
 import { Button } from '../Button';
@@ -27,16 +27,14 @@ import { EFFECT_TH, subCodePending, type ModelBrief, type Overview, type SubCode
  *
  * **1 แถว = 1 ชีตของไฟล์ราคา** (เจ้าของสั่ง 2026-09-24: "1 ชีท / 1 สมุด") — ชีต `TS-01+TS-01-0`
  * มีสองรุ่นในสมุด แต่คนดูแลราคารู้จักมันเป็นหน้าเดียวในไฟล์ ⇒ รวมเป็นแถวเดียว
- * · ชีตที่ทุกรุ่นเป็น `excel` เปิดเป็น `SheetEditor` (ตารางหน้าตาแบบชีต) ทั้งชีต
- * · ชีตอื่นยังเปิด `ModelPriceEditor` ทีละรุ่นเหมือนเดิม (ชีต BH มีสองรุ่น ⇒ ปุ่มแยกรายรุ่น)
- *   จนกว่าจะย้ายมาแบบชีตทีละชีตตามที่เจ้าของสั่ง
+ * · **ทุกชีตเปิดเป็น `SheetEditor`** (ตารางหน้าตาแบบชีต · เจ้าของสั่ง 2026-09-28 "ให้เป็นสไตล์ excel ทั้งหมด")
+ * · `ModelPriceEditor` (เพิ่ม/ลบกฎ · เงื่อนไข · สวิตช์ข้อจำกัด · หัวท้ายช่วงขนาด) เข้าจากปุ่ม "กฎและเงื่อนไข"
+ *   ของแต่ละตารางในหน้าชีตเท่านั้น — กด "กลับ" แล้วกลับมาหน้าชีตเดิม (เจ้าของเคาะข้อ 1–2 ของ mockup)
  */
 
 interface SheetGroup {
   sheet: string;
   models: ModelBrief[];
-  /** ทุกรุ่นในชีตเปิดแบบ Excel ได้ */
-  excel: boolean;
   products: number | null;
 }
 
@@ -50,7 +48,6 @@ function groupSheets(models: ModelBrief[]): SheetGroup[] {
   return [...map].map(([sheet, ms]) => ({
     sheet,
     models: ms,
-    excel: ms.every((m) => m.excel),
     products: ms.every((m) => typeof m.products === 'number')
       ? ms.reduce((n, m) => n + (m.products ?? 0), 0)
       : null,
@@ -185,11 +182,7 @@ export const PriceBook: React.FC<Props> = ({ canQuote, onOpenQuote }) => {
   const sheets = useMemo(() => groupSheets(models), [models]);
   const covered = models.reduce((n, m) => n + (m.products ?? 0), 0);
   const counted = models.some((m) => typeof m.products === 'number');
-  /** กดแถว: ชีตแบบ Excel → เปิดทั้งชีต · ชีตรุ่นเดียว → หน้าแก้รุ่น · ชีตหลายรุ่นแบบเดิม → ต้องกดปุ่มรายรุ่น */
-  const openRow = (g: SheetGroup) => {
-    if (g.excel) setEditingSheet(g.sheet);
-    else if (g.models.length === 1) setEditingModel(g.models[0]!.code);
-  };
+  const openRow = (g: SheetGroup) => setEditingSheet(g.sheet);
 
   async function removeSub(row: SubCode) {
     if (!row.id) return;
@@ -208,27 +201,29 @@ export const PriceBook: React.FC<Props> = ({ canQuote, onOpenQuote }) => {
 
   const bookMissing = overview && !overview.book.ok;
 
-  if (editingSheet) {
-    return (
-      <SheetEditor
-        sheet={editingSheet}
-        products={Object.fromEntries(models.map((m) => [m.code, m.products]))}
-        authHeaders={authHeaders}
-        onBack={(wasSaved) => {
-          setEditingSheet(null);
-          if (wasSaved) void loadOverview();
-        }}
-      />
-    );
-  }
-
   if (editingModel) {
     return (
       <ModelPriceEditor
         code={editingModel}
         authHeaders={authHeaders}
         onBack={(wasSaved) => {
+          // กลับไปหน้าชีตที่เปิดค้างไว้ (ถ้ามี) — หน้าชีตโหลดใหม่เอง จึงเห็นกฎที่เพิ่งแก้
           setEditingModel(null);
+          if (wasSaved) void loadOverview();
+        }}
+      />
+    );
+  }
+
+  if (editingSheet) {
+    return (
+      <SheetEditor
+        sheet={editingSheet}
+        products={Object.fromEntries(models.map((m) => [m.code, m.products]))}
+        authHeaders={authHeaders}
+        onAdvanced={setEditingModel}
+        onBack={(wasSaved) => {
+          setEditingSheet(null);
           if (wasSaved) void loadOverview();
         }}
       />
@@ -312,7 +307,7 @@ export const PriceBook: React.FC<Props> = ({ canQuote, onOpenQuote }) => {
       {sheets.length > 0 && (
         <TableCard
           title="ชีตในสมุดราคา"
-          hint={`${sheets.length} ชีต · ${models.length} รุ่น${counted ? ` · ครอบสินค้า ${covered.toLocaleString('th-TH')} รายการ` : ''} · ชีตที่มีป้าย “แบบ Excel” เปิดเป็นตารางหน้าตาเหมือนในไฟล์`}
+          hint={`${sheets.length} ชีต · ${models.length} รุ่น${counted ? ` · ครอบสินค้า ${covered.toLocaleString('th-TH')} รายการ` : ''} · ทุกชีตเปิดเป็นตารางหน้าตาเหมือนในไฟล์ Excel`}
         >
           <TableScroll>
             <table className="w-full text-xs hidden sm:table">
@@ -329,14 +324,12 @@ export const PriceBook: React.FC<Props> = ({ canQuote, onOpenQuote }) => {
               </thead>
               <tbody>
                 {sheets.map((g) => {
-                  const clickable = g.excel || g.models.length === 1;
                   return (
                     <tr key={g.sheet}
-                        onClick={clickable ? () => openRow(g) : undefined}
-                        className={`group border-b border-slate-50 align-top ${clickable ? 'cursor-pointer hover:bg-slate-50' : ''}`}>
+                        onClick={() => openRow(g)}
+                        className="group border-b border-slate-50 align-top cursor-pointer hover:bg-slate-50">
                       <td className="px-4 py-2.5 whitespace-nowrap">
                         <span className="font-mono font-bold text-slate-900">{sheetName(g)}</span>
-                        {g.excel && <ExcelBadge />}
                       </td>
                       <td className="px-4 py-2.5 text-slate-700">
                         {g.models.map((m) => (
@@ -358,24 +351,14 @@ export const PriceBook: React.FC<Props> = ({ canQuote, onOpenQuote }) => {
                       </td>
                       <td className="px-4 py-2.5 text-right whitespace-nowrap">
                         {/* ปุ่มจริงไว้ให้คีย์บอร์ด/โปรแกรมอ่านจอ — คลิกทั้งแถวเป็นแค่ทางลัดของเมาส์ */}
-                        {clickable ? (
-                          <Button
-                            icon={g.excel ? FileSpreadsheet : Pencil}
-                            aria-label={`แก้ราคา ${sheetName(g)}`}
-                            onClick={(e) => { e.stopPropagation(); openRow(g); }}
-                            className="opacity-60 group-hover:opacity-100 focus-visible:opacity-100"
-                          >
-                            {g.excel ? 'เปิดชีต' : 'แก้ราคา'}
-                          </Button>
-                        ) : (
-                          <span className="inline-flex flex-col items-end gap-1">
-                            {g.models.map((m) => (
-                              <Button key={m.code} icon={Pencil} onClick={() => setEditingModel(m.code)}>
-                                แก้ {m.name}
-                              </Button>
-                            ))}
-                          </span>
-                        )}
+                        <Button
+                          icon={FileSpreadsheet}
+                          aria-label={`แก้ราคา ${sheetName(g)}`}
+                          onClick={(e) => { e.stopPropagation(); openRow(g); }}
+                          className="opacity-60 group-hover:opacity-100 focus-visible:opacity-100"
+                        >
+                          เปิดชีต
+                        </Button>
                       </td>
                     </tr>
                   );
@@ -390,7 +373,7 @@ export const PriceBook: React.FC<Props> = ({ canQuote, onOpenQuote }) => {
               <div key={g.sheet} className="rounded-xl border border-slate-200 bg-card px-3.5 py-3">
                 <div className="flex gap-2 items-baseline justify-between">
                   <span className="font-mono font-bold text-[13px] text-slate-900">
-                    {sheetName(g)}{g.excel && <ExcelBadge />}
+                    {sheetName(g)}
                   </span>
                   <span className="text-[11px] text-slate-500 tabular-nums"><Count n={g.products} /> รายการ</span>
                 </div>
@@ -405,15 +388,7 @@ export const PriceBook: React.FC<Props> = ({ canQuote, onOpenQuote }) => {
                   </div>
                 ))}
                 <div className="flex flex-wrap gap-1.5 mt-2.5">
-                  {g.excel || g.models.length === 1 ? (
-                    <Button icon={g.excel ? FileSpreadsheet : Pencil} onClick={() => openRow(g)}>
-                      {g.excel ? 'เปิดชีต' : 'แก้ราคา'}
-                    </Button>
-                  ) : (
-                    g.models.map((m) => (
-                      <Button key={m.code} icon={Pencil} onClick={() => setEditingModel(m.code)}>แก้ {m.name}</Button>
-                    ))
-                  )}
+                  <Button icon={FileSpreadsheet} onClick={() => openRow(g)}>เปิดชีต</Button>
                 </div>
               </div>
             ))}
@@ -570,14 +545,6 @@ const Count: React.FC<{ n: number | null }> = ({ n }) =>
 const PendingPill: React.FC = () => (
   <span className="ml-1.5 inline-block whitespace-nowrap rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 align-middle text-[10.5px] font-medium text-amber-700">
     ยังไม่มีราคา
-  </span>
-);
-
-/** ป้าย "แบบ Excel" — ชีตนี้เปิดเป็นตารางหน้าตาเหมือนในไฟล์ราคา */
-const ExcelBadge: React.FC = () => (
-  <span className="ml-2 rounded px-1.5 py-0.5 align-middle font-sans text-[10px] font-bold"
-        style={{ background: 'var(--brand-soft)', color: 'var(--brand-fg)' }}>
-    แบบ Excel
   </span>
 );
 

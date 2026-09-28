@@ -984,6 +984,101 @@ console.log('\n── 12. เกลียวที่อ่านไม่ออ
     !bh03Map.adders?.some((a) => a.id === 'cable_over_30cm') && !bh03?.adders.some((a) => a.id === 'cable_over_30cm'));
 }
 
+console.log('\n── 13. สมุดราคาแบบ Excel ทุกชีต (เจ้าของสั่ง 2026-09-28) — ทางบันทึกของหน้าชีต ─────────\n');
+{
+  const rejects = (fn: () => unknown): string | null => {
+    try { fn(); return null; } catch (e) { return e instanceof EditRejected ? e.message : `ไม่ใช่ EditRejected: ${String(e)}`; }
+  };
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
+  // ก. หน้าชีตไม่ส่ง variant / constraintsOff — ต้องคงเดิม ไม่ใช่ลบรุ่น C หรือเปิดข้อจำกัดที่ปิดไว้คืน
+  const bhOff: PriceModel = { ...bh01, constraints: bh01.constraints.map((c, i) => (i === 0 ? { ...c, disabled: true } : c)) };
+  const bhKeep = applyModelEdit(bhOff, {}, withModel(bhOff));
+  check('บันทึกจากหน้าชีตเปล่า ๆ (BH-01) ⇒ รุ่นเดิมทุกไบต์ — รุ่น C ไม่หาย ข้อจำกัดที่ปิดไว้ยังปิด', same(bhKeep, bhOff));
+  check('  หน้าแก้ทีละรุ่นยังปิดข้อจำกัดได้เหมือนเดิม (ส่ง constraintsOff: [] = เปิดทุกข้อ)',
+    applyModelEdit(bhOff, { constraintsOff: [] }, withModel(bhOff)).constraints.every((c) => !c.disabled));
+
+  // ข. ราคาช่วงขนาด (BH) — แก้แค่ราคา หัวท้ายช่วงคงเดิม · ช่วงที่ไม่ได้ส่งเป็น object เดิม · ว่าง = ไม่รับผลิต
+  if (bh01.base.kind === 'banded') {
+    const bands = bh01.base.bands;
+    const nb = applyModelEdit(bh01, { bandPrices: { 0: 777 } }, book);
+    const out = nb.base.kind === 'banded' ? nb.base.bands : [];
+    check('ราคาช่วงแรกของ BH-01 เป็น 777 · หัวท้ายช่วงเท่าเดิม',
+      (out[0]?.flat ?? out[0]?.rate) === 777 && out[0]?.min === bands[0]!.min && out[0]?.max === bands[0]!.max);
+    check('  ช่วงอื่นเท่าเดิมทุกไบต์', same(out.slice(1), bands.slice(1)));
+    const ri = bands.findIndex((b) => b.flat === undefined && b.rate !== undefined);
+    if (ri >= 0) {
+      const nr = applyModelEdit(bh01, { bandPrices: { [ri]: 30 } }, book);
+      const b = nr.base.kind === 'banded' ? nr.base.bands[ri] : undefined;
+      check(`  ช่วงที่คิดต่อหน่วย (${bands[ri]!.label ?? ri}) ยังคิดต่อหน่วย`, b?.rate === 30 && b.flat === undefined, JSON.stringify(b));
+    }
+    const ne = applyModelEdit(bh01, { bandPrices: { 0: null } }, book);
+    const b0 = ne.base.kind === 'banded' ? ne.base.bands[0] : undefined;
+    check('  ลบราคาช่วง = ไม่รับผลิตช่วงนั้น (ไม่ใช่ 0)', b0 !== undefined && b0.flat === undefined && b0.rate === undefined);
+    check('  ช่วงที่ไม่มีอยู่ถูกปฏิเสธ', !!rejects(() => applyModelEdit(bh01, { bandPrices: { 99: 1 } }, book)));
+  }
+
+  // ค. ราคาของกฎราคาเดียว — ตามชนิด · ว่างไม่ได้ · กฎที่แยกตามแกนใช้ทางนี้ไม่ได้
+  const flat = bh01.adders.find((a) => a.kind === 'flat' && !a.rates);
+  const per = bh01.adders.find((a) => a.kind === 'perUnit' && !a.rates);
+  if (flat && per) {
+    const na = applyModelEdit(bh01, { adderPrices: { [flat.id]: 999, [per.id]: 7 } }, book);
+    const f2 = na.adders.find((a) => a.id === flat.id)!;
+    const p2 = na.adders.find((a) => a.id === per.id)!;
+    check(`ราคา "${flat.label}" (เหมา) = 999 · "${per.label}" (ต่อหน่วย) = 7 · ชื่อ/เงื่อนไขเท่าเดิม`,
+      f2.amount === 999 && p2.rate === 7 && same(f2.when, flat.when) && f2.label === flat.label);
+    check('  กฎอื่นเท่าเดิมทุกไบต์', same(na.adders.filter((a) => a.id !== flat.id && a.id !== per.id),
+      bh01.adders.filter((a) => a.id !== flat.id && a.id !== per.id)));
+    check('  ราคาว่างถูกปฏิเสธ (ว่าง ≠ ปิดกฎ)', /ว่างไม่ได้/.test(rejects(() => applyModelEdit(bh01, { adderPrices: { [flat.id]: null } }, book)) ?? ''));
+    check('  พิมพ์ไม่ใช่ตัวเลขถูกปฏิเสธ', !!rejects(() => applyModelEdit(bh01, { adderPrices: { [flat.id]: 'abc' } }, book)));
+  }
+  const tsk04 = Object.values(book.models).find((m) => /^TS.-04$/.test(m.code));
+  const rated = tsk04?.adders.find((a) => a.rates);
+  if (tsk04 && rated) {
+    check('  กฎที่แยกตามแกนแก้ผ่านราคาเดียวไม่ได้', !!rejects(() => applyModelEdit(tsk04, { adderPrices: { [rated.id]: 1 } }, book)));
+  }
+
+  // ง. รุ่น C จากหน้าชีต — % และราคาฝั่งรุ่น C · ข้อความ/ที่มาคงเดิม
+  if (bh01.variant) {
+    const vr = bh01.variant;
+    const nv = applyModelEdit(bh01, { variant: { suffix: vr.suffix, label: vr.label, percent: 25, disabled: !!vr.disabled, adderPrices: vr.adderPrices ?? {} } }, book);
+    check('รุ่น C: % เปลี่ยนเป็น 25 · ราคาฝั่งรุ่น C · ที่มา · ยืนยันแล้ว เท่าเดิม',
+      nv.variant?.percent === 25 && same(nv.variant?.adderPrices, vr.adderPrices) && nv.variant?.source === vr.source && nv.variant?.confirmed === vr.confirmed);
+  }
+
+  // จ. ตารางสามแกน (TS-08 · TS-10) — จอเห็นทุกช่อง และแก้ช่องเดียวแล้วช่องอื่นเท่าเดิม
+  const three = Object.values(book.models).find((m) => m.base.kind === 'matrix' && m.base.axes.length === 3);
+  if (three && three.base.kind === 'matrix') {
+    const view = modelEditorView(book, three);
+    const vb = view.base.kind === 'matrix' ? view.base : undefined;
+    const shown = vb?.cells?.flat().filter((x) => x !== null).length ?? 0;
+    check(`${three.code} (สามแกน) จอเห็นราคาครบทุกช่อง`, shown === Object.keys(three.base.cells).length,
+      `${shown} / ${Object.keys(three.base.cells).length}`);
+    const [k0, v0] = Object.entries(three.base.cells)[0]!;
+    const n3 = applyModelEdit(three, { cells: { [k0]: v0 + 5 } }, book);
+    const c3 = n3.base.kind === 'matrix' ? n3.base.cells : {};
+    check(`  แก้ช่อง "${k0}" แล้วช่องนั้นเปลี่ยน ช่องอื่นเท่าเดิม ลำดับคีย์เดิม`,
+      c3[k0] === v0 + 5 && same(Object.keys(c3), Object.keys(three.base.cells))
+      && Object.entries(three.base.cells).every(([k, v]) => k === k0 || c3[k] === v));
+    check('  ช่องที่ไม่มีในตารางถูกปฏิเสธ', !!rejects(() => applyModelEdit(three, { cells: { 'ไม่มี | ไม่มี | ไม่มี': 1 } }, book)));
+    check('  บันทึกเปล่าได้รุ่นเดิมทุกไบต์', same(applyModelEdit(three, {}, book), three));
+  }
+
+  // ฉ. คอลัมน์บวกเพิ่มในตารางหลัก (แยกตามแกนแถว) กรอกได้ทุกแถวที่ตารางมี — ไม่ใช่ถูกทิ้งเงียบ ๆ
+  if (tsk04 && tsk04.base.kind === 'matrix') {
+    const rowsOf = [...new Set(Object.keys(tsk04.base.cells).map((k) => k.split(' | ')[0]!))];
+    const a = tsk04.adders.find((x) => x.rates && x.byAxis === (tsk04.base as { axes: string[] }).axes[0] && rowsOf.some((r) => !(r in x.rates!)));
+    const r = a && rowsOf.find((x) => !(x in a.rates!));
+    if (a && r) {
+      const nr = applyModelEdit(tsk04, { adderRates: { [a.id]: [{ value: r, rate: 55 }] } }, book);
+      const got = nr.adders.find((x) => x.id === a.id)?.rates?.[r];
+      check(`${tsk04.code} "${a.label}" แถว ${r} ที่เคยว่าง กรอกได้ (55)`, got === 55, String(got));
+      check('  หน้าแก้ทีละรุ่นไม่ได้ช่องว่างเพิ่ม (knownRateKeys ไม่ขยาย)',
+        (modelEditorView(book, tsk04).adders.find((x) => x.id === a.id)?.rates?.length ?? 0) === Object.keys(a.rates!).length);
+    }
+  }
+}
+
 console.log(`\n${'─'.repeat(70)}`);
 console.log(`ผล: ผ่าน ${pass} · ตก ${fails.length}`);
 console.log('─'.repeat(70));
