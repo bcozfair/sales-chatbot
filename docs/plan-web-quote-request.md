@@ -2820,7 +2820,7 @@ golden (`คงเหลือ 24` → `42`) ไม่เกี่ยวกั�
 `default_item_name` ของกฎค่าขนส่ง (ค่านั้นยังเป็นชื่อของบรรทัดที่ **กฎ** เติม และหน้า LIFF ยังอ่านมัน)
 · ช่องชื่อพิมพ์เองได้ หรือกดลูกศรเลือกจากรายการ `ค่าบริการส่งสินค้ากรณียอดไม่ถึง 1,000 บาท` ·
 `ค่าเปลี่ยนแปลงสินค้า` · `Deployment Package` · ทั้งคำตั้งต้นและรายการอยู่ที่
-`MANUAL_SERVICE_ITEM_NAME` / `MANUAL_SERVICE_NAME_PRESETS` ใน `services/shippingFee.ts` ที่เดียว
+`MANUAL_SERVICE_ITEM_NAME` / `manualServiceNamePresets()` (ตัวเลขเกณฑ์อ่านจาก `shipping_fee_config` · 2026-09-28) ใน `services/shippingFee.ts` ที่เดียว
 ส่งถึงฟอร์มทาง `/api/shipping-fee/config` (`manual_item_name` · `manual_name_presets`) และ
 `resolveItems` ใช้คำตั้งต้นเดียวกันเมื่อชื่อว่าง · ยังเป็นค่าในโค้ด ไม่มีหน้าจอให้แก้ ถ้าร้านต้องเพิ่ม/ลด
 ชื่อบ่อยค่อยย้ายลง `shipping_fee_config` · gate: `tsx scripts/diag/webServiceNameUiProbe.ts`

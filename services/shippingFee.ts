@@ -70,12 +70,23 @@ export interface ShippingFeeConfig {
  */
 export const MANUAL_SERVICE_ITEM_NAME = 'ค่าบริการ';
 
-/** ชื่อที่เลือกได้จาก dropdown ของช่องชื่อค่าบริการ — พิมพ์ชื่ออื่นเองได้เสมอ · ลำดับ = ลำดับบนจอ */
-export const MANUAL_SERVICE_NAME_PRESETS: readonly string[] = [
-  'ค่าบริการส่งสินค้ากรณียอดไม่ถึง 1,000 บาท',
-  'ค่าเปลี่ยนแปลงสินค้า',
-  'Deployment Package',
-];
+/**
+ * ชื่อที่เลือกได้จาก dropdown ของช่องชื่อค่าบริการ — พิมพ์ชื่ออื่นเองได้เสมอ · ลำดับ = ลำดับบนจอ
+ *
+ * ตัวเลขในชื่อแรกมาจาก **เกณฑ์ของกฎค่าขนส่ง** (`shipping_fee_config.threshold_before_vat` ที่แอดมินแก้ได้)
+ * ไม่ใช่ตัวเลขในโค้ด — เดิมเขียน "1,000 บาท" ตายตัว วันที่ร้านเปลี่ยนเกณฑ์ ชื่อบนใบจะบอกตัวเลขผิดเงียบ ๆ
+ * (รีวิว 2026-09-25) · เกณฑ์อ่านไม่ได้/ไม่ได้ตั้ง (0) ⇒ ไม่เสนอชื่อนั้น ดีกว่าเสนอ "ไม่ถึง 0 บาท"
+ */
+export function manualServiceNamePresets(thresholdBeforeVat: number): string[] {
+  const threshold = Number(thresholdBeforeVat);
+  return [
+    ...(threshold > 0
+      ? [`ค่าบริการส่งสินค้ากรณียอดไม่ถึง ${threshold.toLocaleString('en-US', { maximumFractionDigits: 2 })} บาท`]
+      : []),
+    'ค่าเปลี่ยนแปลงสินค้า',
+    'Deployment Package',
+  ];
+}
 
 /** ปิดกฎไว้ก่อนเมื่ออ่านค่าไม่ได้ — fail-safe: ยอมไม่คิดค่าขนส่ง ดีกว่าคิดมั่ว */
 const DISABLED_CONFIG: ShippingFeeConfig = {
