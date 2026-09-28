@@ -699,7 +699,7 @@ app.post('/api/quotations/delivery-preview', express.json(), async (req: any, re
 // จึงต้องรู้เกณฑ์กับราคา — server ยังเป็นผู้ตัดสินจริงตอน PUT เสมอ (services/shippingFee.ts)
 app.get('/api/shipping-fee/config', async (req: any, res: any) => {
   try {
-    const { loadShippingFeeConfig, MANUAL_SERVICE_ITEM_NAME, MANUAL_SERVICE_NAME_PRESETS } =
+    const { loadShippingFeeConfig, MANUAL_SERVICE_ITEM_NAME, manualServiceNamePresets } =
       await import('./services/shippingFee.js');
     const cfg = await loadShippingFeeConfig();
     res.json({
@@ -710,7 +710,7 @@ app.get('/api/shipping-fee/config', async (req: any, res: any) => {
       default_item_name: cfg.defaultItemName,
       // สองช่องนี้ใช้แค่ปุ่ม "เพิ่มค่าบริการ" ของหน้าเว็บ — หน้า LIFF ไม่อ่าน (ใช้ default_item_name ของกฎ)
       manual_item_name: MANUAL_SERVICE_ITEM_NAME,
-      manual_name_presets: MANUAL_SERVICE_NAME_PRESETS,
+      manual_name_presets: manualServiceNamePresets(cfg.thresholdBeforeVat),
       product_id: cfg.productId,
       product_model: cfg.productModel,
       product_name: cfg.productName,

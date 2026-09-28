@@ -89,8 +89,9 @@ export interface OdooExportConfig {
    */
   taxByCompany: Record<OdooExportCompany, string>;
   /**
-   * K: source_id ของใบที่ไม่ได้ระบุไว้เอง (`quotations.source_id` เป็น NULL — ใบจาก LINE ทุกใบ
-   * และใบเว็บที่ออกก่อน 2026-09-25) · ใบที่ระบุไว้ใช้ค่าของใบนั้นเสมอ ดู ODOO_SOURCE_OPTIONS
+   * K: ค่าถอยของ source_id เมื่อ `quotations.source_id` ว่าง — ตั้งแต่ 2026-09-25 ทุกใบบันทึกค่าไว้เสมอ
+   * (`insertDraftQuotations` เขียน `Sales` ให้ใบที่ไม่ได้เลือก รวมใบจาก LINE ทุกใบ · ใบเก่า backfill แล้ว)
+   * ⇒ ใช้เฉพาะแถวที่หลุดมา/ฐานที่ยังไม่รัน migration 2026-09-25_02 · ดู ODOO_SOURCE_OPTIONS
    */
   sourceId: string;
   /** O: order_line/product_uom — template กำหนดให้เป็น Pcs ทุกแถว ไม่ดูหน่วยจริงของสินค้า */

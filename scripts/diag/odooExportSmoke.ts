@@ -109,7 +109,7 @@ const { rows: quotes } = await pool.query<OdooExportQuotationRow & {
   frozen_sales_team: string | null;
 }>(
   `SELECT q.quotation_no, q.total_sum, q.created_at, q.updated_at, q.customer_details, q.item_details, q.employee_details,
-          q.customer_id, q.contact_id, q.delivery_terms,
+          q.customer_id, q.contact_id, q.delivery_terms, q.source_id,
           s.name AS salesperson_name, ${ODOO_EXPORT_SALES_TEAM_COL} AS customer_sales_team,
           q.customer_sales_team AS frozen_sales_team,
           s.employee_quotation_id AS salesperson_employee_quotation_id,
@@ -263,6 +263,10 @@ if (contactIds.length > 0 || companyIds.length > 0) {
 
 let cursor = 0;
 let firstRowBad = 0;
+// K: source_id ต้องเป็นค่าที่ตรึงไว้ในใบ (`quotations.source_id`) · ใบที่ไม่มีค่าเท่านั้นที่ใช้ค่าตั้งต้นของ config
+// — เดิมด่านไม่ได้ SELECT คอลัมน์นี้ ⇒ ทุกใบถูกตรวจด้วยค่าตั้งต้น และใบที่เลือก Source เองไม่เคยถูกตรวจจริง (รีวิว 2026-09-25)
+let sourceMismatch = 0;
+let sourceOwn = 0;
 let continuationBad = 0;
 let missingCompany = 0;
 let missingQuotationNo = 0;
@@ -313,6 +317,12 @@ for (const quote of quotesWithItems) {
   if (!first.date_order || !first.source_id) {
     firstRowBad++;
     console.log(`   ✗ ${quote.quotation_no}: แถวแรกขาดค่าหัวใบ (date_order="${first.date_order}" source_id="${first.source_id}")`);
+  }
+  const wantSource = String(quote.source_id ?? '').trim() || config.sourceId;
+  if (String(quote.source_id ?? '').trim()) sourceOwn++;
+  if (first.source_id !== wantSource) {
+    sourceMismatch++;
+    console.log(`   ✗ ${quote.quotation_no}: source_id ในไฟล์ "${first.source_id}" ≠ ค่าของใบ "${wantSource}"`);
   }
   if (!first.partner_id) {
     missingCompany++;
@@ -460,6 +470,8 @@ for (const quote of quotesWithItems) {
 }
 
 ok('ทุกใบมีค่าหัวใบครบในแถวแรก', firstRowBad === 0, firstRowBad ? `(พลาด ${firstRowBad} ใบ)` : '');
+ok(`source_id (คอลัมน์ K) ตรงกับค่าของใบทุกใบ (ตรวจ ${quotesWithItems.length} ใบ · ใบที่ตรึงค่าเอง ${sourceOwn})`, sourceMismatch === 0,
+  sourceMismatch ? `(พลาด ${sourceMismatch} ใบ)` : '');
 ok('แถวที่ 2 ขึ้นไปเว้นช่องหัวใบ (A–L และ S–T) ว่างตามกติกา one2many', continuationBad === 0,
   continuationBad ? `(พลาด ${continuationBad} แถว)` : '');
 ok('delivery_name/delivery_time (S/T) ตรงกับกำหนดส่งที่ตรึงไว้ในใบ', badDelivery === 0,

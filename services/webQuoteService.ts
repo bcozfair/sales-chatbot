@@ -495,7 +495,7 @@ export function parsePaymentTermsOverride(raw: any): string | null {
 }
 
 /**
- * source_id ของไฟล์ Odoo ที่คนออกใบเลือก — `null` = ไม่ได้ส่งมา (export ใช้ค่าตั้งต้น)
+ * source_id ของไฟล์ Odoo ที่คนออกใบเลือก — `null` = ไม่ได้ส่งมา (`insertDraftQuotations` บันทึกเป็น `Sales` · ไม่มีใบ NULL)
  *
  * ค่านอก `ODOO_SOURCE_OPTIONS` เป็น 400 ไม่ใช่ "เงียบ ๆ ใช้ Sales แทน" — Odoo จับคู่ด้วยชื่อ
  * ค่าที่ไม่รู้จักถ้าหลุดถึงไฟล์คือใบตกตอนนำเข้า และถ้าแทนให้เงียบ ๆ ใบจะลงผิดช่องทางโดยไม่มีใครรู้
@@ -806,7 +806,7 @@ export async function createDraft(params: {
   paymentTermsOverride?: any;
   /** กำหนดส่งที่ตั้งเอง แยกรายใบ — ไม่ส่ง = ให้ระบบคิดเองทุกใบ */
   delivery?: WebQuoteDeliveryInput[] | null;
-  /** Source ของไฟล์ Odoo (คอลัมน์ K) — ค่าเดียวทุกใบในชุด · ไม่ส่ง = NULL (export ใช้ค่าตั้งต้น) */
+  /** Source ของไฟล์ Odoo (คอลัมน์ K) — ค่าเดียวทุกใบในชุด · ไม่ส่ง = บันทึกเป็น `Sales` (`DEFAULT_ODOO_SOURCE`) */
   sourceId?: unknown;
   /**
    * คีย์ของกฎที่คนกดรับทราบไว้ในโมดัล (`override_keys` ที่ /preview ส่งไปให้) — ไม่ส่ง = ไม่รับทราบอะไรเลย
