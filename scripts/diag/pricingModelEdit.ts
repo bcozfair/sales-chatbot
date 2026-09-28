@@ -15,7 +15,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { NoBook, loadBookFrom } from '../pricebook/bookSource.js';
 import { computePrice, resolveModel } from '../../services/pricingLab/engine.js';
 import { parseProductCode } from '../../services/pricingLab/code.js';
-import { EditRejected, applyModelEdit, excelReady, modelEditorView } from '../../services/pricingLab/modelEditor.js';
+import { EditRejected, applyModelEdit, excelReady, modelEditorView, pruneUnpriced } from '../../services/pricingLab/modelEditor.js';
 import type { Adder, PriceBook, PriceModel, SheetLayout } from '../../services/pricingLab/types.js';
 import { makeTemplate, readUploaded } from '../../services/pricingLab/bookFile.js';
 import { applyModels } from '../../services/pricingLab/bookUpdate.js';
@@ -296,55 +296,97 @@ if (!ts01 || !ts010 || ts01.base.kind !== 'matrix') {
     v.title === 'TS_-01' && modelEditorView(book, ts010).title === 'TS_-01-0', `${v.title}`);
 
   // เจ้าของสั่ง 2026-09-28: "รหัสที่ใช้ได้ควรเป็นตัวเลือกที่มีข้อมูลตาม Excel และ pattern การประกอบรหัสตามแคตตาล็อกเท่านั้น"
-  // (เริ่มจาก "TS_-01 ใช้กับ TSK/TSJ/TST/TSP/TSPA/TSZ-01 ไม่ได้ใช้กับ TS-01") ⇒ "ใช้กับรหัส" ของทุกรุ่น = แคตตาล็อก ∩ Excel
+  // แล้วเคาะต่อในวันเดียวกัน: "Excel มี J แต่แคตตาล็อกไม่มี ก็ต้องใส่" · "แคตตาล็อกมี R, S แต่ Excel ไม่มีราคา ก็ต้องใส่ไว้
+  // เพิ่มราคาทีหลังได้" ⇒ "ใช้กับรหัส" ของทุกรุ่น = **แคตตาล็อก ∪ Excel** · ตัวที่แคตตาล็อกมีแต่ Excel ไม่มีราคา
+  // = คอลัมน์ "ยังไม่มีราคา" (`base.unpriced`) · ไม่มีทางถอยข้ามชนิดเซนเซอร์
   // ตรวจบนสำเนาที่ใช้รายชื่อจากแมป — ไม่ขึ้นกับว่าฐานเขียน --aliases ไปหรือยัง
   const maps = readdirSync('scripts/pricebook/maps').map((f) =>
-    JSON.parse(readFileSync(`scripts/pricebook/maps/${f}`, 'utf8')) as { code: string; aliases?: string[] });
+    JSON.parse(readFileSync(`scripts/pricebook/maps/${f}`, 'utf8')) as
+      { code: string; aliases?: string[]; base?: { unpriced?: Record<string, string[]> } });
   const strict: PriceBook = {
     ...book,
     models: Object.fromEntries(Object.entries(book.models).map(([k, m]) => {
       const mp = maps.find((x) => x.code === k);
-      return [k, mp ? { ...m, aliases: mp.aliases ?? [] } : m];
+      if (!mp) return [k, m];
+      const base = m.base.kind === 'matrix' ? pruneUnpriced({ ...m.base, unpriced: mp.base?.unpriced }) : m.base;
+      return [k, { ...m, aliases: mp.aliases ?? [], base }];
     })),
   };
   // ชนิดเซนเซอร์ตามหน้า "การสั่งซื้อ" ของแคตตาล็อก (backup/Catalogue · อ่าน 2026-09-28) — ข้อเท็จจริงของกระดาษ ไม่ใช่ข้อมูลในฐาน
+  // TS_-12 มีสองหน้า: Thermocouple (K J) กับ RTD PT100 (P PA Z) ⇒ รวมกันที่นี่ แล้วตรวจรวมทุกตารางที่เลขเดียวกัน
   const CATALOGUE: Record<string, string[]> = {
     '01': ['K', 'J', 'T', 'P', 'PA', 'Z'], '01-0': ['K', 'J', 'T', 'P', 'PA', 'Z'], '04': ['K', 'J', 'T'], '06': ['K', 'J', 'T'],
-    '08': ['P', 'PA', 'Z'], '10': ['P', 'PA', 'Z'], '11': ['K', 'J', 'T', 'P', 'PA', 'Z'], '12': ['K', 'J'],
+    '08': ['P', 'PA', 'Z'], '10': ['P', 'PA', 'Z'], '11': ['K', 'J', 'T', 'P', 'PA', 'Z'], '12': ['K', 'J', 'P', 'PA', 'Z'],
     '14': ['K', 'R', 'S'], '18': ['K', 'J', 'T', 'R', 'S', 'P', 'PA', 'Z'],
   };
-  const outside: string[] = [];
-  const unreadable: string[] = [];
+  const bare: string[] = [];
+  const noData: string[] = [];
+  const waitingOutside: string[] = [];
+  const covered: Record<string, Set<string>> = {};
   for (const m of Object.values(strict.models)) {
     for (const c of [m.code, ...(m.aliases ?? [])]) {
       const hm = /^TS([A-Z]*)-(\d{2}(?:-0)?)$/.exec(c);
       if (!hm) continue;
-      if (hm[1] === '') { if (c !== m.code) outside.push(`${m.code}: ${c} (ไม่มีตัวอักษรเซนเซอร์)`); continue; }
-      // TSP-12 มีชีต Excel ของตัวเองแต่แคตตาล็อก TS_-12 มีแค่ K/J — ถามเจ้าของอยู่ (2026-09-28) จึงยังไม่ตัดสินที่นี่
-      if (m.code !== 'TSP-12' && !(CATALOGUE[hm[2]!] ?? []).includes(hm[1]!)) outside.push(`${m.code}: ${c}`);
+      if (hm[1] === '') { if (c !== m.code) bare.push(`${m.code}: ${c}`); continue; }
+      (covered[hm[2]!] ??= new Set()).add(hm[1]!);
       const p = parseProductCode(c, strict);
-      if (p.model !== m.code || p.parts.some((x) => x.kind === 'unknown' && x.text === `TS${hm[1]}`)) unreadable.push(`${m.code}: ${c}`);
+      if (p.model !== m.code || p.parts.some((x) => x.kind === 'unknown' && x.text === `TS${hm[1]}`)) { noData.push(`${m.code}: ${c}`); continue; }
+      // ยืนบนคอลัมน์ "ยังไม่มีราคา" ได้เฉพาะชนิดที่แคตตาล็อกมี — ตัวที่ไม่มีทั้งในแคตตาล็อกและ Excel ห้ามเสกคอลัมน์ว่างให้
+      const sensor = p.cfg?.axes?.sensor;
+      const onBlank = m.base.kind === 'matrix' && !!sensor && (m.base.unpriced?.sensor ?? []).includes(sensor);
+      if (onBlank && !(CATALOGUE[hm[2]!] ?? []).includes(hm[1]!)) waitingOutside.push(`${m.code}: ${c}`);
     }
   }
-  check('"ใช้กับรหัส" ทุกรุ่นอยู่ในแคตตาล็อก (ไม่มี TS-<เลข> เปล่า ๆ · ไม่มีชนิดเซนเซอร์นอกหน้า "การสั่งซื้อ")',
-    outside.length === 0, outside.join(' · ') || `${maps.length} แมป`);
-  check('"ใช้กับรหัส" ทุกตัวมีข้อมูลใน Excel (หัวรหัสอ่านเป็นคอลัมน์/กฎของตารางนั้นได้)', unreadable.length === 0, unreadable.join(' · '));
+  const missingCat = Object.entries(CATALOGUE).flatMap(([n, ls]) =>
+    ls.filter((l) => !covered[n]?.has(l)).map((l) => `TS${l}-${n}`));
+  check('ไม่มี TS-<เลข> เปล่า ๆ ใน "ใช้กับรหัส" ของรุ่นไหนเลย', bare.length === 0, bare.join(' · ') || `${maps.length} แมป`);
+  check('ทุกชนิดในหน้า "การสั่งซื้อ" ของแคตตาล็อกอยู่ใน "ใช้กับรหัส" (มีราคาหรือยังไม่มีราคาก็ต้องใส่)',
+    missingCat.length === 0, missingCat.join(' · '));
+  check('"ใช้กับรหัส" ทุกตัวอ่านหัวรหัสออก (คอลัมน์/กฎใน Excel หรือคอลัมน์ "ยังไม่มีราคา")', noData.length === 0, noData.join(' · '));
+  check('คอลัมน์ "ยังไม่มีราคา" มีเฉพาะชนิดที่แคตตาล็อกมี', waitingOutside.length === 0, waitingOutside.join(' · '));
   check('หัวตารางยังเป็น TS_-01 · TS_-01-0 (อ่านจากชื่อชีต ไม่ใช่ชื่อพ้อง TS-01)',
     modelEditorView(strict, strict.models['TSK-01']!).title === 'TS_-01' &&
     modelEditorView(strict, strict.models['TSK-01-0']!).title === 'TS_-01-0');
   for (const [code, why] of [
     ['TS-01(M6)4.8+1M', 'ไม่มีตัวอักษรชนิดเซนเซอร์'], ['TS-01-0(M5)+1M', 'ไม่มีตัวอักษรชนิดเซนเซอร์'],
     ['TS-14 6x200+150', 'ไม่มีตัวอักษรชนิดเซนเซอร์'], ['TSE-01(M6)4.8+1M', 'ไม่มีชนิดเซนเซอร์ E'],
-    ['TSR-04(S3)6x150+1.5M', 'ไม่มีชนิดเซนเซอร์ R'], ['TSJ-14(S4)15x300-BU', 'ไม่มีชนิดเซนเซอร์ J'],
+    ['TSR-04(S3)6x150+1.5M', 'ไม่มีชนิดเซนเซอร์ R'], ['TSE-06(S2)6x100', 'ไม่มีชนิดเซนเซอร์ E'],
   ] as const) {
     const p = parseProductCode(code, strict);
     check(`${code} ไม่ยืมตารางของชนิดอื่น — ขึ้นว่าตารางใช้กับรหัสไหน`,
       !p.model && p.problems.some((s) => s.includes(why) && s.includes('ใช้กับรหัส')), p.model ?? p.problems.join(' | '));
   }
   for (const [code, want] of [['TSK-01(M6)4.8+1M', 'TSK-01'], ['TSPA-01-0(M5)+1M', 'TSK-01-0'], ['TSK-14 6x200+150', 'TS-14'],
-    ['TSR-14(S4)15x100-BU', 'TS-14'], ['TST-04(S2)6x100+1M', 'TSK-04'], ['TSZ-11 6x100+1M', 'TSK-11'], ['TSP-18(1.5)6-6x30+20-U', 'TS-18']] as const) {
+    ['TSJ-14 6x200+150', 'TS-14'], ['TSR-14(S4)15x100-BU', 'TS-14'], ['TST-04(S2)6x100+1M', 'TSK-04'],
+    ['TSZ-11 6x100+1M', 'TSK-11'], ['TSP-18(1.5)6-6x30+20-U', 'TS-18'], ['TSN-18(1.5)6-6x100+50', 'TS-18']] as const) {
     const p = parseProductCode(code, strict);
     check(`${code} ยังได้รุ่น ${want}`, p.model === want, p.model ?? p.problems.join(' | '));
+  }
+  // แคตตาล็อกมี แต่ Excel ยังไม่มีราคา ⇒ อ่านออก และตอบ "ยังไม่มีราคา" ไม่ใช่ "ไม่รับผลิต" หรือ "รหัสไม่ได้บอก"
+  for (const code of ['TSR-18(1.5)6-6x100+50', 'TSS-18(1.5)6-6x100+50']) {
+    const p = parseProductCode(code, strict);
+    const o = p.cfg ? computePrice(p.cfg, strict) : null;
+    const nb = o?.violations.find((v) => v.id === 'NO_BASE_PRICE');
+    check(`${code} ได้ตาราง TS-18 และขึ้น "ยังไม่มีราคา" (noRate)`,
+      p.model === 'TS-18' && o?.status !== 'priced' && !!nb?.noRate && !nb.missing && nb.message.includes('ยังไม่มีราคา'),
+      nb?.message ?? o?.status ?? p.problems.join(' | '));
+  }
+  // คอลัมน์ "ยังไม่มีราคา" ต้องรอดแม่แบบ Excel ไป-กลับ และกรอกราคาจากแม่แบบได้จริง
+  const ts18 = strict.models['TS-18']!;
+  if (ts18.base.kind !== 'matrix' || !ts18.base.unpriced) {
+    check('TS-18 มีคอลัมน์ "ยังไม่มีราคา" (Type R/S) จากแมป', false);
+  } else {
+    const back = (await readUploaded(Buffer.from(makeTemplate(strict, '2026-09-28')))).book;
+    const b18 = back?.models['TS-18']?.base;
+    check('แม่แบบ Excel ไป-กลับ: คอลัมน์ "ยังไม่มีราคา" ของ TS-18 ยังอยู่ครบ',
+      b18?.kind === 'matrix' && JSON.stringify(b18.unpriced) === JSON.stringify(ts18.base.unpriced), JSON.stringify(b18?.kind === 'matrix' ? b18.unpriced : b18));
+    const v18 = modelEditorView(strict, ts18);
+    check('  จอเห็นคอลัมน์ Type R/S เป็นช่องว่าง (ไม่ใช่หายไป)',
+      v18.base.kind === 'matrix' && ts18.base.unpriced.sensor!.every((c) => v18.base.kind === 'matrix' && v18.base.cols.includes(c)));
+    const row0 = Object.keys(ts18.base.cells)[0]!.split(' | ')[0]!;
+    const filled = pruneUnpriced({ ...ts18.base, cells: { ...ts18.base.cells, [`${row0} | Type R (TSR)`]: 999 } });
+    check('  กรอกราคา Type R แล้ว Type R ออกจากรายการ "ยังไม่มีราคา" · Type S ยังอยู่',
+      JSON.stringify(filled.unpriced) === JSON.stringify({ sensor: ['Type S (TSS)'] }), JSON.stringify(filled.unpriced));
   }
 
   const K = 'TSK/TSJ | M6x1.0';

@@ -77,7 +77,13 @@ export function axisValues(model: PriceModel, axis: string): string[] {
   if (model.base.kind !== 'matrix') return [];
   const i = model.base.axes.indexOf(axis);
   if (i < 0) return [];
-  return [...new Set(Object.keys(model.base.cells).map((k) => k.split(' | ')[i] ?? ''))];
+  return [
+    ...new Set([
+      ...Object.keys(model.base.cells).map((k) => k.split(' | ')[i] ?? ''),
+      // ค่าที่ตั้งไว้แต่ยังไม่มีราคา — ต้องอ่านออก ไม่งั้นรหัส TSR-18 จะขึ้น "รหัสไม่ได้บอกชนิดเซนเซอร์"
+      ...(model.base.unpriced?.[axis] ?? [])
+    ])
+  ];
 }
 
 /** จับคู่ค่าที่พิมพ์มากับค่าที่ตารางใช้จริง — เทียบแบบไม่สนตัวพิมพ์เล็กใหญ่และรูปแบบเครื่องหมายนิ้ว */

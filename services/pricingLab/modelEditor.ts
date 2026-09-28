@@ -166,19 +166,39 @@ const SEP = ' | ';
  * ⚠️ แถวที่ว่างทั้งแถวในชีต (เช่น D = "7TN" ของ TS-04) ไม่มีคีย์สักตัว ⇒ ไม่โผล่ที่นี่ และเพิ่มจากจอไม่ได้
  *    (ต้องไปทางแม่แบบ Excel) ซึ่งตรงกับกติกาเดิมว่า "เพิ่ม/ลบค่าแกนไม่ใช่งานของหน้าจอ"
  */
-function matrixValues(cells: Record<string, Money>, axisCount: number): string[][] {
+function matrixValues(base: Extract<PriceModel['base'], { kind: 'matrix' }>): string[][] {
+  const axisCount = base.axes.length;
   const out: string[][] = Array.from({ length: axisCount }, () => []);
   const seen = out.map(() => new Set<string>());
-  for (const k of Object.keys(cells)) {
-    const parts = k.split(SEP);
-    parts.forEach((v, i) => {
-      if (i < axisCount && !seen[i]!.has(v)) {
-        seen[i]!.add(v);
-        out[i]!.push(v);
-      }
-    });
-  }
+  const put = (i: number, v: string) => {
+    if (i < axisCount && !seen[i]!.has(v)) {
+      seen[i]!.add(v);
+      out[i]!.push(v);
+    }
+  };
+  for (const k of Object.keys(base.cells)) k.split(SEP).forEach((v, i) => put(i, v));
+  // ค่าที่ตั้งไว้แต่ยังไม่มีราคา (`unpriced`) ต่อท้าย ⇒ เป็นแถว/คอลัมน์ว่างให้กรอกได้
+  base.axes.forEach((a, i) => (base.unpriced?.[a] ?? []).forEach((v) => put(i, v)));
   return out;
+}
+
+/**
+ * ถอดค่าที่ "มีราคาแล้วอย่างน้อยหนึ่งช่อง" ออกจาก `unpriced` — กรอกราคาแล้วคอลัมน์นั้นเป็นคอลัมน์ปกติ
+ * (ช่องที่ยังว่างในคอลัมน์นั้นกลับไปแปลว่า "ไม่รับผลิต" ตามกติกาเดิมของชีต)
+ */
+export function pruneUnpriced(
+  base: Extract<PriceModel['base'], { kind: 'matrix' }>,
+): Extract<PriceModel['base'], { kind: 'matrix' }> {
+  if (!base.unpriced) return base;
+  const keys = Object.keys(base.cells).map((k) => k.split(SEP));
+  const left: Record<string, string[]> = {};
+  for (const [a, vals] of Object.entries(base.unpriced)) {
+    const i = base.axes.indexOf(a);
+    const rest = vals.filter((v) => !keys.some((k) => k[i] === v));
+    if (i >= 0 && rest.length) left[a] = rest;
+  }
+  const { unpriced: _drop, ...plain } = base;
+  return Object.keys(left).length ? { ...plain, unpriced: left } : plain;
 }
 
 /**
@@ -296,7 +316,7 @@ export function modelEditorView(book: PriceBook, m: PriceModel): EditorView {
         ? { kind: 'ref', model: m.base.model }
         : (() => {
             const { axes, cells } = m.base;
-            const vals = matrixValues(cells, axes.length);
+            const vals = matrixValues(m.base);
             const two = axes.length === 2;
             return {
               kind: 'matrix' as const,
@@ -608,7 +628,7 @@ function readRates(raw: unknown[], allowed: Set<string>, what: string): Record<s
 function readCells(raw: unknown, base: Extract<PriceModel['base'], { kind: 'matrix' }>): Record<string, Money> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) reject('ตารางราคาตั้ง: รูปแบบไม่ถูกต้อง');
   if (base.axes.length !== 2) reject('ตารางราคาตั้งของรุ่นนี้มีมากกว่าสองแกน — แก้ผ่านแม่แบบ Excel');
-  const [rows, cols] = matrixValues(base.cells, 2) as [string[], string[]];
+  const [rows, cols] = matrixValues(base) as [string[], string[]];
   const grid = new Set(rows.flatMap((r) => cols.map((c) => r + SEP + c)));
   const edits = raw as Record<string, unknown>;
   for (const k of Object.keys(edits)) {
@@ -642,7 +662,7 @@ function readLayout(raw: unknown, current: PriceModel): SheetLayout | undefined 
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) reject('หน้าตาของชีต: รูปแบบไม่ถูกต้อง');
   if (current.base.kind !== 'matrix' || current.base.axes.length !== 2) reject('หน้าตาของชีตใช้ได้กับตารางสองแกนเท่านั้น');
   const base = current.base as Extract<PriceModel['base'], { kind: 'matrix' }>;
-  const [rows, cols] = matrixValues(base.cells, 2) as [string[], string[]];
+  const [rows, cols] = matrixValues(base) as [string[], string[]];
   const o = raw as Record<string, unknown>;
   const texts = (v: unknown, keys: string[], what: string): Record<string, string> => {
     const m = (v ?? {}) as Record<string, unknown>;
@@ -733,7 +753,7 @@ export function applyModelEdit(current: PriceModel, body: unknown, book?: PriceB
   }
   if (b.cells !== undefined) {
     if (current.base.kind !== 'matrix') reject('รุ่นนี้ไม่ได้ใช้ตารางราคาแบบสองแกน');
-    else base = { ...current.base, cells: readCells(b.cells, current.base) };
+    else base = pruneUnpriced({ ...current.base, cells: readCells(b.cells, current.base) });
   }
 
   // สวิตช์ของข้อจำกัดเป็นสิ่งเดียวที่แก้ได้ — ข้อความและเงื่อนไขมาจากเล่มปัจจุบันเสมอ
@@ -762,7 +782,7 @@ export function applyModelEdit(current: PriceModel, body: unknown, book?: PriceB
       if (!sent || typeof sent !== 'object' || Array.isArray(sent)) reject(`ค่าเริ่มต้นของ ${axis}: รูปแบบไม่ถูกต้อง`);
       const opts = new Set(defaultOptions(book, current, axis));
       const byValues = current.base.kind === 'matrix' && current.base.axes[0] === d.by
-        ? matrixValues(current.base.cells, current.base.axes.length)[0]!
+        ? matrixValues(current.base)[0]!
         : Object.keys(d.values);
       const m = sent as Record<string, unknown>;
       for (const k of Object.keys(m)) if (!byValues.includes(k)) reject(`ค่าเริ่มต้นของ ${axis}: ไม่มี "${k}" ในตาราง`);

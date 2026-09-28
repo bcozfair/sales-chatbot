@@ -111,6 +111,18 @@ function checkBase(b: unknown, out: Problems): void {
   if (b.kind === 'matrix') {
     out.strArr(b, 'axes', 'base', true);
     out.numMap(b, 'cells', 'base', true);
+    // ค่าที่ตั้งไว้แต่ยังไม่มีราคา — แกนต้องมีจริง และใช้ได้กับตารางสองแกนเท่านั้น (แม่แบบ Excel วางได้แค่นั้น)
+    if (b.unpriced !== undefined) {
+      const axes = isStrArr(b.axes) ? b.axes : [];
+      if (!isObj(b.unpriced)) out.add('base.unpriced', 'ต้องเป็น { แกน: [ค่า] }');
+      else if (axes.length !== 2) out.add('base.unpriced', 'ใช้ได้กับตารางสองแกนเท่านั้น');
+      else {
+        for (const [a, vals] of Object.entries(b.unpriced)) {
+          if (!axes.includes(a)) out.add(`base.unpriced.${a}`, 'ไม่มีแกนนี้ในตาราง');
+          else if (!isStrArr(vals) || vals.some((v) => v.trim() === '')) out.add(`base.unpriced.${a}`, 'ต้องเป็นรายการข้อความที่ไม่ว่าง');
+        }
+      }
+    }
   } else if (b.kind === 'banded') {
     out.str(b, 'quantity', 'base', true);
     if (!Array.isArray(b.bands)) { out.add('base.bands', 'ต้องเป็นรายการ'); return; }

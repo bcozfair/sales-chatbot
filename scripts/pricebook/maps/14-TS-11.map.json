@@ -3,7 +3,7 @@
   "sheet": "TS-11",
   "code": "TSK-11",
   "label": "Thermocouple / RTD TS-11 (ไม่มีเกลียว)",
-  "aliases": ["TSJ-11", "TST-11", "TSP-11", "TSPA-11", "TSZ-11"],
+  "aliases": ["TSJ-11", "TST-11", "TSN-11", "TSP-11", "TSPA-11", "TSZ-11"],
   "standard": { "L1": 100, "cable_m": 1 },
   "base": {
     "kind": "matrix",
