@@ -25,7 +25,7 @@ export const PRICE_MODEL_SCHEMA_VERSION = 1;
 const BASE_KINDS = ['matrix', 'banded', 'ref'];
 const ADDER_KINDS = ['flat', 'percent', 'perUnit'];
 const LEVELS = ['block', 'quoteOnRequest', 'warn'];
-const FORMULAS = ['sum', 'cylinderAreaIn2'];
+const FORMULAS = ['sum', 'cylinderAreaIn2', 'rectAreaIn2', 'circleAreaIn2', 'ringAreaIn2'];
 const ROUNDS = ['ceil', 'floor', 'exact'];
 
 type Obj = Record<string, unknown>;
@@ -172,6 +172,7 @@ function checkDerived(d: unknown, path: string, out: Problems): void {
   out.strArr(d, 'args', path, true);
   out.numMap(d, 'consts', path);
   out.oneOf(d, 'round', ROUNDS, path);
+  if (d.when !== undefined) checkPredicate(d.when, `${path}.when`, out);
 }
 
 function checkVariant(v: unknown, out: Problems): void {

@@ -41,6 +41,12 @@ import type {
 import { SUBCODE_PREFIX, matchedSubCodes } from './subcodes.js';
 import { axisLabel, dimLabel, optionLabel } from './labels.js';
 
+/**
+ * ชื่อ option ที่ engine ใส่ให้เองเมื่อใบนี้ใช้ตัวเลือกท้ายเลขรุ่น (`variant:C`) — ใช้ในเงื่อนไขของข้อห้าม/กฎได้
+ * ไม่มีใครพิมพ์มันในรหัส ⇒ ตัวอ่านรหัสไม่ต้องรู้จัก
+ */
+export const VARIANT_OPTION_PREFIX = 'variant:';
+
 /** ปัดเป็นสตางค์ — ตัวเลขในไฟล์ Excel มี float noise จริง 182 เซลล์ (วัด 2026-09-17) */
 function money(n: number): Money {
   return Math.round(n * 100) / 100;
@@ -142,18 +148,29 @@ function computeDerived(d: DerivedDim, dims: Record<string, number>): { value: n
   if (d.formula === 'sum') {
     raw = args.reduce((s, v) => s + v, 0);
     text = d.args.map((a, i) => `${dimLabel(a)} ${fmt(args[i]!)}`).join(' + ');
-  } else if (d.formula === 'cylinderAreaIn2') {
-    // พื้นที่ผิวทรงกระบอกเป็น "ตารางนิ้ว" — สูตรในชีต BH เขียนไว้ตรง ๆ ว่า
-    //   600 x 3.14 x 150 / 645 = 438.14 ปัดเป็น 439
-    // π และตัวหาร 645 (mm² ต่อ 1 in²) อยู่ใน consts ของสมุดราคา ไม่ใช่ในโค้ดนี้
+  } else {
+    // พื้นที่เป็น "ตารางนิ้ว" — π และตัวหาร 645 (mm² ต่อ 1 in²) อยู่ใน consts ของสมุดราคา ไม่ใช่ในโค้ดนี้
     // ⚠️ ชีตใช้ 3.14 ไม่ใช่ Math.PI — ใช้ Math.PI แทนได้ผลต่างในหลักทศนิยม
     //    ซึ่งพอปัดขึ้นแล้วอาจข้ามหลักได้ จึงต้องยึดค่าที่เขาเขียน
     const pi = d.consts?.pi ?? 3.14;
     const per = d.consts?.mm2PerIn2 ?? 645;
-    raw = (args[0]! * pi * args[1]!) / per;
-    text = `${dimLabel(d.args[0]!)} ${fmt(args[0]!)} × ${pi} × ${dimLabel(d.args[1]!)} ${fmt(args[1]!)} ÷ ${per}`;
-  } else {
-    return undefined;
+    const a = (i: number) => `${dimLabel(d.args[i]!)} ${fmt(args[i]!)}`;
+    if (d.formula === 'cylinderAreaIn2') {
+      // ฮีตเตอร์รัดท่อ — สูตรในชีต BH เขียนไว้ตรง ๆ ว่า 600 x 3.14 x 150 / 645 = 438.14 ปัดเป็น 439
+      raw = (args[0]! * pi * args[1]!) / per;
+      text = `${a(0)} × ${pi} × ${a(1)} ÷ ${per}`;
+    } else if (d.formula === 'rectAreaIn2') {
+      raw = (args[0]! * args[1]!) / per;
+      text = `${a(0)} × ${a(1)} ÷ ${per}`;
+    } else if (d.formula === 'circleAreaIn2') {
+      raw = (pi * args[0]! * args[0]!) / 4 / per;
+      text = `${pi} × ${a(0)}² ÷ 4 ÷ ${per}`;
+    } else if (d.formula === 'ringAreaIn2') {
+      raw = (pi * (args[0]! * args[0]! - args[1]! * args[1]!)) / 4 / per;
+      text = `${pi} × (${a(0)}² − ${a(1)}²) ÷ 4 ÷ ${per}`;
+    } else {
+      return undefined;
+    }
   }
   const value = applyRound(raw, d.round ?? 'exact');
   text += ` = ${fmt(raw)}`;
@@ -535,13 +552,22 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
   // standard คือสเปกที่รวมอยู่ในราคาตั้งแล้ว ⇒ เป็นค่าตั้งต้นของทุก dim ที่ผู้ใช้ไม่ได้ระบุ
   const dims: Record<string, number> = { ...model.standard, ...(cfg.dims ?? {}) };
   const options = new Set(cfg.options ?? []);
+  // ตัวเลือกท้ายเลขรุ่นที่ใช้จริง ให้เงื่อนไขอ่านได้ — ขนาดเล็กสุดของแคตตาล็อกต่างกันระหว่าง BH-01 (ID 25) กับ BH-01C (ID 60)
+  // ทั้งที่อยู่ในรุ่นเดียวกันของสมุด (เจ้าของเคาะ 2026-09-28) ⇒ ข้อห้ามต้องแยกได้ว่าใบนี้เป็นตัวเลือก C หรือไม่
+  if (variant) options.add(VARIANT_OPTION_PREFIX + variant.suffix.toUpperCase());
   // รหัสย่อยที่ "เปิดกฎของรุ่น" (`B` ของ TS_-08 = หัวอลูมิเนียมใหญ่) — ต้องเข้า options ก่อน constraint
   // เพราะกฎห้ามอย่าง "2 element ต้องแกน 6 mm ขึ้นไป" อ่าน option ตัวเดียวกัน · เงินมาจากกฎเดิม ไม่ใช่จากแถวนี้
   for (const sc of subCodes) if (sc.effect === 'option' && sc.value) options.add(sc.value);
 
   // ค่าที่คำนวณจากค่าอื่น ต้องมาก่อน constraint และก่อน adder เพราะทั้งคู่อ่านมันได้
   const derivedText: Record<string, string> = {};
+  /** ค่าที่มีแถวสูตรตรงเงื่อนไขของใบนี้ (แม้ขนาดจะไม่ครบ) — ไว้แยก "สมุดยังไม่มีสูตร" ออกจาก "รหัสไม่บอกขนาด" */
+  const derivedMatched = new Set<string>();
   for (const d of model.derivedDims ?? []) {
+    // แถวที่มีเงื่อนไข (สูตรพื้นที่ตามรูปทรงของ BH-02) — ไม่ตรง = ไม่ใช่สูตรของใบนี้ ข้ามทั้งแถว
+    if (d.when && !evalPredicate(d.when, axes, dims, options)) continue;
+    // แถวไม่มีเงื่อนไขนับว่า "เป็นสูตรของใบนี้" ก็ต่อเมื่อใบนี้มีขนาดที่มันใช้ — สูตรทรงกระบอกของ BH-01 ไม่ใช่สูตรของแผ่น BH-02
+    if (d.when || d.args.every((a) => dims[a] !== undefined)) derivedMatched.add(d.name);
     const v = computeDerived(d, dims);
     if (v === undefined) continue;
     dims[d.name] = v.value;
@@ -644,6 +670,19 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
     // ราคาตั้งหาไม่ได้เพราะรหัสย่อยยังไม่ได้บอกค่าของแกนตาราง — ข้อความ "ยังไม่มีราคา" ข้างบนบอกครบแล้ว
     traceBase.steps.push('ยังหาราคาตั้งไม่ได้ — รอรหัสย่อยกำหนดค่าของแกนในตาราง (ดู "ค่าที่ใช้คิด")');
   } else if (!base.ok) {
+    // ปริมาณที่ตารางช่วงราคาต้องใช้ (พื้นที่) คิดไม่ได้ — สองสาเหตุที่คนละคำตอบกับลูกค้า และ **ไม่ใช่ "ไม่รับผลิต"**:
+    // ไม่มีแถวสูตรที่ตรงกับใบนี้เลย (เช่นรูปทรงที่สมุดยังไม่มีสูตร) = ยังไม่มีราคา · มีสูตรแต่ขนาดไม่ครบ = รหัสบอกไม่ครบ
+    const q = model.base.kind === 'banded' ? model.base.quantity : '';
+    if (q && dims[q] === undefined && (model.derivedDims ?? []).some((d) => d.name === q)) {
+      const shape = axes.shape ? ` (${axisLabel('shape')} ${axes.shape})` : '';
+      if (!derivedMatched.has(q)) {
+        base.noRate = true;
+        base.reason = `สมุดราคายังไม่มีสูตร${dimLabel(q)}ของใบนี้${shape} — ตั้งที่ "ค่าที่ระบบคิดให้เอง" ของรุ่น ${model.code}`;
+      } else {
+        base.missing = true;
+        base.reason = `รหัสไม่ได้บอกขนาดที่ใช้คิด${dimLabel(q)}${shape}`;
+      }
+    }
     traceBase.steps.push(`หาราคาตั้งไม่ได้: ${base.reason ?? 'ไม่มีราคาฐาน'}`);
     violations.push({
       id: 'NO_BASE_PRICE', level: 'block', message: base.reason ?? 'ไม่มีราคาฐาน',

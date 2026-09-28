@@ -35,6 +35,7 @@
 import type { PriceBook, PriceModel, ProductConfig } from './types.js';
 import { resolveModel } from './engine.js';
 import { findSubCode, subCodeOption } from './subcodes.js';
+import { AMP, BH_CATALOG, SHAPE_AXIS, bhSpec, buildBhCode, sameBhCode, type BhFamily, type BhForm, type SizeKey } from './catalogBh.js';
 
 /** หนึ่งรหัสย่อยในรหัสสินค้า พร้อมคำอธิบายว่าระบบอ่านมันว่าอะไร — ใช้โชว์ให้คนตรวจก่อนเชื่อราคา */
 export interface CodePart {
@@ -42,7 +43,12 @@ export interface CodePart {
   text: string;
   /** อ่านได้ว่าอะไร (ภาษาคน) */
   reads: string;
-  kind: 'model' | 'axis' | 'dim' | 'option' | 'noPrice' | 'unknown';
+  /**
+   * `choose` = อ่านออกแล้ว แต่ **รหัสไม่พอให้รู้ราคา** ต้องให้คนเลือกเพิ่ม — ตัวเดียววันนี้คือ `T` ของ BH
+   * (ชีตมีเต๋าสองราคา 10A/30A แต่แคตตาล็อกเขียนแค่ `T` · เจ้าของสั่ง 2026-09-28 "ต้องเลือกได้ทั้ง 2 แบบ")
+   * ยังไม่เลือก = ยังไม่รวมในราคา (แบบเดียวกับ `unknown`) แต่ **ไม่ใช่ของที่ต้องไปตั้งค่าในตารางรหัสย่อย**
+   */
+  kind: 'model' | 'axis' | 'dim' | 'option' | 'noPrice' | 'unknown' | 'choose';
   /** true = ตีความเอาเอง ยังไม่มีใครยืนยัน — หน้าจอต้องแสดงต่างจากของที่ชีตเขียนไว้ตรง ๆ */
   guess?: boolean;
 }
@@ -60,6 +66,16 @@ export interface ParsedCode {
   problems: string[];
   /** อ่านได้แต่ต้องให้คนดูก่อน */
   warnings: string[];
+  /**
+   * ช่องตามแคตตาล็อก "การสั่งซื้อ" — มีเฉพาะรุ่นที่มีแคตตาล็อกแล้ว (วันนี้ BH-01 · BH-01C · BH-02 · BH-03)
+   * หน้าคำนวณราคาใช้วาดช่องกรอก และ `buildBhCode(form)` ต้องได้รหัสเดิมกลับมา (ด่าน `diag:pricing-catalog`)
+   */
+  form?: BhForm;
+}
+
+/** ตัวเลือกที่ **รหัสไม่ได้บอก** แต่คนเลือกมาจากช่องกรอก — วันนี้มีตัวเดียวคือขนาดเต๋า 10A/30A ของ BH */
+export interface CodePicks {
+  amp?: string;
 }
 
 // ── ตัวช่วยเล็ก ๆ ────────────────────────────────────────────────────────────
@@ -247,6 +263,8 @@ function readSensor(c: Ctx, prefix: string, letter: string): void {
 // ── ตัวอ่านของแต่ละตระกูล ────────────────────────────────────────────────────
 
 interface Ctx {
+  /** รหัสหลังเตรียมแล้ว (ช่องว่างระหว่างตัวเลขของ BH = ขีด) — ของที่ช่องกรอกต้องประกอบกลับให้ได้ */
+  input: string;
   book: PriceBook;
   model: PriceModel;
   cfg: ProductConfig;
@@ -576,52 +594,268 @@ function readTs18(c: Ctx, rest: string, prefix: string, letter: string): void {
 }
 
 /**
- * BH — `BH-01C-600x150-380-4950W-PL-PL2` (BH!E19 ตัวอย่างการคิดราคาที่ฝ่ายขายเขียนเอง)
- * `600x150` = เส้นผ่านศูนย์กลาง × ความกว้าง · `380` = แรงดันไฟ (ไม่มีผลกับราคา)
- * · `4950W` = กำลังไฟ (มีผลเฉพาะ BH-03) · `PL2` = Male Connector PL-2
+ * BH — ท่อนเรียงตามแคตตาล็อก "การสั่งซื้อ" (`catalogBh.ts`):
+ *   `BH-01 [ID]x[H]-[V]-[W]W-[ขั้วไฟ]-[วัสดุ]` · `BH-01C-[ID]x[H]-[V]-[W]W-[การต่อ]-[ขั้วไฟ]-[วัสดุ]`
+ *   `BH-02[Shape] [Size]-[V]-[W]W-[ขั้วไฟ]-[วัสดุ]` · `BH-03 [ID]x[H]-[V]-[W]W-[ขั้วไฟ]`
+ * ตัวอย่างที่ฝ่ายขายเขียนเองในชีต: `BH-01C-600x150-380-4950W-PL-PL2` (BH!E19)
+ *
+ * ความหมายของตัวอักษรมาจากแคตตาล็อก ส่วน **เงินอยู่ที่กฎของสมุดราคา** ตามเดิม (N → `nut` · PL2 → `conn_pl2` ·
+ * 1/2/3 → ความยาวสาย → `cable_over_30cm`) · ของที่ชีตยังไม่มีราคา (PL5) ถามตารางรหัสย่อย · ท่อนที่ไม่อยู่ใน
+ * แคตตาล็อก (`S000` · `(HPT)` · `2P`) ไปทางเดิมทุกอย่าง (ตารางรหัสย่อย → อ่านไม่ออก) แล้วจำตำแหน่งไว้ใน `form.extras`
  */
-function readBh(c: Ctx, rest: string): void {
-  const core = rest.match(/^-?([0-9.]+)x([0-9.]+)/i);
-  if (core) {
-    c.cfg.dims = { ...c.cfg.dims, dia_mm: Number(core[1]), width_mm: Number(core[2]) };
-    add(c, { text: `${core[1]}x${core[2]}`, reads: `เส้นผ่านศูนย์กลาง ${core[1]} mm × ความกว้าง ${core[2]} mm`, kind: 'dim' });
-    rest = rest.slice(core[0].length);
+function readBh(c: Ctx, num: string, suffix: string, rest: string, picks: CodePicks): BhForm | undefined {
+  const family: BhFamily | undefined =
+    num === '01' ? (suffix === '' ? 'BH-01' : suffix === 'C' ? 'BH-01C' : undefined)
+    : num === '02' ? (suffix in SHAPE_AXIS ? 'BH-02' : undefined)
+    : num === '03' ? (suffix === '' ? 'BH-03' : undefined)
+    : undefined;
+  const spec = family ? bhSpec(family) : undefined;
+  const form: BhForm = { family: family ?? 'BH-01', extras: [] };
+  let last = 'head';
+  let noForm = false;
+  const extra = (text: string, glue = false) => form.extras!.push({ text, after: last, ...(glue ? { glue } : {}) });
+
+  // ── ตัวอักษรท้ายเลขรุ่น ────────────────────────────────────────────────────
+  if (family === 'BH-02') {
+    // BH-02 ใช้ตัวอักษรท้ายเลขรุ่นเป็น "รูปทรง" (Shape ของแคตตาล็อก) · ตัว C ยัง **บวก 20% ตามชีต** ด้วย
+    // (เจ้าของเคาะ 2026-09-28 "BH-02C ให้บวก 20% เหมือนเดิมตาม excel") ⇒ C = วงกลม + ตัวเลือก C ของรุ่น
+    form.shape = suffix;
+    c.cfg.axes = { ...c.cfg.axes, shape: SHAPE_AXIS[suffix]! };
+    const shape = spec!.shapes!.find((x) => x.code === suffix)!;
+    const v = suffix !== '' ? readModelSuffix(c, suffix, true) : undefined;
+    add(c, {
+      text: suffix,
+      reads: `รูปทรง${shape.label}${suffix === '' ? ' (ไม่มีตัวอักษร = None ของแคตตาล็อก)' : ''}${v ? ` · ${v}` : ''}`,
+      kind: 'axis',
+    });
+    if (suffix === 'S') c.warnings.push('Special Shape — แคตตาล็อกไม่มีสูตรพื้นที่ ต้องขอราคาจากฝ่ายผลิต');
   } else {
-    c.warnings.push('อ่านขนาด (กว้าง × ยาว) จากรหัสไม่ได้ — ใส่ขนาดต่อท้ายเลขรุ่นแล้วคิดใหม่ เช่น BH-01-600x150');
+    readModelSuffix(c, suffix);
   }
 
-  for (const token of leftovers(c, rest)) {
-    if (readCableBh(c, token)) continue;
-    if (readCommonToken(c, token)) continue;
+  // ── ขนาด ───────────────────────────────────────────────────────────────────
+  const size = rest.match(/^-?([0-9.]+)(?:x([0-9.]+))?(?:x([0-9.]+))?/i);
+  if (family === 'BH-02') {
+    const want: SizeKey[] = spec!.shapes!.find((x) => x.code === suffix)!.dims;
+    const got = size ? [size[1], size[2], size[3]].filter((x): x is string => x !== undefined) : [];
+    const dimKey: Record<SizeKey, string> = { id: 'dia_mm', h: 'width_mm', w: 'w_mm', l: 'l_mm', d1: 'd1_mm', d2: 'd2_mm' };
+    const text = size ? size[0].replace(/^-/, '') : '';
+    if (size && got.length === want.length) {
+      want.forEach((k, i) => {
+        form[k] = Number(got[i]);
+        c.cfg.dims = { ...c.cfg.dims, [dimKey[k]]: Number(got[i]) };
+      });
+      add(c, { text, reads: want.map((k, i) => `${spec!.slots[k]!.label} ${got[i]} mm`).join(' × '), kind: 'dim' });
+    } else if (size) {
+      form.sizeText = text;
+      add(c, {
+        text,
+        reads: `ขนาดไม่ตรงแคตตาล็อกของรูปทรงนี้ (ต้องเป็น ${want.map((k) => spec!.slots[k]!.label).join(' × ')}) — ยังคิดพื้นที่ไม่ได้`,
+        kind: 'unknown',
+      });
+    } else {
+      c.warnings.push(`อ่านขนาดจากรหัสไม่ได้ — ใส่ขนาดต่อท้ายเลขรุ่น เช่น BH-02 120x345`);
+    }
+    if (size) rest = rest.slice(size[0].length);
+  } else if (size && size[2] !== undefined && size[3] === undefined) {
+    c.cfg.dims = { ...c.cfg.dims, dia_mm: Number(size[1]), width_mm: Number(size[2]) };
+    form.id = Number(size[1]);
+    form.h = Number(size[2]);
+    add(c, { text: `${size[1]}x${size[2]}`, reads: `เส้นผ่านศูนย์กลาง (ID) ${size[1]} mm × ความสูง (H) ${size[2]} mm`, kind: 'dim' });
+    rest = rest.slice(size[0].length);
+  } else {
+    c.warnings.push('อ่านขนาด (ID × H) จากรหัสไม่ได้ — ใส่ขนาดต่อท้ายเลขรุ่นแล้วคิดใหม่ เช่น BH-01 600x150');
+    noForm = true; // ไม่มีขนาด = ประกอบรหัสกลับไม่ได้ ⇒ ไม่มีช่องให้กรอก (ท่อนอื่นยังอ่านต่อตามเดิม)
+  }
+  last = 'size';
 
-    const watt = token.match(/^(\d+(?:\.\d+)?)W(x\d+)?$/i);
-    if (watt) {
+  // ── ท่อนที่เหลือ ───────────────────────────────────────────────────────────
+  const strip = num === '01' || num === '02';           // BH-01 · BH-01C · BH-02 ใช้รายการขั้วไฟชุดเดียวกัน
+  const hasMat = strip;
+  const hasConn = num === '01' && suffix === 'C';
+  const termCodes = new Set((num === '03' ? BH_CATALOG[3]! : BH_CATALOG[0]!).slots.term!.options!.map((o) => o.code).filter(Boolean));
+
+  // ท่อนแรกที่ไม่มีขีดนำหน้า (`216x200+160`) ติดกับขนาด — ต้องจำไว้ ไม่งั้นประกอบกลับแล้วได้ขีดเกินมา
+  const firstGlued = rest !== '' && !rest.startsWith('-');
+  leftovers(c, rest).forEach((raw, i) => {
+    // สิ่งที่ติดท้ายท่อนโดยไม่มีขีด (`T(HPT)` · `240W+1.5M`) — ตัวท่อนอ่านตามแคตตาล็อก ส่วนที่ติดท้ายเป็นท่อนนอกแคตตาล็อก
+    const pieces = raw.match(/\([^)]*\)|\+[^(+]*|[^(+]+/g) ?? [raw];
+    const core = /^[(+]/.test(pieces[0]!) ? '' : pieces.shift()!;
+    if (core !== '') {
+      if (i === 0 && firstGlued) readOther(core, true);
+      else readBhToken(core);
+    }
+    pieces.forEach((p, j) => readOther(p, core !== '' || j > 0 || (i === 0 && firstGlued)));
+  });
+
+  // BH-03: ไม่ระบุการออกขั้วไฟ = "ออกน็อต + ฝาครอบ" (มาตรฐานของแคตตาล็อก) และ **คิดเพิ่มตามปกติ**
+  // (เจ้าของตอบ 2026-09-28: "มาตรฐานคือออกน็อต + ฝาครอบ ใช่ครับ แต่คิดเพิ่มปกติครับ") ⇒ เปิดกฎ `nut` ของรุ่น
+  if (num === '03' && form.term === undefined && c.model.adders.some((a) => a.when && 'option' in a.when && a.when.option === 'nut')) {
+    c.cfg.options = [...(c.cfg.options ?? []), 'nut'];
+    add(c, { text: '', reads: 'การออกขั้วไฟไม่ระบุ = ออกน็อต + ฝาครอบ (มาตรฐานของ BH-03) — คิดค่าออกน็อตตามปกติ', kind: 'option' });
+  }
+
+  // ช่องกรอกต้องประกอบกลับเป็นรหัสเดิมเป๊ะ — ไม่งั้นแก้ช่องเดียวแล้วรหัสส่วนอื่นเปลี่ยนตามเงียบ ๆ
+  // (รหัสที่เขียนนอกรูปแบบ เช่น `BH-02-S` · ไม่มีหน่วย W · `220x800W`) ⇒ ไม่มีช่อง หน้าจอแสดงแบบอ่านทีละท่อนเหมือนเดิม
+  if (!spec || noForm || (form.watt === undefined && form.wattText === undefined)) return undefined;
+  return sameBhCode(buildBhCode(form), c.input) ? form : undefined;
+
+  function readBhToken(token: string): void {
+    const T = token.toUpperCase();
+    // `220V` · `230/400` ก็เป็นแรงดัน (รหัสจริงเขียนแบบนี้หลายสิบตัว) — เก็บตามที่พิมพ์ ประกอบกลับได้เหมือนเดิม
+    if (form.volt === undefined && form.watt === undefined && /^\d{2,3}(?:\/\d{2,3})?V?$/.test(T)) {
+      form.volt = token;
+      last = 'volt';
+      add(c, { text: token, reads: `แรงดันไฟ ${token} V — ชีตไม่ได้คิดราคาตามแรงดัน`, kind: 'noPrice' });
+      return;
+    }
+    const watt = T.match(/^(\d+(?:\.\d+)?)W(.*)$/);
+    if (form.watt === undefined && form.wattText === undefined && watt) {
+      last = 'watt';
       const hasWatt = c.model.standard.watt !== undefined;
-      if (hasWatt && !watt[2]) {
+      if (watt[2]) {
+        form.wattText = token;
+        // `800Wx2` ของรุ่นที่ชีตไม่คิดตามกำลังไฟ = ไม่มีผลกับราคา (เหมือนก่อนมีแคตตาล็อก) · `500Wx2P` · `900W,1300W` = อ่านไม่ออก
+        const noWattPrice = !hasWatt && /^X\d+$/.test(watt[2]);
+        add(c, {
+          text: token,
+          reads: noWattPrice
+            ? `กำลังไฟ ${watt[1]} W คูณ ${watt[2].slice(1)} — รุ่นนี้ชีตไม่ได้คิดราคาตามกำลังไฟ`
+            : `กำลังไฟ ${watt[1]} W ตามด้วย "${token.slice(watt[1]!.length + 1)}" — ยังไม่รู้ว่าคิดราคายังไง`,
+          kind: noWattPrice ? 'noPrice' : 'unknown',
+        });
+        return;
+      }
+      form.watt = Number(watt[1]);
+      if (hasWatt) {
         c.cfg.dims = { ...c.cfg.dims, watt: Number(watt[1]) };
         add(c, { text: token, reads: `กำลังไฟ ${watt[1]} W`, kind: 'dim' });
-      } else if (hasWatt) {
-        add(c, { text: token, reads: `กำลังไฟ ${watt[1]} W คูณ ${watt[2]} — ยังไม่รู้ว่าคิดราคายังไง`, kind: 'unknown' });
       } else {
         add(c, { text: token, reads: `กำลังไฟ ${watt[1]} W — รุ่นนี้ชีตไม่ได้คิดราคาตามกำลังไฟ`, kind: 'noPrice' });
       }
-      continue;
+      return;
     }
-
-    if (/^\d{2,3}$/.test(token)) {
+    if (hasConn && form.conn === undefined && form.term === undefined && (T === 'SE' || T === 'PL')) {
+      form.conn = T;
+      last = 'conn';
+      add(c, { text: token, reads: `การต่อใช้งานแบบ${T === 'SE' ? 'อนุกรม' : 'ขนาน'} — ไม่มีผลกับราคา`, kind: 'noPrice' });
+      return;
+    }
+    if (form.term === undefined && form.mat === undefined && termCodes.has(T) && (strip || !/^[123]$/.test(T))) {
+      form.term = T;
+      last = 'term';
+      readTerm(T);
+      return;
+    }
+    if (hasMat && form.mat === undefined && T === 'Z') {
+      form.mat = 'Z';
+      last = 'mat';
+      add(c, { text: token, reads: 'วัสดุ Zinc — ชีตคิดราคาเดียวกับสแตนเลส ("สแตนเลส+Zinc")', kind: 'noPrice' });
+      return;
+    }
+    // ตัวเลข 2–3 หลักนอกตำแหน่งแรงดัน (`-210-420-` · `-400W-50`) — ก่อนมีแคตตาล็อกอ่านเป็นแรงดัน "ไม่มีผลกับราคา"
+    // ⇒ คงไว้แบบเดิม (ไม่ทำให้รหัสที่เคยคิดครบกลายเป็นไม่ครบ) แต่ไม่ใช่ท่อนของแคตตาล็อก จึงเก็บเป็นท่อนนอกแคตตาล็อก
+    if (/^\d{2,3}$/.test(T)) {
+      extra(token);
       add(c, { text: token, reads: `แรงดันไฟ ${token} V — ชีตไม่ได้คิดราคาตามแรงดัน`, kind: 'noPrice' });
-      continue;
+      return;
     }
-    if (readFromTable(c, token)) continue;
+    readOther(token, false);
+  }
+
+  /** ท่อนนอกแคตตาล็อก — ทางเดิมทุกอย่าง (สาย `+1M`/`50CM` · PL2 · ตารางรหัสย่อย · อ่านไม่ออก) แล้วจำตำแหน่งไว้ */
+  function readOther(token: string, glue: boolean): void {
+    extra(token, glue);
+    if (token.startsWith('(')) {
+      if (!readFromTable(c, token.slice(1, -1), token)) add(c, { text: token, reads: 'ยังไม่ได้ตั้งค่าว่าแปลว่าอะไร', kind: 'unknown' });
+      return;
+    }
+    if (readCableBh(c, token)) return;
+    if (readCommonToken(c, token)) return;
+    if (readFromTable(c, token)) return;
     // หลายช่องติดกันไม่มีตัวคั่น (`BU` = หัว B + Ground U ของ TS_-08) — ครบทุกตัวอักษรถึงจะใช้
     const split = splitKnown(c, token);
     if (split.pieces.length > 1 && !split.rest) {
       for (const p of split.pieces) readFromTable(c, p);
-      continue;
+      return;
     }
-
     add(c, { text: token, reads: 'ยังไม่ได้ตั้งค่าว่าแปลว่าอะไร', kind: 'unknown' });
   }
+
+  function readTerm(T: string): void {
+    if (/^[123]$/.test(T)) {
+      // "1 = สายยาว 1 M." ของแคตตาล็อก ⇒ ความยาวสายเข้ากฎ "สายยาวเกิน 30 CM" ของชีตตามเดิม
+      const cm = Number(T) * 100;
+      c.cfg.dims = { ...c.cfg.dims, cable_cm: cm };
+      add(c, { text: T, reads: `ออกสายยาว ${T} M (มาตรฐาน ${c.model.standard.cable_cm ?? '—'} CM)`, kind: 'dim' });
+      return;
+    }
+    if (T === 'N') {
+      c.cfg.options = [...(c.cfg.options ?? []), 'nut'];
+      add(c, { text: T, reads: 'ออกน็อต', kind: 'option' });
+      return;
+    }
+    if (T === 'PL2') {
+      if (!readCommonToken(c, T)) add(c, { text: T, reads: `ปลั๊ก PL-2 — ${c.model.sheet ?? c.model.code} ไม่มีราคาปลั๊ก PL-2`, kind: 'unknown' });
+      return;
+    }
+    if (T === 'PL5') {
+      // ชีตยังไม่มีราคาปลั๊ก PL-5 — ราคารออยู่ที่ตารางรหัสย่อย (แถวค่าว่าง = "ยังไม่มีราคา") · option ไว้ให้ข้อห้ามความสูงอ่าน
+      c.cfg.options = [...(c.cfg.options ?? []), 'conn:pl5'];
+      if (!readFromTable(c, T)) {
+        add(c, { text: T, reads: 'ปลั๊ก PL-5 — ชีตยังไม่มีราคา และยังไม่ได้ตั้งในตารางรหัสย่อย', kind: 'unknown' });
+      }
+      return;
+    }
+    // T = เต๋าเซรามิก — ชีตมีสองราคา (ตัวเล็ก 10A · 30A) แต่รหัสไม่ได้บอก ⇒ ต้องให้คนเลือก ห้ามเดา
+    const amp = AMP.find((a) => a.code === picks.amp?.toUpperCase());
+    if (amp) {
+      form.amp = amp.code;
+      c.cfg.options = [...(c.cfg.options ?? []), `term:${amp.code.toLowerCase()}`];
+      add(c, { text: T, reads: `เต๋าเซรามิก ${amp.label} (เลือกในช่องขนาดเต๋า — รหัสไม่ได้บอก)`, kind: 'option' });
+    } else {
+      add(c, { text: T, reads: 'เต๋าเซรามิก — ชีตมีสองราคา (10A · 30A) แต่รหัสไม่ได้บอก ต้องเลือกขนาดเต๋าก่อน ยังไม่รวมในราคา', kind: 'choose' });
+    }
+  }
+}
+
+/**
+ * ตัวอักษรท้ายเลขรุ่น สามทางที่ต่างกันคนละเรื่อง:
+ *   1. อยู่ในชื่อรุ่นอยู่แล้ว (`TS-01-0`)            ⇒ ไม่ต้องพูดถึง
+ *   2. เป็น "ตัวเลือกของรุ่นหลัก" ที่ตั้งราคาไว้แล้ว  ⇒ เปิดใช้แล้วบอกว่าคิดเพิ่มยังไง
+ *   3. ไม่มีใครตั้งค่าให้                            ⇒ **ห้ามกลืนทิ้ง**
+ * ข้อ 3 เคยกลืนข้อ 2 ไปด้วย: `BH-02C`/`BH-03C` (12 รหัสที่ขายจริง) ตกไปคิดเป็นรุ่นฐาน
+ * เปล่า ๆ ไม่บวก 20% แล้วคืนราคาหน้าตาปกติออกมา ไม่มีอะไรฟ้อง (เจอ 2026-09-22)
+ * ส่วนข้อ 3 ของจริงยังมีอยู่: `11P` 1,465 รหัส · `11L` 211 · `11LP` 112
+ *
+ * `quiet` = คืนคำอธิบายของข้อ 2 ให้ผู้เรียกรวมเข้าท่อนของตัวเอง แทนการเพิ่มท่อนใหม่ (C ของ BH-02 คือทั้ง
+ * รูปทรงและตัวเลือก — ขึ้นสองท่อนชื่อ C ซ้ำกันคนอ่านจะงง)
+ */
+function readModelSuffix(c: Ctx, suffix: string, quiet = false): string | undefined {
+  const model = c.model;
+  const variant =
+    suffix !== '' && model.variant && !model.variant.disabled &&
+    suffix === model.variant.suffix.toUpperCase()
+      ? model.variant
+      : undefined;
+  if (variant) {
+    c.cfg.variant = variant.suffix;
+    const pct = variant.percent ?? 0;
+    const extra = Object.keys(variant.adderPrices ?? {}).length;
+    const reads =
+      `${variant.label} — ` +
+      (pct ? `บวกเพิ่มจากราคาตั้งอีก ${pct}%` : 'ไม่บวกเพิ่มจากราคาตั้ง') +
+      (extra ? ` · ของแถม ${extra} รายการคิดคนละราคากับรุ่นปกติ` : '');
+    if (quiet) return reads;
+    add(c, { text: suffix, reads, kind: 'model' });
+  } else if (suffix !== '' && !model.code.toUpperCase().endsWith(suffix) && !quiet) {
+    add(c, {
+      text: suffix,
+      reads: `ตัวอักษรท้ายเลขรุ่น — สมุดราคามีแต่ตารางของ ${model.code} ยังไม่ได้ตั้งค่าว่า ${suffix} ต่างจากรุ่นฐานยังไง`,
+      kind: 'unknown'
+    });
+  }
+  return undefined;
 }
 
 /** สายของ BH นับเป็นเซนติเมตร (มาตรฐาน 30 CM ตาม BH!A19) */
@@ -720,8 +954,11 @@ export function modelOfCode(input: string, book: PriceBook): PriceModel | undefi
   return h ? findModel(book, h.prefix, h.num, h.suffix) : undefined;
 }
 
-export function parseProductCode(input: string, book: PriceBook): ParsedCode {
-  const normalized = norm(input);
+export function parseProductCode(input: string, book: PriceBook, picks: CodePicks = {}): ParsedCode {
+  // BH: ช่องว่างระหว่างตัวเลขสองตัวคือตัวคั่นท่อน (`BH-01 101x150 220-2000W`) — `norm` ลบช่องว่างทิ้งหมด
+  // ทำให้ขนาดกับแรงดันติดกันเป็น "101x150220" แล้วได้ราคาของความสูง 150,220 mm เงียบ ๆ (เจอ 2026-09-28 · 23 รหัสจริง)
+  const prepared = /^\s*BH/i.test(input) ? input.replace(/(\d)\s+(?=\d)/g, '$1-') : input;
+  const normalized = norm(prepared);
   const out: ParsedCode = { input, normalized, parts: [], problems: [], warnings: [] };
   if (normalized === '') {
     out.problems.push('ยังไม่ได้พิมพ์รหัส');
@@ -757,49 +994,18 @@ export function parseProductCode(input: string, book: PriceBook): ParsedCode {
   }
 
   out.model = model.code;
-  const c: Ctx = { book, model, cfg: { model: model.code }, parts: [], warnings: out.warnings };
+  const c: Ctx = { input: prepared, book, model, cfg: { model: model.code }, parts: [], warnings: out.warnings };
   add(c, { text: normalized.slice(0, head.text.length), reads: `รุ่น ${model.code} — ${model.label}`, kind: 'model' });
-
-  // ตัวอักษรท้ายเลขรุ่น สามทางที่ต่างกันคนละเรื่อง:
-  //   1. อยู่ในชื่อรุ่นอยู่แล้ว (`TS-01-0`)            ⇒ ไม่ต้องพูดถึง
-  //   2. เป็น "ตัวเลือกของรุ่นหลัก" ที่ตั้งราคาไว้แล้ว  ⇒ เปิดใช้แล้วบอกว่าคิดเพิ่มยังไง
-  //   3. ไม่มีใครตั้งค่าให้                            ⇒ **ห้ามกลืนทิ้ง**
-  // ข้อ 3 เคยกลืนข้อ 2 ไปด้วย: `BH-02C`/`BH-03C` (12 รหัสที่ขายจริง) ตกไปคิดเป็นรุ่นฐาน
-  // เปล่า ๆ ไม่บวก 20% แล้วคืนราคาหน้าตาปกติออกมา ไม่มีอะไรฟ้อง (เจอ 2026-09-22)
-  // ส่วนข้อ 3 ของจริงยังมีอยู่: `11P` 1,465 รหัส · `11L` 211 · `11LP` 112
-  const variant =
-    suffix !== '' && model.variant && !model.variant.disabled &&
-    suffix === model.variant.suffix.toUpperCase()
-      ? model.variant
-      : undefined;
-  if (variant) {
-    c.cfg.variant = variant.suffix;
-    const pct = variant.percent ?? 0;
-    const extra = Object.keys(variant.adderPrices ?? {}).length;
-    add(c, {
-      text: suffix,
-      reads:
-        `${variant.label} — ` +
-        (pct ? `บวกเพิ่มจากราคาตั้งอีก ${pct}%` : 'ไม่บวกเพิ่มจากราคาตั้ง') +
-        (extra ? ` · ของแถม ${extra} รายการคิดคนละราคากับรุ่นปกติ` : ''),
-      kind: 'model'
-    });
-  } else if (suffix !== '' && !model.code.toUpperCase().endsWith(suffix)) {
-    add(c, {
-      text: suffix,
-      reads: `ตัวอักษรท้ายเลขรุ่น — สมุดราคามีแต่ตารางของ ${model.code} ยังไม่ได้ตั้งค่าว่า ${suffix} ต่างจากรุ่นฐานยังไง`,
-      kind: 'unknown'
-    });
-  }
 
   const rest = normalized.slice(head.text.length);
   // ตัวอักษรตัวแรกหลัง TS บอกชนิดหัววัด (TSK → K) · BH ไม่มีชนิดหัววัด
   const letter = prefix.startsWith('TS') ? prefix.slice(2, 3) : '';
 
-  if (prefix === 'BH') readBh(c, rest);
-  else if (model.code === 'TS-14') readTs14(c, rest, prefix, letter);
-  else if (model.code === 'TS-18') readTs18(c, rest, prefix, letter);
+  if (prefix === 'BH') out.form = readBh(c, num, suffix, rest, picks);
+  else if (model.code === 'TS-14') { readModelSuffix(c, suffix); readTs14(c, rest, prefix, letter); }
+  else if (model.code === 'TS-18') { readModelSuffix(c, suffix); readTs18(c, rest, prefix, letter); }
   else {
+    readModelSuffix(c, suffix);
     readTsGeneric(c, rest, prefix);
     // หัววัดอ่านหลังส่วนขนาด เพราะบางชีตคิดมันเป็น "คอลัมน์ของตารางราคาตั้ง" (ต้องรู้แกนอื่นก่อน)
     // และบางชีตคิดเป็น "กฎบวกเพิ่ม" — `readSensor` ดูจากสมุดราคาเองว่าเป็นแบบไหน
@@ -814,4 +1020,9 @@ export function parseProductCode(input: string, book: PriceBook): ParsedCode {
 /** จำนวนรหัสย่อยที่อ่านไม่ออก — หน้าจอใช้ตัดสินว่าจะขึ้นธงเตือนไหม */
 export function unknownParts(p: ParsedCode): CodePart[] {
   return p.parts.filter((x) => x.kind === 'unknown');
+}
+
+/** ท่อนที่ **ยังไม่ได้รวมในราคา** — อ่านไม่ออก หรืออ่านออกแต่ต้องให้คนเลือกเพิ่ม (`choose`) */
+export function notInPriceParts(p: ParsedCode): CodePart[] {
+  return p.parts.filter((x) => x.kind === 'unknown' || x.kind === 'choose');
 }

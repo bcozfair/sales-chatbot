@@ -810,11 +810,13 @@ export const ModelPriceEditor: React.FC<{
           hint="อ่านอย่างเดียว — สูตรพวกนี้พังแล้วทั้งรุ่นคิดราคาไม่ออก จึงไม่เปิดให้แก้จากจอ"
         >
           <div className="px-4 py-3 space-y-1.5">
-            {orig.derived.map((d) => (
-              <div key={d.name} className="flex gap-2 text-[12.5px] text-slate-600">
+            {orig.derived.map((d, i) => (
+              // ชื่อค่าซ้ำกันได้ (สูตรพื้นที่ของ BH-02 หลายแถว เลือกตามรูปทรง) ⇒ key ต้องมีลำดับด้วย
+              <div key={`${d.name}-${i}`} className="flex gap-2 text-[12.5px] text-slate-600">
                 <Calculator className="h-4 w-4 shrink-0 mt-px text-slate-400" />
-                <span><b className="text-slate-800">{d.label}</b> — คิดจาก {d.argsTh}
+                <span><b className="text-slate-800">{d.label}</b> — {d.formulaTh} จาก {d.argsTh}
                   {d.consts && <span className="text-slate-400"> (ค่าคงที่ {d.consts})</span>}
+                  {d.whenTh && <span className="block text-[11.5px] text-slate-500">ใช้เมื่อ {d.whenTh}</span>}
                 </span>
               </div>
             ))}

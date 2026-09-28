@@ -11,6 +11,7 @@
 //    … --data <dir> --new-rules [--apply --by <username>]                        เติม "กฎบวกเพิ่มที่แมปเพิ่งมี" ลงเล่มปัจจุบัน ไม่แก้กฎ/ราคาเดิมสักช่อง
 //    … --data <dir> --rounding [--apply --by <username>]                         ปรับ "วิธีปัดเศษ" ของกฎเดิมให้ตรงแมป ไม่แตะตัวเลขราคาสักช่อง
 //    … --data <dir> --aliases  [--apply --by <username>]                         ปรับ "รายชื่อรหัสที่ใช้ตารางเดียวกัน" ให้ตรงแมป ไม่แตะตัวเลขราคาสักช่อง
+//    … --data <dir> --catalog  [--apply --by <username>]                         ปรับ "สูตรที่ระบบคิดเอง + ข้อห้าม" ให้ตรงแมป (แคตตาล็อก BH) ไม่แตะตัวเลขราคาสักช่อง
 //    … --data <dir> --out <ไฟล์.json>                                           เขียนเป็นไฟล์ (ไม่แตะฐาน)
 //
 //  **`--data` ไม่มีค่าเริ่มต้นโดยตั้งใจ** — ยุคไฟล์ตั้งต้นที่ `data/` ซึ่งถูกเสิร์ฟออกเว็บโดยไม่ตรวจสิทธิ์
@@ -41,6 +42,7 @@ import { readBookState } from '../../services/pricingLab/bookStore.js';
 import { BookConflict, BookRejected, commitBookChange, seedBook } from '../../services/pricingLab/bookUpdate.js';
 import { pruneUnpriced } from '../../services/pricingLab/modelEditor.js';
 import type { SourceFile } from '../../db/pricingBookRepo.js';
+import { catalogRulesChanges } from './catalogRules.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -849,6 +851,47 @@ async function applyAliases(fromFile: PriceBook, opts: { apply: boolean; by: str
   return 0;
 }
 
+/**
+ * `--catalog` — ปรับ **สูตรที่ระบบคิดเอง** (`derivedDims`) และ **ข้อห้าม** (`constraints`) ของรุ่นในฐานให้ตรงแมป
+ * ราคาตั้ง · กฎบวกเพิ่ม · อัตรา · ตัวเลือก C คงเดิมทุกไบต์ (ตัวคิดอยู่ที่ `catalogRules.ts` — ด่านใช้ตัวเดียวกัน)
+ *
+ * ครั้งแรกที่ใช้: แคตตาล็อก BH (เจ้าของเคาะ 2026-09-28) — สูตรพื้นที่ BH-02 ตามรูปทรง (สี่เหลี่ยม/วงกลม/โดนัท ·
+ * Special = ขอราคา) และขนาดเล็กสุด ID 25 (BH-01) · 60 (BH-01C) · ความสูงตามการออกขั้วไฟ แทน "OD 65" ของชีต
+ * ซึ่งใช้กับ BH-03 เท่านั้น · แยกเป็นธงของตัวเองเพราะข้อห้ามตัดสินว่ารหัสไหนได้ราคา
+ */
+async function applyCatalog(fromFile: PriceBook, opts: { apply: boolean; by: string | null }): Promise<number> {
+  const state = await readBookState();
+  if (!state) {
+    console.error('ยังไม่มีสมุดราคาในฐาน — --catalog ใช้ได้เฉพาะเล่มที่มีอยู่แล้ว');
+    return 1;
+  }
+  const changes = catalogRulesChanges(state.book, fromFile);
+  if (changes.length === 0) {
+    console.log('\nสูตรและข้อห้ามในฐานตรงกับแมปทุกรุ่นแล้ว — ไม่มีอะไรต้องเขียน');
+    return 0;
+  }
+  const models = { ...state.book.models };
+  for (const ch of changes) {
+    models[ch.code] = withFields(state.book.models[ch.code]!, { derivedDims: ch.model.derivedDims, constraints: ch.model.constraints });
+    console.log(`\n${ch.code}:`);
+    for (const n of ch.notes) console.log(`  ${n}`);
+  }
+  if (!opts.apply) {
+    console.log(`\n(ยังไม่ได้เขียนลงฐาน — ${changes.length} รุ่น · ใส่ --apply --by <username> เพื่อบันทึก · ไม่แตะตัวเลขราคา)`);
+    return 0;
+  }
+  const at = new Date().toISOString();
+  const revision = await commitBookChange({
+    parent: state.revision,
+    kind: 'model',
+    next: { ...state.book, models, edited: { at, by: opts.by ?? undefined, note: 'ปรับสูตรพื้นที่และขนาดเล็กสุดตามแคตตาล็อก BH (เจ้าของเคาะ 2026-09-28) — ไม่แตะตัวเลขราคา' } },
+    changed: changes.map((c) => c.code),
+    by: opts.by,
+  });
+  console.log(`\nบันทึกแล้ว — การบันทึกครั้งที่ ${revision} (${changes.map((c) => c.code).join(', ')})`);
+  return 0;
+}
+
 async function main(): Promise<number> {
   const args = process.argv.slice(2);
   const val = (flag: string): string | undefined => {
@@ -865,6 +908,7 @@ async function main(): Promise<number> {
   const newRules = args.includes('--new-rules');
   const rounding = args.includes('--rounding');
   const aliases = args.includes('--aliases');
+  const catalog = args.includes('--catalog');
 
   if (!dataDir === !fromJson) {
     console.error('ต้องบอกที่มาของสมุดราคาอย่างใดอย่างหนึ่ง:');
@@ -910,6 +954,7 @@ async function main(): Promise<number> {
   if (newRules) return applyNewRules(book, { apply, by });
   if (rounding) return applyRounding(book, { apply, by });
   if (aliases) return applyAliases(book, { apply, by });
+  if (catalog) return applyCatalog(book, { apply, by });
 
   if (outFile) {
     writeFileSync(resolve(outFile), JSON.stringify(book, null, 2), 'utf8');

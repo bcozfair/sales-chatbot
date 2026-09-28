@@ -18,6 +18,7 @@ import { parseProductCode } from '../../services/pricingLab/code.js';
 import { computePrice, formatOutcome } from '../../services/pricingLab/engine.js';
 import type { PriceBook, ProductConfig, SubCode } from '../../services/pricingLab/types.js';
 import { NoBook, loadBookFrom } from '../pricebook/bookSource.js';
+import { withPendingCatalogRules } from '../pricebook/catalogRules.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // เล่มปัจจุบันในฐาน (SELECT อย่างเดียว) · `--data <dir>` = ตรวจกับตัวเลขของชีตตรง ๆ · `--book <ไฟล์>` (ดู bookSource.ts)
@@ -25,7 +26,10 @@ const loaded = await loadBookFrom().catch((e: unknown) => {
   if (e instanceof NoBook) { console.error(e.message); process.exit(1); }
   throw e;
 });
-const book = loaded.book;
+// กติกาแคตตาล็อก BH (สูตรพื้นที่ตามรูปทรง · ขนาดเล็กสุด) ที่เล่มในฐานยังไม่มี = เติมในหน่วยความจำแล้วบอก (ดู catalogRules.ts)
+const pendingRules = withPendingCatalogRules(loaded.book);
+const book = pendingRules.book;
+if (pendingRules.note) console.log(pendingRules.note);
 console.log(`สมุดราคาที่ใช้: ${loaded.label}\n`);
 
 interface Case {

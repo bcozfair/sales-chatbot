@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Calculator, CircleDollarSign, AlertTriangle, BookOpen } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { PageHeader } from '../PageHeader';
@@ -7,7 +7,9 @@ import { TableCard, EmptyState, ErrorBox } from '../logs/ui';
 import { errMsg, formatDateTime } from '../logs/format';
 import { SubCodeModal } from './SubCodeModal';
 import { CalcTrace } from './CalcTrace';
-import { type QuoteOverview, type ParsedCode, type PriceOutcome } from './types';
+import { CatalogTemplate } from './CatalogTemplate';
+import { formForFamily } from './catalogForm';
+import { type BhForm, type QuoteOverview, type ParsedCode, type PriceOutcome } from './types';
 
 /**
  * หน้า "คิดราคาสินค้า" — โมดูลทดลองที่ถอดออกได้ทั้งก้อน
@@ -31,18 +33,36 @@ import { type QuoteOverview, type ParsedCode, type PriceOutcome } from './types'
  *   คนที่รู้ว่า `S000` แปลว่าอะไร คือคนที่กำลังออกใบอยู่ตอนนั้น ถ้าต้องจำไว้ไปแก้ทีหลัง
  *   มันจะไม่ถูกแก้ · และปุ่มเขียนตัวอักษรจริงลงไป ไม่ใช่คำว่า "อันนี้" เพราะบรรทัดเดียว
  *   มีตัวที่อ่านไม่ออกได้หลายตัว ถ้าทุกปุ่มเขียนเหมือนกันหมด คนกดต้องไล่สายตาหาว่าปุ่มไหนของตัวไหน
+ *
+ * **ตั้งแต่ 2026-09-28 รหัสที่มีแคตตาล็อก (ซีรีส์ BH) ได้ช่องกรอกเรียงตามแคตตาล็อกแทนการ์ด "ระบบอ่านรหัสนี้ว่าอะไร"**
+ * (เจ้าของเคาะ mockup แบบ A "กรอกในรหัส" + ขอช่องคำนวณจากรหัสแบบเดิมไว้ด้วย) — ช่องรหัสด้านบนกับช่องกรอกตามกันเสมอ:
+ * พิมพ์รหัส → เซิร์ฟเวอร์อ่านเป็นช่อง · แก้ช่อง → เซิร์ฟเวอร์ประกอบรหัสให้ (`/quote` รับ `form`) ⇒ ไม่มีตัวประกอบรหัส
+ * ฝั่งเบราว์เซอร์ที่จะเขียนไม่ตรงกับตัวอ่าน · รหัสที่ไม่มีแคตตาล็อก/เขียนนอกรูปแบบ ยังเห็นหน้าเดิมทุกอย่าง
  */
 
 const HELP = 'ตัวอย่างในชีต — กดเพื่อลอง';
-const EXAMPLES = ['TSK-14 6x200+150-BU', 'TSJ-04(S8) 6x100+1M', 'BH-01C-600x150-380-4950W'];
+const EXAMPLES = ['BH-01C-600x150-380-4950W-PL-PL2', 'BH-02C 210-220-1400W-N-Z', 'BH-03 170x110-220-2700W-T', 'TSK-14 6x200+150-BU', 'TSJ-04(S8) 6x100+1M'];
 
 interface QuoteResult {
+  /** รหัสที่เซิร์ฟเวอร์คิดราคาจริง — ตอนส่งช่องกรอกไป คือรหัสที่เซิร์ฟเวอร์ประกอบให้ */
+  code?: string;
   parsed: ParsedCode;
   outcome: PriceOutcome | null;
 }
 
 /** ท่อนที่ยังไม่มีใครบอกว่าแปลว่าอะไร — ตัวเดียวที่ได้ปุ่ม "＋ เพิ่ม" */
 const isUnknown = (kind: string) => kind === 'unknown';
+/** ท่อนที่ยังไม่รวมในราคา — อ่านไม่ออก หรืออ่านออกแต่ต้องเลือกเพิ่ม (ขนาดเต๋า T) */
+const notInPrice = (kind: string) => kind === 'unknown' || kind === 'choose';
+
+/** "ไม่รับผลิต" ≠ "รหัสบอกไม่ครบ" ≠ "ยังไม่มีราคา" — คนละคำตอบกับลูกค้า (เดิมรวมกันหมด 2026-09-24) */
+function notPricedTitle(o: PriceOutcome | null): string {
+  if (o?.status === 'quoteOnRequest') return 'ต้องขอราคาจากฝ่ายผลิต';
+  if (o?.violations.some((v) => v.level === 'block' && !v.missing && !v.noRate)) return 'ไม่รับผลิตขนาดนี้';
+  if (o?.violations.some((v) => v.missing)) return 'รหัสยังบอกข้อมูลไม่ครบ';
+  if (o?.violations.some((v) => v.noRate)) return 'ยังไม่มีราคาในสมุดราคา';
+  return 'ยังคิดราคาไม่ได้';
+}
 
 interface Props {
   /** คนนี้เปิดหน้า "สมุดราคา" ได้ไหม (มาจากเมนูที่เขาเห็นจริง = ช่อง `page.pricebook`) */
@@ -64,6 +84,11 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [adding, setAdding] = useState<string | null>(null);
+  /** ช่องตามแคตตาล็อก — null = รหัสนี้ไม่มีแคตตาล็อก (หรือเขียนนอกรูปแบบ) ⇒ หน้าเดิม */
+  const [form, setForm] = useState<BhForm | null>(null);
+  /** คำขอล่าสุด — คำตอบของคำขอเก่าที่มาถึงทีหลังต้องทิ้ง ไม่งั้นพิมพ์ 150 แล้วช่องเด้งกลับเป็น 15 */
+  const seq = useRef(0);
+  const typing = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadOverview = useCallback(async () => {
     try {
@@ -75,24 +100,49 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
     }
   }, [authHeaders]);
 
-  const quote = useCallback(async (input: string) => {
-    if (!input.trim()) return;
+  /**
+   * คิดราคา — จากรหัสที่พิมพ์ (`code`) หรือจากช่องกรอก (`form`)
+   * ขนาดเต๋าที่เลือกไว้ส่งไปกับรหัสด้วย (`picks`) เพราะมันไม่อยู่ในรหัส — พิมพ์รหัสเดิมซ้ำแล้วค่าที่เลือกต้องไม่หาย
+   */
+  const send = useCallback(async (body: { code?: string; form?: BhForm; picks?: { amp?: string } }) => {
+    const mine = ++seq.current;
     setBusy(true);
     setError('');
     try {
       const res = await fetch('/api/admin/pricing/quote', {
-        method: 'POST', headers: jsonHeaders, body: JSON.stringify({ code: input }),
+        method: 'POST', headers: jsonHeaders, body: JSON.stringify(body),
       });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body?.error ?? 'คิดราคาไม่สำเร็จ');
-      setResult(body);
+      const out = await res.json();
+      if (mine !== seq.current) return;
+      if (!res.ok) throw new Error(out?.error ?? 'คิดราคาไม่สำเร็จ');
+      setResult(out);
+      if (body.form) setCode(out.code ?? '');
+      else setForm(out.parsed?.form ?? null);
     } catch (e: unknown) {
+      if (mine !== seq.current) return;
       setError(errMsg(e));
       setResult(null);
     } finally {
-      setBusy(false);
+      if (mine === seq.current) setBusy(false);
     }
   }, [jsonHeaders]);
+
+  const amp = form?.amp;
+  const quote = useCallback((input: string) => {
+    if (!input.trim()) return;
+    if (typing.current) clearTimeout(typing.current);
+    void send({ code: input, ...(amp ? { picks: { amp } } : {}) });
+  }, [send, amp]);
+
+  /** แก้ช่องกรอก — ช่องเลือกส่งทันที · ช่องพิมพ์หน่วงไว้ให้พิมพ์จบก่อน */
+  const editForm = useCallback((next: BhForm, now?: boolean) => {
+    setForm(next);
+    if (typing.current) clearTimeout(typing.current);
+    if (now) void send({ form: next });
+    else typing.current = setTimeout(() => { void send({ form: next }); }, 350);
+  }, [send]);
+
+  useEffect(() => () => { if (typing.current) clearTimeout(typing.current); }, []);
 
   // โหลดครั้งแรก — หุ้ม setTimeout ตามท่าของทั้งแอป (eslint ปฏิเสธ setState ตรง ๆ ใน useEffect)
   useEffect(() => {
@@ -105,13 +155,15 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
   const modelName = (c?: string) => overview?.models.find((m) => m.code === c)?.name ?? c;
 
   const bookMissing = overview && !overview.book.ok;
-  /** สิ่งที่ยังไม่ได้รวมในราคา: กฎที่ข้ามเพราะอ่านค่าในรหัสไม่ออก + ท่อนของรหัสที่อ่านไม่ออก */
+  /** สิ่งที่ยังไม่ได้รวมในราคา: กฎที่ข้ามเพราะอ่านค่าในรหัสไม่ออก + ท่อนที่อ่านไม่ออก/ยังต้องเลือก */
   const notIncluded = result
     ? [
         ...(result.outcome?.violations ?? []).filter((v) => v.partial).map((v) => v.message),
-        ...result.parsed.parts.filter((p) => isUnknown(p.kind)).map((p) => `${p.text} — ${p.reads}`),
+        ...result.parsed.parts.filter((p) => notInPrice(p.kind)).map((p) => `${p.text} — ${p.reads}`),
       ]
     : [];
+  const catalog = overview?.catalog ?? [];
+  const catalogMode = !!form && catalog.some((c) => c.family === form.family);
 
   return (
     <div className="space-y-3.5">
@@ -164,9 +216,25 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
             </button>
           ))}
         </div>
+
+        {/* ── 1b. ช่องกรอกตามแคตตาล็อก + ราคา (เฉพาะรหัสที่มีแคตตาล็อก) ──────────── */}
+        {catalogMode && (
+          <div className="mt-3.5 pt-3.5 border-t border-slate-100">
+            <CatalogTemplate
+              catalog={catalog}
+              form={form}
+              onChange={editForm}
+              onFamily={(f) => {
+                const spec = catalog.find((c) => c.family === f);
+                if (spec) editForm(formForFamily(spec, form), true);
+              }}
+            />
+            {result && <CatalogResult result={result} notIncluded={notIncluded} />}
+          </div>
+        )}
       </div>
 
-      {result && (
+      {result && !catalogMode && (
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)] gap-3.5 items-start">
           {/* ── 2. ระบบอ่านรหัสนี้ว่าอะไร ──────────────────────────────── */}
           <TableCard title="ระบบอ่านรหัสนี้ว่าอะไร" hint="ตรวจให้ครบก่อนเชื่อราคา">
@@ -178,13 +246,13 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
                 {result.parsed.parts.map((p, i) => (
                   <li key={`${p.text}-${i}`} className="flex gap-3 items-center py-2.5 flex-wrap">
                     <span className={`font-mono font-bold text-xs px-2 py-1 rounded-md border shrink-0 ${
-                      isUnknown(p.kind)
+                      notInPrice(p.kind)
                         ? 'bg-red-50 border-red-200 text-red-700'
                         : 'bg-card border-slate-200 text-slate-900'
                     }`}>
                       {p.text}
                     </span>
-                    <span className={`text-xs flex-1 min-w-[140px] ${isUnknown(p.kind) ? 'text-red-700 font-semibold' : 'text-slate-700'}`}>
+                    <span className={`text-xs flex-1 min-w-[140px] ${notInPrice(p.kind) ? 'text-red-700 font-semibold' : 'text-slate-700'}`}>
                       {p.reads}
                       {p.guess && <span className="block text-[11px] text-slate-400 mt-0.5">ตีความเอาเอง ยังไม่มีใครยืนยัน</span>}
                     </span>
@@ -264,15 +332,7 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
                 <EmptyState
                   icon={AlertTriangle}
                   // "รหัสบอกไม่ครบ" ≠ "ไม่รับผลิต" — เดิมขึ้นอย่างหลังกับ TSJ-01 4.8+2M ที่แค่ไม่มีวงเล็บเกลียว (2026-09-24)
-                  title={
-                    result.outcome?.violations.some((v) => v.level === 'block' && !v.missing && !v.noRate)
-                      ? 'ไม่รับผลิตขนาดนี้'
-                      : result.outcome?.violations.some((v) => v.missing)
-                        ? 'รหัสยังบอกข้อมูลไม่ครบ'
-                        : result.outcome?.violations.some((v) => v.noRate)
-                          ? 'ยังไม่มีราคาในสมุดราคา'
-                          : 'ยังคิดราคาไม่ได้'
-                  }
+                  title={notPricedTitle(result.outcome)}
                   hint={
                     result.outcome?.violations.map((v) => v.message).join(' · ')
                     || result.parsed.problems.join(' · ')
@@ -301,6 +361,66 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
             void quote(code);
           }}
         />
+      )}
+    </div>
+  );
+};
+
+/**
+ * ราคาใต้ช่องกรอก (mockup แบบ A) — เงินแต่ละก้อนเป็นชิปต่อกันด้วย "+" แล้วยอดรวมด้านขวา
+ * ของที่ไม่มีผลกับราคารวมเป็นบรรทัดจางบรรทัดเดียว · ป้ายเตือนขึ้นเฉพาะตอนมีเรื่องจริง
+ * ที่มาละเอียดทุกบาทอยู่ในการ์ด "วิธีคำนวณทีละขั้น" ข้างล่างเหมือนเดิม
+ */
+const CatalogResult: React.FC<{ result: QuoteResult; notIncluded: string[] }> = ({ result, notIncluded }) => {
+  const o = result.outcome;
+  const priced = o?.status === 'priced';
+  const free = result.parsed.parts.filter((p) => p.kind === 'noPrice').map((p) => p.reads.split(' — ')[0]);
+  const warns = [
+    ...(o?.violations ?? []).filter((v) => !v.partial).map((v) => v.message),
+    ...result.parsed.problems,
+    ...result.parsed.warnings,
+  ];
+  return (
+    <div className="mt-3 pt-3 border-t border-slate-100">
+      <div className="flex items-end justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-1.5 text-[12.5px]">
+            {(o?.breakdown ?? []).map((b, i) => (
+              <React.Fragment key={`${b.step}-${i}`}>
+                {i > 0 && <span className="text-slate-400 font-bold">+</span>}
+                <span className="px-2 py-1 rounded-lg border border-slate-200 bg-slate-50 text-slate-700" title={b.detail}>
+                  {b.label}<b className="ml-1.5 text-slate-900 tabular-nums">{b.amount?.toLocaleString()}</b>
+                </span>
+              </React.Fragment>
+            ))}
+          </div>
+          {free.length > 0 && (
+            <div className="mt-1.5 text-[11.5px] text-slate-400">ไม่มีผลกับราคา: {free.join(' · ')}</div>
+          )}
+        </div>
+        <div className="text-right">
+          <div className={`text-[11.5px] ${priced && notIncluded.length ? 'text-amber-700 font-semibold' : 'text-slate-500'}`}>
+            {!priced ? '' : notIncluded.length ? 'ราคาเฉพาะส่วนที่คำนวณได้' : 'ราคาตั้งต่อหน่วย (ยังไม่รวมส่วนลด)'}
+          </div>
+          <div className="text-[26px] font-extrabold text-slate-900 tabular-nums leading-tight">
+            {priced
+              ? <>{o!.unitPrice.toLocaleString()}<span className="text-[13px] font-semibold text-slate-500 ml-1.5">บาท</span></>
+              : <span className="text-[17px] text-red-700">{notPricedTitle(o)}</span>}
+          </div>
+        </div>
+      </div>
+      {(notIncluded.length > 0 || warns.length > 0) && (
+        <div className="mt-2.5 grid gap-1.5">
+          {notIncluded.map((t) => (
+            <div key={t} className="flex gap-2 rounded-lg px-3 py-2 text-xs bg-amber-50 border border-amber-200 text-amber-800">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" /><span><b>ยังไม่รวมในราคา</b> — {t}</span>
+            </div>
+          ))}
+          {warns.map((t) => (
+            <div key={t} className={`rounded-lg px-3 py-2 text-xs border ${
+              priced ? 'bg-sky-50 border-sky-200 text-sky-800' : 'bg-red-50 border-red-200 text-red-700'}`}>{t}</div>
+          ))}
+        </div>
       )}
     </div>
   );

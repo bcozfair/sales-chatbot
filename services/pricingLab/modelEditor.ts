@@ -18,7 +18,7 @@
 //  ขึ้นใหม่จากค่าที่รู้จักเท่านั้น ไม่ใช่ `JSON.parse` แล้วยัดลงสมุดราคา
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { AXIS_TH, DIM_TH, KIND_TH, OPTION_TH, axisLabel, dimLabel, displayName } from './labels.js';
+import { AXIS_TH, DIM_TH, FORMULA_TH, KIND_TH, OPTION_TH, axisLabel, dimLabel, displayName } from './labels.js';
 import { scopeRank } from './subcodes.js';
 import type { Adder, Band, ModelVariant, Money, Predicate, PriceBook, PriceModel, SheetLayout } from './types.js';
 
@@ -111,7 +111,7 @@ export interface EditorView {
   variant: (ModelVariant & { covers: string[] }) | null;
   adders: EditorAdder[];
   constraints: { id: string; level: string; levelTh: string; message: string; whenTh: string; disabled: boolean }[];
-  derived: { name: string; label: string; argsTh: string; consts: string }[];
+  derived: { name: string; label: string; argsTh: string; consts: string; formulaTh: string; whenTh: string }[];
   /** คำศัพท์ให้ช่องเลือกในกล่อง "แก้กฎ" — รายการปิด ไม่ใช่ช่องพิมพ์อิสระ */
   vocab: {
     options: { key: string; label: string }[];
@@ -396,10 +396,13 @@ export function modelEditorView(book: PriceBook, m: PriceModel): EditorView {
     derived: (m.derivedDims ?? []).map((d) => ({
       name: dimLabel(d.name),
       label: d.label,
-      argsTh: d.args.map(dimLabel).join(' + '),
+      argsTh: d.args.map(dimLabel).join(d.formula === 'sum' ? ' + ' : ' · '),
       consts: Object.entries(d.consts ?? {})
         .map(([k, v]) => `${k}=${v}`)
-        .join(' · ')
+        .join(' · '),
+      formulaTh: FORMULA_TH[d.formula] ?? d.formula,
+      // สูตรพื้นที่ของ BH-02 มีหลายแถวชื่อเดียวกัน เลือกตามรูปทรง — ต้องเห็นว่าแถวไหนใช้เมื่อไหร่
+      whenTh: d.when ? whenToText(d.when) : '',
     })),
     vocab: {
       options: Object.entries(OPTION_TH).map(([key, label]) => ({ key, label })),

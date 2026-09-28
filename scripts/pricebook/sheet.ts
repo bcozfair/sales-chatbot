@@ -21,6 +21,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { matrixKey } from '../../services/pricingLab/engine.js';
+import { FORMULA_TH as FORMULA_LABELS } from '../../services/pricingLab/labels.js';
 import type {
   Adder,
   Band,
@@ -92,10 +93,8 @@ const ROUND_TH: Record<RoundMode, string> = {
   exact: 'ไม่ปัด'
 };
 
-const FORMULA_TH: Record<DerivedDim['formula'], string> = {
-  sum: 'บวกกัน',
-  cylinderAreaIn2: 'พื้นที่ผิวทรงกระบอก'
-};
+// คำของสูตรอยู่ที่ labels.ts ที่เดียว (หน้าแก้ทีละรุ่นใช้คำเดียวกัน) — Record แบบมีชนิดกันลืมสูตรใหม่
+const FORMULA_TH: Record<DerivedDim['formula'], string> = FORMULA_LABELS as Record<DerivedDim['formula'], string>;
 
 /**
  * ผลของรหัสย่อยต่อราคา — คำที่แอดมินจะเห็นและพิมพ์เอง
@@ -948,7 +947,9 @@ function derivedSheet(book: PriceBook): SheetTable {
         FORMULA_TH[d.formula],
         d.args.join(', '),
         pairsToText(d.consts),
-        d.round ? ROUND_TH[d.round] : ''
+        d.round ? ROUND_TH[d.round] : '',
+        // ว่าง = ทุกกรณี · สูตรพื้นที่ของ BH-02 เลือกตามรูปทรง (หลายแถวชื่อค่าเดียวกัน)
+        d.when ? predicateToText(d.when) : ''
       ]);
     }
   }
@@ -963,7 +964,8 @@ function derivedSheet(book: PriceBook): SheetTable {
       { label: 'สูตร', width: 22 },
       { label: 'ใช้ค่าจาก', width: 24 },
       { label: 'ค่าคงที่', width: 26 },
-      { label: 'ปัดเศษ', width: 10 }
+      { label: 'ปัดเศษ', width: 10 },
+      { label: 'ใช้เมื่อ', width: 34 }
     ],
     rows,
     freeze: true
@@ -1731,6 +1733,16 @@ function readDerived(grid: CellValue[][] | undefined, models: Record<string, Pri
     const consts = textToPairs(toText(cell(row, h.index, 'ค่าคงที่')));
     if (Object.keys(consts).length) d.consts = consts;
     if (roundTh !== '' && ROUND_FROM[roundTh]) d.round = ROUND_FROM[roundTh];
+    // คอลัมน์ "ใช้เมื่อ" เพิ่มทีหลัง (2026-09-28) — แม่แบบเก่าไม่มีคอลัมน์นี้ = ทุกกรณี เหมือนเดิม
+    const whenTh = toText(cell(row, h.index, 'ใช้เมื่อ'));
+    if (whenTh !== '') {
+      const parsed = parsePredicate(whenTh);
+      if (!parsed.ok) {
+        R.err(name, `${parsed.reason} (ค่า ${nm})`, line);
+        continue;
+      }
+      if (!('always' in parsed.value)) d.when = parsed.value;
+    }
     model.derivedDims = model.derivedDims ?? [];
     model.derivedDims.push(d);
   }

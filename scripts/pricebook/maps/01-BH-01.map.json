@@ -38,6 +38,65 @@
         "mm2PerIn2": 645
       },
       "round": "ceil"
+    },
+    {
+      "name": "area_in2",
+      "label": "พื้นที่แผ่น (ตารางนิ้ว)",
+      "formula": "rectAreaIn2",
+      "args": [
+        "w_mm",
+        "l_mm"
+      ],
+      "consts": {
+        "mm2PerIn2": 645
+      },
+      "round": "ceil",
+      "when": {
+        "axis": "shape",
+        "in": [
+          "สี่เหลี่ยม",
+          "Special"
+        ]
+      }
+    },
+    {
+      "name": "area_in2",
+      "label": "พื้นที่แผ่น (ตารางนิ้ว)",
+      "formula": "circleAreaIn2",
+      "args": [
+        "d1_mm"
+      ],
+      "consts": {
+        "pi": 3.14,
+        "mm2PerIn2": 645
+      },
+      "round": "ceil",
+      "when": {
+        "axis": "shape",
+        "in": [
+          "วงกลม"
+        ]
+      }
+    },
+    {
+      "name": "area_in2",
+      "label": "พื้นที่แผ่น (ตารางนิ้ว)",
+      "formula": "ringAreaIn2",
+      "args": [
+        "d1_mm",
+        "d2_mm"
+      ],
+      "consts": {
+        "pi": 3.14,
+        "mm2PerIn2": 645
+      },
+      "round": "ceil",
+      "when": {
+        "axis": "shape",
+        "in": [
+          "โดนัท"
+        ]
+      }
     }
   ],
   "base": {
@@ -164,14 +223,40 @@
   ],
   "constraints": [
     {
-      "id": "MIN_OD",
+      "id": "MIN_ID",
       "when": {
-        "dim": "dia_mm",
-        "lt": 65
+        "all": [
+          {
+            "not": {
+              "option": "variant:C"
+            }
+          },
+          {
+            "dim": "dia_mm",
+            "lt": 25
+          }
+        ]
       },
       "level": "block",
-      "message": "ขนาดเล็กสุดที่ทำได้ OD = 65 mm",
-      "source": "Sheet1!H3"
+      "message": "ขนาด ID เล็กสุดที่ทำได้ 25 mm (แคตตาล็อก BH-01)",
+      "source": "แคตตาล็อก BH-01 'การสั่งซื้อ' — ID เล็กสุด 25 mm · แทน 'OD = 65 mm' ของชีต (Sheet1!H3) ซึ่งเจ้าของเคาะ 2026-09-28 ว่าใช้กับ BH-03 เท่านั้น"
+    },
+    {
+      "id": "MIN_ID_C",
+      "when": {
+        "all": [
+          {
+            "option": "variant:C"
+          },
+          {
+            "dim": "dia_mm",
+            "lt": 60
+          }
+        ]
+      },
+      "level": "block",
+      "message": "ขนาด ID เล็กสุดที่ทำได้ 60 mm (แคตตาล็อก BH-01C)",
+      "source": "แคตตาล็อก BH-01C 'การสั่งซื้อ' — ID เล็กสุด 60 mm"
     },
     {
       "id": "MIN_WIDTH",
@@ -182,6 +267,79 @@
       "level": "block",
       "message": "ความกว้างเล็กสุดที่ทำได้ 25 mm",
       "source": "Sheet1!H4"
+    },
+    {
+      "id": "MIN_H_PLUG",
+      "when": {
+        "all": [
+          {
+            "not": {
+              "option": "variant:C"
+            }
+          },
+          {
+            "any": [
+              {
+                "option": "conn:pl2"
+              },
+              {
+                "option": "conn:pl5"
+              }
+            ]
+          },
+          {
+            "dim": "width_mm",
+            "lt": 30
+          }
+        ]
+      },
+      "level": "block",
+      "message": "ออกขั้วไฟแบบปลั๊ก ความสูง (H) เล็กสุด 30 mm (แคตตาล็อก BH-01)",
+      "source": "แคตตาล็อก BH-01 'การสั่งซื้อ' — ความยาวสั้นสุด 30 mm กรณีออกปลั๊ก"
+    },
+    {
+      "id": "MIN_H_NUT",
+      "when": {
+        "all": [
+          {
+            "not": {
+              "option": "variant:C"
+            }
+          },
+          {
+            "option": "nut"
+          },
+          {
+            "dim": "width_mm",
+            "lt": 40
+          }
+        ]
+      },
+      "level": "block",
+      "message": "ออกขั้วไฟแบบน็อต ความสูง (H) เล็กสุด 40 mm (แคตตาล็อก BH-01)",
+      "source": "แคตตาล็อก BH-01 'การสั่งซื้อ' — ความยาวสั้นสุด 40 mm กรณีออกน็อต (เต๋าเซรามิกเล็ก 25 mm = MIN_WIDTH)"
+    },
+    {
+      "id": "AREA_POSITIVE",
+      "when": {
+        "dim": "area_in2",
+        "lte": 0
+      },
+      "level": "block",
+      "message": "พื้นที่แผ่นเป็น 0 หรือติดลบ — โดนัทต้องมี D2 (วงใน) เล็กกว่า D1 (วงนอก)",
+      "source": "ตรวจความถูกต้องของขนาด BH-02 รูปทรงโดนัท (ไม่มีในชีต)"
+    },
+    {
+      "id": "SPECIAL_SHAPE",
+      "when": {
+        "axis": "shape",
+        "in": [
+          "Special"
+        ]
+      },
+      "level": "quoteOnRequest",
+      "message": "Special Shape — แคตตาล็อกไม่มีสูตรพื้นที่ ต้องขอราคาจากฝ่ายผลิต",
+      "source": "แคตตาล็อก BH-02 'การสั่งซื้อ' Shape/Size · สูตรเจ้าของเคาะ 2026-09-28 (\"เอาตามที่เสนอ แต่วางโครงให้แก้ค่าผ่าน UI ภายหลังได้\")"
     }
   ]
 }

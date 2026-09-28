@@ -9,6 +9,7 @@ import {
 } from '../services/pricingLab/bookStore.js';
 import { computePrice } from '../services/pricingLab/engine.js';
 import { parseProductCode } from '../services/pricingLab/code.js';
+import { AMP, BH_CATALOG, bhSpec, buildBhCode, type BhForm, type SizeKey } from '../services/pricingLab/catalogBh.js';
 import { displayName } from '../services/pricingLab/labels.js';
 import { productsPerModel } from '../services/pricingLab/bookCoverage.js';
 import {
@@ -382,8 +383,52 @@ pricingLabRouter.get('/overview', async (_req: AdminRequest, res: Response) => {
     version: book?.version ?? null,
     models: modelBriefs(book),
     edited: book?.edited ?? null,
+    // ลำดับท่อน + ตัวเลือกของแคตตาล็อก (ไม่มีราคาสักบาท — เงินอยู่ที่สมุดราคาซึ่งไม่เคยออกจากเซิร์ฟเวอร์)
+    catalog: BH_CATALOG,
   });
 });
+
+/**
+ * ช่องกรอกที่หน้าจอส่งมา → `BhForm` ที่ปลอดภัย — รับเฉพาะช่องที่แคตตาล็อกของรุ่นนั้นมี ค่าเลือกต้องอยู่ในรายการ
+ * ตัวเลขต้องเป็นบวก · ข้อความสั้น ⇒ รหัสที่ประกอบได้ยาวไม่เกินที่ `/quote` รับอยู่แล้ว
+ */
+function cleanForm(raw: unknown): BhForm | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  const spec = typeof r.family === 'string' ? bhSpec(r.family) : undefined;
+  if (!spec) return undefined;
+  const form: BhForm = { family: spec.family };
+  const numOf = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 && v < 100_000 ? v : undefined);
+  const textOf = (v: unknown, max = 24) => (typeof v === 'string' && v.length <= max && !/[\s()]/.test(v) ? v : undefined);
+  const pick = (slot: string, v: unknown) => {
+    const opts = spec.slots[slot]?.options;
+    return typeof v === 'string' && opts?.some((o) => o.code === v) ? v : undefined;
+  };
+  if (spec.shapes) form.shape = pick('shape', r.shape) ?? '';
+  for (const k of ['id', 'h', 'w', 'l', 'd1', 'd2'] as SizeKey[]) {
+    const n = numOf(r[k]);
+    if (n !== undefined) form[k] = n;
+  }
+  if (typeof r.sizeText === 'string' && r.sizeText.length <= 40 && /^[0-9.x]+$/i.test(r.sizeText)) form.sizeText = r.sizeText;
+  form.volt = textOf(r.volt, 12) ?? '';
+  const watt = numOf(r.watt);
+  if (watt !== undefined) form.watt = watt;
+  else if (textOf(r.wattText, 24)) form.wattText = r.wattText as string;
+  for (const slot of ['conn', 'term', 'mat'] as const) {
+    const v = pick(slot, r[slot]);
+    if (v) form[slot] = v;
+  }
+  if (typeof r.amp === 'string' && AMP.some((a) => a.code === r.amp)) form.amp = r.amp;
+  if (Array.isArray(r.extras)) {
+    form.extras = r.extras.slice(0, 12).flatMap((e) => {
+      if (!e || typeof e !== 'object') return [];
+      const x = e as Record<string, unknown>;
+      if (typeof x.text !== 'string' || x.text.length > 30 || /\s/.test(x.text) || typeof x.after !== 'string') return [];
+      return [{ text: x.text, after: x.after, ...(x.glue === true ? { glue: true } : {}) }];
+    });
+  }
+  return form;
+}
 
 /**
  * หน้า "สมุดราคา" ตอนเปิด — ทุกอย่าง **ยกเว้นราคา**
@@ -577,7 +622,14 @@ pricebookRouter.put('/sheet/:sheet', async (req: AdminRequest, res: Response) =>
  * แล้วค่อยรู้ว่าพิมพ์ผิด (ซึ่งแปลว่ารหัสอื่นทุกตัวที่มีตัวอักษรนี้คิดผิดตามไปแล้ว)
  */
 pricingLabRouter.post('/quote', async (req: AdminRequest, res: Response) => {
-  const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+  // สองทางเข้า: พิมพ์รหัสมา (`code`) หรือกรอกช่องตามแคตตาล็อก (`form`) — ทางหลัง **เซิร์ฟเวอร์ประกอบรหัสเอง**
+  // แล้วเดินทางเดียวกับรหัสที่พิมพ์ทุกขั้น ⇒ ราคาจากช่องกับราคาจากรหัสเดียวกันเป็นเลขเดียวกันเสมอ
+  const form = req.body?.form !== undefined ? cleanForm(req.body.form) : undefined;
+  if (req.body?.form !== undefined && !form) return res.status(400).json({ error: 'ช่องที่กรอกไม่ตรงกับแคตตาล็อก' });
+  const code = form ? buildBhCode(form) : typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+  // ขนาดเต๋า 10A/30A ไม่อยู่ในรหัส — มากับช่องกรอก หรือส่งมาคู่กับรหัสที่พิมพ์ (จำค่าที่เลือกไว้ตอนพิมพ์รหัสใหม่)
+  const ampRaw = form?.amp ?? req.body?.picks?.amp;
+  const picks = typeof ampRaw === 'string' && AMP.some((a) => a.code === ampRaw) ? { amp: ampRaw } : {};
   if (!code) return res.status(400).json({ error: 'ยังไม่ได้ใส่รหัสสินค้า' });
   if (code.length > 200) return res.status(400).json({ error: 'รหัสยาวเกินไป' });
 
@@ -590,9 +642,9 @@ pricingLabRouter.post('/quote', async (req: AdminRequest, res: Response) => {
     book = withSubCodes(book, [draft]);
   }
 
-  const parsed = parseProductCode(code, book);
+  const parsed = parseProductCode(code, book, picks);
   const outcome = parsed.cfg ? computePrice(parsed.cfg, book) : null;
-  res.json({ parsed, outcome });
+  res.json({ code, parsed, outcome });
 });
 
 pricebookRouter.get('/subcodes', async (_req: AdminRequest, res: Response) => {

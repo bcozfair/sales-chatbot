@@ -13,6 +13,7 @@
  */
 import { readFileSync, readdirSync } from 'node:fs';
 import { NoBook, loadBookFrom } from '../pricebook/bookSource.js';
+import { withPendingCatalogRules } from '../pricebook/catalogRules.js';
 import { computePrice, resolveModel } from '../../services/pricingLab/engine.js';
 import { parseProductCode } from '../../services/pricingLab/code.js';
 import { EditRejected, applyModelEdit, excelReady, modelEditorView, pruneUnpriced } from '../../services/pricingLab/modelEditor.js';
@@ -36,7 +37,10 @@ const loaded = await loadBookFrom().catch((e: unknown) => {
   if (e instanceof NoBook) { console.error(e.message); process.exit(1); }
   throw e;
 });
-const book = loaded.book;
+// กติกาแคตตาล็อก BH (สูตรพื้นที่ตามรูปทรง · ขนาดเล็กสุด) ที่เล่มในฐานยังไม่มี = เติมในหน่วยความจำแล้วบอก (ดู catalogRules.ts)
+const pendingRules = withPendingCatalogRules(loaded.book);
+const book = pendingRules.book;
+if (pendingRules.note) console.log(pendingRules.note);
 console.log(`สมุดราคาที่ใช้: ${loaded.label}\n`);
 
 const bh01 = book.models['BH-01'];
@@ -60,16 +64,18 @@ console.log('\n── 1. ตัวเลือกท้ายรหัสคิ�
 // เฉลยที่ฝ่ายขายเขียนไว้ในชีตเอง: BH!E19:E22 → 10,975 → +20% = 13,170 → +320 = 13,490
 check('BH-01C คิดได้ตรงตัวอย่างในชีต (13,490)', priceOfCode('BH-01C-600x150-380-4950W-PL2') === 13490,
   String(priceOfCode('BH-01C-600x150-380-4950W-PL2')));
-check('BH-02C ได้ราคาเดียวกับ BH-01C (เคยตกไปคิดเป็นรุ่นฐาน)',
-  priceOfCode('BH-02C-600x150-380-4950W-PL2') === 13490,
-  String(priceOfCode('BH-02C-600x150-380-4950W-PL2')));
-check('BH-02 (ไม่มีตัว C) ต้องไม่บวก 20%', priceOfCode('BH-02-600x150-380-4950W-PL2') === 11135,
-  String(priceOfCode('BH-02-600x150-380-4950W-PL2')));
+// BH-02C = แผ่นวงกลม (แคตตาล็อก) และยังบวก 20% ตามชีต (เจ้าของเคาะ 2026-09-28) — เทียบกับใบเดียวกันที่ไม่ใช้ตัวเลือก C
+const c02 = parseProductCode('BH-02C 210-220-1400W', book).cfg!;
+const c02Plain = computePrice({ ...c02, variant: undefined }, book).unitPrice;
+check('BH-02C บวก 20% เหมือน BH-01C (เคยตกไปคิดเป็นรุ่นฐาน)',
+  computePrice(c02, book).unitPrice === Math.round(c02Plain * 1.2 * 100) / 100 && c02Plain > 0,
+  `${computePrice(c02, book).unitPrice} = ${c02Plain} × 1.2`);
+check('BH-02 (ไม่มีตัว C) ต้องไม่บวก 20%', parseProductCode('BH-02 600x150-380-4950W-PL2', book).cfg?.variant === undefined);
 check('BH-03C แพงกว่า BH-03 จริง', priceOfCode('BH-03C 185x283-230-3000Wx2') > priceOfCode('BH-03 185x283-230-3000Wx2'),
   `${priceOfCode('BH-03C 185x283-230-3000Wx2')} vs ${priceOfCode('BH-03 185x283-230-3000Wx2')}`);
 
 // ตัว C ต้องถูกอ่านว่าเป็น "ตัวเลือกของรุ่น" ไม่ใช่ตัวอักษรที่อ่านไม่ออก
-const parsedC = parseProductCode('BH-02C-600x150-380-4950W-PL2', book);
+const parsedC = parseProductCode('BH-02C 210-220-1400W-PL2', book);
 check('ตัว C ไม่ถูกมาร์กว่าอ่านไม่ออกอีกแล้ว', !parsedC.parts.some((p) => p.kind === 'unknown' && p.text === 'C'),
   parsedC.parts.filter((p) => p.kind === 'unknown').map((p) => p.text).join(' · ') || '(ไม่มีตัวที่อ่านไม่ออก)');
 check('cfg ที่อ่านได้มี variant ติดมาด้วย', parsedC.cfg?.variant === 'C', String(parsedC.cfg?.variant));
@@ -160,8 +166,9 @@ check('บันทึกแบบไม่แก้อะไร แล้วร
     withModel(after)).unitPrice === 13490);
 
 // ปิดข้อจำกัดหนึ่งข้อ แล้วต้องปิดจริง (สวิตช์เป็นสิ่งเดียวที่แก้ได้)
-const off = applyModelEdit(bh01, { ...sneaky, constraintsOff: ['MIN_OD'] });
-check('ปิดข้อจำกัดจากหน้าจอได้', off.constraints.find((c) => c.id === 'MIN_OD')?.disabled === true);
+// (ข้อที่ใช้ทดลองเคยเป็น MIN_OD ของชีต — แคตตาล็อกแทนด้วย MIN_ID ตั้งแต่ 2026-09-28)
+const off = applyModelEdit(bh01, { ...sneaky, constraintsOff: ['MIN_ID'] });
+check('ปิดข้อจำกัดจากหน้าจอได้', off.constraints.find((c) => c.id === 'MIN_ID')?.disabled === true);
 check('ข้อจำกัดข้ออื่นไม่ถูกปิดตามไปด้วย', off.constraints.find((c) => c.id === 'MIN_WIDTH')?.disabled !== true);
 
 // แก้ราคาแล้วต้องมีผลกับราคาที่คิดออกมาจริง ไม่ใช่แค่เก็บลงไฟล์
@@ -687,8 +694,8 @@ if (ts01 && ts010) {
   check('หน้าชีตรู้ค่ามาตรฐานของเกลียว', JSON.stringify(v9.axisDefaults) === JSON.stringify([{ axis: 'thread', axisTh: 'ขนาดเกลียว', value: '1/4”' }]),
     JSON.stringify(v9.axisDefaults));
   check('ยังเปิดแบบชีต Excel ได้', excelReady(b9.models['TSK-01']!) && excelReady(b9.models['TSK-01-0']!));
-  check('ไฟล์ catalog-subcodes.json ผ่านตัวตรวจทุกแถว (TS_-01 12 + แกน 6 · TS_-08 5 + หัวค่าว่าง 4 + เกลียวมิล 10 · TS_-10 5 + เกลียวมิล 12)',
-    cat.length === 49, String(cat.length));
+  check('ไฟล์ catalog-subcodes.json ผ่านตัวตรวจทุกแถว (TS_-01 12 + แกน 6 · TS_-08 5 + หัวค่าว่าง 4 + เกลียวมิล 10 · TS_-10 5 + เกลียวมิล 12 · BH ปลั๊ก PL-5 ค่าว่าง 2)',
+    cat.length === 51, String(cat.length));
 
   // ── ราคาสายที่ตารางรหัสย่อยตั้งให้ ต้องมีช่องบนหน้าสมุดราคาเสมอ (เจ้าของ 2026-09-25: "ต้องสามารถแก้ไขผ่าน ui ได้")
   const rowsOf = (b: PriceBook, code: string) =>

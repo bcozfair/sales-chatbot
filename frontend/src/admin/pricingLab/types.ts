@@ -69,12 +69,54 @@ export interface QuoteOverview {
   version: string | null;
   models: ModelBrief[];
   edited: { at: string; by?: string; note?: string } | null;
+  /** ลำดับท่อน + ตัวเลือกของแคตตาล็อก "การสั่งซื้อ" (ไม่มีราคา) — ดู `services/pricingLab/catalogBh.ts` */
+  catalog?: CatalogFamilySpec[];
+}
+
+// ── แคตตาล็อก "การสั่งซื้อ" (สำเนาชนิดข้อมูลของ services/pricingLab/catalogBh.ts) ──────────────
+export type BhFamily = 'BH-01' | 'BH-01C' | 'BH-02' | 'BH-03';
+export type SizeKey = 'id' | 'h' | 'w' | 'l' | 'd1' | 'd2';
+export interface CatalogOption { code: string; label: string }
+export interface CatalogSlot {
+  label: string;
+  kind: 'number' | 'choice' | 'text';
+  unit?: string;
+  options?: CatalogOption[];
+  suggest?: string[];
+  hint?: string;
+  /** ช่องนี้ไม่อยู่ในรหัส (ขนาดเต๋า 10A/30A) */
+  offCode?: boolean;
+}
+export type CatalogLayoutItem = { slot: string } | { sep: string };
+export interface CatalogFamilySpec {
+  family: BhFamily;
+  head: string;
+  name: string;
+  short: string;
+  layout: CatalogLayoutItem[];
+  slots: Record<string, CatalogSlot>;
+  shapes?: { code: string; label: string; dims: SizeKey[] }[];
+}
+export interface BhForm {
+  family: BhFamily;
+  shape?: string;
+  id?: number; h?: number; w?: number; l?: number; d1?: number; d2?: number;
+  sizeText?: string;
+  volt?: string;
+  watt?: number;
+  wattText?: string;
+  conn?: string;
+  term?: string;
+  amp?: string;
+  mat?: string;
+  extras?: { text: string; after: string; glue?: boolean }[];
 }
 
 export interface CodePart {
   text: string;
   reads: string;
-  kind: 'model' | 'axis' | 'dim' | 'option' | 'noPrice' | 'unknown';
+  /** `choose` = อ่านออกแต่ต้องให้คนเลือกเพิ่มก่อนรวมในราคา (ขนาดเต๋า T ของ BH) — ไม่ใช่ของที่ต้องไปตั้งในตารางรหัสย่อย */
+  kind: 'model' | 'axis' | 'dim' | 'option' | 'noPrice' | 'unknown' | 'choose';
   guess?: boolean;
 }
 
@@ -85,6 +127,8 @@ export interface ParsedCode {
   parts: CodePart[];
   problems: string[];
   warnings: string[];
+  /** ช่องตามแคตตาล็อก — มีเฉพาะรหัสที่เขียนตามรูปแบบของแคตตาล็อก (วันนี้ซีรีส์ BH) */
+  form?: BhForm;
 }
 
 export interface BreakdownLine {
@@ -331,7 +375,7 @@ export interface EditorView {
   variant: EditorVariant | null;
   adders: EditorAdder[];
   constraints: { id: string; level: string; levelTh: string; message: string; whenTh: string; disabled: boolean }[];
-  derived: { name: string; label: string; argsTh: string; consts: string }[];
+  derived: { name: string; label: string; argsTh: string; consts: string; formulaTh: string; whenTh: string }[];
   vocab: {
     options: { key: string; label: string }[];
     dims: { key: string; label: string }[];
