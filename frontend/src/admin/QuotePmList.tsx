@@ -11,7 +11,8 @@
  *
  * การแบ่งใบจริงไม่ได้อยู่ที่นี่ — อยู่ที่ decideForcedQuoteCompany (services/customerQuoteCompany.ts)
  */
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useAuth } from '../context/AuthContext';
 import { AlertTriangle, Building2, CheckCircle2, Edit2, Layers, Loader2, Plus, Search, Trash2 } from 'lucide-react';
 import { PageHeader } from './PageHeader';
@@ -72,22 +73,147 @@ async function sendJson(url: string, method: string, token: string | null, paylo
 const companyLabel = (row: QuotePmRow) => row.company_name || `บริษัทรหัส ${row.company_id}`;
 const dateTh = (iso: string) => new Date(iso).toLocaleDateString('th-TH');
 
-/** ป้าย "ครอบคลุม" — undefined = กำลังนับ · 0 = ไม่พบบริษัทในฐานลูกค้าแล้ว */
-const CoverageChip: React.FC<{ n: number | undefined }> = ({ n }) =>
-  n === undefined ? (
-    <Loader2 className="w-3.5 h-3.5 text-slate-300 animate-spin" aria-label="กำลังนับ" />
-  ) : n > 1 ? (
-    <span className={PM_CHIP}>{n} รหัสลูกค้า</span>
-  ) : n === 1 ? (
-    <span className={GRAY_CHIP}>รหัสนี้รหัสเดียว</span>
-  ) : (
-    <span className="text-slate-300">—</span>
+const POP_WIDTH = 340;
+const GUTTER = 16;
+
+/**
+ * ป้าย "ครอบคลุม" + กล่องลอยบอกว่ามีผลกับรหัสไหนบ้าง (แบบ A ที่เจ้าของยืนยัน 2026-09-28 ·
+ * mockups/quote-pm-coverage-tooltip.html)
+ *
+ * · จอกว้าง: ชี้แล้วขึ้น · มือถือ: แตะเปิด แตะที่อื่น/Esc ปิด (มือถือไม่มี hover) · โฟกัสด้วยคีย์บอร์ดก็เปิด
+ * · วาดผ่าน portal ตำแหน่ง fixed — การ์ดตารางเป็น `overflow-hidden` ถ้าวาดข้างในกล่องจะถูกตัด
+ *   และบีบให้อยู่ในจอเสมอ (ชิดขอบ 16px · ล่างไม่พอก็กางขึ้นบน) ⇒ 390px ไม่มี scroll แนวนอน
+ * · รหัสที่ตั้งไว้จริงขึ้นบนสุดพร้อมป้าย "ที่ตั้งไว้" ที่เหลือเรียงตามรหัส
+ * · undefined = กำลังนับ · [] = ไม่พบบริษัทในฐานลูกค้าแล้ว · 1 รหัส = ไม่มีกล่อง (ไม่มีอะไรเพิ่มให้ดู)
+ */
+const CoverageChip: React.FC<{ companyId: number; list: RelatedCompany[] | undefined }> = ({ companyId, list }) => {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ left: number; top: number; above: boolean } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+  const hoverTimer = useRef<number | undefined>(undefined);
+  const lastPointer = useRef('');
+  const popId = useId();
+
+  const place = useCallback(() => {
+    const b = btnRef.current?.getBoundingClientRect();
+    if (!b) return;
+    const width = Math.min(POP_WIDTH, window.innerWidth - GUTTER * 2);
+    const left = Math.max(GUTTER, Math.min(b.left, window.innerWidth - width - GUTTER));
+    const h = popRef.current?.offsetHeight ?? 0;
+    const above = h > 0 && b.bottom + 6 + h > window.innerHeight - 8 && b.top - 6 - h > 8;
+    setPos({ left, top: above ? b.top - 6 - h : b.bottom + 6, above });
+  }, []);
+
+  // วัดตำแหน่งหลังกล่องขึ้นแล้ว (ต้องรู้ความสูงจริงก่อนตัดสินว่ากางขึ้นหรือลง)
+  useLayoutEffect(() => {
+    if (!open) return;
+    place();
+  }, [open, place]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (btnRef.current?.contains(t) || popRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    const onMove = () => place();
+    document.addEventListener('pointerdown', onDown);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', onMove, true);
+    window.addEventListener('resize', onMove);
+    return () => {
+      document.removeEventListener('pointerdown', onDown);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', onMove, true);
+      window.removeEventListener('resize', onMove);
+    };
+  }, [open, place]);
+
+  useEffect(() => () => window.clearTimeout(hoverTimer.current), []);
+
+  if (list === undefined) return <Loader2 className="w-3.5 h-3.5 text-slate-300 animate-spin" aria-label="กำลังนับ" />;
+  if (list.length === 0) return <span className="text-slate-300">—</span>;
+  if (list.length === 1) return <span className={GRAY_CHIP}>รหัสนี้รหัสเดียว</span>;
+
+  const sorted = [...list].sort((a, b) =>
+    Number(b.company_id === companyId) - Number(a.company_id === companyId)
+    || String(a.reference ?? '\uffff').localeCompare(String(b.reference ?? '\uffff'))
+    || a.company_id - b.company_id);
+  // ชี้ = เปิด · ออกจากทั้งป้ายและกล่อง = ปิด (หน่วงนิดเดียวให้เลื่อนเมาส์จากป้ายลงไปในกล่องได้)
+  // ตัดสินจาก `pointerType` ของแต่ละครั้ง ไม่ใช่ media query `(hover: hover)` — เครื่องจอสัมผัสที่มีเมาส์ด้วย
+  // (และ Chrome headless ของด่าน) ตอบ media query ผิดทาง · นิ้วแตะ = สลับเปิด/ปิดด้วย click แทน
+  const enter = (e: React.PointerEvent) => { if (e.pointerType !== 'mouse') return; window.clearTimeout(hoverTimer.current); setOpen(true); };
+  const leave = (e: React.PointerEvent) => { if (e.pointerType !== 'mouse') return; hoverTimer.current = window.setTimeout(() => setOpen(false), 120); };
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        className={`${PM_CHIP} cursor-help`}
+        data-coverage-chip
+        aria-expanded={open}
+        aria-describedby={open ? popId : undefined}
+        onPointerDown={(e) => { lastPointer.current = e.pointerType; }}
+        // เมาส์เปิดไว้แล้วจากการชี้ — คลิกไม่ต้องสลับ · นิ้ว/คีย์บอร์ด (Enter) = สลับ
+        onClick={() => { if (lastPointer.current !== 'mouse') setOpen((v) => !v); lastPointer.current = ''; }}
+        onPointerEnter={enter}
+        onPointerLeave={leave}
+        // เปิดเฉพาะโฟกัสจากคีย์บอร์ด — แตะบนมือถือได้ทั้ง focus และ click ติดกัน ถ้าเปิดทั้งคู่ click จะสลับปิดทันที
+        onFocus={(e) => { if (e.currentTarget.matches(':focus-visible')) setOpen(true); }}
+        onBlur={(e) => { if (!popRef.current?.contains(e.relatedTarget as Node)) setOpen(false); }}
+      >
+        {list.length} รหัสลูกค้า
+      </button>
+      {open && createPortal(
+        <div
+          ref={popRef}
+          id={popId}
+          role="tooltip"
+          onPointerEnter={enter}
+          onPointerLeave={leave}
+          style={{ left: pos?.left ?? -9999, top: pos?.top ?? -9999, width: `min(${POP_WIDTH}px, calc(100vw - ${GUTTER * 2}px))` }}
+          className="fixed z-50 rounded-xl border border-slate-300 bg-card shadow-2xl pt-2.5 pb-1.5 text-left"
+        >
+          <div className="px-3 pb-1.5 text-[11.5px] font-bold text-slate-800">
+            ค่านี้มีผลกับ {list.length} รหัสลูกค้าในนิติบุคคลเดียวกัน
+            <span className="block font-normal text-[10.5px] text-slate-400 mt-px">ชื่อ รหัสอ้างอิง หรือเลขผู้เสียภาษี ตรงกัน</span>
+          </div>
+          <div className="max-h-[288px] overflow-y-auto">
+            {sorted.map((r) => {
+              const me = r.company_id === companyId;
+              return (
+                <div key={r.company_id} className="flex items-baseline gap-2.5 px-3 py-1.5 border-t border-slate-200">
+                  <span className={`shrink-0 w-[88px] font-mono text-[11.5px] break-all ${me ? 'font-bold text-sky-700' : 'text-slate-500'}`}>
+                    {r.reference || '—'}
+                  </span>
+                  <span className="flex-1 min-w-0 text-[12px] text-slate-800">
+                    {r.display_name || `บริษัทรหัส ${r.company_id}`}
+                    {me && (
+                      <span className="ml-1 inline-block px-1.5 rounded-full border border-sky-200 text-[10px] font-bold text-sky-700 align-middle">
+                        ที่ตั้งไว้
+                      </span>
+                    )}
+                    {r.tax_id && <span className="block font-mono text-[10.5px] text-slate-400">{r.tax_id}</span>}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
   );
+};
 
 export const QuotePmList: React.FC = () => {
   const { token } = useAuth();
   const [rows, setRows] = useState<QuotePmRow[]>([]);
-  const [coverage, setCoverage] = useState<Record<number, number>>({});
+  const [coverage, setCoverage] = useState<Record<number, RelatedCompany[]>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -112,9 +238,9 @@ export const QuotePmList: React.FC = () => {
             const id = queue.shift()!;
             try {
               const rel = await fetchJson<RelatedCompany[]>(`/api/admin/quote-pm/customers/${id}/related`, token);
-              if (!cancelled) setCoverage((c) => ({ ...c, [id]: rel.length }));
+              if (!cancelled) setCoverage((c) => ({ ...c, [id]: rel }));
             } catch {
-              if (!cancelled) setCoverage((c) => ({ ...c, [id]: 0 }));
+              if (!cancelled) setCoverage((c) => ({ ...c, [id]: [] }));
             }
           }
         };
@@ -233,7 +359,7 @@ export const QuotePmList: React.FC = () => {
                     <div className="font-semibold text-slate-900">{companyLabel(row)}</div>
                     {!row.company_name && <div className="text-[11px] text-amber-600">ไม่พบชื่อในฐานข้อมูลลูกค้าแล้ว</div>}
                   </td>
-                  <td className="px-4 py-2.5"><CoverageChip n={coverage[row.company_id]} /></td>
+                  <td className="px-4 py-2.5"><CoverageChip companyId={row.company_id} list={coverage[row.company_id]} /></td>
                   <td className="px-4 py-2.5 text-slate-500">{row.note || <span className="text-slate-300">—</span>}</td>
                   <td className="px-4 py-2.5 text-slate-500 text-[13px]">
                     {row.created_by_name || <span className="text-slate-300">—</span>}
@@ -260,7 +386,7 @@ export const QuotePmList: React.FC = () => {
                   {actions(row)}
                 </div>
                 <div className="flex flex-wrap items-center gap-2 text-[12px] text-slate-500">
-                  <CoverageChip n={coverage[row.company_id]} />
+                  <CoverageChip companyId={row.company_id} list={coverage[row.company_id]} />
                   <span>{row.created_by_name || '—'} · {dateTh(row.created_at)}</span>
                 </div>
                 {row.note && <div className="text-[12px] text-slate-500">{row.note}</div>}
