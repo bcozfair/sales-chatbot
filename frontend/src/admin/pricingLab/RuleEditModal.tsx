@@ -3,6 +3,7 @@ import { Calculator } from 'lucide-react';
 import { Modal } from '../Modal';
 import { Button } from '../Button';
 import type { EditorAdder, EditorView, Predicate } from './types';
+import { makeId } from './tsRulesText';
 
 /**
  * กล่อง "เพิ่ม / แก้กฎบวกเพิ่ม" ของหน้าแก้ราคาทีละรุ่น
@@ -37,16 +38,6 @@ const num = (v: string): number | null => {
   const n = Number(s);
   return Number.isFinite(n) ? n : null;
 };
-
-/** สร้าง id จากชื่อที่พิมพ์ — ตัวอักษรไทยใช้เป็นคีย์ไม่ได้ จึงถอยไปใช้เลขลำดับ */
-function makeId(label: string, used: string[]): string {
-  const base = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-  const stem = /^[a-z]/.test(base) ? base.slice(0, 30) : 'rule';
-  let id = stem;
-  let n = 1;
-  while (used.includes(id)) id = `${stem}_${++n}`;
-  return id;
-}
 
 function whenToText(p: Predicate | null, optLabel: (k: string) => string, dimLabel: (k: string) => string): string {
   if (!p || 'always' in p) return 'ทุกกรณี';
@@ -156,7 +147,7 @@ export const RuleEditModal: React.FC<{
     onSave({
       ...(adder ?? {
         uid: id, id, kindTh: '', dimTh: null, byAxis: null, byAxisTh: null,
-        rates: null, disabled: false, custom: true, source: '',
+        rates: null, disabled: false, custom: true, source: '', overStd: null, round: null, skipIfNoRate: false,
       }),
       uid: adder?.uid ?? id,
       id,

@@ -354,9 +354,15 @@ export interface EditorAdder {
   dim: string | null;
   dimTh: string | null;
   over: number | null;
+  /** ค่าที่ `over: null` หมายถึง (สเปกมาตรฐานของรุ่น) — อ่านอย่างเดียว ห้ามส่งกลับเป็น `over` */
+  overStd: number | null;
   step: number | null;
   times: number | null;
   unit: string;
+  /** วิธีปัดเศษของช่วง — อ่านอย่างเดียว (ไม่ใช่ perUnit = null) */
+  round: 'ceil' | 'floor' | 'exact' | null;
+  /** ค่าแกนที่ไม่มีอัตรา: true = ข้ามกฎ · false = "ยังไม่มีราคา" — อ่านอย่างเดียว */
+  skipIfNoRate: boolean;
   byAxis: string | null;
   byAxisTh: string | null;
   /** `rate: null` = ค่าแกนนี้ไม่มีราคา (ต้องขอราคา) — ไม่ใช่ 0 */
@@ -417,12 +423,16 @@ export interface EditorView {
     | { kind: 'ref'; model: string };
   variant: EditorVariant | null;
   adders: EditorAdder[];
-  constraints: { id: string; level: string; levelTh: string; message: string; whenTh: string; disabled: boolean }[];
+  constraints: { id: string; level: string; levelTh: string; message: string; whenTh: string; when: Predicate | null; disabled: boolean }[];
   derived: { name: string; label: string; argsTh: string; consts: string; formulaTh: string; whenTh: string }[];
+  /** ค่ามาตรฐานที่รวมในราคาตั้งแล้ว */
+  standard: { dim: string; dimTh: string; value: number }[];
   vocab: {
     options: { key: string; label: string }[];
     dims: { key: string; label: string }[];
     axes: { key: string; label: string }[];
     kinds: { key: string; label: string }[];
+    /** คีย์ที่ซีรีส์เดียวกันใช้อยู่ — กล่องแก้กฎของ TS โชว์ชุดนี้ก่อน */
+    series: { options: string[]; dims: string[] };
   };
 }

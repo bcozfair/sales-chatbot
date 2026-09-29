@@ -20,7 +20,7 @@
 
 import { AXIS_TH, DIM_TH, FORMULA_TH, KIND_TH, OPTION_TH, axisLabel, dimLabel, displayName } from './labels.js';
 import { scopeRank } from './subcodes.js';
-import type { Adder, Band, ModelVariant, Money, Predicate, PriceBook, PriceModel, SheetLayout } from './types.js';
+import type { Adder, Band, ModelVariant, Money, Predicate, PriceBook, PriceModel, RoundMode, SheetLayout } from './types.js';
 
 // ── ที่หน้าจออ่าน ────────────────────────────────────────────────────────────
 
@@ -47,9 +47,18 @@ export interface EditorAdder {
   dim: string | null;
   dimTh: string | null;
   over: number | null;
+  /**
+   * ค่าที่ `over: null` หมายถึง (`standard[dim]` ของรุ่น) — **อ่านอย่างเดียว** ให้จอเขียนประโยค "ยาวเกิน 100 mm"
+   * ได้โดยไม่ต้องเดาจากข้อความ · ห้ามส่งกลับมาเป็น `over` (ทับแล้วกฎเลิกตามสเปกมาตรฐานของรุ่น)
+   */
+  overStd: number | null;
   step: number | null;
   times: number | null;
   unit: string;
+  /** วิธีปัดเศษของช่วง (engine ตั้งต้น = ขึ้น) — **อ่านอย่างเดียว** ตัวรับพกของเดิมต่อเอง (`readAdders`) · ไม่ใช่ perUnit = `null` */
+  round: RoundMode | null;
+  /** ค่าแกนที่ไม่มีอัตรา: true = ข้ามกฎ (ไม่คิดเพิ่ม) · false = "ยังไม่มีราคา" — อ่านอย่างเดียว ตัวรับพกของเดิมต่อ */
+  skipIfNoRate: boolean;
   /** อัตราที่ต่างกันตามค่าแกน — หน้าจอแก้ได้ทีละค่า แต่เพิ่ม/ลบค่าแกนไม่ได้ */
   byAxis: string | null;
   byAxisTh: string | null;
@@ -109,14 +118,22 @@ export interface EditorView {
   axisDefaults: { axis: string; axisTh: string; value: string }[];
   variant: (ModelVariant & { covers: string[] }) | null;
   adders: EditorAdder[];
-  constraints: { id: string; level: string; levelTh: string; message: string; whenTh: string; disabled: boolean }[];
+  /** `when` = โครงเงื่อนไขให้จอจัดกลุ่ม (อ่านอย่างเดียว — ข้อจำกัดแก้ได้แค่เปิด/ปิด ดูหัวไฟล์) */
+  constraints: { id: string; level: string; levelTh: string; message: string; whenTh: string; when: Predicate | null; disabled: boolean }[];
   derived: { name: string; label: string; argsTh: string; consts: string; formulaTh: string; whenTh: string }[];
+  /** ค่ามาตรฐานที่รวมในราคาตั้งแล้ว แยกเป็นช่อง (`standardTh` คือข้อความเดียวกันต่อเป็นบรรทัด) */
+  standard: { dim: string; dimTh: string; value: number }[];
   /** คำศัพท์ให้ช่องเลือกในกล่อง "แก้กฎ" — รายการปิด ไม่ใช่ช่องพิมพ์อิสระ */
   vocab: {
     options: { key: string; label: string }[];
     dims: { key: string; label: string }[];
     axes: { key: string; label: string }[];
     kinds: { key: string; label: string }[];
+    /**
+     * คีย์ของ `options`/`dims` ที่รุ่นในซีรีส์เดียวกันใช้อยู่ในเล่มนี้ — กล่องแก้กฎของ TS โชว์ชุดนี้ก่อน
+     * (เจ้าของเคาะ 2026-09-29: รายการเต็มปน BH เช่น "เต๋าเซรามิค 10A") · เป็นแค่ลำดับการโชว์ ไม่ใช่ด่าน
+     */
+    series: { options: string[]; dims: string[] };
   };
 }
 
@@ -302,6 +319,38 @@ function sheetTitle(m: PriceModel, name: string): string {
   return inSheet ? `TS_${own![1]}` : name;
 }
 
+/** ซีรีส์ของรุ่น = สองตัวอักษรแรกของรหัส (`TSK-04` · `TSP-08` · `TS-14` → TS · `BH-01` → BH) */
+const seriesOf = (code: string) => code.slice(0, 2).toUpperCase();
+
+function walkWhen(p: Predicate | undefined, options: Set<string>, dims: Set<string>): void {
+  if (!p || 'always' in p) return;
+  if ('all' in p) p.all.forEach((x) => walkWhen(x, options, dims));
+  else if ('any' in p) p.any.forEach((x) => walkWhen(x, options, dims));
+  else if ('not' in p) walkWhen(p.not, options, dims);
+  else if ('option' in p) options.add(p.option);
+  else if ('dim' in p) dims.add(p.dim);
+}
+
+/** คีย์ตัวเลือก/ช่องตัวเลขที่รุ่นในซีรีส์เดียวกันใช้อยู่จริง — ดู `EditorView.vocab.series` */
+function seriesVocab(book: PriceBook, m: PriceModel): { options: string[]; dims: string[] } {
+  const options = new Set<string>();
+  const dims = new Set<string>();
+  const series = seriesOf(m.code);
+  for (const x of Object.values(book.models)) {
+    if (seriesOf(x.code) !== series) continue;
+    for (const k of Object.keys(x.standard ?? {})) dims.add(k);
+    for (const a of x.adders) {
+      walkWhen(a.when, options, dims);
+      if (a.dim) dims.add(a.dim);
+    }
+    for (const c of x.constraints) walkWhen(c.when, options, dims);
+  }
+  return {
+    options: Object.keys(OPTION_TH).filter((k) => options.has(k)),
+    dims: Object.keys(DIM_TH).filter((k) => dims.has(k))
+  };
+}
+
 export function modelEditorView(book: PriceBook, m: PriceModel): EditorView {
   const base: EditorView['base'] =
     m.base.kind === 'banded'
@@ -380,9 +429,12 @@ export function modelEditorView(book: PriceBook, m: PriceModel): EditorView {
         dim: a.dim ?? null,
         dimTh: a.dim ? dimLabel(a.dim) : null,
         over: a.over ?? null,
+        overStd: a.dim ? m.standard?.[a.dim] ?? null : null,
         step: a.step ?? null,
         times: a.times ?? null,
         unit: a.unit ?? '',
+        round: a.kind === 'perUnit' ? a.round ?? 'ceil' : null,
+        skipIfNoRate: !!a.skipIfNoRate,
         byAxis: a.byAxis ?? null,
         byAxisTh: a.byAxis ? axisLabel(a.byAxis) : null,
         rates: a.rates
@@ -399,6 +451,7 @@ export function modelEditorView(book: PriceBook, m: PriceModel): EditorView {
       levelTh: LEVEL_TH[c.level] ?? c.level,
       message: c.message,
       whenTh: whenToText(c.when),
+      when: c.when ?? null,
       disabled: !!c.disabled
     })),
     derived: (m.derivedDims ?? []).map((d) => ({
@@ -412,11 +465,13 @@ export function modelEditorView(book: PriceBook, m: PriceModel): EditorView {
       // สูตรพื้นที่ของ BH-02 มีหลายแถวชื่อเดียวกัน เลือกตามรูปทรง — ต้องเห็นว่าแถวไหนใช้เมื่อไหร่
       whenTh: d.when ? whenToText(d.when) : '',
     })),
+    standard: Object.entries(m.standard ?? {}).map(([dim, value]) => ({ dim, dimTh: dimLabel(dim), value })),
     vocab: {
       options: Object.entries(OPTION_TH).map(([key, label]) => ({ key, label })),
       dims: Object.entries(DIM_TH).map(([key, label]) => ({ key, label })),
       axes: Object.entries(AXIS_TH).map(([key, label]) => ({ key, label })),
-      kinds: (['flat', 'percent', 'perUnit'] as const).map((key) => ({ key, label: KIND_TH[key] ?? key }))
+      kinds: (['flat', 'percent', 'perUnit'] as const).map((key) => ({ key, label: KIND_TH[key] ?? key })),
+      series: seriesVocab(book, m)
     }
   };
 }

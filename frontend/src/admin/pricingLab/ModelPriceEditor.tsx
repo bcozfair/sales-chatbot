@@ -4,6 +4,9 @@ import { Button } from '../Button';
 import { TableCard, ErrorBox } from '../logs/ui';
 import { errMsg } from '../logs/format';
 import { RuleEditModal } from './RuleEditModal';
+import { TsRuleModal } from './TsRuleModal';
+import { TsRulesView } from './TsRulesView';
+import { isTsRulesModel } from './tsRulesText';
 import type { EditorAdder, EditorBand, EditorView } from './types';
 
 /**
@@ -289,14 +292,29 @@ function buildDiff(orig: EditorView, w: Working): DiffRow[] {
       rows.push({ what: `กฎ ${a.label} — ราคา`, was: priceOf(o) || 'ไม่มีราคา', now: priceOf(a) || 'ไม่มีราคา' });
     }
     if (o.rates && a.rates) {
+      // ช่องเดียวของหน้า TS เปลี่ยนทีละหลายสิบขนาดด้วยตัวเลขคู่เดียวกัน ⇒ ขนาดที่ขยับ "จาก X เป็น Y" เหมือนกัน
+      // เกิน 6 ขนาด รวมเป็นแถวเดียว (ยังบอกครบว่ากี่ขนาด ขนาดไหน) · น้อยกว่านั้นแยกแถวเหมือนเดิม
+      const moved = new Map<string, { was: number | null; now: number | null; keys: string[] }>();
       for (const r of a.rates) {
         const b = o.rates.find((x) => x.value === r.value);
         if (b && b.rate !== r.rate) {
+          const k = `${b.rate}→${r.rate}`;
+          const g = moved.get(k) ?? { was: b.rate, now: r.rate, keys: [] };
+          g.keys.push(r.value || '(ว่าง)');
+          moved.set(k, g);
+        }
+      }
+      for (const g of moved.values()) {
+        const many = g.keys.length > 6;
+        const where = many
+          ? `${g.keys.length} ขนาด (${g.keys.slice(0, 4).join(', ')} …)`
+          : null;
+        for (const key of many ? [where!] : g.keys) {
           rows.push({
-            what: `กฎ ${a.label} — ${a.byAxisTh ?? ''} ${r.value || '(ว่าง)'}`.replace(/\s+/g, ' '),
-            was: b.rate === null ? 'ไม่มีราคา' : fmt(b.rate),
-            now: r.rate === null ? 'ไม่มีราคา — ขนาดนี้ต้องขอราคา' : fmt(r.rate),
-            warn: r.rate === null,
+            what: `กฎ ${a.label} — ${a.byAxisTh ?? ''} ${key}`.replace(/\s+/g, ' '),
+            was: g.was === null ? 'ไม่มีราคา' : fmt(g.was),
+            now: g.now === null ? 'ไม่มีราคา — ขนาดนี้ต้องขอราคา' : fmt(g.now),
+            warn: g.now === null,
           });
         }
       }
@@ -438,6 +456,61 @@ export const ModelPriceEditor: React.FC<{
 
   const v = orig.variant;
   const keeps = v ? w.adders.filter((a) => w.variantPrices[a.id] === undefined) : [];
+
+  const review_ = review && (
+    <ReviewModal
+      code={orig.code}
+      rows={diff}
+      problems={problems}
+      note={note}
+      saved={saved}
+      busy={busy}
+      onNote={setNote}
+      onBack={() => setReview(false)}
+      onSave={() => void save()}
+      onDone={() => { setReview(false); setSaved(false); }}
+    />
+  );
+  const saveRule = (next: WAdder) => {
+    patch((d) => {
+      const i = d.adders.findIndex((x) => x.uid === next.uid);
+      if (i >= 0) d.adders[i] = next; else d.adders.push(next);
+      d.adders.sort((x, y) => x.order - y.order);
+    });
+    setEditing(null);
+  };
+
+  // ซีรีส์ TS ใช้หน้าตาใหม่ (เจ้าของเคาะ 2026-09-29 · ดูหัว TsRulesView.tsx) — สำเนาทำงาน · ส่วนต่าง · บันทึก ใช้ของหน้านี้ชุดเดียวกัน
+  if (isTsRulesModel(orig)) {
+    return (
+      <>
+        <TsRulesView
+          orig={orig}
+          adders={w.adders}
+          constraintsOff={w.constraintsOff}
+          changes={diff.length}
+          error={error}
+          onBack={() => onBack(savedOnce.current)}
+          onUndo={() => setW(toWorking(orig))}
+          onReview={() => setReview(true)}
+          onAdder={(i, next) => patch((d) => { d.adders[i] = next; })}
+          onRemove={(i) => patch((d) => { const [x] = d.adders.splice(i, 1); if (x) delete d.variantPrices[x.id]; })}
+          onEdit={(a) => setEditing({ adder: a })}
+          onConstraint={(id, on) => patch((d) => { if (on) d.constraintsOff.delete(id); else d.constraintsOff.add(id); })}
+        />
+        {editing && (
+          <TsRuleModal
+            adder={editing.adder}
+            view={orig}
+            existingIds={w.adders.map((a) => a.id)}
+            onClose={() => setEditing(null)}
+            onSave={saveRule}
+          />
+        )}
+        {review_}
+      </>
+    );
+  }
 
   return (
     <div className="space-y-3.5">
@@ -830,31 +903,11 @@ export const ModelPriceEditor: React.FC<{
           vocab={orig.vocab}
           existingIds={w.adders.map((a) => a.id)}
           onClose={() => setEditing(null)}
-          onSave={(next) => {
-            patch((d) => {
-              const i = d.adders.findIndex((x) => x.uid === next.uid);
-              if (i >= 0) d.adders[i] = next; else d.adders.push(next);
-              d.adders.sort((x, y) => x.order - y.order);
-            });
-            setEditing(null);
-          }}
+          onSave={saveRule}
         />
       )}
 
-      {review && (
-        <ReviewModal
-          code={orig.code}
-          rows={diff}
-          problems={problems}
-          note={note}
-          saved={saved}
-          busy={busy}
-          onNote={setNote}
-          onBack={() => setReview(false)}
-          onSave={() => void save()}
-          onDone={() => { setReview(false); setSaved(false); }}
-        />
-      )}
+      {review_}
     </div>
   );
 };
