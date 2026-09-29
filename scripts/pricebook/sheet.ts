@@ -1478,10 +1478,9 @@ function readAdders(grid: CellValue[][] | undefined, models: Record<string, Pric
       }
       a.percent = percent;
     } else if (kind === 'flat') {
-      if (amount === undefined && rate === undefined && byAxis === '') {
-        R.err(name, `กฎ ${id} เป็นแบบเงินคงที่ แต่ไม่ได้ใส่จำนวนเงิน`, line);
-        continue;
-      }
+      // ช่องเงินว่าง = "ยังไม่มีราคา" ไม่ใช่ข้อผิดพลาด — กติกาเดียวกับ engine (`evalAdder` ตอบ noRate) เพราะเล่มมีกฎ
+      // ที่ตั้งโครงไว้รอกรอกเงินจริง (conn_pl5 ของ BH · เจ้าของ 2026-09-29) ถ้าตรงนี้ปฏิเสธ แม่แบบที่ดาวน์โหลดจากเล่ม
+      // ปัจจุบันจะอัปโหลดกลับไม่ได้ทั้งไฟล์ · ห้ามเติม 0 ให้ — 0 คือราคาจริงที่แปลว่า "ฟรี"
       if (amount !== undefined) a.amount = amount;
       if (rate !== undefined) a.rate = rate;
     } else {

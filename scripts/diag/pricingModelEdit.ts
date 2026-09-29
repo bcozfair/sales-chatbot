@@ -962,8 +962,18 @@ console.log('\n── 12. เกลียวที่อ่านไม่ออ
     check('  การ์ดวิธีคำนวณบอกเหตุผลที่ไม่คิดค่าสาย (เกินไม่ถึงช่วงเต็ม)', /นับเฉพาะช่วงเต็ม/.test(JSON.stringify(x15.r.trace ?? '')),
       JSON.stringify(x15.r.trace ?? null).slice(0, 200));
     const x25 = run('TSJ-11 6x30+2.5M');
-    check('  TSJ-11 6x30+2.5M — เกินเต็มเมตรแล้วต้องรู้ชนิดสาย ⇒ ยังไม่ได้ราคา (ไม่ใช่ข้ามค่าสายไปเงียบ ๆ)',
-      x25.r.status !== 'priced' && x25.r.violations.some((v) => /ชนิดสาย/.test(v.message)), why(x25));
+    // เล่มที่มีค่ามาตรฐานสาย (แคตตาล็อก TS ข้อ 5: TS-11 ไม่ระบุ = สแตนเลสถัก · เข้าเล่มด้วย --extras-only) คิดตามค่านั้น
+    // เล่มที่ยังไม่มีต้องบล็อก — ด่านนี้รันกับเล่มในฐานจริง จึงต้องเช็กตามเล่ม ไม่ใช่สมมติว่าเล่มยังเก่า
+    const m11 = Object.entries(book.models).find(([k]) => /^TS.-11$/.test(k))![1];
+    const std11 = m11.axisDefaults?.cable;
+    if (std11) {
+      const perM = m11.adders.find((a) => a.id === 'cable_over_1m')?.rates?.[std11];
+      check(`  TSJ-11 6x30+2.5M — เกินเต็มเมตร ไม่บอกชนิดสาย ⇒ คิดค่าสายตามค่ามาตรฐานของเล่ม (${std11}) 1 เมตร`,
+        x25.r.status === 'priced' && perM !== undefined && x25.r.unitPrice === x1.r.unitPrice + perM, `${why(x25)} vs ${why(x1)} · ${perM}`);
+    } else {
+      check('  TSJ-11 6x30+2.5M — เกินเต็มเมตรแล้วต้องรู้ชนิดสาย ⇒ ยังไม่ได้ราคา (ไม่ใช่ข้ามค่าสายไปเงียบ ๆ)',
+        x25.r.status !== 'priced' && x25.r.violations.some((v) => /ชนิดสาย/.test(v.message)), why(x25));
+    }
   }
   if (Object.keys(book.models).some((k) => /^TS.-04$/.test(k))) {
     const f = run('TSK-04(S2)5x100+1.2MF');
