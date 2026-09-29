@@ -3,6 +3,7 @@ import { Tag, AlertTriangle } from 'lucide-react';
 import { Modal } from '../Modal';
 import { Button } from '../Button';
 import { EFFECT_TH, EFFECT_HINT, type ModelBrief, type SubCode, type SubCodeEffect } from './types';
+import { isWide } from './subCodeText';
 
 /**
  * กล่องตั้งค่ารหัสย่อย — กล่องเดียวจบ ทั้งตอนเพิ่มใหม่และตอนแก้ของเดิม
@@ -17,6 +18,13 @@ import { EFFECT_TH, EFFECT_HINT, type ModelBrief, type SubCode, type SubCodeEffe
  *    เดียวกับตอนบันทึกจริง ไม่ใช่สูตรที่สองบนหน้าจอ ⇒ เลขที่เห็นก่อนกดคือเลขที่จะได้จริงเสมอ
  * 3. **ช่องที่ไม่เกี่ยวกับผลที่เลือกจะหายไป ไม่ใช่จางลง** — ช่องที่เห็นแต่กรอกไม่ได้ทำให้คนเดาว่า
  *    ต้องปลดล็อกยังไง ส่วนช่องที่ไม่อยู่ ไม่มีใครถาม
+ *
+ * **เปิดจากหน้าชีต (`targets`)** — เจ้าของเคาะ mockup `pricebook-subcodes-sheet` 2026-09-29:
+ *   ขอบเขตคือรุ่นในชีตที่เปิดอยู่เท่านั้น ไม่ต้องเลือกจากรายการทุกรุ่น · ชีตที่มีสองรุ่นเลือก "ทุกรุ่นในชีต" หรือ
+ *   "เฉพาะรุ่น …" (ข้อ 1) · แถวบนจอหนึ่งแถวอาจเป็นหลายแถวในฐาน (`members`) ⇒ บันทึกทีละแถวตามรุ่นที่เลือก
+ *   ⚠️ รุ่นที่มีแถวของตัวอักษรนี้อยู่แล้ว **ต้องแก้แถวเดิม ไม่ใช่เพิ่มแถวใหม่** — ขอบเขตของแถวเดิมอาจเป็นชื่ออื่นของรุ่น
+ *   (`TSK-01` ของรุ่น `TS_-01`) ⇒ เพิ่มใหม่ด้วยรหัสรุ่นจะได้สองแถวที่ชั้นเท่ากัน แล้วตัวอ่านเลือกตัวไหนก็ได้
+ *   ขอบเขตทั้งตระกูล/ทุกรุ่นแก้จากหน้าแรกเท่านั้น (ข้อ 4) · บันทึกแล้ว **มีผลทันที** (ข้อ 2)
  */
 
 interface Props {
@@ -30,6 +38,14 @@ interface Props {
   code: string;
   /** แก้ของเดิม — ไม่ส่ง = เพิ่มใหม่ */
   editing?: SubCode;
+  /** เปิดจากหน้าชีต: รุ่นในชีต — แทนช่อง "ใช้กับรุ่นไหน" แบบรายการทุกรุ่น */
+  targets?: { code: string; name: string }[];
+  /** เปิดจากหน้าชีต: แถวในฐานทุกแถวที่รวมเป็นแถวบนจอที่กำลังแก้ */
+  members?: SubCode[];
+  /** เปิดจากหน้าชีต: แถวในฐานของรุ่นในชีต — หาแถวเดิมของตัวอักษรนี้ก่อนเพิ่มใหม่ */
+  siblings?: SubCode[];
+  /** ท่อนที่ต่างกันแค่ตัวเลข (S000 · S001) — เริ่มที่ติ๊ก "ใช้กับตัวที่เลขต่างกัน" */
+  preferPattern?: boolean;
   onClose: () => void;
   onSaved: () => void;
 }
@@ -43,8 +59,18 @@ function familyOf(code: string): string | null {
 }
 
 export const SubCodeModal: React.FC<Props> = ({
-  token, subCode, modelCode, models, code, editing, onClose, onSaved,
+  token, subCode: givenSubCode, modelCode, models, code, editing, targets, members, siblings, preferPattern, onClose, onSaved,
 }) => {
+  // เพิ่มจากปุ่ม "+ เพิ่มตัวอักษร" ไม่มีตัวอักษรมาให้ ⇒ พิมพ์เอง
+  const [typed, setTyped] = useState('');
+  const subCode = givenSubCode || typed.trim();
+  /** หน้าชีต: `*` = ทุกรุ่นในชีต · อื่น ๆ = รหัสรุ่นเดียว */
+  const [pick, setPick] = useState(() => {
+    if (!targets || targets.length < 2) return targets?.[0]?.code ?? '*';
+    const own = new Set((members ?? []).flatMap((m) => m.models ?? []));
+    const covered = targets.filter((t) => own.has(t.code));
+    return members && covered.length === 1 ? covered[0]!.code : '*';
+  });
   const [reads, setReads] = useState(editing?.reads ?? '');
   const [effect, setEffect] = useState<SubCodeEffect>(editing?.effect ?? 'flat');
   const [amount, setAmount] = useState(String(editing?.amount ?? ''));
@@ -54,7 +80,7 @@ export const SubCodeModal: React.FC<Props> = ({
   const [axis, setAxis] = useState(editing?.axis ?? '');
   const [value, setValue] = useState(editing?.value ?? '');
   const [scope, setScope] = useState(editing?.scope ?? modelCode);
-  const [pattern, setPattern] = useState((editing?.match ?? 'exact') === 'pattern');
+  const [pattern, setPattern] = useState((editing?.match ?? (preferPattern ? 'pattern' : 'exact')) === 'pattern');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [preview, setPreview] = useState<{ before: number | null; after: number | null } | null>(null);
@@ -62,7 +88,9 @@ export const SubCodeModal: React.FC<Props> = ({
   const family = familyOf(modelCode);
   // กฎที่เปิดได้ — ของรุ่นในช่อง "ใช้กับรุ่นไหน" ถ้าเลือกรุ่นเดียว ไม่งั้นของรุ่นที่กำลังคิดอยู่
   // (ขอบเขตทั้งตระกูล/ทุกรุ่น: รุ่นที่ไม่มีกฎนั้นจะขึ้นแดงเองที่ตัวอ่านรหัส ไม่คิดเงินเงียบ ๆ)
-  const scopeModel = models.find((m) => m.code === scope) ?? models.find((m) => m.code === modelCode);
+  const scopeModel = targets
+    ? models.find((m) => m.code === (pick === '*' ? targets[0]?.code : pick))
+    : models.find((m) => m.code === scope) ?? models.find((m) => m.code === modelCode);
   const optionChoices = scopeModel?.options ?? [];
   // ค่าที่ช่องนั้นรับได้ (หัวคอลัมน์เกลียว · ชนิดสาย) — ชื่ออย่างเดียว · ไม่มีในรายการ = พิมพ์เองได้เหมือนเดิม
   const axisChoices = scopeModel?.axes?.[axis.trim()] ?? [];
@@ -114,18 +142,32 @@ export const SubCodeModal: React.FC<Props> = ({
     return () => clearTimeout(t);
   }, [code, draft, token]);
 
+  /** ส่งหนึ่งแถว — `id` = แก้แถวเดิม · ไม่มี = เพิ่ม (ฐานรวมแถวที่ตัวอักษร+ขอบเขตซ้ำให้เอง) */
+  async function send(row: SubCode, id?: number) {
+    const res = await fetch(id ? `/api/admin/pricebook/subcodes/${id}` : '/api/admin/pricebook/subcodes', {
+      method: id ? 'PUT' : 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(row),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body?.error ?? 'บันทึกไม่สำเร็จ');
+  }
+
   async function save() {
     setBusy(true);
     setErr('');
     try {
-      const url = editing?.id ? `/api/admin/pricebook/subcodes/${editing.id}` : '/api/admin/pricebook/subcodes';
-      const res = await fetch(url, {
-        method: editing?.id ? 'PUT' : 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(draft),
-      });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body?.error ?? 'บันทึกไม่สำเร็จ');
+      if (targets) {
+        const chosen = pick === '*' ? targets.map((t) => t.code) : [pick];
+        const same = (r: SubCode) => r.subCode.toUpperCase() === draft.subCode.toUpperCase();
+        for (const code of chosen) {
+          const covers = (r: SubCode) => r.id !== undefined && !isWide(r) && (r.models ?? []).includes(code);
+          const own = (members ?? []).find(covers) ?? (siblings ?? []).find((r) => covers(r) && same(r));
+          await send({ ...draft, scope: own?.scope ?? code }, own?.id);
+        }
+      } else {
+        await send(draft, editing?.id);
+      }
       onSaved();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'บันทึกไม่สำเร็จ');
@@ -143,15 +185,15 @@ export const SubCodeModal: React.FC<Props> = ({
   return (
     <Modal
       icon={Tag}
-      title={editing ? `แก้รหัสย่อย ${editing.subCode}` : `เพิ่มรหัสย่อย ${subCode}`}
+      title={editing ? `แก้รหัสย่อย ${editing.subCode}` : givenSubCode ? `เพิ่มรหัสย่อย ${givenSubCode}` : 'เพิ่มตัวอักษรในรหัส'}
       size="lg"
       onClose={busy ? undefined : onClose}
       footer={
         <>
           <Button variant="neutral" onClick={onClose} disabled={busy}>ยกเลิก</Button>
           <Button variant="primary" onClick={() => void save()} busy={busy}
-                  disabled={!reads.trim() || (effect === 'option' && !value) || (effect === 'setAxis' && !axis.trim())}>
-            บันทึก
+                  disabled={!subCode || !reads.trim() || (effect === 'option' && !value) || (effect === 'setAxis' && !axis.trim())}>
+            {targets ? 'บันทึก · มีผลทันที' : 'บันทึก'}
           </Button>
         </>
       }
@@ -161,13 +203,25 @@ export const SubCodeModal: React.FC<Props> = ({
       <div className="p-5 space-y-3.5">
         <p className="text-xs text-slate-500">ตั้งครั้งเดียว รหัสอื่นที่มีตัวอักษรนี้คิดตามทั้งหมด</p>
 
+        {!givenSubCode && (
+          <div>
+            <label className={lab} htmlFor="sc-token">
+              ตัวอักษรในรหัส <span className="font-normal text-slate-400">— ตามที่เขียนในรหัสสินค้า ไม่ต้องใส่วงเล็บ</span>
+            </label>
+            <input
+              id="sc-token" className={`${fld} font-mono`} value={typed} autoFocus
+              onChange={(e) => setTyped(e.target.value.replace(/[()]/g, ''))} placeholder="เช่น U"
+            />
+          </div>
+        )}
+
         <div>
           <label className={lab} htmlFor="sc-reads">
             อ่านว่าอะไร <span className="font-normal text-slate-400">— เขียนให้คนที่ไม่เคยเห็นรหัสนี้เข้าใจ</span>
           </label>
           <input
             id="sc-reads" className={fld} value={reads} onChange={(e) => setReads(e.target.value)}
-            placeholder="เช่น หัวกระโหลก Blacklite ใหญ่" autoFocus
+            placeholder="เช่น หัวกระโหลก Blacklite ใหญ่" autoFocus={!!givenSubCode}
           />
         </div>
 
@@ -250,7 +304,30 @@ export const SubCodeModal: React.FC<Props> = ({
           )}
         </div>
 
-        <div>
+        {targets && targets.length > 1 && (
+          <fieldset>
+            <legend className={lab}>ใช้กับรุ่นไหน</legend>
+            <div className="space-y-1">
+              {[{ code: '*', name: '' }, ...targets].map((t) => (
+                <label key={t.code} className="flex gap-2.5 items-center text-sm text-slate-700 rounded-lg px-2 py-1.5 hover:bg-slate-50 cursor-pointer">
+                  <input type="radio" name="sc-pick" className="w-4 h-4 shrink-0" checked={pick === t.code} onChange={() => setPick(t.code)} />
+                  {t.code === '*' ? (
+                    <span>ทุกรุ่นในชีตนี้ — {targets.map((x) => <ModelChip key={x.code} name={x.name} />)}</span>
+                  ) : (
+                    <span>เฉพาะ <ModelChip name={t.name} /> <span className="text-xs text-slate-400">— รุ่นอื่นคงความหมายเดิม</span></span>
+                  )}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        )}
+        {targets && targets.length === 1 && (
+          <p className="rounded-xl px-3.5 py-2.5 text-xs bg-blue-50 border border-blue-200 text-blue-700">
+            ใช้กับ <b className="font-mono">{targets[0]!.name}</b> (ชีตที่เปิดอยู่) — ไม่ต้องเลือกรุ่นเอง
+          </p>
+        )}
+
+        {!targets && <div>
           <label className={lab} htmlFor="sc-scope">ใช้กับรุ่นไหน</label>
           <select id="sc-scope" className={fld} value={scope} onChange={(e) => setScope(e.target.value)}>
             <option value={modelCode}>เฉพาะรุ่น {modelCode} (ที่กำลังคิดอยู่)</option>
@@ -260,7 +337,7 @@ export const SubCodeModal: React.FC<Props> = ({
               <option key={m.code} value={m.code}>เฉพาะรุ่น {m.code}</option>
             ))}
           </select>
-        </div>
+        </div>}
 
         {digits && (
           <label className="flex gap-2.5 items-start text-xs text-slate-700">
@@ -275,13 +352,13 @@ export const SubCodeModal: React.FC<Props> = ({
           </label>
         )}
 
-        <div className="flex gap-2.5 rounded-xl px-3.5 py-2.5 text-xs leading-relaxed bg-amber-50 border border-amber-200 text-amber-800">
+        {!targets && <div className="flex gap-2.5 rounded-xl px-3.5 py-2.5 text-xs leading-relaxed bg-amber-50 border border-amber-200 text-amber-800">
           <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
           <span>
             ค่าเริ่มต้นคือ <b>รุ่นเดียว</b> เพราะของจริงมีตัวอักษรเดียวกันที่คนละรุ่นคิดคนละราคา —
             หน้าแปลน 1 นิ้ว: <b>TS-18 คิด 650</b> · <b>TW คิด 800</b>
           </span>
-        </div>
+        </div>}
 
         {preview && preview.after !== null && (
           <div className="rounded-xl px-3.5 py-2.5 text-xs bg-card border border-slate-200 text-slate-700">
@@ -304,3 +381,7 @@ export const SubCodeModal: React.FC<Props> = ({
     </Modal>
   );
 };
+
+const ModelChip: React.FC<{ name: string }> = ({ name }) => (
+  <span className="ml-1 inline-block rounded-md bg-slate-100 px-1.5 py-px font-mono text-[11px] text-slate-600">{name}</span>
+);

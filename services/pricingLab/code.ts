@@ -52,6 +52,12 @@ export interface CodePart {
   kind: 'model' | 'axis' | 'dim' | 'option' | 'noPrice' | 'unknown' | 'choose';
   /** true = ตีความเอาเอง ยังไม่มีใครยืนยัน — หน้าจอต้องแสดงต่างจากของที่ชีตเขียนไว้ตรง ๆ */
   guess?: boolean;
+  /**
+   * มีเฉพาะท่อน `unknown` ที่ **เพิ่มแถวในตารางรหัสย่อยแล้วจะอ่านออก** (ตัวอ่านลองค้นตารางด้วยคำนี้แล้วไม่เจอ)
+   * — ค่าคือคำที่ต้องใช้เป็นรหัสย่อย (ไม่มีวงเล็บ) · ไม่มีช่องนี้ = แก้ที่ตารางราคา/ตัวอ่าน ไม่ใช่ที่รหัสย่อย
+   * ใช้แยกสองกองในส่วน "ยังอ่านไม่ออกในชีตนี้" ของหน้าสมุดราคา (`subcodeView.ts`) — engine ไม่อ่านช่องนี้
+   */
+  subCode?: string;
 }
 
 export interface ParsedCode {
@@ -105,14 +111,36 @@ export function axisValues(model: PriceModel, axis: string): string[] {
   if (model.base.kind !== 'matrix') return [];
   const i = model.base.axes.indexOf(axis);
   if (i < 0) return [];
-  return [
-    ...new Set([
-      ...Object.keys(model.base.cells).map((k) => k.split(' | ')[i] ?? ''),
-      // ค่าที่ตั้งไว้แต่ยังไม่มีราคา — ต้องอ่านออก ไม่งั้นรหัส TSR-18 จะขึ้น "รหัสไม่ได้บอกชนิดเซนเซอร์"
-      ...(model.base.unpriced?.[axis] ?? [])
-    ])
-  ];
+  const unpriced = model.base.unpriced?.[axis];
+  let perAxis = AXIS_MEMO.get(model.base.cells);
+  if (!perAxis) AXIS_MEMO.set(model.base.cells, (perAxis = new Map()));
+  let hit = perAxis.get(`${i}|${axis}`);
+  if (!hit || hit.unpriced !== unpriced) {
+    hit = {
+      unpriced,
+      values: [
+        ...new Set([
+          ...Object.keys(model.base.cells).map((k) => k.split(' | ')[i] ?? ''),
+          // ค่าที่ตั้งไว้แต่ยังไม่มีราคา — ต้องอ่านออก ไม่งั้นรหัส TSR-18 จะขึ้น "รหัสไม่ได้บอกชนิดเซนเซอร์"
+          ...(unpriced ?? [])
+        ])
+      ]
+    };
+    perAxis.set(`${i}|${axis}`, hit);
+  }
+  // สำเนาทุกครั้ง — ผู้เรียกแก้ array ที่ได้ไปแล้วต้องไม่ย้อนมาเปลี่ยนค่าในที่จำ
+  return [...hit.values];
 }
+
+/**
+ * จำค่าของแต่ละแกนต่อ "ก้อน `cells`" — วัด 2026-09-29: อ่านรหัสจริง 17,879 รหัสใช้ 11.4 วินาที
+ * ในนั้น ~9.5 วินาทีคือการแตกคีย์ทุกช่องของตารางซ้ำทุกครั้งที่อ่านรหัส (ตาราง TS-08/10 มีหลายพันช่อง)
+ * ⇒ ส่วน "ยังอ่านไม่ออกในชีตนี้" ของหน้าสมุดราคานับสดไม่ไหว
+ * ผูกกับตัว object ของ `cells` (WeakMap) ไม่ใช่รหัสรุ่น — ทุกทางที่แก้ราคาสร้าง `cells` ก้อนใหม่เสมอ
+ * (`readCells` · ตัวอ่าน Excel · โหลดเล่มจากฐาน) ⇒ เล่มใหม่ = ก้อนใหม่ = นับใหม่เอง ไม่มีของค้าง
+ * ⚠️ ถ้าวันหนึ่งมีโค้ดแก้ `cells[k] = …` ในก้อนเดิม ต้องสร้างก้อนใหม่แทน ไม่งั้นแกนที่จำไว้ไม่รู้จักค่าใหม่
+ */
+const AXIS_MEMO = new WeakMap<object, Map<string, { unpriced: string[] | undefined; values: string[] }>>();
 
 /** จับคู่ค่าที่พิมพ์มากับค่าที่ตารางใช้จริง — เทียบแบบไม่สนตัวพิมพ์เล็กใหญ่และรูปแบบเครื่องหมายนิ้ว */
 function matchValue(values: string[], raw: string): string | undefined {
@@ -415,7 +443,8 @@ function readCable(c: Ctx, token: string): boolean {
     reads: pieces.length
       ? `ชนิดสาย/Ground — ตารางรหัสย่อยของรุ่นนี้อ่านได้ไม่ครบ (รู้จัก ${pieces.join(' + ')} · ไม่รู้จัก ${rest})`
       : 'ชนิดสาย/Ground ที่ตารางรหัสย่อยของรุ่นนี้ยังไม่รู้จัก',
-    kind: 'unknown'
+    kind: 'unknown',
+    subCode: tail
   });
   if (c.model.adders.some((a) => a.byAxis === 'cable')) c.cfg.unread = { ...c.cfg.unread, cable: tail.toUpperCase() };
   return true;
@@ -453,7 +482,7 @@ function readTsGeneric(c: Ctx, rest: string, prefix: string, letter = ''): void 
     // รุ่นที่ไม่มีแกนเกลียว แต่รหัสมีวงเล็บมา — ลองตารางรหัสย่อยก่อน ไม่งั้นบอกว่าอ่านไม่ออก
     const raw = paren[1] ?? '';
     if (!readFromTable(c, raw, `(${raw})`)) {
-      add(c, { text: `(${raw})`, reads: `ตารางราคา ${c.model.sheet ?? c.model.code} ไม่มีแกนเกลียว — ยังไม่ได้ตั้งค่าว่าวงเล็บนี้แปลว่าอะไร`, kind: 'unknown' });
+      add(c, { text: `(${raw})`, reads: `ตารางราคา ${c.model.sheet ?? c.model.code} ไม่มีแกนเกลียว — ยังไม่ได้ตั้งค่าว่าวงเล็บนี้แปลว่าอะไร`, kind: 'unknown', subCode: raw });
     }
     rest = rest.slice(paren[0].length);
   } else if (paren) {
@@ -478,13 +507,14 @@ function readTsGeneric(c: Ctx, rest: string, prefix: string, letter = ''): void 
       add(c, {
         text: `(${raw})`,
         reads: `เกลียวมิล ${raw.toUpperCase()} — ตารางราคา ${c.model.sheet ?? c.model.code} มีแต่เกลียวนิ้ว ยังไม่ได้ตั้งค่าว่าคิดเท่าไหร่`,
-        kind: 'unknown'
+        kind: 'unknown',
+        subCode: raw
       });
     } else {
       // บอกมาแล้วแต่อ่านไม่ออก ≠ ไม่ได้บอก — ต้องจำไว้ ไม่งั้น engine เติมเกลียวมาตรฐานของรุ่น (1/4” · M5)
       // แล้วคิดราคาของเกลียวคนละขนาดโดยบรรทัดราคาเขียนว่า "รหัสไม่ได้ระบุ" (เจอ 81 รหัสจริง · 2026-09-25)
       c.cfg.unread = { ...c.cfg.unread, thread: `(${raw})` };
-      add(c, { text: `(${raw})`, reads: 'อ่านไม่ออกว่าเป็นเกลียวขนาดไหน', kind: 'unknown' });
+      add(c, { text: `(${raw})`, reads: 'อ่านไม่ออกว่าเป็นเกลียวขนาดไหน', kind: 'unknown', subCode: raw });
     }
     rest = rest.slice(paren[0].length);
   } else if (hasThread && !c.model.axisDefaults?.thread) {
@@ -543,7 +573,8 @@ function readTsGeneric(c: Ctx, rest: string, prefix: string, letter = ''): void 
       add(c, {
         text: dText,
         reads: `ตารางราคา ${c.model.sheet ?? c.model.code} มีขนาดแกนเดียวคือ ${c.model.standard.dia_mm ?? '—'} mm — ยังไม่ได้ตั้งค่าว่า ${dText} คิดเท่าไหร่`,
-        kind: 'unknown'
+        kind: 'unknown',
+        subCode: dText
       });
       // รหัสบอกขนาดแกนมาแล้วแต่อ่านไม่ออก — กฎความยาวแกนต้องขึ้น "ยังไม่รวม" ไม่ใช่ "รหัสไม่ได้บอก"
       if (dRates.length) c.cfg.unread = { ...c.cfg.unread, D: dText };
@@ -594,7 +625,7 @@ function readTs14(c: Ctx, rest: string, prefix: string, letter: string): void {
       c.cfg.options = [...(c.cfg.options ?? []), 'thread'];
       add(c, { text: `(${raw})`, reads: 'รุ่นมีเกลียว (ชีตคิดเพิ่มราคาเดียวทุกขนาดเกลียว)', kind: 'option' });
     } else if (!readFromTable(c, raw, `(${raw})`)) {
-      add(c, { text: `(${raw})`, reads: 'ยังไม่ได้ตั้งค่าว่าแปลว่าอะไร', kind: 'unknown' });
+      add(c, { text: `(${raw})`, reads: 'ยังไม่ได้ตั้งค่าว่าแปลว่าอะไร', kind: 'unknown', subCode: raw });
     }
     rest = rest.slice(paren[0].length);
   }
@@ -662,7 +693,8 @@ function readTs18(c: Ctx, rest: string, prefix: string, letter: string): void {
       add(c, {
         text: `(${raw})`,
         reads: 'หน้าแปลน — ไม่ตรงกับรายการที่ชีตมีราคาให้ ต้องขอราคาจากผลิต 2',
-        kind: 'unknown'
+        kind: 'unknown',
+        subCode: raw
       });
     }
     rest = rest.slice(paren[0].length);
@@ -893,7 +925,7 @@ function readBh(c: Ctx, num: string, suffix: string, rest: string, picks: CodePi
   function readOther(token: string, glue: boolean): void {
     extra(token, glue);
     if (token.startsWith('(')) {
-      if (!readFromTable(c, token.slice(1, -1), token)) add(c, { text: token, reads: 'ยังไม่ได้ตั้งค่าว่าแปลว่าอะไร', kind: 'unknown' });
+      if (!readFromTable(c, token.slice(1, -1), token)) add(c, { text: token, reads: 'ยังไม่ได้ตั้งค่าว่าแปลว่าอะไร', kind: 'unknown', subCode: token.slice(1, -1) });
       return;
     }
     if (readCableBh(c, token)) return;
@@ -905,7 +937,7 @@ function readBh(c: Ctx, num: string, suffix: string, rest: string, picks: CodePi
       for (const p of split.pieces) readFromTable(c, p);
       return;
     }
-    add(c, { text: token, reads: 'ยังไม่ได้ตั้งค่าว่าแปลว่าอะไร', kind: 'unknown' });
+    add(c, { text: token, reads: 'ยังไม่ได้ตั้งค่าว่าแปลว่าอะไร', kind: 'unknown', subCode: token });
   }
 
   /**
@@ -984,7 +1016,7 @@ function readBh(c: Ctx, num: string, suffix: string, rest: string, picks: CodePi
       if (rule) {
         add(c, { text: T, reads: rule.label, kind: 'option' });
       } else if (!readFromTable(c, T)) {
-        add(c, { text: T, reads: 'ปลั๊ก PL-5 — ชีตยังไม่มีราคา และยังไม่ได้ตั้งในตารางรหัสย่อย', kind: 'unknown' });
+        add(c, { text: T, reads: 'ปลั๊ก PL-5 — ชีตยังไม่มีราคา และยังไม่ได้ตั้งในตารางรหัสย่อย', kind: 'unknown', subCode: T });
       }
       return;
     }
@@ -1081,7 +1113,7 @@ function readTail(c: Ctx, rest: string, prefix: string): void {
       continue;
     }
 
-    add(c, { text: token, reads: 'ยังไม่ได้ตั้งค่าว่าแปลว่าอะไร', kind: 'unknown' });
+    add(c, { text: token, reads: 'ยังไม่ได้ตั้งค่าว่าแปลว่าอะไร', kind: 'unknown', subCode: token });
   }
   void prefix;
 }

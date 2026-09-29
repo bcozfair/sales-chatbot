@@ -1,15 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { BookOpen, CircleDollarSign, Download, FileSpreadsheet, Info, Plus, Tag, Undo2, Upload } from 'lucide-react';
+import { BookOpen, CircleDollarSign, Download, FileSpreadsheet, Undo2, Upload } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { PageHeader } from '../PageHeader';
 import { Button } from '../Button';
-import { TableCard, TableScroll, EmptyState, ErrorBox } from '../logs/ui';
+import { TableCard, TableScroll, ErrorBox } from '../logs/ui';
 import { errMsg, formatDateTime } from '../logs/format';
-import { SubCodeModal } from './SubCodeModal';
 import { BookImportModal } from './BookImportModal';
 import { ModelPriceEditor } from './ModelPriceEditor';
 import { SheetEditor } from './SheetEditor';
-import { EFFECT_TH, subCodePending, type ModelBrief, type Overview, type SubCode } from './types';
+import { SheetSubCodes, SubCodeHome } from './SubCodePanels';
+import type { ModelBrief, Overview, UnreadSummary } from './types';
 
 /**
  * หน้า "สมุดราคา" — ทุกอย่างที่ **แก้ราคา** ของโมดูลคิดราคาสินค้า
@@ -18,6 +18,10 @@ import { EFFECT_TH, subCodePending, type ModelBrief, type Overview, type SubCode
  * (`page.pricebook`) — "หน้าคิดราคาก็คือคิดราคาอย่างเดียว" · ของที่ย้ายมาจากหน้านั้นทั้งก้อน:
  * การ์ดเล่มที่ใช้อยู่ + ย้อนเล่ม · ดาวน์โหลด/อัปโหลดแม่แบบ · รายชื่อรุ่น + แก้ราคาทีละรุ่น ·
  * รหัสย่อยที่ตั้งไว้ · รายการที่ยังไม่ได้ตั้ง
+ *
+ * **รหัสย่อยย้ายไปอยู่ในหน้าชีตแล้ว** (เจ้าของเคาะ 2026-09-29 — ตารางใหญ่หน้าแรก "ดูซ้ำกันหลายรุ่น") ⇒ หน้านี้เหลือ
+ * ค้น "ตัวอักษรนี้ใช้ที่ไหน" · แถวขอบเขตหลายรุ่น · สรุป "ยังอ่านไม่ออก" ต่อชีต (`SubCodePanels.tsx`)
+ * รายการ "ยังไม่ได้ตั้งค่า" เดิม (census นับครั้งเดียว 2026-09-18) ถูกแทนด้วยตัวนับสด `GET /unread`
  *
  * ⚠️ กติกาเดิมของโมดูลยังอยู่ครบ: **ไฟล์นี้ไม่ถือราคาไว้ใน state** — `/overview` ส่งมาแค่ชื่อรุ่น
  *   กับจำนวน ราคาเดินทางมาเฉพาะตอนเปิดหน้าแก้รุ่น (`ModelPriceEditor`) หรือตอนกดดาวน์โหลดแม่แบบ
@@ -89,7 +93,8 @@ export const PriceBook: React.FC<Props> = ({ canQuote, onOpenQuote }) => {
 
   const [overview, setOverview] = useState<Overview | null>(null);
   const [error, setError] = useState('');
-  const [adding, setAdding] = useState<{ subCode: string; editing?: SubCode } | null>(null);
+  /** ตัวนับ "ยังอ่านไม่ออก" — `undefined` = กำลังนับ · `null` = นับไม่สำเร็จ (ซ่อนตัวเลข ไม่ใช่ error ทั้งหน้า) */
+  const [unread, setUnread] = useState<UnreadSummary | null | undefined>(undefined);
   const [importing, setImporting] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [rollingBack, setRollingBack] = useState(false);
@@ -107,6 +112,23 @@ export const PriceBook: React.FC<Props> = ({ canQuote, onOpenQuote }) => {
       setError(errMsg(e));
     }
   }, [authHeaders]);
+
+  /** นับสดที่เซิร์ฟเวอร์ (~2 วินาทีรอบแรกหลังเล่ม/รหัสย่อยเปลี่ยน) — แยกจาก overview เพื่อไม่ให้หน้าแรกรอ */
+  const loadUnread = useCallback(async () => {
+    setUnread(undefined);
+    try {
+      const res = await fetch('/api/admin/pricebook/unread', { headers: authHeaders });
+      setUnread(res.ok ? ((await res.json())?.summary ?? null) : null);
+    } catch {
+      setUnread(null);
+    }
+  }, [authHeaders]);
+
+  /** แถวรหัสย่อยเปลี่ยน (มีผลทันที) — รายการกับตัวนับต้องตามทัน */
+  const subCodesChanged = useCallback(() => {
+    void loadOverview();
+    void loadUnread();
+  }, [loadOverview, loadUnread]);
 
   /**
    * ดาวน์โหลดแม่แบบ — ต้องผ่าน `fetch` + blob ไม่ใช่ `<a href>` เพราะเส้นนี้อยู่หลัง
@@ -160,44 +182,26 @@ export const PriceBook: React.FC<Props> = ({ canQuote, onOpenQuote }) => {
 
   // โหลดครั้งแรก — หุ้ม setTimeout ตามท่าของทั้งแอป (eslint ปฏิเสธ setState ตรง ๆ ใน useEffect)
   useEffect(() => {
-    const t = setTimeout(() => { void loadOverview(); }, 0);
+    const t = setTimeout(() => { void loadOverview(); void loadUnread(); }, 0);
     return () => clearTimeout(t);
-  }, [loadOverview]);
+  }, [loadOverview, loadUnread]);
 
   /** ของที่ตั้งเอง (ตาราง) มาก่อนของที่ติดมากับไฟล์ราคา — ลำดับเดียวกับที่ engine ใช้ตัดสิน */
   const allSet = useMemo(
     () => [...(overview?.subCodes ?? []), ...(overview?.fromPriceFile ?? [])],
     [overview],
   );
-
-  /** รหัสย่อยที่ยังไม่มีใครตั้ง เรียงตามจำนวนรหัสจริงที่มีตัวอักษรนั้น — ไล่เก็บจากบนลงล่างได้ */
-  const todo = useMemo(() => {
-    const set = new Set(allSet.map((s) => s.subCode.toUpperCase()));
-    return (overview?.census?.items ?? [])
-      .filter((it) => !set.has(it.token.toUpperCase()))
-      .slice(0, 16);
-  }, [allSet, overview]);
+  const axisLabels = useMemo(() => overview?.axisLabels ?? {}, [overview]);
 
   const models = useMemo(() => overview?.models ?? [], [overview]);
   const sheets = useMemo(() => groupSheets(models), [models]);
   const covered = models.reduce((n, m) => n + (m.products ?? 0), 0);
   const counted = models.some((m) => typeof m.products === 'number');
   const openRow = (g: SheetGroup) => setEditingSheet(g.sheet);
-
-  async function removeSub(row: SubCode) {
-    if (!row.id) return;
-    if (!window.confirm(`ลบรหัสย่อย ${row.subCode} ของ ${row.scope} ?`)) return;
-    await fetch(`/api/admin/pricebook/subcodes/${row.id}`, { method: 'DELETE', headers: authHeaders });
-    await loadOverview();
-  }
-
-  async function toggleSub(row: SubCode) {
-    if (!row.id) return;
-    await fetch(`/api/admin/pricebook/subcodes/${row.id}`, {
-      method: 'PUT', headers: jsonHeaders, body: JSON.stringify({ ...row, disabled: !row.disabled }),
-    });
-    await loadOverview();
-  }
+  const labelOfSheet = (sheet: string) => {
+    const g = sheets.find((x) => x.sheet === sheet);
+    return g ? sheetName(g) : sheet;
+  };
 
   const bookMissing = overview && !overview.book.ok;
 
@@ -216,6 +220,7 @@ export const PriceBook: React.FC<Props> = ({ canQuote, onOpenQuote }) => {
   }
 
   if (editingSheet) {
+    const codes = sheets.find((g) => g.sheet === editingSheet)?.models.map((m) => m.code) ?? [];
     return (
       <SheetEditor
         sheet={editingSheet}
@@ -224,9 +229,22 @@ export const PriceBook: React.FC<Props> = ({ canQuote, onOpenQuote }) => {
         onAdvanced={setEditingModel}
         onBack={(wasSaved) => {
           setEditingSheet(null);
-          if (wasSaved) void loadOverview();
+          // ราคาในตารางเปลี่ยน = ตัวอ่านรหัสอาจอ่านขนาดใหม่ออก ⇒ นับใหม่ด้วย
+          if (wasSaved) subCodesChanged();
         }}
-      />
+      >
+        <SheetSubCodes
+          sheet={editingSheet}
+          codes={codes}
+          rows={allSet}
+          models={models}
+          axisLabels={axisLabels}
+          unread={unread === undefined ? undefined : unread === null ? null : (unread.sheets.find((s) => s.sheet === editingSheet) ?? null)}
+          token={token ?? ''}
+          authHeaders={authHeaders}
+          onChanged={subCodesChanged}
+        />
+      </SheetEditor>
     );
   }
 
@@ -354,6 +372,7 @@ export const PriceBook: React.FC<Props> = ({ canQuote, onOpenQuote }) => {
                         <Button
                           icon={FileSpreadsheet}
                           aria-label={`แก้ราคา ${sheetName(g)}`}
+                          data-sheet={g.sheet}
                           onClick={(e) => { e.stopPropagation(); openRow(g); }}
                           className="opacity-60 group-hover:opacity-100 focus-visible:opacity-100"
                         >
@@ -388,7 +407,7 @@ export const PriceBook: React.FC<Props> = ({ canQuote, onOpenQuote }) => {
                   </div>
                 ))}
                 <div className="flex flex-wrap gap-1.5 mt-2.5">
-                  <Button icon={FileSpreadsheet} onClick={() => openRow(g)}>เปิดชีต</Button>
+                  <Button icon={FileSpreadsheet} aria-label={`แก้ราคา ${sheetName(g)}`} data-sheet={g.sheet} onClick={() => openRow(g)}>เปิดชีต</Button>
                 </div>
               </div>
             ))}
@@ -406,129 +425,18 @@ export const PriceBook: React.FC<Props> = ({ canQuote, onOpenQuote }) => {
         />
       )}
 
-      {/* ── รหัสย่อยที่ตั้งค่าไว้ ───────────────────────────────────────── */}
-      <TableCard title="รหัสย่อยที่ตั้งค่าไว้" hint={`${allSet.length} ตัว`}>
-        {allSet.length === 0 ? (
-          <EmptyState icon={Tag} title="ยังไม่มีรหัสย่อยที่ตั้งไว้" hint="กดตัวอักษรในรายการ “ยังไม่ได้ตั้งค่า” ข้างล่าง หรือกด ＋ เพิ่ม จากหน้าคำนวณราคา" />
-        ) : (
-          <>
-            {/* ตารางเต็มบนจอกว้าง */}
-            <TableScroll>
-              <table className="w-full text-xs hidden sm:table">
-                <thead>
-                  <tr className="text-left text-slate-500 border-b border-slate-100">
-                    <th className="px-4 py-2 font-semibold">รหัสย่อย</th>
-                    <th className="px-4 py-2 font-semibold">อ่านว่า</th>
-                    <th className="px-4 py-2 font-semibold">ผลกับราคา</th>
-                    <th className="px-4 py-2 font-semibold">ใช้กับรุ่น</th>
-                    <th className="px-4 py-2 font-semibold">ที่มา</th>
-                    <th className="px-4 py-2" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {allSet.map((s) => (
-                    <tr key={`${s.subCode}-${s.scope}`} className={`border-b border-slate-50 ${s.disabled ? 'opacity-50' : ''}`}>
-                      <td className="px-4 py-2.5 font-mono font-bold text-slate-900">{s.subCode}</td>
-                      <td className="px-4 py-2.5 text-slate-700">{s.reads || <span className="text-slate-400">—</span>}</td>
-                      <td className="px-4 py-2.5 text-slate-600">
-                        {EFFECT_TH[s.effect]}
-                        {s.amount !== undefined && ` ${s.amount.toLocaleString()} บาท`}
-                        {s.percent !== undefined && ` ${s.percent}%`}
-                        {s.effect === 'setAxis' && s.value && ` → ${s.value}`}
-                        {subCodePending(s) && <PendingPill />}
-                      </td>
-                      <td className="px-4 py-2.5 font-mono text-slate-600">{s.scope}</td>
-                      <td className="px-4 py-2.5 text-slate-500">
-                        {s.source ? `ไฟล์ราคา · ${s.source}` : `ตั้งค่าเอง${s.by ? ` · ${s.by}` : ''}${s.at ? ` · ${s.at}` : ''}`}
-                      </td>
-                      <td className="px-4 py-2.5 text-right whitespace-nowrap">
-                        {s.id ? (
-                          <span className="inline-flex gap-1.5">
-                            <Button onClick={() => setAdding({ subCode: s.subCode, editing: s })}>แก้</Button>
-                            <Button onClick={() => void toggleSub(s)}>{s.disabled ? 'เปิด' : 'ปิดไว้'}</Button>
-                            <Button variant="danger" tone="soft" onClick={() => void removeSub(s)}>ลบ</Button>
-                          </span>
-                        ) : (
-                          <span className="text-slate-400">มาจากไฟล์ราคา</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </TableScroll>
-
-            <div className="sm:hidden p-3 space-y-2.5">
-              {allSet.map((s) => (
-                <div key={`${s.subCode}-${s.scope}`}
-                     className={`rounded-xl border border-slate-200 bg-card px-3.5 py-3 ${s.disabled ? 'opacity-50' : ''}`}>
-                  <div className="flex gap-2 items-center flex-wrap">
-                    <span className="font-mono font-bold text-[13px] text-slate-900">{s.subCode}</span>
-                    <span className="text-[11px] text-slate-600">{EFFECT_TH[s.effect]}</span>
-                    {subCodePending(s) && <PendingPill />}
-                    <span className="text-[11px] text-slate-400">ใช้กับ <span className="font-mono">{s.scope}</span></span>
-                  </div>
-                  <div className="text-xs text-slate-700 mt-1.5">{s.reads || '—'}</div>
-                  <div className="text-[11px] text-slate-400 mt-1">
-                    {s.source ? `ไฟล์ราคา · ${s.source}` : `ตั้งค่าเอง${s.by ? ` · ${s.by}` : ''}`}
-                  </div>
-                  {s.id && (
-                    <div className="flex gap-1.5 mt-2.5">
-                      <Button onClick={() => setAdding({ subCode: s.subCode, editing: s })}>แก้</Button>
-                      <Button onClick={() => void toggleSub(s)}>{s.disabled ? 'เปิด' : 'ปิดไว้'}</Button>
-                      <Button variant="danger" tone="soft" onClick={() => void removeSub(s)}>ลบ</Button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-      </TableCard>
-
-      {/* ── ยังไม่ได้ตั้งค่า ──────────────────────────────────────────── */}
-      {todo.length > 0 && (
-        <TableCard title="ยังไม่ได้ตั้งค่า" hint="เรียงตามจำนวนรหัสจริงที่มีตัวอักษรนั้น">
-          <div className="px-4 py-3.5">
-            <div className="flex flex-wrap gap-1.5">
-              {todo.map((it) => (
-                <button key={`${it.token}-${it.where}`}
-                        onClick={() => setAdding({ subCode: it.token })}
-                        className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-full bg-card border border-slate-200 text-slate-700 hover:border-[var(--brand-border)] hover:text-[var(--brand-fg)]">
-                  <Plus className="w-3 h-3" />
-                  <b className="font-mono">{it.token}</b>
-                  <span className="text-[10.5px] text-slate-400 tabular-nums">{it.count.toLocaleString()} รหัส</span>
-                </button>
-              ))}
-            </div>
-            {overview?.census && (
-              <div className="flex gap-2.5 rounded-xl px-3.5 py-2.5 mt-3 text-xs leading-relaxed bg-blue-50 border border-blue-200 text-blue-700">
-                <Info className="w-4 h-4 shrink-0 mt-0.5" />
-                <span>
-                  นับจากรหัสจริง <b className="tabular-nums">{overview.census.totalCodes.toLocaleString()}</b> รหัส
-                  ในฐานสินค้า ({overview.census.measuredAt}) — ตัวที่ต่างกันแค่ตัวเลข
-                  (<span className="font-mono">S000 S001 S002…</span>) ตั้งเป็น <b>แม่แบบตัวเดียว</b> ได้ทั้งชุด
-                </span>
-              </div>
-            )}
-          </div>
-        </TableCard>
-      )}
-
-      {adding && (
-        <SubCodeModal
-          token={token ?? ''}
-          subCode={adding.subCode}
-          editing={adding.editing}
-          modelCode={adding.editing?.scope ?? models[0]?.code ?? '*'}
+      {/* ── รหัสย่อย — ย้ายไปหน้าชีตแล้ว หน้าแรกเหลือค้น · แถวหลายรุ่น · สรุปที่อ่านไม่ออก ── */}
+      {overview && (
+        <SubCodeHome
+          rows={allSet}
           models={models}
-          // หน้านี้ไม่มีช่องพิมพ์รหัส ⇒ ไม่มีพรีวิวราคา (พรีวิวอยู่ที่ปุ่ม ＋ เพิ่ม ในหน้าคิดราคาสินค้า)
-          code=""
-          onClose={() => setAdding(null)}
-          onSaved={() => {
-            setAdding(null);
-            void loadOverview();
-          }}
+          axisLabels={axisLabels}
+          unread={unread}
+          sheetLabel={labelOfSheet}
+          onOpenSheet={setEditingSheet}
+          token={token ?? ''}
+          authHeaders={authHeaders}
+          onChanged={subCodesChanged}
         />
       )}
     </div>
@@ -540,13 +448,6 @@ const Count: React.FC<{ n: number | null }> = ({ n }) =>
   typeof n === 'number'
     ? <>{n.toLocaleString('th-TH')}</>
     : <span className="text-slate-300" title="นับไม่สำเร็จ — ลองเปิดหน้านี้ใหม่">—</span>;
-
-/** รหัสย่อยที่รู้ความหมายแล้วแต่ช่องราคา/ค่าที่เทียบยังว่าง — หน้าคิดราคาขึ้น "ยังไม่มีราคา" จนกว่าจะกรอก */
-const PendingPill: React.FC = () => (
-  <span className="ml-1.5 inline-block whitespace-nowrap rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 align-middle text-[10.5px] font-medium text-amber-700">
-    ยังไม่มีราคา
-  </span>
-);
 
 /** ช่องข้อเท็จจริงหนึ่งช่องบนการ์ดสมุดราคา — ประกาศนอกคอมโพเนนต์ (eslint: static-components) */
 const Fact: React.FC<{ k: string; v: string; sub?: string; mono?: boolean }> = ({ k, v, sub, mono }) => (

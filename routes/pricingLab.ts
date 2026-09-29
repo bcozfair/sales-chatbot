@@ -1,8 +1,5 @@
 import { Router, json, type Response } from 'express';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { AdminRequest } from '../config/auth.js';
 import {
   NO_BOOK_MESSAGE, bookStatus, loadBookState, tokenOf, withSubCodes, type BookState,
@@ -11,8 +8,9 @@ import { computePrice } from '../services/pricingLab/engine.js';
 import { parseProductCode, type CodePicks } from '../services/pricingLab/code.js';
 import { ADDONS, AMP, BH_CATALOG, HOLE_LIMITS, bhSpec, buildBhCode, type BhForm, type HoleSpec, type SizeKey } from '../services/pricingLab/catalogBh.js';
 import { TS_ADDONS, TS_CATALOG, buildTsCode, slotOptions, tsSpec, type TsForm } from '../services/pricingLab/catalogTs.js';
-import { displayName } from '../services/pricingLab/labels.js';
+import { AXIS_TH, displayName } from '../services/pricingLab/labels.js';
 import { productsPerModel } from '../services/pricingLab/bookCoverage.js';
+import { subCodeModels, unreadBySheet } from '../services/pricingLab/subcodeView.js';
 import {
   EditRejected, applyModelEdit, applySheetEdit, modelEditorView, sheetModels,
 } from '../services/pricingLab/modelEditor.js';
@@ -21,7 +19,7 @@ import {
   BookConflict, BookRejected, RevisionNotFound, KEEP_BACKUPS,
   applyModels, commitBookChange, diffBooks, listRestorable, parseRestoreName, restoreRevision,
 } from '../services/pricingLab/bookUpdate.js';
-import type { PriceBook } from '../services/pricingLab/types.js';
+import type { PriceBook, SubCode } from '../services/pricingLab/types.js';
 import {
   listSubCodes, upsertSubCode, updateSubCode, deleteSubCode, clean,
 } from '../db/pricingLabRepo.js';
@@ -111,30 +109,6 @@ pricebookRouter.use((req, res, next) => (UPLOAD_PATHS.has(req.path) ? uploadJson
  * ⇒ ของที่อันตรายที่สุดอยู่ในโควตาเสมอ ไม่ใช่ของที่ถูกตัดทิ้ง)
  */
 const MAX_DIFF_ROWS = 300;
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-
-/**
- * จำนวนรหัสจริงที่มีรหัสย่อยแต่ละตัว — ภาพนิ่ง ไม่ได้ต่อฐานตอนรัน (ดูหัวไฟล์ census)
- *
- * **ตัดท่อนที่เป็นตัวเลขล้วนทิ้ง** — `(11.5)` `(12.7)` `(1.5)` ในรหัสจริงคือ *ขนาด* ไม่ใช่
- * รหัสย่อยที่ต้องตั้งราคา (ตัวอ่านรหัสจัดการให้แล้วจากแม่แบบของรุ่น) · วัด 2026-09-18:
- * 8 จาก 60 รายการในไฟล์เป็นแบบนี้ และสองตัวแรกขึ้นติดอันดับบนสุดของรายการ "ยังไม่ได้ตั้งค่า"
- * ⇒ ถ้าไม่กรอง หน้าจอจะสั่งให้แอดมินไปตั้งค่าของที่ตั้งไม่ได้ ซึ่งทำให้ทั้งรายการดูเชื่อไม่ได้
- *
- * กรองที่นี่ ไม่ใช่ที่หน้าจอ เพราะมันเป็นข้อเท็จจริงของข้อมูล ไม่ใช่รสนิยมการแสดงผล
- */
-const IS_NUMBER_ONLY = /^[\d.]+$/;
-
-const census: unknown = (() => {
-  try {
-    const raw = JSON.parse(readFileSync(join(HERE, '../services/pricingLab/subcode-census.json'), 'utf8'));
-    if (!raw || !Array.isArray(raw.items)) return raw;
-    return { ...raw, items: raw.items.filter((it: { token?: string }) => !IS_NUMBER_ONLY.test(it.token ?? '')) };
-  } catch {
-    return null;
-  }
-})();
 
 /** สมุดราคา + รหัสย่อยจากตาราง — ทุก endpoint ที่คิดเลขต้องผ่านตัวนี้ ไม่ใช่ `loadBookState()` ตรง ๆ */
 async function bookWithDb(): Promise<PriceBook | undefined> {
@@ -375,7 +349,7 @@ function modelBriefs(book: PriceBook | undefined) {
 /**
  * หน้า "คิดราคาสินค้า" ตอนเปิด — แค่พอให้รู้ว่าใช้เล่มไหนอยู่ และอ่านชื่อรุ่นในผลคิดราคาได้
  *
- * ไม่มีรหัสย่อย · census · เล่มสำรอง · จำนวนช่องราคา — ของพวกนั้นเป็นของงานแก้ราคา
+ * ไม่มีรหัสย่อย · ท่อนที่อ่านไม่ออก · เล่มสำรอง · จำนวนช่องราคา — ของพวกนั้นเป็นของงานแก้ราคา
  * อยู่ที่ `GET /api/admin/pricebook/overview` หลังด่าน `page.pricebook`
  */
 pricingLabRouter.get('/overview', async (_req: AdminRequest, res: Response) => {
@@ -471,13 +445,16 @@ pricebookRouter.get('/overview', async (_req: AdminRequest, res: Response) => {
   const status = await bookStatus(state);
   const book = state?.book;
   const coverage = state ? await productsPerModel(state) : null;
+  // `models` ของแต่ละแถว = รุ่นที่แถวนั้นมีผลจริง (`scopeRank` ตัวเดียวกับตัวอ่านรหัส) — หน้าจอเอาไปจัดเข้าชีต
+  const where = <T extends SubCode>(rows: T[]) => (book ? rows.map((r) => ({ ...r, models: subCodeModels(book, r) })) : []);
   res.json({
     book: status,
     version: book?.version ?? null,
     models: modelBriefs(book).map((m) => ({ ...m, products: coverage?.counts[m.code] ?? null })),
-    subCodes: book ? await listSubCodes() : [],
-    fromPriceFile: book?.subCodes ?? [],
-    census,
+    subCodes: where(book ? await listSubCodes() : []),
+    fromPriceFile: where(book?.subCodes ?? []),
+    // ชื่อไทยของช่องที่รหัสย่อยแบบ "ตั้งค่าให้ช่อง" ชี้ไป — ประโยค "คิดเท่าขนาดหน้าแปลน 1”" ในหน้าชีต/หน้าแรก
+    axisLabels: AXIS_TH,
     // การ์ด "สมุดราคาที่ระบบใช้อยู่" — ตอบคำถาม "ราคาที่ระบบคิดอยู่ตอนนี้มาจากไหน ใครอัป เมื่อไหร่"
     // จำนวนช่องเป็น **จำนวน** ไม่ใช่ราคา ⇒ ไม่ขัดกฎที่หัวไฟล์
     shelf: book
@@ -718,6 +695,17 @@ pricingLabRouter.post('/quote', async (req: AdminRequest, res: Response) => {
   const parsed = parseProductCode(code, book, picks);
   const outcome = parsed.cfg ? computePrice(parsed.cfg, book) : null;
   res.json({ code, parsed, outcome });
+});
+
+/**
+ * "ยังอ่านไม่ออก" ต่อชีต — นับสดจากรหัสสินค้าจริง (แทนรายการ census ที่นับครั้งเดียว · เจ้าของเคาะ 2026-09-29 ข้อ 3)
+ * คืน **จำนวนและท่อนของรหัส** ไม่มีราคา · รอบแรกหลังเล่ม/รหัสย่อยเปลี่ยนใช้ ~2 วินาที (แบ่งช่วงไม่บล็อกบอท —
+ * ดูหัว subcodeView.ts) · `null` = นับไม่สำเร็จ ⇒ หน้าจอซ่อนการ์ด ไม่ใช่ขึ้น error ทั้งหน้า
+ */
+pricebookRouter.get('/unread', async (_req: AdminRequest, res: Response) => {
+  const state = await loadBookState();
+  if (!state) return noBook(res);
+  res.json({ summary: await unreadBySheet(state, withSubCodes(state.book, await listSubCodes())) });
 });
 
 pricebookRouter.get('/subcodes', async (_req: AdminRequest, res: Response) => {

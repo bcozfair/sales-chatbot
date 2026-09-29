@@ -951,7 +951,9 @@ export const SheetEditor: React.FC<{
   /** ปุ่ม "กฎและเงื่อนไข" ของตาราง — เปิดหน้าแก้ทีละรุ่น (โครงของกฎ) */
   onAdvanced: (code: string) => void;
   onBack: (saved: boolean) => void;
-}> = ({ sheet, products, authHeaders, onAdvanced, onBack }) => {
+  /** ส่วนใต้ตาราง — "ตัวอักษรในรหัส" / "ยังอ่านไม่ออกในชีตนี้" (`SheetSubCodes` · แก้แล้วมีผลทันที ไม่ผูกกับปุ่มตรวจของตาราง) */
+  children?: React.ReactNode;
+}> = ({ sheet, products, authHeaders, onAdvanced, onBack, children }) => {
   const jsonHeaders = useMemo(
     () => ({ ...authHeaders, 'Content-Type': 'application/json' }),
     [authHeaders],
@@ -1079,6 +1081,8 @@ export const SheetEditor: React.FC<{
           />
         ))}
       </div>
+
+      {children}
 
       {review && (
         <ReviewModal

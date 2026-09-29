@@ -33,6 +33,8 @@ export interface SubCode {
   by?: string;
   at?: string;
   note?: string;
+  /** รุ่นที่แถวนี้มีผลจริง — `/overview` เติมให้ด้วย `scopeRank` ตัวเดียวกับตัวอ่านรหัส (หน้าจอห้ามเดาขอบเขตเอง) */
+  models?: string[];
 }
 
 /**
@@ -216,11 +218,28 @@ export interface PriceTrace {
   checks: { message: string; hit: boolean; level: 'block' | 'quoteOnRequest' | 'warn'; condition: string; source?: string }[];
 }
 
-export interface CensusItem {
-  token: string;
-  where: 'paren' | 'tail';
+/** `GET /api/admin/pricebook/unread` — ท่อนที่ตัวอ่านรหัสยังอ่านไม่ออก นับสดจากรหัสสินค้าจริง (`subcodeView.ts`) */
+export interface UnreadToken {
+  text: string;
+  /** มี = เพิ่มแถวรหัสย่อยด้วยคำนี้แล้วอ่านออก · ไม่มี = แก้ที่ตาราง/ตัวอ่าน */
+  subCode?: string;
   count: number;
-  models: string[];
+  example: string;
+  reads: string;
+}
+
+export interface SheetUnread {
+  sheet: string;
+  codes: number;
+  unread: number;
+  tokens: UnreadToken[];
+}
+
+export interface UnreadSummary {
+  measuredAt: string;
+  codes: number;
+  unread: number;
+  sheets: SheetUnread[];
 }
 
 /** เล่มเก่าที่เก็บไว้ให้ย้อนกลับ — ชื่อไฟล์คือสิ่งเดียวที่ส่งกลับไปตอนกดย้อน */
@@ -250,7 +269,8 @@ export interface Overview {
   models: ModelBrief[];
   subCodes: SubCode[];
   fromPriceFile: SubCode[];
-  census: { measuredAt: string; totalCodes: number; items: CensusItem[] } | null;
+  /** ชื่อไทยของแกน (`cable` → ชนิดสาย) — ชื่ออย่างเดียว */
+  axisLabels: Record<string, string>;
   shelf: BookShelf | null;
 }
 
