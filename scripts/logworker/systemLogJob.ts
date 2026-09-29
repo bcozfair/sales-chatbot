@@ -36,6 +36,14 @@ const RESPAWN_DELAY_MS = 5_000;
  * ต้องยาวกว่าระยะที่ stack trace ของบรรทัดเดียวกันตามมา (วัดจริง < 1 ms) อยู่หลายเท่า
  */
 const HOLD_IDLE_MS = 1_500;
+/**
+ * แจ้ง "ยังอ่านอยู่" ลง log_worker_state ทุกเท่านี้ แม้ไม่มีแถวให้เขียน
+ *
+ * last_ok_at เคยขยับเฉพาะตอนเขียนแถวสำเร็จ ⇒ แอปที่ไม่มีเตือน/ผิดพลาดเลยครึ่งวัน (ซึ่งคือตอนที่ระบบ
+ * ดีที่สุด) ขึ้นแถบ "ตัวเก็บ log มีปัญหา" บนหน้าบันทึกระบบ (เกิดจริง 28–29/09/2026) · ต้องสั้นกว่าเกณฑ์
+ * 15 นาทีของ getWorkerStatus() หลายเท่า เพื่อให้พลาดหนึ่งรอบแล้วยังไม่ขึ้นเตือน
+ */
+const HEARTBEAT_MS = 5 * 60_000;
 
 interface Pending {
   createdAt: Date;
@@ -67,6 +75,11 @@ const idleReleasers: (() => void)[] = [];
 /** stdio ของเราคือ ['ignore','pipe','pipe'] ⇒ ไม่มี stdin แต่มี stdout/stderr ที่อ่านได้แน่นอน */
 type LogsChild = ChildProcessByStdio<null, Readable, Readable>;
 const children = new Set<LogsChild>();
+/** คอนเทนเนอร์ที่ `docker logs -f` ยังรันอยู่ — heartbeat แจ้งเฉพาะตัวที่อ่านอยู่จริง */
+const following = new Set<string>();
+/** flush ล่าสุดล้ม ⇒ ห้าม heartbeat ไปล้าง last_error ทิ้งจนกว่าจะเขียนสำเร็จอีกครั้ง */
+let flushFailed = false;
+let lastBeatAt = Date.now();
 
 function toRow(p: Pending): Row {
   return {
@@ -117,6 +130,16 @@ async function insertRows(rows: Row[]): Promise<void> {
     values);
 }
 
+/** cursorAt = null ⇒ checkpoint ไม่ขยับ (markOk ใช้ GREATEST ซึ่งข้าม NULL) */
+async function heartbeat(): Promise<void> {
+  if (flushing || flushFailed || buffer.length > 0 || Date.now() - lastBeatAt < HEARTBEAT_MS) return;
+  lastBeatAt = Date.now();
+  for (const c of following) {
+    try { await markOk(`system_log:${c}`, null, 0); }
+    catch (err) { logErr(`heartbeat ของ ${c} ล้มเหลว:`, err instanceof Error ? err.message : err); }
+  }
+}
+
 async function flushOnce(): Promise<void> {
   if (flushing || buffer.length === 0) return;
   flushing = true;
@@ -136,10 +159,12 @@ async function flushOnce(): Promise<void> {
         for (const [c, ts] of perContainer) {
           await markOk(`system_log:${c}`, ts, batch.filter(r => r.container === c).length);
         }
+        flushFailed = false;
       } catch (err) {
         // ทิ้งก้อนนี้ ไม่ requeue — DB ล่มยาวแล้ว requeue จะวนพังไม่จบและกิน memory จนโปรเซสตาย
         // (เหตุผลเดียวกับ services/apiLogService.ts) · ของที่หายยังอยู่ใน docker logs อีก ~50 MB
         logErr(`flush ล้มเหลว ทิ้ง ${batch.length} แถว:`, err instanceof Error ? err.message : err);
+        flushFailed = true;
         await markError(`system_log:${[...perContainer.keys()][0] ?? 'unknown'}`, err);
         break;
       }
@@ -192,6 +217,7 @@ async function followContainer(container: string): Promise<void> {
       ['logs', '--timestamps', '--follow', '--since', since, container],
       { stdio: ['ignore', 'pipe', 'pipe'] });
     children.add(child);
+    following.add(container);
 
     const handle = (stream: 'stdout' | 'stderr') => (line: string) => {
       const t = splitTimestamp(line);
@@ -219,6 +245,7 @@ async function followContainer(container: string): Promise<void> {
 
     const finish = (why: string) => {
       children.delete(child);
+      following.delete(container);
       for (const s of ['stdout', 'stderr'] as const) {
         if (held[s]) { push(held[s]!); held[s] = null; }
       }
@@ -248,7 +275,7 @@ export async function startSystemLogJob(): Promise<void> {
   }
   flushTimer = setInterval(() => {
     for (const release of idleReleasers) release();
-    void flushOnce();
+    void flushOnce().then(heartbeat);
   }, FLUSH_INTERVAL_MS);
 }
 

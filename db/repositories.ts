@@ -466,12 +466,16 @@ export async function insertMessage(msg: {
   content: string; reply_token?: string | null; reply_content?: string | null;
   meta?: any;
 }): Promise<number | null> {
+  // Postgres เก็บอักขระ NUL (\u0000) ใน text/jsonb ไม่ได้ ⇒ ทั้งแถวตก (เกิดจริง 25/09/2026 ข้อความหนึ่ง
+  // มี NUL ติดมา ประวัติแถวนั้นหาย) · ตัดทิ้งเฉพาะตัวนั้น ตัวอักษรอื่นเหมือนเดิมทุกตัว
+  const noNul = (s: string | null | undefined) => (typeof s === 'string' ? s.replace(/\u0000/g, '') : s ?? null);
   try {
     const { rows } = await pool.query(
       `INSERT INTO messages (user_id, message_id, type, content, reply_token, reply_content, meta)
        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-      [msg.user_id, msg.message_id, msg.type, msg.content, msg.reply_token ?? null, msg.reply_content ?? null,
-       msg.meta === undefined ? null : JSON.stringify(msg.meta)]);
+      [msg.user_id, msg.message_id, msg.type, noNul(msg.content), msg.reply_token ?? null, noNul(msg.reply_content),
+       // ตัดใน replacer ไม่ใช่ใน string ที่ stringify แล้ว — regex บน "\\u0000" จะกิน backslash ของข้อความจริงได้
+       msg.meta === undefined ? null : JSON.stringify(msg.meta, (_k, v) => (typeof v === 'string' ? noNul(v) : v))]);
     return rows[0]?.id != null ? Number(rows[0].id) : null;
   } catch (err) { logErr('insertMessage', err); return null; }
 }

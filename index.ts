@@ -366,6 +366,9 @@ async function handleRedelivery(
   const ageMs = typeof event?.timestamp === 'number' ? receivedAt - event.timestamp : null;
   const age = ageMs === null ? '?' : Math.round(ageMs / 1000);
   const who = `user=${queueKey} type=${event?.type}`;
+  // บรรทัดเตือนต้องสั้นพอให้อ่านจบในบรรทัดเดียวบนหน้า "บันทึกระบบ" (เจ้าของขอ 2026-09-29)
+  // ⚠️ คงคำว่า "LINE ส่งซ้ำ" กับ "ส่งเมื่อ N วิก่อน" ไว้ — DEPLOY.md 6.2 grep คำแรกแล้วย้อนเวลาด้วยตัวหลัง
+  const short = `${queueKey.slice(0, 9)}… ${event?.type} ส่งเมื่อ ${age} วิก่อน`;
 
   recordWebhookProcessing({
     requestId: reqId ?? undefined, lineUserId: queueKey, outcome: 'dropped',
@@ -388,30 +391,30 @@ async function handleRedelivery(
       console.log(`[queue] LINE ส่งซ้ำ ${who} (รอบที่ ${seen.deliveryCount}) — ตอบไปแล้วตั้งแต่รอบแรก ทิ้งเงียบ`);
       if (receipt) await markRedeliveryAction(receipt.webhookEventId, 'skipped_duplicate');
     } else {
-      console.warn(`[queue] ⚠️ LINE ส่งซ้ำ ${who} เหตุการณ์เดิมเมื่อ ${age} วิที่แล้ว — ` +
-        `ตรวจใบรับไม่ได้ ข้ามไว้ก่อน (ปลอดภัยกว่าเสี่ยงกวนเซลส์ที่ได้คำตอบไปแล้ว)`);
+      // ข้ามไว้ก่อน — ปลอดภัยกว่าเสี่ยงกวนเซลส์ที่ได้คำตอบไปแล้ว
+      console.warn(`[queue] ⚠️ LINE ส่งซ้ำ ตรวจสถานะไม่ได้ ข้ามไป · ${short}`);
     }
     return;
   }
 
   const reason = decision.reason === 'never_arrived'
-    ? 'รอบแรกไม่เคยมาถึง'
+    ? 'รอบแรกไม่ถึงแอป'
     : `รอบแรกจบแบบ ${seen.previousOutcome ?? 'ไม่ทราบผล'}`;
-  console.warn(`[queue] ⚠️ LINE ส่งซ้ำ ${who} เหตุการณ์เดิมเมื่อ ${age} วิที่แล้ว — ${reason} ` +
-    `⇒ ไม่ทำงานให้ แต่แจ้งเซลส์ให้สั่งใหม่`);
 
+  // ไม่ทำงานให้ แค่แจ้งเซลส์ให้สั่งใหม่ · พิมพ์บรรทัดเดียว "หลัง" รู้ผลการแจ้ง
   try {
     await lineClient.replyMessage({
       replyToken: event.replyToken,
       messages: [{ type: 'text', text: lostCommandMessage(event) }],
     });
-    console.log(`[queue] แจ้งเซลส์เรื่องคำสั่งตกหล่นสำเร็จ ${who}`);
+    console.warn(`[queue] ⚠️ LINE ส่งซ้ำ ${reason} แจ้งเซลส์ให้ส่งใหม่แล้ว · ${short}`);
     if (receipt) await markRedeliveryAction(receipt.webhookEventId, 'warned');
   } catch (err: any) {
     const msg = err?.message || String(err);
     // ระดับ error เพื่อให้ขึ้นหน้า "บันทึกระบบ" — นี่คือเคสเดียวที่ต้องมีคนตามต่อด้วยมือ
-    console.error(`[queue] ❌ คำสั่งของเซลส์ตกหล่นและแจ้งกลับไม่สำเร็จ ${who} ` +
-      `เหตุการณ์เดิมเมื่อ ${age} วิที่แล้ว${receipt?.postbackData ? ` data=${receipt.postbackData}` : ''} — ${msg}`);
+    // จึงพิมพ์ user เต็มและ data ของปุ่ม ไม่ย่อเหมือนบรรทัดอื่น
+    console.error(`[queue] ❌ LINE ส่งซ้ำ ${reason} และแจ้งเซลส์ไม่สำเร็จ ต้องทักเอง ${who} ` +
+      `ส่งเมื่อ ${age} วิก่อน${receipt?.postbackData ? ` data=${receipt.postbackData}` : ''} — ${msg}`);
     if (receipt) await markRedeliveryAction(receipt.webhookEventId, 'warn_failed', msg);
   }
 }
@@ -521,7 +524,8 @@ app.post('/callback', line.middleware(lineConfig), (req: any, res: any) => {
             // อาจกำลังจะตอบสำเร็จอยู่พอดี (abort หยุดมันได้แค่ที่ "ด่านตรวจถัดไป" ไม่ตัดกลางคัน)
             // การยิงซ้ำจะแย่ง token กัน ทำให้ผู้ใช้เห็นข้อความผิด และ Push Message ก็ถูกห้ามอยู่แล้ว
             queueMetrics.timedOut++;
-            console.warn(`[queue] TIMEOUT ที่ ${remaining}ms ${who} — abort แล้ว (handler จะหยุดที่ด่านถัดไป ถ้ากำลังตอบอยู่ก็ปล่อยให้ตอบจนจบ)`);
+            // handler หยุดที่ด่านถัดไป ถ้ากำลังตอบอยู่ก็ปล่อยให้ตอบจนจบ
+            console.warn(`[queue] TIMEOUT ${Math.round(remaining / 1000)} วิ ตัดงานแล้ว · ${who}`);
           } else {
             queueMetrics.failed++;
             console.error(`[queue] ERROR ${who}:`, res.error?.message || res.error);
@@ -569,6 +573,21 @@ app.post('/callback', line.middleware(lineConfig), (req: any, res: any) => {
       });
     });
   }
+});
+
+/**
+ * สายขาดระหว่างที่ `line.middleware()` กำลังอ่าน body — ปลายทาง (LINE/Cloudflare) ปิด connection
+ * ก่อนส่งครบ ⇒ event นี้ยังไม่ถูกรับ และ LINE จะส่งซ้ำมาใน ~60 วิ ซึ่ง handleRedelivery แจ้งเซลส์ต่อเอง
+ *
+ * เดิมตกไปถึงตัวจัดการ error ของ Express ซึ่งพิมพ์แค่ "Error: aborted" (ขึ้นเป็น "ผิดพลาด" บนหน้า
+ * บันทึกระบบโดยไม่บอกว่ามาจากไหน) — 3 ใน 12 ครั้งของ "รอบแรกไม่ถึงแอป" ช่วง 23–28/09 นำหน้าด้วย
+ * บรรทัดนี้ 2–4 วิหลัง event (docs/line-webhook-redelivery.md)
+ * ตอบ 500 เหมือนตัวจัดการเดิม (ไม่มีใครรับแล้ว แต่ api_logs ต้องนับเหมือนเดิม) · error อื่นส่งต่อตามเดิมทุกตัว
+ */
+app.use('/callback', (err: any, req: any, res: any, next: any) => {
+  if (err?.message !== 'aborted' && err?.code !== 'ECONNRESET') return next(err);
+  console.warn(`[callback] ⚠️ LINE ตัดสายก่อนส่งข้อมูลครบ รอ LINE ส่งซ้ำ`);
+  if (!res.headersSent) res.status(500).end();
 });
 
 // --- Endpoint ตรวจเช็คสถานะการทำงานของเซิร์ฟเวอร์ ---

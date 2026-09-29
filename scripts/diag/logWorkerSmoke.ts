@@ -15,6 +15,7 @@
 //  ให้รันซ้ำทุกครั้งที่แตะ scripts/logworker/ หรือ migration ทั้ง 3 ไฟล์ของแผน log
 // ─────────────────────────────────────────────────────────────────────────────
 import { pool } from '../../config/db.js';
+import { getWorkerStatus } from '../../db/logRepositories.js';
 import { parseLevel, parseDays, levelRank } from '../logworker/config.js';
 import { splitTimestamp, isContinuation, parseEntry, detectLevel } from '../logworker/parseLine.js';
 import { redact, redactObject } from '../logworker/redact.js';
@@ -197,19 +198,17 @@ async function dbChecks(): Promise<void> {
       WHERE message ~* '(bearer\\s+[a-z0-9]|password"?\\s*[:=]\\s*[^*]|api[_-]?key"?\\s*[:=]\\s*[^*])'`);
   ok('ไม่มีความลับหลุดลง system_logs', leak[0].n === 0, `พบ ${leak[0].n} แถว`);
 
-  const { rows: st } = await pool.query<{ job: string; age_min: number | null; last_error: string | null }>(
-    `SELECT job,
-            round(extract(epoch FROM now() - last_ok_at) / 60)::int AS age_min,
-            last_error
-       FROM log_worker_state ORDER BY job`);
+  // เกณฑ์ "ค้าง" ต่องานมาจาก getWorkerStatus() ตัวเดียวกับแถบบนหน้าจอ — ด่านกับจอต้องตัดสินตรงกันเสมอ
+  const st = (await getWorkerStatus() as { job: string; last_ok_at: Date | null; last_error: string | null; stale: boolean }[])
+    .map(s => ({ ...s, age_min: s.last_ok_at === null ? null : Math.round((Date.now() - new Date(s.last_ok_at).getTime()) / 60_000) }));
   console.log('\n   สถานะ logworker แต่ละงาน:');
   for (const s of st) {
     console.log(`     ${s.job.padEnd(28)} สำเร็จล่าสุด ` +
       (s.age_min === null ? 'ยังไม่เคยรัน' : `${s.age_min} นาทีที่แล้ว`) +
       (s.last_error ? `  ⚠️ ${s.last_error.slice(0, 80)}` : ''));
   }
-  const stale = st.filter(s => s.age_min !== null && s.age_min > 15);
-  ok('ไม่มีงานที่ค้างเกิน 15 นาที (ยังไม่เคยรัน = ยังไม่ได้เปิด worker ไม่นับว่าพัง)',
+  const stale = st.filter(s => s.age_min !== null && s.stale);
+  ok('ไม่มีงานที่ค้างเกินรอบของตัวเอง (ยังไม่เคยรัน = ยังไม่ได้เปิด worker ไม่นับว่าพัง)',
     stale.length === 0, stale.map(s => s.job).join(', ') || 'ปกติ');
 
   const { rows: pend } = await pool.query<{ n: number }>(

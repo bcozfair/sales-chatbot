@@ -1933,8 +1933,10 @@ export async function handleEvent(
     // C.3 — ไม่ใช่ระบบพัง แต่เป็นการหยุดตัวเองเพราะงบหมด (index.ts สั่ง abort และ log [queue] TIMEOUT ไว้แล้ว)
     // ห้าม reply ที่นี่: reply token เป็น single-use และเส้นทางบางเส้นตอบไปแล้วก่อนถึงด่านตรวจ
     // การยิงข้อความ "ระบบขัดข้อง" ทับจะทำให้เซลส์เห็นข้อความผิด — ปล่อยเงียบแล้วไปวัดที่ log แทน
+    // ระดับ log ไม่ใช่ warn: เหตุการณ์เดียวกับบรรทัด TIMEOUT ที่ขึ้นหน้า "บันทึกระบบ" อยู่แล้ว
+    // บรรทัดนี้แค่บอกว่าหยุดที่ขั้นไหน ⇒ อยู่ใน docker logs พอ ไม่ต้องเป็นแถว error ซ้ำอีกแถว
     if (error?.[DEADLINE_ABORT]) {
-      console.warn(`[abort] user=${event?.source?.userId || 'unknown'} type=${event?.type} — ${error.message}`);
+      console.log(`[abort] user=${event?.source?.userId || 'unknown'} type=${event?.type} — ${error.message}`);
       return null;
     }
     console.error('เกิดข้อผิดพลาดในการประมวลผลระบบ:', error);

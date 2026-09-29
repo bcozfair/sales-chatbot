@@ -375,13 +375,20 @@ export function getRequestTimeline(requestId: string) {
  * สถานะของงานเบื้องหลังทั้งหมด — แสดงบนหน้า "บันทึกระบบ"
  *
  * "worker หยุดเงียบ ๆ" เป็นความเสี่ยงจริงของสถาปัตยกรรมนี้ (แอปไม่รู้ด้วยซ้ำว่ามันหายไป)
- * ⇒ ต้องมีที่ให้คนเห็นได้โดยไม่ต้อง ssh เข้าเครื่อง · stale = true เมื่อไม่สำเร็จเกิน 15 นาที
+ * ⇒ ต้องมีที่ให้คนเห็นได้โดยไม่ต้อง ssh เข้าเครื่อง · stale = true เมื่อไม่สำเร็จนานเกินรอบของงานนั้น
+ *
+ * เกณฑ์ต้องยาวกว่ารอบของแต่ละงาน (ค่ารอบอยู่ที่ scripts/logworker/index.ts + systemLogJob.ts HEARTBEAT_MS)
+ * เดิมใช้ 15 นาทีทุกงาน ⇒ log_retention ที่รันชั่วโมงละครั้งขึ้นว่า "ค้าง" 45 นาทีของทุกชั่วโมง (พบ 29/09/2026)
  */
 export function getWorkerStatus() {
   return q(
     `SELECT job, cursor_at, last_run_at, last_ok_at, last_error,
             runs::text, rows_written::text,
-            (last_ok_at IS NULL OR last_ok_at < now() - interval '15 minutes') AS stale
+            (last_ok_at IS NULL OR last_ok_at < now() - CASE job
+               WHEN 'log_retention' THEN interval '2 hours'    -- รันทุกชั่วโมง
+               WHEN 'traffic_daily' THEN interval '40 minutes' -- รันทุก 15 นาที · SQL ยาวได้ถึง 60 วิ
+               ELSE interval '15 minutes'                      -- audit_actor ทุกนาที · system_log heartbeat ทุก 5 นาที
+             END) AS stale
        FROM log_worker_state ORDER BY job`);
 }
 

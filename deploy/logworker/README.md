@@ -125,7 +125,7 @@ node --import tsx ../../scripts/logworker/backfillActor.ts
 
 3 ทาง เรียงจากสะดวกที่สุด:
 
-1. **หน้า "บันทึกระบบ"** ใน Admin Portal — มีแถบสถานะของทั้ง 4 งานอยู่บนสุด ขึ้นเตือนเองเมื่อค้างเกิน 15 นาที
+1. **หน้า "บันทึกระบบ"** ใน Admin Portal — มีแถบสถานะของทั้ง 4 งานอยู่บนสุด ขึ้นเตือนเองเมื่อไม่สำเร็จนานเกินรอบของงานนั้น (เกณฑ์ต่องานอยู่ที่ `getWorkerStatus()` ใน `db/logRepositories.ts` · ตัวเก็บ system log แจ้ง heartbeat ทุก 5 นาทีแม้ไม่มีแถวใหม่)
 2. `npm run diag:log-worker` — ตรวจครบทั้งตัวแยกระดับ, ตัวลบข้อมูลอ่อนไหว, migration, trigger, และสถานะ worker
 3. `journalctl -u logworker -n 50`
 
