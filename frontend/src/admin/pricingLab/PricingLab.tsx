@@ -7,9 +7,9 @@ import { TableCard, EmptyState, ErrorBox } from '../logs/ui';
 import { errMsg, formatDateTime } from '../logs/format';
 import { SubCodeModal } from './SubCodeModal';
 import { CalcTrace } from './CalcTrace';
-import { CatalogTemplate } from './CatalogTemplate';
-import { formForFamily } from './catalogForm';
-import { type BhForm, type QuoteOverview, type ParsedCode, type PriceOutcome } from './types';
+import { CatalogTemplate, TsCatalogTemplate, type FamilyChoice } from './CatalogTemplate';
+import { formForFamily, tsFormForFamily } from './catalogForm';
+import { type BhForm, type QuoteOverview, type ParsedCode, type PriceOutcome, type TsForm } from './types';
 
 /**
  * หน้า "คิดราคาสินค้า" — โมดูลทดลองที่ถอดออกได้ทั้งก้อน
@@ -38,10 +38,14 @@ import { type BhForm, type QuoteOverview, type ParsedCode, type PriceOutcome } f
  * (เจ้าของเคาะ mockup แบบ A "กรอกในรหัส" + ขอช่องคำนวณจากรหัสแบบเดิมไว้ด้วย) — ช่องรหัสด้านบนกับช่องกรอกตามกันเสมอ:
  * พิมพ์รหัส → เซิร์ฟเวอร์อ่านเป็นช่อง · แก้ช่อง → เซิร์ฟเวอร์ประกอบรหัสให้ (`/quote` รับ `form`) ⇒ ไม่มีตัวประกอบรหัส
  * ฝั่งเบราว์เซอร์ที่จะเขียนไม่ตรงกับตัวอ่าน · รหัสที่ไม่มีแคตตาล็อก/เขียนนอกรูปแบบ ยังเห็นหน้าเดิมทุกอย่าง
+ *
+ * **ตั้งแต่ 2026-09-29 ซีรีส์ TS ทั้ง 11 ตารางได้ช่องกรอกแบบเดียวกัน** (เจ้าของ: "หน้าคำนวณราคาของซีรีย์ TS_ ทั้งหมด
+ * ยังไม่ใช้รูปแบบแคตตาล็อคเหมือนซีรีย์ BH" · เคาะ mockup `pricing-catalogue-ts.html` + คำถาม 9 ข้อ "ตามที่แนะนำ")
+ * — ช่อง "รุ่น" ช่องเดียวรวม BH กับ TS สลับข้ามซีรีส์ได้ · ช่องของ TS ส่งไปเป็น `tsForm` (`catalogTs.ts`)
  */
 
 const HELP = 'ตัวอย่างในชีต — กดเพื่อลอง';
-const EXAMPLES = ['BH-01C-600x150-380-4950W-PL-PL2', 'BH-02C 210-220-1400W-N-Z', 'BH-03 170x110-220-2700W-T', 'TSK-14 6x200+150-BU', 'TSJ-04(S8) 6x100+1M'];
+const EXAMPLES = ['BH-01C-600x150-380-4950W-PL-PL2', 'BH-02C 210-220-1400W-N-Z', 'BH-03 170x110-220-2700W-T', 'TSK-14 6x200+150-BU', 'TSK-04(S2)6Ax300+3MP', 'TSP-11P 6x50+5M-PU'];
 
 interface QuoteResult {
   /** รหัสที่เซิร์ฟเวอร์คิดราคาจริง — ตอนส่งช่องกรอกไป คือรหัสที่เซิร์ฟเวอร์ประกอบให้ */
@@ -86,6 +90,8 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
   const [adding, setAdding] = useState<string | null>(null);
   /** ช่องตามแคตตาล็อก — null = รหัสนี้ไม่มีแคตตาล็อก (หรือเขียนนอกรูปแบบ) ⇒ หน้าเดิม */
   const [form, setForm] = useState<BhForm | null>(null);
+  /** ช่องตามแคตตาล็อกของซีรีส์ TS — null = รหัสนี้ไม่ใช่ TS หรือเขียนนอกรูปแบบ */
+  const [tsForm, setTsForm] = useState<TsForm | null>(null);
   /** คำขอล่าสุด — คำตอบของคำขอเก่าที่มาถึงทีหลังต้องทิ้ง ไม่งั้นพิมพ์ 150 แล้วช่องเด้งกลับเป็น 15 */
   const seq = useRef(0);
   const typing = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -104,7 +110,7 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
    * คิดราคา — จากรหัสที่พิมพ์ (`code`) หรือจากช่องกรอก (`form`)
    * ขนาดเต๋าและสิ่งที่ต้องบวกเพิ่มที่เลือกไว้ส่งไปกับรหัสด้วย (`picks`) เพราะมันไม่อยู่ในรหัส — พิมพ์รหัสเดิมซ้ำแล้วค่าที่เลือกต้องไม่หาย
    */
-  const send = useCallback(async (body: { code?: string; form?: BhForm; picks?: { amp?: string; addons?: string[] } }) => {
+  const send = useCallback(async (body: { code?: string; form?: BhForm; tsForm?: TsForm; picks?: { amp?: string; addons?: string[] } }) => {
     const mine = ++seq.current;
     setBusy(true);
     setError('');
@@ -116,8 +122,9 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
       if (mine !== seq.current) return;
       if (!res.ok) throw new Error(out?.error ?? 'คิดราคาไม่สำเร็จ');
       setResult(out);
-      if (body.form) setCode(out.code ?? '');
-      else setForm(out.parsed?.form ?? null);
+      if (body.form || body.tsForm) setCode(out.code ?? '');
+      if (!body.form) setForm(out.parsed?.form ?? null);
+      if (!body.tsForm) setTsForm(out.parsed?.tsForm ?? null);
     } catch (e: unknown) {
       if (mine !== seq.current) return;
       setError(errMsg(e));
@@ -128,7 +135,7 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
   }, [jsonHeaders]);
 
   const amp = form?.amp;
-  const addons = form?.addons;
+  const addons = form?.addons ?? tsForm?.addons;
   const quote = useCallback((input: string) => {
     if (!input.trim()) return;
     if (typing.current) clearTimeout(typing.current);
@@ -141,6 +148,15 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
     if (typing.current) clearTimeout(typing.current);
     if (now) void send({ form: next });
     else typing.current = setTimeout(() => { void send({ form: next }); }, 350);
+  }, [send]);
+
+  /** ช่องกรอกของ TS — กติกาเดียวกับของ BH (ช่องเลือกส่งทันที · ช่องพิมพ์หน่วง) */
+  const editTsForm = useCallback((next: TsForm, now?: boolean) => {
+    setTsForm(next);
+    setForm(null);
+    if (typing.current) clearTimeout(typing.current);
+    if (now) void send({ tsForm: next });
+    else typing.current = setTimeout(() => { void send({ tsForm: next }); }, 350);
   }, [send]);
 
   useEffect(() => () => { if (typing.current) clearTimeout(typing.current); }, []);
@@ -164,7 +180,21 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
       ]
     : [];
   const catalog = overview?.catalog ?? [];
-  const catalogMode = !!form && catalog.some((c) => c.family === form.family);
+  const catalogTs = overview?.catalogTs ?? [];
+  const tsSpec = tsForm ? catalogTs.find((c) => c.family === tsForm.family) : undefined;
+  const bhMode = !!form && catalog.some((c) => c.family === form.family);
+  const catalogMode = bhMode || !!tsSpec;
+  /** ช่อง "รุ่น" ช่องเดียวรวมสองซีรีส์ (เจ้าของเคาะข้อ 9) — TS_-12 มีสองรายการตามแคตตาล็อกสองหน้า */
+  const families: FamilyChoice[] = useMemo(() => [
+    ...(overview?.catalogTs ?? []).map((c) => ({ value: c.family, code: c.head, text: c.name, group: 'TS — Temperature Sensor' })),
+    ...(overview?.catalog ?? []).map((c) => ({ value: c.family, code: c.head, text: c.name, group: 'BH — Heater' })),
+  ], [overview]);
+  const pickFamily = (f: string) => {
+    const bh = catalog.find((c) => c.family === f);
+    if (bh) { setTsForm(null); editForm(formForFamily(bh, form ?? undefined), true); return; }
+    const ts = catalogTs.find((c) => c.family === f);
+    if (ts) editTsForm(tsFormForFamily(ts, tsForm ?? undefined), true);
+  };
 
   return (
     <div className="space-y-3.5">
@@ -221,15 +251,11 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
         {/* ── 1b. ช่องกรอกตามแคตตาล็อก + ราคา (เฉพาะรหัสที่มีแคตตาล็อก) ──────────── */}
         {catalogMode && (
           <div className="mt-3.5 pt-3.5 border-t border-slate-100">
-            <CatalogTemplate
-              catalog={catalog}
-              form={form}
-              onChange={editForm}
-              onFamily={(f) => {
-                const spec = catalog.find((c) => c.family === f);
-                if (spec) editForm(formForFamily(spec, form), true);
-              }}
-            />
+            {bhMode && form ? (
+              <CatalogTemplate catalog={catalog} families={families} form={form} onChange={editForm} onFamily={pickFamily} />
+            ) : tsSpec && tsForm ? (
+              <TsCatalogTemplate spec={tsSpec} families={families} form={tsForm} onChange={editTsForm} onFamily={pickFamily} />
+            ) : null}
             {result && <CatalogResult result={result} notIncluded={notIncluded} />}
           </div>
         )}

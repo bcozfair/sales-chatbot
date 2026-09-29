@@ -1,5 +1,5 @@
 /* ─────────────────────────────────────────────────────────────────────────────
-   เปิดหน้า "คำนวณราคา" จริงแล้วกรอกตามแคตตาล็อก BH (ช่องกรอก ↔ ช่องรหัส ตามกันจริงไหม)
+   เปิดหน้า "คำนวณราคา" จริงแล้วกรอกตามแคตตาล็อก BH และ TS (ช่องกรอก ↔ ช่องรหัส ตามกันจริงไหม)
 
    เครื่องมือของสมุดราคา — ดู services/pricingLab/README.md · docs/pricing-code-bh.md
 
@@ -148,9 +148,11 @@ for (const width of [1280, 390]) {
   await page.click('input[aria-label="สายถักสแตนเลส"]');
   await settle();
 
-  ok('เลือกรุ่นจาก dropdown ในช่อง "รุ่น" (ไม่มีการ์ดแยกแล้ว) · มี 4 รุ่น',
-    (await page.$$eval('select[aria-label="รุ่น"] option', (os) => os.length)) === 4
-      && (await page.$$('xpath/.//button[.//b[text()="BH-03"]]')).length === 0);
+  // ช่อง "รุ่น" ช่องเดียวรวม BH กับ TS แบ่งกลุ่ม (เจ้าของเคาะข้อ 9 · 2026-09-29) — TS 11 ตาราง (TS_-12 สองหน้า) + BH 4 รุ่น
+  const groups = await page.$$eval('select[aria-label="รุ่น"] optgroup', (gs) => gs.map((g) => `${(g as HTMLOptGroupElement).label}:${g.children.length}`));
+  ok('เลือกรุ่นจาก dropdown ในช่อง "รุ่น" (ไม่มีการ์ดแยกแล้ว) · กลุ่ม TS 11 + BH 4',
+    JSON.stringify(groups) === JSON.stringify(['TS — Temperature Sensor:11', 'BH — Heater:4'])
+      && (await page.$$('xpath/.//button[.//b[text()="BH-03"]]')).length === 0, groups.join(' · '));
   await choose('รุ่น', 'BH-03');
   await choose('การออกขั้วไฟ', '1');
   ok('BH-03 เลือกออกสาย 1 M ได้ → รหัสลงท้าย -1', (await codeValue()).endsWith('-1') && !(await text()).includes('ระบบอ่านรหัสนี้ว่าอะไร'), await codeValue());
@@ -173,9 +175,48 @@ for (const width of [1280, 390]) {
     (await page.$eval('input[aria-label="D1"]', (el) => (el as HTMLInputElement).value)) === '215' && (await codeValue()).startsWith('BH-02C 215-'),
     await codeValue());
 
+  // ── ซีรีส์ TS (เจ้าของเคาะ mockup pricing-catalogue-ts 2026-09-29) ──────────────────────────
+  const val = (label: string) => page.$eval(`select[aria-label="${label}"]`, (el) => (el as HTMLSelectElement).value);
   await typeCode('TSK-14 6x200+150-BU');
   body = await text();
-  ok('รหัสที่ยังไม่มีแคตตาล็อก (TS) → หน้าเดิม', body.includes('ระบบอ่านรหัสนี้ว่าอะไร') && (await page.$('select[aria-label="การออกขั้วไฟ"]')) === null);
+  ok('พิมพ์รหัส TS → ขึ้นช่องตามแคตตาล็อก (ไม่ใช่การ์ด "ระบบอ่านรหัสนี้ว่าอะไร")',
+    !body.includes('ระบบอ่านรหัสนี้ว่าอะไร') && (await val('ชนิดหัวกระโหลก')) === 'B' && (await val('Ground')) === 'U'
+      && (await shown('รุ่น')).face === 'TS_-14');
+  await typeCode('TSK-04(S2)6Ax300+3MP');
+  ok('TS_-04 ช่องได้ค่าจากรหัส (หัววัด TS · Sensor K · เกลียว S2 · แกน 6 · วัสดุ A · สาย P)',
+    (await val('ชนิดหัววัด')) === 'TS' && (await val('ชนิด Sensor')) === 'K' && (await val('ขนาดเกลียว')) === 'S2'
+      && (await val('ขนาดแกน')) === '6' && (await val('วัสดุ')) === 'A' && (await val('ชนิดสาย')) === 'P');
+  await choose('ขนาดเกลียว', 'S4');
+  ok('แก้เกลียว → รหัสด้านบนเปลี่ยนตาม', (await codeValue()) === 'TSK-04(S4)6Ax300+3MP', await codeValue());
+  await setNumber('ความยาวแกน', '250');
+  ok('แก้ความยาวแกน → รหัสเปลี่ยน', (await codeValue()) === 'TSK-04(S4)6Ax250+3MP', await codeValue());
+  await choose('ชนิดหัววัด', 'N');
+  ok('เปลี่ยนหัววัดเป็น NTC → ช่อง Sensor เหลือ 2K/10K · รหัสขึ้นต้น N2-04',
+    (await val('ชนิด Sensor')) === '2' && (await codeValue()).startsWith('N2-04('), await codeValue());
+  body = await text();
+  ok('NTC คิดราคาได้ (กฎ NTC/PTC ของชีต)', body.includes('NTC') && /\d,?\d{3}\s*บาท/.test(body));
+  await choose('รุ่น', 'TS_-06');
+  ok('สลับเป็น TS_-06 → มีช่องหัวกระโหลก · ยกหัววัด/แกนเดิมมา', (await page.$('select[aria-label="ชนิดหัวกระโหลก"]')) !== null
+    && (await codeValue()).startsWith('N2-06(') && (await val('ขนาดแกน')) === '6', await codeValue());
+  await choose('ชนิดหัวกระโหลก', 'KB');
+  ok('เลือกหัว KB → รหัสลงท้าย -KB', (await codeValue()).endsWith('-KB'), await codeValue());
+  await choose('รุ่น', 'TS_-08');
+  const before08 = await text();
+  const code08 = await codeValue();
+  await page.click('input[aria-label="หัก L ดัดงอ"]');
+  await settle();
+  body = await text();
+  ok('TS_-08 ติ๊ก "หัก L" → ราคาเปลี่ยน รหัสไม่เปลี่ยน', body !== before08 && (await codeValue()) === code08 && body.includes('หัก L'), code08);
+  await typeCode('TSP-11P 6x50+5M-PU-S000');
+  ok('TS_-11 Spring P · ท่อนนอกแคตตาล็อก -S000 ขึ้นเป็นป้ายท้ายรหัส',
+    (await val('Spring')) === 'P' && (await page.$('button[aria-label="เอา S000 ออก"]')) !== null);
+  await page.click('button[aria-label="เอา S000 ออก"]');
+  await settle();
+  ok('กดเอา S000 ออก → รหัสไม่มี -S000', (await codeValue()) === 'TSP-11P 6x50+5M-PU', await codeValue());
+  await choose('รุ่น', 'BH-01');
+  ok('สลับจาก TS กลับไป BH ได้จากช่องเดียวกัน', (await page.$('select[aria-label="การออกขั้วไฟ"]')) !== null && (await codeValue()).startsWith('BH-01 '), await codeValue());
+  await typeCode('TSK-06(S4)12.7x110-2B');
+  ok('รหัส TS ที่เขียนนอกรูปแบบ (-2B ติดกัน) → หน้าเดิม (ไม่เดาช่อง)', (await text()).includes('ระบบอ่านรหัสนี้ว่าอะไร'));
 
   await typeCode('BH-02-S 406x330-220-2500W');
   body = await text();

@@ -32,10 +32,11 @@
 //  `engine.ts` คิดราคา ⇒ แก้ตัวอ่านรหัสไม่กระทบตัวเลข และแก้ราคาไม่กระทบตัวอ่าน
 // ─────────────────────────────────────────────────────────────────────────────
 
-import type { PriceBook, PriceModel, ProductConfig } from './types.js';
+import type { PriceBook, PriceModel, Predicate, ProductConfig } from './types.js';
 import { resolveModel } from './engine.js';
 import { findSubCode, subCodeOption } from './subcodes.js';
 import { ADDONS, AMP, BH_CATALOG, SHAPE_AXIS, bhSpec, buildBhCode, sameBhCode, type BhFamily, type BhForm, type SizeKey } from './catalogBh.js';
+import { MODEL_SUFFIX, NTC_HEADS, NTC_NUMBERS, TS_ADDONS, readTsForm, tsFamilyOfModel, tsSpec, type TsForm } from './catalogTs.js';
 
 /** หนึ่งรหัสย่อยในรหัสสินค้า พร้อมคำอธิบายว่าระบบอ่านมันว่าอะไร — ใช้โชว์ให้คนตรวจก่อนเชื่อราคา */
 export interface CodePart {
@@ -71,6 +72,10 @@ export interface ParsedCode {
    * หน้าคำนวณราคาใช้วาดช่องกรอก และ `buildBhCode(form)` ต้องได้รหัสเดิมกลับมา (ด่าน `diag:pricing-catalog`)
    */
   form?: BhForm;
+  /**
+   * ช่องตามแคตตาล็อกของซีรีส์ TS (`catalogTs.ts` · เจ้าของเคาะ 2026-09-29) — มีเฉพาะรหัสที่ประกอบกลับจากช่องได้รหัสเดิมทุกตัวอักษร
+   */
+  tsForm?: TsForm;
 }
 
 /**
@@ -79,6 +84,7 @@ export interface ParsedCode {
  */
 export interface CodePicks {
   amp?: string;
+  /** BH: `ADDONS[].code` · TS: `TS_ADDONS[].code` (หัก L · หักฉาก) — ตัวอ่านกรองซ้ำตามกฎที่รุ่นนั้นมีจริง */
   addons?: string[];
 }
 
@@ -110,6 +116,19 @@ export function axisValues(model: PriceModel, axis: string): string[] {
 function matchValue(values: string[], raw: string): string | undefined {
   const want = norm(raw).toLowerCase();
   return values.find((v) => norm(v).toLowerCase() === want);
+}
+
+/**
+ * ขนาดแกน — ตรงตัวก่อน แล้วค่อยเทียบกับ **ตัวเลขหน้าวงเล็บ** เมื่อได้ค่าเดียว: ชีต TS-12,13 เขียนแถวเป็น
+ * `1.5 (For Type K)` · `1.6 (For Type J)` แต่รหัสจริงเขียน `1.5` (แคตตาล็อก "1.5 mm Type K Only") ⇒ เดิมขึ้น
+ * "ไม่มีแกน 1.5" ทั้งที่ Excel มีราคา (เจอ 2026-09-28 · รหัสจริงของสองขนาดนี้หลายร้อยรหัส)
+ */
+function matchD(values: string[], raw: string): string | undefined {
+  const hit = matchValue(values, raw);
+  if (hit) return hit;
+  const want = norm(raw).toLowerCase();
+  const loose = values.filter((v) => /\(.*\)\s*$/.test(v) && norm(v.replace(/\s*\(.*\)\s*$/, '')).toLowerCase() === want);
+  return loose.length === 1 ? loose[0] : undefined;
 }
 
 /**
@@ -221,9 +240,20 @@ const SENSOR_ADDON: Record<
   }
 };
 
-/** รุ่นนี้มีกฎบวกเพิ่มที่ติ๊กด้วย option นี้จริงไหม */
+/**
+ * รุ่นนี้มีกฎบวกเพิ่มที่ติ๊กด้วย option นี้จริงไหม — ไล่ลงไปในเงื่อนไขซ้อนด้วย: 2 element ของ TS-18 แยกกฎ Thermocouple / RTD
+ * เป็น `{ all: [{ option: 'element:2' }, { axis: 'sensor', … }] }` ⇒ ดูแค่ชั้นบนสุดแล้ว `-2` ของ TS-18 ขึ้น "รุ่นนี้ไม่มีกฎ" ทั้งที่มี
+ */
 function hasOptionAdder(model: PriceModel, option: string): boolean {
-  return model.adders.some((a) => a.when !== undefined && 'option' in a.when && a.when.option === option);
+  const uses = (p: Predicate | undefined): boolean => {
+    if (!p) return false;
+    if ('option' in p) return p.option === option;
+    if ('all' in p) return p.all.some(uses);
+    if ('any' in p) return p.any.some(uses);
+    if ('not' in p) return false; // "ไม่ได้ติ๊ก" ไม่ใช่กฎที่เปิดด้วยการติ๊ก
+    return false;
+  };
+  return model.adders.some((a) => uses(a.when));
 }
 
 /**
@@ -339,6 +369,9 @@ function splitKnown(c: Ctx, text: string): { pieces: string[]; rest: string } {
 function leftovers(c: Ctx, rest: string): string[] {
   return rest
     .split('-')
+    // 2 Element อยู่หน้าความยาวสายโดยไม่มีขีดคั่น (`x290-2+2MTSU` · แคตตาล็อก TS_-04 · 10 · 11 · 12) — แยกที่ `+ตัวเลข`
+    // ไม่งั้นทั้งท่อน `2+2MTSU` ขึ้นแดงแล้วค่าสายหายไปด้วย (เจอ 2026-09-28 · 48 รหัสของ TS_-10)
+    .flatMap((t) => t.split(/(?=\+\d)/))
     .map((t) => t.trim())
     .filter((t) => t !== '');
 }
@@ -387,6 +420,18 @@ function readCable(c: Ctx, token: string): boolean {
 }
 
 /**
+ * ขนาดที่ **แคตตาล็อกมีแต่ตารางราคาไม่มีแถวเลย** (ไม่ว่าวัสดุไหน) — TS_-18 แกน 2/3 mm · TS_-14 แกน 28 mm
+ * ⇒ ตอบ "ยังไม่มีราคา" (ตาม mockup ที่เจ้าของเคาะ 2026-09-29) ไม่ใช่ "อ่านไม่ออก" · ขนาดที่ตารางมีกับวัสดุอื่น
+ * (`10` ที่ Excel มีแค่ `10A`) ไม่นับ — แคตตาล็อกเองบอกว่าขนาดนั้นทำได้เฉพาะวัสดุนั้น จึงเป็นรหัสนอกแคตตาล็อกจริง
+ */
+function catalogOnlySize(c: Ctx, slot: string, raw: string, tableValues: string[]): boolean {
+  const fam = tsFamilyOfModel(c.model.code);
+  const listed = fam ? tsSpec(fam)?.slots[slot]?.options?.some((o) => o.code !== '' && Number(o.code) === Number(raw)) : false;
+  if (!listed || !/^[0-9.]+$/.test(raw)) return false;
+  return !tableValues.some((v) => Number((v.match(/^[0-9.]+/) ?? [])[0]) === Number(raw));
+}
+
+/**
  * ไวยากรณ์ร่วมของ TC แบบ "แกน × เกลียว" — `TS_-04(S_) 6x100+1M` (TS-04!A7)
  * วงเล็บ = ขนาดเกลียว · ก่อน x = แกน D · หลัง x = ความยาว L1 · +NM = ความยาวสาย
  *
@@ -396,7 +441,7 @@ function readCable(c: Ctx, token: string): boolean {
  * ในตารางราคาตั้ง (ราคาตามเกลียว) แต่ค่าความยาวแกนแยกราคาตาม D ⇒ อ่าน D ไว้ให้กฎนั้น
  * ⇒ เตือนว่า "ไม่มีวงเล็บ" เฉพาะรุ่นที่มีแกนเกลียวจริงเท่านั้น
  */
-function readTsGeneric(c: Ctx, rest: string, prefix: string): void {
+function readTsGeneric(c: Ctx, rest: string, prefix: string, letter = ''): void {
   const hasThread = axisValues(c.model, 'thread').length > 0;
   const hasD = axisValues(c.model, 'D').length > 0;
   const dRates = hasD ? [] : [...new Set(c.model.adders.filter((a) => a.byAxis === 'D').flatMap((a) => Object.keys(a.rates ?? {})))];
@@ -446,13 +491,38 @@ function readTsGeneric(c: Ctx, rest: string, prefix: string): void {
   }
 
   const core = rest.match(/^([0-9.]+[A-WYZ]*)(?:x([0-9.]+))?/i);
+  let teflon = false;
   if (core) {
     const dText = core[1] ?? '';
     if (hasD) {
-      const dHit = matchValue(axisValues(c.model, 'D'), dText);
+      const dValues = axisValues(c.model, 'D');
+      const dHit = matchD(dValues, dText);
+      // วัสดุ T / AT = แกนเคลือบเทปล่อน (แคตตาล็อก "SUS 304 / 316 With Teflon Coated") — เจ้าของเคาะข้อ 2 (2026-09-29):
+      // ยืนบนแถวของแกนเปล่า (T → `6` · AT → `6A`) แล้วคิดกฎ "หุ้มเทปล่อน" เต็มความยาวแกน L1 · แกนที่ชีตไม่มีอัตรา = ยังไม่มีราคา
+      const coat = !dHit && hasOptionAdder(c.model, 'coat:teflon') ? dText.match(/^([0-9.]+A?)T$/i) : null;
+      const coatBase = coat ? matchValue(dValues, coat[1] ?? '') : undefined;
+      // ตัวอักษรวัสดุที่ Excel ยังไม่มีราคาตั้ง (TN · AL) — ตั้งในตารางรหัสย่อยเป็นแกน D ที่ยังไม่มีค่า ⇒ "ยังไม่มีราคา"
+      const mat = !dHit && !coatBase ? dText.match(/^([0-9.]+)([A-Z]+)$/i) : null;
       if (dHit) {
         c.cfg.axes = { ...c.cfg.axes, D: dHit };
         add(c, { text: dText, reads: `แกน D = ${dHit} mm`, kind: 'axis' });
+        if (/for type k/i.test(dHit) && letter === 'J') c.warnings.push(`แคตตาล็อก: แกน ${dText} mm ทำได้เฉพาะ Type K`);
+        if (/for type j/i.test(dHit) && letter === 'K') c.warnings.push(`แคตตาล็อก: แกน ${dText} mm ทำได้เฉพาะ Type J`);
+      } else if (coatBase) {
+        teflon = true;
+        c.cfg.axes = { ...c.cfg.axes, D: coatBase };
+        c.cfg.options = [...(c.cfg.options ?? []), 'coat:teflon'];
+        add(c, {
+          text: dText,
+          reads: `แกน D = ${coatBase} mm เคลือบเทปล่อน (วัสดุ ${/AT$/i.test(dText) ? 'AT = SUS 316' : 'T = SUS 304'} With Teflon Coated) — คิด "หุ้มเทปล่อน" เต็มความยาวแกน`,
+          kind: 'axis'
+        });
+      } else if (mat && readFromTable(c, mat[2] ?? '', dText)) {
+        // แถวในตารางรหัสย่อยบอกแล้วว่าวัสดุนี้แปลว่าอะไร (วันนี้: ยังไม่มีราคาตั้ง)
+      } else if (catalogOnlySize(c, 'd', dText, dValues)) {
+        c.cfg.axes = { ...c.cfg.axes, D: dText };
+        c.cfg.catalogOnly = { ...c.cfg.catalogOnly, D: dText };
+        add(c, { text: dText, reads: `แกน D = ${dText} mm — แคตตาล็อกมีขนาดนี้ แต่ตารางราคา ${c.model.sheet ?? c.model.code} ยังไม่มีแถว`, kind: 'axis' });
       } else {
         add(c, { text: dText, reads: `ไม่มีแกน ${dText} ในตารางราคา ${c.model.sheet ?? c.model.code}`, kind: 'unknown' });
       }
@@ -490,6 +560,11 @@ function readTsGeneric(c: Ctx, rest: string, prefix: string): void {
       }
     }
     rest = rest.slice(core[0].length);
+  }
+  // เคลือบเทปล่อนเต็มความยาวแกน — ไม่ได้บอกความยาว = ความยาวมาตรฐานของรุ่น
+  if (teflon) {
+    const len = c.cfg.dims?.L1 ?? c.model.standard.L1;
+    if (len !== undefined) c.cfg.dims = { ...c.cfg.dims, teflon_mm: len };
   }
 
   readTail(c, rest, prefix);
@@ -531,6 +606,10 @@ function readTs14(c: Ctx, rest: string, prefix: string, letter: string): void {
     if (hit) {
       c.cfg.axes = { ...c.cfg.axes, dia_group: hit };
       add(c, { text: core[1] ?? '', reads: `กลุ่มขนาด ${hit}`, kind: 'axis' });
+    } else if (catalogOnlySize(c, 'd', core[1] ?? '', groups.map((g) => (g.match(/[\d.]+/) ?? [''])[0]!))) {
+      c.cfg.axes = { ...c.cfg.axes, dia_group: core[1] ?? '' };
+      c.cfg.catalogOnly = { ...c.cfg.catalogOnly, dia_group: core[1] ?? '' };
+      add(c, { text: core[1] ?? '', reads: `ขนาด ${core[1]} mm — แคตตาล็อกมีขนาดนี้ แต่ตารางราคา TS-14 ยังไม่มีกลุ่มขนาดนี้`, kind: 'axis' });
     } else {
       add(c, {
         text: core[1] ?? '',
@@ -571,6 +650,8 @@ function readTs18(c: Ctx, rest: string, prefix: string, letter: string): void {
     if (hit) {
       c.cfg.axes = { ...c.cfg.axes, flange: hit };
       add(c, { text: `(${raw})`, reads: `หน้าแปลน ${hit}`, kind: 'axis', guess: true });
+    } else if (readFromTable(c, raw, `(${raw})`)) {
+      // รหัสหน้าแปลนของแคตตาล็อก (F1–F5 = JIS 10K) ตั้งในตารางรหัสย่อยว่าใช้แถวไหนของชีต — เจ้าของเคาะข้อ 7 (2026-09-29)
     } else {
       // ใส่ค่าดิบลงแกนหน้าแปลนทั้งที่อ่านไม่ออก **โดยตั้งใจ** — ชีตมีกฎอยู่แล้วว่า
       // หน้าแปลนนอกรายการต้องขอราคาจากผลิต 2 (TW!L34) ⇒ ปล่อยว่างไว้จะกลายเป็น
@@ -595,6 +676,10 @@ function readTs18(c: Ctx, rest: string, prefix: string, letter: string): void {
       if (norm(core[1] ?? '').toLowerCase() !== norm(d2).toLowerCase()) {
         c.warnings.push(`รหัสนี้ D1 (${core[1]}) กับ D2 (${d2}) ไม่เท่ากัน — ชีตมีราคาแถวเดียวชื่อ "D1/D2" ระบบจึงคิดจาก D2`);
       }
+    } else if (catalogOnlySize(c, 'd2', core[2] ?? '', ds)) {
+      c.cfg.axes = { ...c.cfg.axes, D: core[2] ?? '' };
+      c.cfg.catalogOnly = { ...c.cfg.catalogOnly, D: core[2] ?? '' };
+      add(c, { text: `${core[1]}-${core[2]}`, reads: `แกน D2 ${core[2]} mm — แคตตาล็อกมีขนาดนี้ แต่ตารางราคา TS-18 ยังไม่มีแถว`, kind: 'axis' });
     } else {
       add(c, { text: `${core[1]}-${core[2]}`, reads: `ไม่มีแกน ${core[2]} ในตารางราคา TS-18`, kind: 'unknown' });
     }
@@ -896,6 +981,9 @@ function readModelSuffix(c: Ctx, suffix: string, quiet = false): string | undefi
       (extra ? ` · ของแถม ${extra} รายการคิดคนละราคากับรุ่นปกติ` : '');
     if (quiet) return reads;
     add(c, { text: suffix, reads, kind: 'model' });
+  } else if (suffix !== '' && MODEL_SUFFIX[model.code]?.[suffix] && !quiet) {
+    // ตัวอักษรท้ายเลขรุ่นที่แคตตาล็อกบอกความหมาย (TS_-11 Spring P = None Spring) — `catalogTs.ts`
+    add(c, { text: suffix, reads: MODEL_SUFFIX[model.code]![suffix]!, kind: 'noPrice' });
   } else if (suffix !== '' && !model.code.toUpperCase().endsWith(suffix) && !quiet) {
     add(c, {
       text: suffix,
@@ -946,6 +1034,33 @@ function readTail(c: Ctx, rest: string, prefix: string): void {
   void prefix;
 }
 
+/**
+ * หัว NTC/PTC ตามแคตตาล็อก TS_-04 · 06 · 11 (`N10` = NTC 10K) — ราคาเดียวกับที่ Excel เขียนไว้เป็น
+ * "NTC / PTC บวกเพิ่มจาก Type K/J" (เจ้าของเคาะข้อ 1 · 2026-09-29) ⇒ อ่านด้วยตัวอ่านหัววัดตัวเดิมในชื่อ `TSN`
+ * แล้วเปลี่ยนแค่ป้ายบนจอให้เป็นสิ่งที่คนพิมพ์มา · แกนต่ำกว่า 5 mm ไม่มีอัตราในชีต = "ยังไม่มีราคา" (แคตตาล็อก: 5 mm ขึ้นไป)
+ */
+function readNtcHead(c: Ctx, head: string): void {
+  const before = c.parts.length;
+  readSensor(c, 'TSN', 'N');
+  const part = c.parts[before];
+  if (part && part.kind !== 'unknown') {
+    part.text = head;
+    part.reads = `${NTC_HEADS[head]} — ${part.reads}`;
+  }
+}
+
+/**
+ * บวกเพิ่มที่ติ๊กใต้ช่องรหัส (หัก L · หักฉาก — ไม่อยู่ในรหัส) — เปิดกฎของสมุดราคาที่ `when.option` ตรงกัน
+ * เฉพาะรุ่นที่มีกฎนั้นจริง · ราคาอยู่ที่กฎ ไม่ใช่ที่นี่ (เจ้าของเคาะข้อ 8 · 2026-09-29)
+ */
+function readTsAddons(c: Ctx, picks: CodePicks): void {
+  for (const a of TS_ADDONS) {
+    if (!picks.addons?.includes(a.code) || !hasOptionAdder(c.model, a.code)) continue;
+    c.cfg.options = [...(c.cfg.options ?? []), a.code];
+    add(c, { text: '', reads: `${a.label} (ติ๊กในช่องบวกเพิ่ม — รหัสไม่ได้บอก)`, kind: 'option' });
+  }
+}
+
 // ── ตัวหลัก ──────────────────────────────────────────────────────────────────
 
 /**
@@ -962,6 +1077,11 @@ function readTail(c: Ctx, rest: string, prefix: string): void {
  */
 function findModel(book: PriceBook, prefix: string, num: string, suffix: string): PriceModel | undefined {
   if (prefix === 'TS') return undefined;
+  // หัว NTC/PTC ตามแคตตาล็อก (`N10-04` · `P2-11P`) = ตารางเดียวกับ TSN-<เลข> ของ Excel — เฉพาะตารางที่แคตตาล็อกมีหัวนี้
+  if (/^[NP]\d/.test(prefix)) {
+    if (!NTC_HEADS[prefix] || !NTC_NUMBERS.includes(num)) return undefined;
+    prefix = 'TSN';
+  }
   return resolveModel(book, `${prefix}-${num}${suffix}`) ?? resolveModel(book, `${prefix}-${num}`);
 }
 
@@ -977,7 +1097,7 @@ function modelsOfNumber(book: PriceBook, num: string): PriceModel[] {
  * `(-0)?` มีไว้สำหรับ `TS_-01-0` ซึ่งเป็น **ตารางราคาคนละตารางในชีตเดียวกัน** (เกลียว M4–M10
  * แทน M6–5/16") ไม่ใช่รหัสย่อยต่อท้าย — 377 จาก 1,210 รหัสของตระกูล 01 เป็นแบบนี้
  */
-const HEAD_RE = /^(BH|TS[A-Z]*)-?(\d{2})(-0)?([A-Z]*)/i;
+const HEAD_RE = /^(BH|TS[A-Z]*|[NP]\d{1,2})-?(\d{2})(-0)?([A-Z]*)/i;
 
 function readHead(normalized: string) {
   const head = normalized.match(HEAD_RE);
@@ -1021,6 +1141,13 @@ export function parseProductCode(input: string, book: PriceBook, picks: CodePick
 
   const { prefix, num, suffix } = head;
   const model = findModel(book, prefix, num, suffix);
+  if (!model && /^[NP]\d/.test(prefix)) {
+    out.problems.push(
+      `หัววัด ${prefix} ไม่อยู่ในแคตตาล็อก — NTC/PTC มี ${Object.keys(NTC_HEADS).join(' · ')} (2K · 10K) ` +
+        `และใช้กับ ${NTC_NUMBERS.map((n) => `TS_-${n}`).join(' · ')} เท่านั้น`
+    );
+    return out;
+  }
   if (!model) {
     // หัวรหัสไม่อยู่ในรายชื่อ แต่เลขรุ่นนี้มีตาราง ⇒ บอกว่าตารางนั้นใช้กับรหัสไหน (ไม่ใช่ "ยังไม่มีสมุดราคา")
     const siblings = prefix === 'BH' ? [] : modelsOfNumber(book, num);
@@ -1054,10 +1181,21 @@ export function parseProductCode(input: string, book: PriceBook, picks: CodePick
   else if (model.code === 'TS-18') { readModelSuffix(c, suffix); readTs18(c, rest, prefix, letter); }
   else {
     readModelSuffix(c, suffix);
-    readTsGeneric(c, rest, prefix);
+    readTsGeneric(c, rest, prefix, letter);
     // หัววัดอ่านหลังส่วนขนาด เพราะบางชีตคิดมันเป็น "คอลัมน์ของตารางราคาตั้ง" (ต้องรู้แกนอื่นก่อน)
     // และบางชีตคิดเป็น "กฎบวกเพิ่ม" — `readSensor` ดูจากสมุดราคาเองว่าเป็นแบบไหน
-    readSensor(c, prefix, letter);
+    if (NTC_HEADS[prefix]) readNtcHead(c, prefix);
+    else readSensor(c, prefix, letter);
+  }
+
+  if (prefix !== 'BH') {
+    readTsAddons(c, picks);
+    const family = tsFamilyOfModel(model.code);
+    const tsForm = family ? readTsForm(input, family) : undefined;
+    if (tsForm) {
+      const on = (picks.addons ?? []).filter((a) => TS_ADDONS.some((x) => x.code === a) && hasOptionAdder(model, a));
+      out.tsForm = on.length ? { ...tsForm, addons: on } : tsForm;
+    }
   }
 
   out.parts = c.parts;

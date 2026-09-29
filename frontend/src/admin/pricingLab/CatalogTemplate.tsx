@@ -1,6 +1,6 @@
 import React from 'react';
 import { ChevronDown, X } from 'lucide-react';
-import type { BhForm, CatalogFamilySpec, CatalogSlot, SizeKey } from './types';
+import type { BhForm, CatalogFamilySpec, CatalogOption, CatalogSlot, SizeKey, TsFamilySpec, TsForm, TsSlot } from './types';
 
 /**
  * ช่องกรอก "ตามแคตตาล็อก" — แต่ละช่องคือท่อนหนึ่งของรหัส เรียงตามตาราง "การสั่งซื้อ" ของแคตตาล็อก
@@ -13,12 +13,16 @@ import type { BhForm, CatalogFamilySpec, CatalogSlot, SizeKey } from './types';
  * และสมุดราคาไม่ต้องมาถึงเบราว์เซอร์ (กฎที่หัว `PricingLab.tsx`)
  */
 
+/** หนึ่งรายการของช่อง "รุ่น" — BH กับ TS อยู่ในรายการเดียวกัน แบ่งกลุ่ม (เจ้าของเคาะข้อ 9 · 2026-09-29) */
+export interface FamilyChoice { value: string; code: string; text: string; group: string }
+
 interface Props {
   catalog: CatalogFamilySpec[];
+  families: FamilyChoice[];
   form: BhForm;
   /** `now` = ช่องแบบเลือก ส่งทันที · ไม่ใส่ = ช่องพิมพ์ ให้ผู้เรียกหน่วงก่อนส่ง */
   onChange: (next: BhForm, now?: boolean) => void;
-  onFamily: (family: BhForm['family']) => void;
+  onFamily: (family: string) => void;
 }
 
 const INPUT =
@@ -41,20 +45,24 @@ const Sep: React.FC<{ t: string }> = ({ t }) => (
  * `<select>` ของเบราว์เซอร์โชว์ข้อความของตัวเลือกเดียวกับในรายการเสมอ ⇒ ซ่อนตัวอักษรของ select แล้ววางรหัสทับ
  * (select ตัวจริงยังรับคลิก/คีย์บอร์ด และ aria อ่านข้อความเต็มได้ตามเดิม) · กว้างตามรหัสที่ยาวสุด ไม่ใช่คำอธิบาย
  */
-interface CodeOption { value: string; code: string; text?: string }
+interface CodeOption { value: string; code: string; text?: string; group?: string }
 const CodeSelect: React.FC<{
   label: string; value: string; options: CodeOption[]; placeholder?: string; onChange: (v: string) => void;
 }> = ({ label, value, options, placeholder, onChange }) => {
   const cur = options.find((o) => o.value === value);
   const ch = Math.max(placeholder?.length ?? 0, ...options.map((o) => o.code.length)) + 4;
+  const item = (o: CodeOption) => (
+    <option key={o.value} className="bg-card text-slate-900" value={o.value}>{o.text ? `${o.code} · ${o.text}` : o.code}</option>
+  );
+  const groups = [...new Set(options.map((o) => o.group).filter((g): g is string => !!g))];
   return (
     <div className="relative font-mono text-[14px]" style={{ width: `${ch}ch` }}>
       <select className={`${INPUT} w-full pl-2 pr-6 text-transparent appearance-none cursor-pointer`} value={value} aria-label={label}
               onChange={(e) => onChange(e.target.value)}>
         {placeholder !== undefined && <option className="bg-card text-slate-900" value="">{placeholder}</option>}
-        {options.map((o) => (
-          <option key={o.value} className="bg-card text-slate-900" value={o.value}>{o.text ? `${o.code} · ${o.text}` : o.code}</option>
-        ))}
+        {groups.length
+          ? groups.map((g) => <optgroup key={g} label={g} className="bg-card text-slate-500">{options.filter((o) => o.group === g).map(item)}</optgroup>)
+          : options.map(item)}
       </select>
       <span aria-hidden="true"
             className={`pointer-events-none absolute inset-y-0 left-0 flex items-center pl-2 font-semibold ${cur ? 'text-slate-900' : 'text-slate-400'}`}>
@@ -66,7 +74,14 @@ const CodeSelect: React.FC<{
   );
 };
 
-export const CatalogTemplate: React.FC<Props> = ({ catalog, form, onChange, onFamily }) => {
+/** ช่อง "รุ่น" — ช่องแรกของรหัส ใช้ร่วมกันทั้ง BH และ TS (สลับข้ามซีรีส์ได้จากช่องนี้) */
+const FamilySlot: React.FC<{ families: FamilyChoice[]; value: string; onFamily: (v: string) => void }> = ({ families, value, onFamily }) => (
+  <Slot cap="รุ่น">
+    <CodeSelect label="รุ่น" value={value} options={families} onChange={(v) => v !== value && onFamily(v)} />
+  </Slot>
+);
+
+export const CatalogTemplate: React.FC<Props> = ({ catalog, families, form, onChange, onFamily }) => {
   const spec = catalog.find((s) => s.family === form.family);
   if (!spec) return null;
   const set = (patch: Partial<BhForm>, now?: boolean) => onChange({ ...form, ...patch }, now);
@@ -130,14 +145,7 @@ export const CatalogTemplate: React.FC<Props> = ({ catalog, form, onChange, onFa
 
   items.push(
     // เจ้าของสั่ง 2026-09-28: ย้ายการ์ดเลือกรุ่นมาเป็น dropdown ในช่อง "รุ่น" — หัวรหัสก็คือช่องแรกของรหัสอยู่แล้ว
-    <Slot key="head" cap="รุ่น">
-      <CodeSelect
-        label="รุ่น"
-        value={form.family}
-        options={catalog.map((s) => ({ value: s.family, code: s.head, text: s.name }))}
-        onChange={(v) => v !== form.family && onFamily(v as BhForm['family'])}
-      />
-    </Slot>,
+    <FamilySlot key="head" families={families} value={form.family} onFamily={onFamily} />,
   );
   // BH-02: ท่อนที่ติดหลังหัวรหัสอยู่หลังช่อง Shape (ตัวอักษรรูปทรงเป็นส่วนหนึ่งของหัวรหัส)
   if (!spec.shapes) extrasAfter('head');
@@ -227,6 +235,124 @@ export const CatalogTemplate: React.FC<Props> = ({ catalog, form, onChange, onFa
                   onChange={() => {
                     const cur = form.addons ?? [];
                     set({ addons: on ? cur.filter((x) => x !== a.code) : [...cur, a.code] }, true);
+                  }}
+                />
+                {a.label}
+              </label>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
+/**
+ * ช่องกรอกตามแคตตาล็อกของซีรีส์ TS — หน้าตาเดียวกับของ BH (เจ้าของเคาะ mockup `pricing-catalogue-ts.html` 2026-09-29)
+ *
+ * วาดจาก `layout` ของแต่ละตารางตรง ๆ (`services/pricingLab/catalogTs.ts`) ⇒ ไม่มีโค้ดรายรุ่นฝั่งเบราว์เซอร์ · **ไม่ประกอบรหัส
+ * และไม่คิดราคา** เหมือนของ BH — ส่งค่าช่องขึ้นไปให้เซิร์ฟเวอร์ประกอบ (`buildTsCode`) แล้วคิดทางเดียวกับรหัสที่พิมพ์
+ * ตัวเลือกที่ Excel ยังไม่มีราคา **ไม่ติดป้ายในรายการ** โดยตั้งใจ — แอดมินกรอกราคาทีหลังได้ ผลคิดราคาข้างล่างเป็นคนบอก
+ */
+interface TsProps {
+  spec: TsFamilySpec;
+  families: FamilyChoice[];
+  form: TsForm;
+  onChange: (next: TsForm, now?: boolean) => void;
+  onFamily: (family: string) => void;
+}
+
+const tsOptions = (slot: TsSlot, values: Record<string, string>): CatalogOption[] =>
+  slot.optionsByProbe ? slot.optionsByProbe[values.probe ?? 'TS'] ?? [] : slot.options ?? [];
+
+export const TsCatalogTemplate: React.FC<TsProps> = ({ spec, families, form, onChange, onFamily }) => {
+  const set = (patch: Record<string, string>, now?: boolean) => onChange({ ...form, values: { ...form.values, ...patch } }, now);
+  const items: React.ReactNode[] = [<FamilySlot key="head" families={families} value={form.family} onFamily={onFamily} />];
+  // ตัวคั่นวาดก่อนช่องถัดไปเสมอ แม้ช่องนั้นเป็น None — แผนผังแคตตาล็อกโชว์ทุกช่อง (รหัสจริงไม่เขียนท่อน None)
+  for (const [i, it] of spec.layout.entries()) {
+    if ('sep' in it) {
+      items.push(<Sep key={`sep-${i}`} t={it.sep === ' ' ? '␣' : it.sep} />);
+      continue;
+    }
+    if ('fixed' in it) {
+      items.push(
+        <span key={`fx-${i}`} className="h-9 flex items-center px-2.5 rounded-lg bg-slate-100 font-mono text-[14px] font-bold text-slate-900">{it.fixed}</span>,
+      );
+      continue;
+    }
+    const key = it.slot;
+    const slot = spec.slots[key];
+    if (!slot) continue;
+    const value = form.values[key] ?? '';
+    if (slot.kind === 'number') {
+      const ch = Math.max(5, (slot.placeholder?.length ?? 0) + 3, value.length + 3);
+      items.push(
+        <Slot key={key} cap={`${slot.label}${slot.unit ? ` (${slot.unit})` : ''}`} hint={slot.hint}>
+          <input
+            inputMode="decimal"
+            className={`${INPUT} px-1.5 text-center placeholder:text-slate-400 placeholder:font-medium`}
+            style={{ width: `${ch}ch` }}
+            value={value}
+            placeholder={slot.placeholder}
+            aria-label={slot.label}
+            onChange={(e) => set({ [key]: e.target.value.replace(/[^0-9.]/g, '') })}
+          />
+        </Slot>,
+      );
+      continue;
+    }
+    const opts = tsOptions(slot, form.values);
+    items.push(
+      <Slot key={key} cap={slot.label} hint={slot.hint}>
+        <CodeSelect
+          label={slot.label}
+          value={value}
+          options={opts.map((o) => ({ value: o.code, code: o.code || 'None', text: o.label }))}
+          onChange={(v) => {
+            if (key !== 'probe') { set({ [key]: v }, true); return; }
+            // เปลี่ยนชนิดหัววัด = ตัวเลือกของช่อง Sensor คนละชุด (TS → K J T … · N/P → 2K 10K)
+            const next: Record<string, string> = { ...form.values, probe: v };
+            const sensors = spec.slots.sensor ? tsOptions(spec.slots.sensor, next) : [];
+            if (!sensors.some((o) => o.code === next.sensor)) next.sensor = sensors[0]?.code ?? '';
+            onChange({ ...form, values: next }, true);
+          }}
+        />
+      </Slot>,
+    );
+  }
+  for (const [i, e] of (form.extras ?? []).entries()) {
+    items.push(<Sep key={`xs-${i}`} t="-" />);
+    items.push(
+      <Slot key={`x-${i}`} cap="นอกแคตตาล็อก">
+        <span className="h-9 inline-flex items-center gap-1 pl-2.5 pr-1 rounded-lg font-mono text-[14px] font-bold bg-sky-50 border border-sky-200 text-sky-800">
+          {e}
+          <button type="button" aria-label={`เอา ${e} ออก`} title="เอาออกจากรหัส" className="p-0.5 rounded hover:bg-sky-100"
+                  onClick={() => onChange({ ...form, extras: (form.extras ?? []).filter((_, j) => j !== i) }, true)}>
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </span>
+      </Slot>,
+    );
+  }
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-start gap-1 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 pt-3 pb-2">
+        {items}
+      </div>
+      {/* ชีตมีราคาแต่แคตตาล็อกและรหัสไม่มีท่อนนี้ (หัก L · หักฉาก — ข้อ 8) ⇒ ติ๊กแยกใต้รหัส แบบเดียวกับ "บวกเพิ่ม" ของ BH */}
+      {spec.addons?.length ? (
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12.5px] text-slate-700">
+          <span className="text-slate-500">บวกเพิ่ม (ไม่อยู่ในรหัส)</span>
+          {spec.addons.map((a) => {
+            const on = form.addons?.includes(a.code) ?? false;
+            return (
+              <label key={a.code} className="inline-flex items-center gap-1.5 cursor-pointer select-none">
+                <input
+                  type="checkbox" className="h-4 w-4 accent-[var(--brand)]" checked={on} aria-label={a.label}
+                  onChange={() => {
+                    const cur = form.addons ?? [];
+                    onChange({ ...form, addons: on ? cur.filter((x) => x !== a.code) : [...cur, a.code] }, true);
                   }}
                 />
                 {a.label}

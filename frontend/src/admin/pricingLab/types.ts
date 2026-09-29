@@ -69,6 +69,8 @@ export interface QuoteOverview {
   edited: { at: string; by?: string; note?: string } | null;
   /** ลำดับท่อน + ตัวเลือกของแคตตาล็อก "การสั่งซื้อ" (ไม่มีราคา) — ดู `services/pricingLab/catalogBh.ts` */
   catalog?: CatalogFamilySpec[];
+  /** ซีรีส์ TS — ดู `services/pricingLab/catalogTs.ts` (ไม่มีราคาเช่นกัน) */
+  catalogTs?: TsFamilySpec[];
 }
 
 // ── แคตตาล็อก "การสั่งซื้อ" (สำเนาชนิดข้อมูลของ services/pricingLab/catalogBh.ts) ──────────────
@@ -113,6 +115,39 @@ export interface BhForm {
   extras?: { text: string; after: string; glue?: boolean }[];
 }
 
+// ── แคตตาล็อก TS (สำเนาชนิดข้อมูลของ services/pricingLab/catalogTs.ts) ──────────────────────────
+export type TsFamily = 'TS_-01' | 'TS_-01-0' | 'TS_-04' | 'TS_-06' | 'TS_-08' | 'TS_-10' | 'TS_-11' | 'TS_-12' | 'TS_-12R' | 'TS_-14' | 'TS_-18';
+export interface TsSlot {
+  label: string;
+  kind: 'choice' | 'number';
+  options?: CatalogOption[];
+  /** ตัวเลือกที่ขึ้นกับช่อง "ชนิดหัววัด" (TS / N / P) */
+  optionsByProbe?: Record<string, CatalogOption[]>;
+  unit?: string;
+  placeholder?: string;
+  hint?: string;
+  optional?: boolean;
+}
+export type TsLayoutItem = { slot: string } | { sep: string } | { fixed: string };
+export interface TsFamilySpec {
+  family: TsFamily;
+  head: string;
+  name: string;
+  model: string;
+  layout: TsLayoutItem[];
+  slots: Record<string, TsSlot>;
+  defaults: Record<string, string>;
+  addons?: CatalogOption[];
+}
+export interface TsForm {
+  family: TsFamily;
+  /** ช่อง → รหัสในช่อง (`''` = None / ช่องตัวเลขว่าง) */
+  values: Record<string, string>;
+  addons?: string[];
+  /** ท่อนต่อท้ายที่ไม่อยู่ในแคตตาล็อก (`S000`) */
+  extras?: string[];
+}
+
 export interface CodePart {
   text: string;
   reads: string;
@@ -130,6 +165,8 @@ export interface ParsedCode {
   warnings: string[];
   /** ช่องตามแคตตาล็อก — มีเฉพาะรหัสที่เขียนตามรูปแบบของแคตตาล็อก (วันนี้ซีรีส์ BH) */
   form?: BhForm;
+  /** ช่องตามแคตตาล็อกของซีรีส์ TS — มีเฉพาะรหัสที่ประกอบกลับจากช่องได้รหัสเดิม */
+  tsForm?: TsForm;
 }
 
 export interface BreakdownLine {

@@ -204,7 +204,8 @@ function computeBase(
   axes: Record<string, string>,
   dims: Record<string, number>,
   seen: Set<string>,
-  unread: Record<string, string> = {}
+  unread: Record<string, string> = {},
+  catalogOnly: Record<string, string> = {}
 ): BaseResult {
   const base = model.base;
 
@@ -217,7 +218,7 @@ function computeBase(
     if (!parent) {
       return { ok: false, amount: 0, label: 'ฐานราคา', reason: `ไม่มีรุ่น ${base.model} ในสมุดราคา`, steps: [] };
     }
-    const r = computeBase(parent, book, axes, dims, seen, unread);
+    const r = computeBase(parent, book, axes, dims, seen, unread, catalogOnly);
     return {
       ...r,
       label: `${r.label} (ฐานของ ${parent.code})`,
@@ -258,6 +259,19 @@ function computeBase(
           missing: true,
           reason: `รหัสไม่ได้บอก${unknown.map(axisLabel).join(' และ ')} — ตารางราคาตั้งต้องรู้ค่านี้ก่อน`,
           steps,
+        };
+      }
+      // ขนาดที่แคตตาล็อกมีแต่ตาราง Excel ไม่มีแถวเลย (TS_-18 แกน 2/3 mm · TS_-14 แกน 28 mm) — "ยังไม่มีราคา" ตาม mockup ที่เจ้าของ
+      // เคาะ 2026-09-29 ไม่ใช่ "ไม่รับผลิต" (แคตตาล็อกขายขนาดนี้) และไม่ใช่ "รหัสไม่ได้บอก" (รหัสบอกแล้ว)
+      const listedOnly = base.axes.filter((a) => catalogOnly[a] !== undefined && catalogOnly[a] === axes[a]);
+      if (listedOnly.length) {
+        return {
+          ok: false,
+          amount: 0,
+          label: 'ฐานราคา',
+          noRate: true,
+          reason: `ตารางราคาตั้งของ ${model.code} ยังไม่มีแถว${listedOnly.map((a) => `${axisLabel(a)} ${axes[a]}`).join(' · ')} — แคตตาล็อกมีขนาดนี้แต่ชีต Excel ยังไม่มีราคา`,
+          steps: [...steps, `${listedOnly.map((a) => `${axisLabel(a)} ${axes[a]}`).join(' · ')} อยู่ในแคตตาล็อก แต่ตารางราคาไม่มีแถวนี้ (ยังไม่มีราคา ไม่ใช่ไม่รับผลิต)`],
         };
       }
       // ค่าที่ตั้งไว้ให้กรอกราคาทีหลัง ≠ ช่องที่ชีตเว้นไว้ — อย่างแรก "ยังไม่มีราคา" อย่างหลัง "ไม่รับผลิต"
@@ -688,7 +702,7 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
           `รหัสย่อย ${ownBase[0].subCode} (${ownBase[0].reads}) ตั้งราคาตั้งต้นเอง = ${fmt(money(ownBase[0].amount ?? 0))} บาท — ไม่ใช้ตารางราคาตั้ง`,
         ],
       }
-    : computeBase(model, book, axes, dims, new Set([model.code]), cfg.unread);
+    : computeBase(model, book, axes, dims, new Set([model.code]), cfg.unread, cfg.catalogOnly);
   const baseWaits = model.base.kind === 'matrix' && model.base.axes.some((a) => pendingAxes.has(a));
   const traceBase: TraceBase = { ok: base.ok, label: base.label, steps: [...base.steps] };
   if (!base.ok && baseWaits) {

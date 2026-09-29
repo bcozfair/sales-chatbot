@@ -694,8 +694,9 @@ if (ts01 && ts010) {
   check('หน้าชีตรู้ค่ามาตรฐานของเกลียว', JSON.stringify(v9.axisDefaults) === JSON.stringify([{ axis: 'thread', axisTh: 'ขนาดเกลียว', value: '1/4”' }]),
     JSON.stringify(v9.axisDefaults));
   check('ยังเปิดแบบชีต Excel ได้', excelReady(b9.models['TSK-01']!) && excelReady(b9.models['TSK-01-0']!));
-  check('ไฟล์ catalog-subcodes.json ผ่านตัวตรวจทุกแถว (TS_-01 12 + แกน 6 · TS_-08 5 + หัวค่าว่าง 4 + เกลียวมิล 10 · TS_-10 5 + เกลียวมิล 12 · BH ปลั๊ก PL-5 ค่าว่าง 2)',
-    cat.length === 51, String(cat.length));
+  check('ไฟล์ catalog-subcodes.json ผ่านตัวตรวจทุกแถว (TS_-01 12 + แกน 6 · TS_-08 5 + หัวค่าว่าง 4 + เกลียวมิล 10 · TS_-10 5 + เกลียวมิล 12 · BH ปลั๊ก PL-5 ค่าว่าง 2 ' +
+    '+ แคตตาล็อก TS ชุด 2026-09-29: TS_-04 9 · 06 13 · 08 1 · 10 3 · 11 6 · 12 5 · 12 RTD 6 · 14 8 · 18 14)',
+    cat.length === 116, String(cat.length));
 
   // ── ราคาสายที่ตารางรหัสย่อยตั้งให้ ต้องมีช่องบนหน้าสมุดราคาเสมอ (เจ้าของ 2026-09-25: "ต้องสามารถแก้ไขผ่าน ui ได้")
   const rowsOf = (b: PriceBook, code: string) =>

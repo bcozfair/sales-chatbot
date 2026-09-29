@@ -10,6 +10,7 @@ import {
 import { computePrice } from '../services/pricingLab/engine.js';
 import { parseProductCode, type CodePicks } from '../services/pricingLab/code.js';
 import { ADDONS, AMP, BH_CATALOG, bhSpec, buildBhCode, type BhForm, type SizeKey } from '../services/pricingLab/catalogBh.js';
+import { TS_ADDONS, TS_CATALOG, buildTsCode, slotOptions, tsSpec, type TsForm } from '../services/pricingLab/catalogTs.js';
 import { displayName } from '../services/pricingLab/labels.js';
 import { productsPerModel } from '../services/pricingLab/bookCoverage.js';
 import {
@@ -387,6 +388,8 @@ pricingLabRouter.get('/overview', async (_req: AdminRequest, res: Response) => {
     edited: book?.edited ?? null,
     // ลำดับท่อน + ตัวเลือกของแคตตาล็อก (ไม่มีราคาสักบาท — เงินอยู่ที่สมุดราคาซึ่งไม่เคยออกจากเซิร์ฟเวอร์)
     catalog: BH_CATALOG,
+    // ซีรีส์ TS (เจ้าของเคาะ mockup 2026-09-29) — ข้อมูลชุดเดียวกับที่ตัวอ่านรหัสใช้ ไม่มีราคาเช่นกัน
+    catalogTs: TS_CATALOG,
   });
 });
 
@@ -631,17 +634,55 @@ pricebookRouter.put('/sheet/:sheet', async (req: AdminRequest, res: Response) =>
  * "ถ้ากดบันทึก ราคาจะกลายเป็นเท่าไหร่" **ก่อน** ที่จะเขียนอะไรลงฐาน ไม่ใช่ให้กดบันทึกไปก่อน
  * แล้วค่อยรู้ว่าพิมพ์ผิด (ซึ่งแปลว่ารหัสอื่นทุกตัวที่มีตัวอักษรนี้คิดผิดตามไปแล้ว)
  */
+/**
+ * ช่องกรอกของซีรีส์ TS ที่หน้าจอส่งมา → `TsForm` ที่ปลอดภัย — ช่องเลือกต้องอยู่ในรายการของแคตตาล็อก (ช่อง Sensor ตามชนิดหัววัด)
+ * ช่องตัวเลขต้องเป็นตัวเลขบวกสั้น ๆ · ท่อนนอกแคตตาล็อกเป็นตัวอักษร/ตัวเลขล้วน ⇒ รหัสที่ประกอบได้ยาวไม่เกินที่ `/quote` รับ
+ */
+function cleanTsForm(raw: unknown): TsForm | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  const spec = typeof r.family === 'string' ? tsSpec(r.family) : undefined;
+  if (!spec || !r.values || typeof r.values !== 'object') return undefined;
+  const given = r.values as Record<string, unknown>;
+  const values: Record<string, string> = {};
+  // ชนิดหัววัดก่อน — ตัวเลือกของช่อง Sensor ขึ้นกับมัน
+  for (const key of ['probe', ...Object.keys(spec.slots).filter((k) => k !== 'probe')]) {
+    const slot = spec.slots[key];
+    if (!slot) continue;
+    const v = given[key];
+    if (slot.kind === 'number') {
+      if (v === undefined || v === '') { values[key] = ''; continue; }
+      if (typeof v !== 'string' || !/^\d{1,5}(\.\d{1,2})?$/.test(v) || Number(v) <= 0) return undefined;
+      values[key] = v;
+    } else {
+      const want = typeof v === 'string' ? v : '';
+      if (!slotOptions(slot, values).some((o) => o.code === want)) return undefined;
+      values[key] = want;
+    }
+  }
+  const form: TsForm = { family: spec.family, values };
+  const addons = cleanAddons(spec.addons, r.addons);
+  if (addons.length) form.addons = addons;
+  if (Array.isArray(r.extras)) {
+    const extras = r.extras.slice(0, 8).filter((x): x is string => typeof x === 'string' && /^[A-Z]{1,4}\d{1,6}$/i.test(x));
+    if (extras.length) form.extras = extras;
+  }
+  return form;
+}
+
 pricingLabRouter.post('/quote', async (req: AdminRequest, res: Response) => {
   // สองทางเข้า: พิมพ์รหัสมา (`code`) หรือกรอกช่องตามแคตตาล็อก (`form`) — ทางหลัง **เซิร์ฟเวอร์ประกอบรหัสเอง**
   // แล้วเดินทางเดียวกับรหัสที่พิมพ์ทุกขั้น ⇒ ราคาจากช่องกับราคาจากรหัสเดียวกันเป็นเลขเดียวกันเสมอ
   const form = req.body?.form !== undefined ? cleanForm(req.body.form) : undefined;
   if (req.body?.form !== undefined && !form) return res.status(400).json({ error: 'ช่องที่กรอกไม่ตรงกับแคตตาล็อก' });
-  const code = form ? buildBhCode(form) : typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+  const tsForm = req.body?.tsForm !== undefined ? cleanTsForm(req.body.tsForm) : undefined;
+  if (req.body?.tsForm !== undefined && !tsForm) return res.status(400).json({ error: 'ช่องที่กรอกไม่ตรงกับแคตตาล็อก' });
+  const code = form ? buildBhCode(form) : tsForm ? buildTsCode(tsForm) : typeof req.body?.code === 'string' ? req.body.code.trim() : '';
   // ขนาดเต๋า 10A/30A และสิ่งที่ต้องบวกเพิ่มไม่อยู่ในรหัส — มากับช่องกรอก หรือส่งมาคู่กับรหัสที่พิมพ์
   // (จำค่าที่เลือกไว้ตอนพิมพ์รหัสใหม่) · ตัวอ่านรหัสกรองซ้ำตามรุ่นที่อ่านได้อีกชั้น
   const ampRaw = form?.amp ?? req.body?.picks?.amp;
   const picks: CodePicks = typeof ampRaw === 'string' && AMP.some((a) => a.code === ampRaw) ? { amp: ampRaw } : {};
-  const addons = form?.addons ?? cleanAddons(ADDONS, req.body?.picks?.addons);
+  const addons = form?.addons ?? tsForm?.addons ?? cleanAddons([...ADDONS, ...TS_ADDONS], req.body?.picks?.addons);
   if (addons.length) picks.addons = addons;
   if (!code) return res.status(400).json({ error: 'ยังไม่ได้ใส่รหัสสินค้า' });
   if (code.length > 200) return res.status(400).json({ error: 'รหัสยาวเกินไป' });
