@@ -253,7 +253,7 @@ function buildDiff(models: EditorView[], drafts: Record<string, Draft>): DiffRow
             rateWas(a, k), toNum(d.rates[a.id]?.[k] ?? ''), 'ต้องขอราคา', ` ${unitOf(a)}`);
         }
       } else {
-        priceRow(`${v.title} · ${a.label}`, priceOf(a), toNum(d.prices[a.id] ?? ''), 'บันทึกไม่ได้', ` ${unitTxt(a)}`);
+        priceRow(`${v.title} · ${a.label}`, priceOf(a), toNum(d.prices[a.id] ?? ''), priceOf(a) === null ? 'ยังไม่มีราคา' : 'บันทึกไม่ได้', ` ${unitTxt(a)}`);
       }
     }
     if (v.variant) {
@@ -374,16 +374,18 @@ const GridInput: React.FC<{
   highlight?: boolean;
   tint?: boolean;
   required?: boolean;
+  /** ช่องที่ยังไม่มีราคาโดยตั้งใจ (กฎที่ตั้งโครงไว้ก่อน เช่น PL-5 ของ BH) — ว่างได้ และทาสีเหลืองให้เห็นว่ารอกรอก */
+  pending?: boolean;
   placeholder?: string;
   emptyTitle?: string;
   onChange: (v: string) => void;
-}> = ({ value, was, label, highlight, tint, required, placeholder = '—', emptyTitle = 'ว่าง = ไม่รับผลิต (ไม่ใช่ราคา 0)', onChange }) => {
+}> = ({ value, was, label, highlight, tint, required, pending, placeholder = '—', emptyTitle = 'ว่าง = ไม่รับผลิต (ไม่ใช่ราคา 0)', onChange }) => {
   const p = parse(value);
   const invalid = p === undefined || (required && p === null);
   const changed = toNum(value) !== toNum(was) || invalid;
   const empty = value.trim() === '';
   return (
-    <td className={`border border-slate-200 p-0 ${invalid ? 'bg-red-50' : changed ? 'bg-blue-50' : highlight ? 'bg-yellow-200' : tint ? 'bg-emerald-50/60' : ''}`}>
+    <td className={`border border-slate-200 p-0 ${invalid ? 'bg-red-50' : changed ? 'bg-blue-50' : pending && empty ? 'bg-amber-50' : highlight ? 'bg-yellow-200' : tint ? 'bg-emerald-50/60' : ''}`}>
       <input
         inputMode="decimal"
         aria-label={label}
@@ -394,7 +396,7 @@ const GridInput: React.FC<{
         onChange={(e) => onChange(e.target.value)}
         // แบบ Excel: คลิกช่องแล้วพิมพ์ทับได้เลย — ไม่งั้นเลขใหม่ไปต่อท้ายเลขเดิม (250 → 250260)
         onFocus={(e) => e.currentTarget.select()}
-        className={`block w-full min-w-[68px] bg-transparent px-2.5 py-2 text-center text-[13.5px] tabular-nums outline-none placeholder:text-slate-300 focus:bg-card focus:ring-2 focus:ring-inset focus:ring-[var(--brand-border-strong)] ${
+        className={`block w-full min-w-[68px] bg-transparent px-2.5 py-2 text-center text-[13.5px] tabular-nums outline-none ${pending && empty ? 'placeholder:text-amber-700 placeholder:text-[12px]' : 'placeholder:text-slate-300'} focus:bg-card focus:ring-2 focus:ring-inset focus:ring-[var(--brand-border-strong)] ${
           invalid ? 'font-bold text-red-700' : changed ? 'font-bold text-blue-700' : 'text-slate-900'
         }`}
       />
@@ -441,12 +443,16 @@ const ExtrasBox: React.FC<{ v: EditorView; d: Draft; patch: Patch }> = ({ v, d, 
                 {a.disabled && <span className="ml-1.5 text-[10.5px] font-normal no-underline text-slate-400">(ปิดอยู่)</span>}
                 {condTh(a) && <span className="block text-[11px] font-normal text-slate-500">เมื่อ {condTh(a)}</span>}
               </th>
+              {/* กฎที่ยังไม่เคยมีราคา (PL-5 ของ BH · เจ้าของ 2026-09-29 "ทำโครงไว้ให้พิมพ์ค่าภายหลัง") ว่างได้ = ยังไม่มีราคา ·
+                  กรอกแล้วกลับเป็นช่องห้ามว่างเหมือนแถวอื่น (backend ปฏิเสธการลบราคาที่เคยมี) */}
               <GridInput
                 label={`${v.title} ${a.label}`}
                 value={d.prices[a.id] ?? ''}
                 was={str(priceOf(a))}
-                required
-                emptyTitle="ว่างไม่ได้ — จะเลิกคิดให้ปิดกฎที่ปุ่ม “กฎและเงื่อนไข”"
+                required={priceOf(a) !== null}
+                pending={priceOf(a) === null}
+                placeholder={priceOf(a) === null ? 'ยังไม่มีราคา' : undefined}
+                emptyTitle={priceOf(a) === null ? 'ว่าง = ยังไม่มีราคา (ไม่ใช่ 0) — กรอกเมื่อได้ราคา' : 'ว่างไม่ได้ — จะเลิกคิดให้ปิดกฎที่ปุ่ม “กฎและเงื่อนไข”'}
                 onChange={(val) => patch((x) => ({ ...x, prices: { ...x.prices, [a.id]: val } }))}
               />
               <td className="border border-slate-200 px-2.5 py-1.5 text-[12px] text-slate-500 whitespace-nowrap">{unitTxt(a)}</td>
@@ -455,7 +461,8 @@ const ExtrasBox: React.FC<{ v: EditorView; d: Draft; patch: Patch }> = ({ v, d, 
                   label={`${v.title} ${v.code}${vr.suffix} ${a.label}`}
                   value={d.variantPrices[a.id] ?? ''}
                   was={str(vr.adderPrices?.[a.id])}
-                  placeholder={fmt(toNum(d.prices[a.id] ?? ''))}
+                  pending={toNum(d.prices[a.id] ?? '') === null}
+                  placeholder={toNum(d.prices[a.id] ?? '') === null ? 'ยังไม่มีราคา' : fmt(toNum(d.prices[a.id] ?? ''))}
                   emptyTitle="ว่าง = ราคาเท่ารุ่นหลัก"
                   onChange={(val) => patch((x) => ({ ...x, variantPrices: { ...x.variantPrices, [a.id]: val } }))}
                 />

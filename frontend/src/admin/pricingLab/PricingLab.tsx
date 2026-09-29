@@ -9,7 +9,7 @@ import { SubCodeModal } from './SubCodeModal';
 import { CalcTrace } from './CalcTrace';
 import { CatalogTemplate, TsCatalogTemplate, type FamilyChoice } from './CatalogTemplate';
 import { formForFamily, tsFormForFamily } from './catalogForm';
-import { type BhForm, type QuoteOverview, type ParsedCode, type PriceOutcome, type TsForm } from './types';
+import { type BhForm, type HoleRow, type QuoteOverview, type ParsedCode, type PriceOutcome, type TsForm } from './types';
 
 /**
  * หน้า "คิดราคาสินค้า" — โมดูลทดลองที่ถอดออกได้ทั้งก้อน
@@ -108,9 +108,9 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
 
   /**
    * คิดราคา — จากรหัสที่พิมพ์ (`code`) หรือจากช่องกรอก (`form`)
-   * ขนาดเต๋าและสิ่งที่ต้องบวกเพิ่มที่เลือกไว้ส่งไปกับรหัสด้วย (`picks`) เพราะมันไม่อยู่ในรหัส — พิมพ์รหัสเดิมซ้ำแล้วค่าที่เลือกต้องไม่หาย
+   * ขนาดเต๋า · สิ่งที่ต้องบวกเพิ่ม · รูที่เจาะ ส่งไปกับรหัสด้วย (`picks`) เพราะมันไม่อยู่ในรหัส — พิมพ์รหัสเดิมซ้ำแล้วค่าที่เลือกต้องไม่หาย
    */
-  const send = useCallback(async (body: { code?: string; form?: BhForm; tsForm?: TsForm; picks?: { amp?: string; addons?: string[] } }) => {
+  const send = useCallback(async (body: { code?: string; form?: BhForm; tsForm?: TsForm; picks?: { amp?: string; addons?: string[]; holes?: HoleRow[] } }) => {
     const mine = ++seq.current;
     setBusy(true);
     setError('');
@@ -136,11 +136,12 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
 
   const amp = form?.amp;
   const addons = form?.addons ?? tsForm?.addons;
+  const holes = form?.holes;
   const quote = useCallback((input: string) => {
     if (!input.trim()) return;
     if (typing.current) clearTimeout(typing.current);
-    void send({ code: input, picks: { ...(amp ? { amp } : {}), ...(addons?.length ? { addons } : {}) } });
-  }, [send, amp, addons]);
+    void send({ code: input, picks: { ...(amp ? { amp } : {}), ...(addons?.length ? { addons } : {}), ...(holes?.length ? { holes } : {}) } });
+  }, [send, amp, addons, holes]);
 
   /** แก้ช่องกรอก — ช่องเลือกส่งทันที · ช่องพิมพ์หน่วงไว้ให้พิมพ์จบก่อน */
   const editForm = useCallback((next: BhForm, now?: boolean) => {

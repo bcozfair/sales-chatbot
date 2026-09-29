@@ -1,6 +1,6 @@
 import React from 'react';
 import { ChevronDown, X } from 'lucide-react';
-import type { BhForm, CatalogFamilySpec, CatalogOption, CatalogSlot, SizeKey, TsFamilySpec, TsForm, TsSlot } from './types';
+import type { BhForm, CatalogFamilySpec, CatalogOption, CatalogSlot, HoleRow, SizeKey, TsFamilySpec, TsForm, TsSlot } from './types';
 
 /**
  * ช่องกรอก "ตามแคตตาล็อก" — แต่ละช่องคือท่อนหนึ่งของรหัส เรียงตามตาราง "การสั่งซื้อ" ของแคตตาล็อก
@@ -70,6 +70,49 @@ const CodeSelect: React.FC<{
       </span>
       {/* ลูกศรของเบราว์เซอร์ใช้สีตัวอักษร ⇒ หายไปพร้อมข้อความที่ซ่อน จึงวาดเอง */}
       <ChevronDown aria-hidden="true" className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+    </div>
+  );
+};
+
+/**
+ * ช่อง "เจาะรู" — ไม่อยู่ในรหัส (หมายเหตุแคตตาล็อก "ถ้ามีเจาะรูควรระบุขนาดและตำแหน่งเจาะรู") · เจ้าของเคาะ mockup แบบ B
+ * 2026-09-29 (`mockups/pricing-bh-holes.html`): แถวละขนาด เพิ่มแถวได้ · ราคาต่อ mm อยู่ที่กฎ "เจาะรู" ของสมุดราคา
+ * แถวที่ยังกรอกไม่ครบส่งขึ้นไปได้ (NaN) — เซิร์ฟเวอร์ทิ้งเอง ⇒ ผลรวมบนจอนับเฉพาะแถวที่ครบ ให้ตรงกับที่คิดเงิน
+ */
+const HOLE_INPUT =
+  'h-8 w-16 rounded-lg bg-card border border-slate-200 px-1.5 text-center font-mono text-[13px] font-semibold text-slate-900 ' +
+  'focus:outline-none focus:border-[var(--brand-border-strong)] focus:ring-2 focus:ring-[var(--brand-soft)]';
+const HoleRows: React.FC<{ rows: HoleRow[]; onChange: (rows: HoleRow[], now?: boolean) => void }> = ({ rows, onChange }) => {
+  const valid = rows.filter((r) => Number.isInteger(r.count) && r.count > 0 && r.mm > 0);
+  // ปัดแบบเดียวกับตัวอ่านรหัส (`readHoles` ใน code.ts) — ตัวเลข "รวม" บนจอต้องเท่ากับที่คิดเงิน
+  const total = Math.round(valid.reduce((t, r) => t + r.count * r.mm, 0) * 100) / 100;
+  const put = (i: number, patch: Partial<HoleRow>) => onChange(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const numOf = (v: string) => (v === '' ? NaN : Number(v));
+  const shown = (n: number) => (Number.isNaN(n) ? '' : String(n));
+  return (
+    <div className="mt-2 flex flex-col gap-1.5 text-[12.5px] text-slate-700">
+      <span className="text-slate-500">เจาะรู (ไม่อยู่ในรหัส)</span>
+      {rows.map((r, i) => (
+        <span key={i} className="inline-flex flex-wrap items-center gap-1.5">
+          <input type="number" inputMode="numeric" min={1} step={1} className={HOLE_INPUT} aria-label={`จำนวนรู แถว ${i + 1}`}
+                 value={shown(r.count)} onChange={(e) => put(i, { count: numOf(e.target.value) })} />
+          รู <span className="text-slate-400">×</span> Ø
+          <input type="number" inputMode="decimal" min={0} className={HOLE_INPUT} aria-label={`ขนาดรู (mm) แถว ${i + 1}`}
+                 value={shown(r.mm)} onChange={(e) => put(i, { mm: numOf(e.target.value) })} />
+          mm
+          <button type="button" className="ml-0.5 p-1 text-slate-400 hover:text-red-600 cursor-pointer" aria-label={`ลบแถวเจาะรู ${i + 1}`}
+                  onClick={() => onChange(rows.filter((_, j) => j !== i), true)}>
+            <X className="h-4 w-4" />
+          </button>
+        </span>
+      ))}
+      <span className="inline-flex flex-wrap items-center gap-3">
+        <button type="button" className="font-medium text-[var(--brand-btn)] hover:underline cursor-pointer"
+                onClick={() => onChange([...rows, { count: 1, mm: NaN }])}>
+          + เพิ่มขนาดรู
+        </button>
+        {valid.length > 0 && <span className="text-slate-500">รวม {total} mm</span>}
+      </span>
     </div>
   );
 };
@@ -243,6 +286,9 @@ export const CatalogTemplate: React.FC<Props> = ({ catalog, families, form, onCh
           })}
         </div>
       ) : null}
+      {spec.holes && (
+        <HoleRows rows={form.holes ?? []} onChange={(holes, now) => set({ holes: holes.length ? holes : undefined }, now)} />
+      )}
     </div>
   );
 };

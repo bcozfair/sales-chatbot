@@ -97,7 +97,11 @@ export interface CatalogFamilySpec {
   shapes?: { code: string; label: string; dims: SizeKey[] }[];
   /** สิ่งที่ต้องบวกเพิ่ม (ไม่อยู่ในรหัส) — `code` คือค่าที่ส่งกลับไปใน `BhForm.addons` */
   addons?: CatalogOption[];
+  /** มีช่อง "เจาะรู" (ไม่อยู่ในรหัส) */
+  holes?: boolean;
 }
+/** รูที่เจาะหนึ่งแถว — ช่องที่ยังว่างเป็น NaN ระหว่างพิมพ์ (เซิร์ฟเวอร์ทิ้งแถวที่ไม่ครบ) */
+export interface HoleRow { count: number; mm: number }
 export interface BhForm {
   family: BhFamily;
   shape?: string;
@@ -111,6 +115,8 @@ export interface BhForm {
   amp?: string;
   /** สิ่งที่ต้องบวกเพิ่มที่ติ๊กไว้ — ไม่อยู่ในรหัส */
   addons?: string[];
+  /** รูที่เจาะ — ไม่อยู่ในรหัส */
+  holes?: HoleRow[];
   mat?: string;
   extras?: { text: string; after: string; glue?: boolean }[];
 }

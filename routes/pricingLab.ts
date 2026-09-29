@@ -9,7 +9,7 @@ import {
 } from '../services/pricingLab/bookStore.js';
 import { computePrice } from '../services/pricingLab/engine.js';
 import { parseProductCode, type CodePicks } from '../services/pricingLab/code.js';
-import { ADDONS, AMP, BH_CATALOG, bhSpec, buildBhCode, type BhForm, type SizeKey } from '../services/pricingLab/catalogBh.js';
+import { ADDONS, AMP, BH_CATALOG, HOLE_LIMITS, bhSpec, buildBhCode, type BhForm, type HoleSpec, type SizeKey } from '../services/pricingLab/catalogBh.js';
 import { TS_ADDONS, TS_CATALOG, buildTsCode, slotOptions, tsSpec, type TsForm } from '../services/pricingLab/catalogTs.js';
 import { displayName } from '../services/pricingLab/labels.js';
 import { productsPerModel } from '../services/pricingLab/bookCoverage.js';
@@ -403,6 +403,21 @@ function cleanAddons(allowed: { code: string }[] | undefined, raw: unknown): str
   return (allowed ?? []).map((a) => a.code).filter((code) => raw.includes(code));
 }
 
+/**
+ * ช่องเจาะรู (ไม่อยู่ในรหัส) — แถวที่กรอกไม่ครบ/ไม่ใช่ตัวเลขบวกถูกทิ้ง (หน้าจอส่งแถวที่กำลังพิมพ์มาด้วย)
+ * จำนวนรูเป็นจำนวนเต็ม · ขนาดตามที่กรอก (ไม่ปัดที่นี่ — ผลรวมบนจอกับที่คิดเงินต้องเป็นเลขเดียวกัน) · เพดาน `HOLE_LIMITS` กันค่าหลุด
+ */
+function cleanHoles(raw: unknown): HoleSpec[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.slice(0, HOLE_LIMITS.rows).flatMap((h) => {
+    if (!h || typeof h !== 'object') return [];
+    const { count, mm } = h as Record<string, unknown>;
+    if (typeof count !== 'number' || !Number.isInteger(count) || count <= 0 || count > HOLE_LIMITS.count) return [];
+    if (typeof mm !== 'number' || !Number.isFinite(mm) || mm <= 0 || mm > HOLE_LIMITS.mm) return [];
+    return [{ count, mm }];
+  });
+}
+
 function cleanForm(raw: unknown): BhForm | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const r = raw as Record<string, unknown>;
@@ -432,6 +447,8 @@ function cleanForm(raw: unknown): BhForm | undefined {
   if (typeof r.amp === 'string' && AMP.some((a) => a.code === r.amp)) form.amp = r.amp;
   const addons = cleanAddons(spec.addons, r.addons);
   if (addons.length) form.addons = addons;
+  const holes = spec.holes ? cleanHoles(r.holes) : [];
+  if (holes.length) form.holes = holes;
   if (Array.isArray(r.extras)) {
     form.extras = r.extras.slice(0, 12).flatMap((e) => {
       if (!e || typeof e !== 'object') return [];
@@ -678,12 +695,14 @@ pricingLabRouter.post('/quote', async (req: AdminRequest, res: Response) => {
   const tsForm = req.body?.tsForm !== undefined ? cleanTsForm(req.body.tsForm) : undefined;
   if (req.body?.tsForm !== undefined && !tsForm) return res.status(400).json({ error: 'ช่องที่กรอกไม่ตรงกับแคตตาล็อก' });
   const code = form ? buildBhCode(form) : tsForm ? buildTsCode(tsForm) : typeof req.body?.code === 'string' ? req.body.code.trim() : '';
-  // ขนาดเต๋า 10A/30A และสิ่งที่ต้องบวกเพิ่มไม่อยู่ในรหัส — มากับช่องกรอก หรือส่งมาคู่กับรหัสที่พิมพ์
+  // ขนาดเต๋า 10A/30A · สิ่งที่ต้องบวกเพิ่ม · รูที่เจาะ ไม่อยู่ในรหัส — มากับช่องกรอก หรือส่งมาคู่กับรหัสที่พิมพ์
   // (จำค่าที่เลือกไว้ตอนพิมพ์รหัสใหม่) · ตัวอ่านรหัสกรองซ้ำตามรุ่นที่อ่านได้อีกชั้น
   const ampRaw = form?.amp ?? req.body?.picks?.amp;
   const picks: CodePicks = typeof ampRaw === 'string' && AMP.some((a) => a.code === ampRaw) ? { amp: ampRaw } : {};
   const addons = form?.addons ?? tsForm?.addons ?? cleanAddons([...ADDONS, ...TS_ADDONS], req.body?.picks?.addons);
   if (addons.length) picks.addons = addons;
+  const holes = form ? form.holes ?? [] : cleanHoles(req.body?.picks?.holes);
+  if (holes.length) picks.holes = holes;
   if (!code) return res.status(400).json({ error: 'ยังไม่ได้ใส่รหัสสินค้า' });
   if (code.length > 200) return res.status(400).json({ error: 'รหัสยาวเกินไป' });
 

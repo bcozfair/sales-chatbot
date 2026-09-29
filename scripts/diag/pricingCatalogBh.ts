@@ -8,6 +8,8 @@
  *   3. **คำตอบของเจ้าของ 2026-09-28 ห้าข้อ** เป็นจริงในตัวคิดราคา (สูตรพื้นที่ BH-02 · C +20% · T เลือก 10A/30A ·
  *      ID เล็กสุดตามแคตตาล็อก · BH-03 ไม่ระบุขั้วไฟ = คิดค่าน็อต)
  *   4. **สิ่งที่ต้องบวกเพิ่มนอกรหัส** (สาย Silicone · สายถักสแตนเลส · ท่อเฟ็กส์ — คำตอบชุดที่สอง 2026-09-28)
+ *   5. **คำตอบของเจ้าของ 2026-09-29** — เจาะรู · PL-5 ว่าง = ยังไม่มีราคา · BH-03 คิดค่ากำลังไฟทุกขนาด · BH-03C ยืนยัน ·
+ *      S### / (HPT) ไม่มีผลกับราคา · สายเป็นตัวเลขเปล่า = เมตร · BH-03 `-N` = น็อต · ขนาดเล็กกว่าแคตตาล็อก = เตือน ไม่บล็อก
  *
  * ไม่มี golden ของราคา (CLAUDE.md) — ข้อ 3 เทียบ "ความสัมพันธ์" ที่ต้องจริงเสมอไม่ว่าราคาในฐานเป็นเท่าไหร่
  * (C = ฐาน × 1.2 · 30A − 10A = ส่วนต่างของสองกฎในเล่มเดียวกัน · ขนาดเล็กกว่าเกณฑ์ = ติดข้อห้าม)
@@ -147,13 +149,21 @@ async function main(): Promise<void> {
     && (t30.o?.unitPrice ?? 0) - (t10.o?.unitPrice ?? 0) === (rule(t30.o, 'term_30a')?.amount ?? 0) - (rule(t10.o, 'term_10a')?.amount ?? 0));
   check('ข้อ 3 รหัสไม่เปลี่ยนตามขนาดเต๋า (อยู่นอกรหัส)', t30.p.form !== undefined && buildBhCode(t30.p.form) === 'BH-01 180x110-240-2540W-T');
 
-  // ข้อ 4: ขนาดเล็กสุดตามแคตตาล็อก — BH-01 25 · BH-01C 60 · BH-03 65
-  const blocked = (code: string) => price(code).o?.status === 'notManufacturable';
-  check('ข้อ 4 BH-01 ID 30 คิดได้ (เดิมติด "OD 65" ของชีต)', !blocked('BH-01 30x100-220-300W'));
-  check('ข้อ 4 BH-01 ID 20 ไม่รับผลิต', blocked('BH-01 20x100-220-300W'));
-  check('ข้อ 4 BH-01C ID 50 ไม่รับผลิต · 60 คิดได้', blocked('BH-01C-50x100-220-300W') && !blocked('BH-01C-60x100-220-300W'));
-  check('ข้อ 4 BH-03 ID 60 ไม่รับผลิต · 65 คิดได้', blocked('BH-03 60x100-220-300W') && !blocked('BH-03 65x100-220-300W'));
-  check('ข้อ 4 BH-01 ออกน็อตสูง 35 ไม่รับผลิต · ออกสายสูง 35 คิดได้', blocked('BH-01 100x35-220-300W-N') && !blocked('BH-01 100x35-220-300W'));
+  // ข้อ 4: ขนาดเล็กสุดตามแคตตาล็อก — BH-01 25 · BH-01C 60 · BH-03 65 · ตั้งแต่ 2026-09-29 เล็กกว่านี้ = **เตือน** ยังคิดราคาให้
+  // (เจ้าของ: "อยากให้แค่เตือนแทนการบล็อก" · "ใช้กับทุกรหัส") ⇒ ข้อที่ต้องจริง: ได้ราคา + มีคำเตือนข้อนั้น · ขนาดปกติไม่มีคำเตือน
+  const small = (code: string, id: string) => {
+    const o = price(code).o;
+    return o?.status === 'priced' && o.violations.some((v) => v.id === id && v.level === 'warn');
+  };
+  const clean = (code: string) => {
+    const o = price(code).o;
+    return o?.status === 'priced' && !o.violations.some((v) => v.id.startsWith('MIN_'));
+  };
+  check('ข้อ 4 BH-01 ID 30 คิดได้ ไม่มีคำเตือน (เดิมติด "OD 65" ของชีต)', clean('BH-01 30x100-220-300W'));
+  check('ข้อ 4 BH-01 ID 20 = ได้ราคา + เตือนเล็กกว่าแคตตาล็อก', small('BH-01 20x100-220-300W', 'MIN_ID'));
+  check('ข้อ 4 BH-01C ID 50 เตือน · 60 ไม่เตือน', small('BH-01C-50x100-220-300W', 'MIN_ID_C') && clean('BH-01C-60x100-220-300W'));
+  check('ข้อ 4 BH-03 ID 60 เตือน · 65 ไม่เตือน', small('BH-03 60x100-220-300W', 'MIN_OD') && clean('BH-03 65x100-220-300W'));
+  check('ข้อ 4 BH-01 ออกน็อตสูง 35 เตือน · ออกสายสูง 35 ไม่เตือน', small('BH-01 100x35-220-300W-N', 'MIN_H_NUT') && clean('BH-01 100x35-220-300W'));
 
   // ข้อ 5: BH-03 ไม่ระบุขั้วไฟ = ออกน็อต + ฝาครอบ คิดค่าน็อตปกติ
   const b3 = price('BH-03 170x110-220-2700W');
@@ -167,7 +177,7 @@ async function main(): Promise<void> {
   check('1/2/3 = สายยาว 1/2/3 M เข้ากฎ "สายยาวเกิน 30 CM"', ['1', '2', '3'].every((n) =>
     rule(price(`BH-01 180x110-240-2540W-${n}`).o, 'cable_over_30cm')?.status === 'applied'));
   const pl5 = price('BH-01 180x110-240-2540W-PL5');
-  check('PL5 = อ่านออก แต่ "ยังไม่มีราคา" (ไม่ใช่ +0)', pl5.o?.status === 'notManufacturable' && pl5.o.violations.some((v) => v.noRate)
+  check('PL5 = อ่านออก แต่ "ยังไม่มีราคา" (ไม่ใช่ +0)', pl5.o?.status === 'notManufacturable' && pl5.o.violations.some((v) => v.id === 'conn_pl5' && v.noRate)
     && !pl5.p.parts.some((x) => x.kind === 'unknown'));
   const z = price('BH-01C-600x150-380-4950W-SE-PL2-Z');
   check('SE / Z = อ่านออก ไม่มีผลกับราคา', z.p.parts.filter((x) => x.text === 'SE' || x.text === 'Z').every((x) => x.kind === 'noPrice')
@@ -211,6 +221,75 @@ async function main(): Promise<void> {
     && rule(b31.o, 'nut')?.status !== 'applied' && !b31.o?.trace?.rules.some((r) => r.id.startsWith('cable_over') && r.status === 'applied'));
   check('BH-03 ออกสาย 3 M + สายถักสแตนเลส = 3 เมตร', rule(b31.o, 'cable_ss_braid')?.status === 'applied'
     && rule(b31.o, 'cable_ss_braid')?.amount === (rule(price('BH-03 160x47-220-1500W-1', { addons: ['cable:ss_braid'] }).o, 'cable_ss_braid')?.amount ?? NaN) * 3);
+
+  // ── 6. คำตอบของเจ้าของ 2026-09-29 ────────────────────────────────────────────
+  // ไม่มีตัวเลขราคาฝังในด่าน — อัตราอ่านจากกฎในเล่ม แล้วตรวจความสัมพันธ์ (จำนวนรู × ขนาด × อัตรา · ตัวเลขเปล่า = M เดียวกัน)
+  section('6. คำตอบของเจ้าของ 2026-09-29');
+  const bh01 = book.models['BH-01']!;
+  const bh03 = book.models['BH-03']!;
+  const holdRate = bh01.adders.find((a) => a.id === 'hold')?.rate ?? NaN;
+  const holes = [{ count: 2, mm: 20 }, { count: 1, mm: 12 }];
+  for (const code of ['BH-01 120x60-220-800W-N', 'BH-01C-600x150-380-4950W-PL-PL2', 'BH-02 100x500-220-1000W', 'BH-03 170x110-220-2700W']) {
+    const h = price(code, { holes });
+    const r = rule(h.o, 'hold');
+    check(`เจาะรู ${code.split(' ')[0]!.split('-').slice(0, 2).join('-')}: 2 รู × Ø20 + 1 รู × Ø12 = 52 mm × อัตราต่อ mm ของกฎ hold`,
+      r?.status === 'applied' && r.amount === 52 * holdRate && (h.o?.unitPrice ?? 0) - (price(code).o?.unitPrice ?? 0) === r.amount, `+${r?.amount}`);
+  }
+  const hf = price('BH-01 120x60-220-800W-N', { holes });
+  check('เจาะรู: รหัสไม่เปลี่ยน (อยู่นอกรหัส) · ช่องกรอกได้ค่ากลับ', hf.p.form !== undefined && buildBhCode(hf.p.form) === 'BH-01 120x60-220-800W-N'
+    && JSON.stringify(hf.p.form.holes) === JSON.stringify(holes));
+  check('เจาะรู: ไม่ได้กรอก = ไม่มีค่าเจาะรู', rule(price('BH-01 120x60-220-800W-N').o, 'hold')?.status !== 'applied');
+
+  const pl5Rule = (m: typeof bh01) => m.adders.find((a) => a.id === 'conn_pl5');
+  check('PL-5 เป็นกฎในสมุดราคาทั้ง BH-01 และ BH-03 · ช่องเงินว่าง (กรอกทีหลัง)', [bh01, bh03].every((m) => {
+    const a = pl5Rule(m);
+    return a?.kind === 'flat' && a.amount === undefined && a.when !== undefined && 'option' in a.when && a.when.option === 'conn:pl5';
+  }));
+  const pl5b3 = price('BH-03 114x110-230-900W-PL5');
+  check('PL-5 ของ BH-03 = "ยังไม่มีราคา" (ไม่ใช่ +0)', pl5b3.o?.status === 'notManufacturable' && pl5b3.o.violations.some((v) => v.id === 'conn_pl5' && v.noRate));
+  // กรอกราคาแล้ว (จำลองในหน่วยความจำ) — รุ่นปกติได้ราคานั้น · รุ่น C ที่ว่าง = เท่ารุ่นหลัก (กติกาเดิมของช่อง C) · กรอก C = ใช้ของ C
+  const typed = (pl5: number, pl5C?: number) => ({
+    ...book,
+    models: {
+      ...book.models,
+      'BH-01': {
+        ...bh01,
+        adders: bh01.adders.map((a) => (a.id === 'conn_pl5' ? { ...a, amount: pl5 } : a)),
+        variant: { ...bh01.variant!, adderPrices: { ...bh01.variant!.adderPrices, ...(pl5C !== undefined ? { conn_pl5: pl5C } : {}) } },
+      },
+    },
+  });
+  const withPl5 = (b: typeof book, code: string) => { const p = parseProductCode(code, b); return p.cfg ? computePrice(p.cfg, b) : null; };
+  const n200 = withPl5(typed(200), 'BH-01 180x110-240-2540W-PL5');
+  check('PL-5 กรอกราคาแล้ว = บวกเท่าที่กรอก', n200?.status === 'priced' && rule(n200, 'conn_pl5')?.amount === 200);
+  check('PL-5 รุ่น C: ช่อง C ว่าง = เท่ารุ่นหลัก · กรอก C = ใช้ของ C',
+    rule(withPl5(typed(200), 'BH-01C-600x150-380-4950W-PL-PL5'), 'conn_pl5')?.amount === 200
+    && rule(withPl5(typed(200, 400), 'BH-01C-600x150-380-4950W-PL-PL5'), 'conn_pl5')?.amount === 400);
+
+  const big = price('BH-03 300x200-220-5000W');
+  check('BH-03 พื้นที่เกิน 100 ตร.นิ้ว คิดค่ากำลังไฟตามปกติ', areaOf(big.o) > 100 && rule(big.o, 'watt_over_100')?.status === 'applied'
+    && rule(big.o, 'watt_over_100')?.amount === Math.ceil((5000 - 100) / 100) * (bh03.adders.find((a) => a.id === 'watt_over_100')?.rate ?? NaN));
+  check('BH-03C ยืนยันแล้ว — บวก % และของแถมตามที่ตั้ง', bh03.variant?.confirmed === true
+    && rule(price('BH-03C-200x100-220-2000W').o, 'variant:C')?.status === 'applied');
+
+  const tagged = price('BH-01 100x50-220-600W-N-S000(HPT)');
+  check('S### และ (HPT) = อ่านออก ไม่มีผลกับราคา', ['S000', '(HPT)'].every((t) => tagged.p.parts.some((x) => x.text === t && x.kind === 'noPrice'))
+    && !tagged.p.parts.some((x) => x.kind === 'unknown') && tagged.o?.unitPrice === price('BH-01 100x50-220-600W-N').o?.unitPrice);
+  check('S### / (HPT) ไม่ลามไปซีรีส์อื่น (scope BH-0*)', parseProductCode('TSK-01(M6)4.8+3M-S007', book).parts.some((x) => x.text === 'S007' && x.kind === 'unknown'));
+
+  const bare = price('BH-01 113x50-220-750W-1.5');
+  check('สายเป็นตัวเลขเปล่า = เมตร (1.5 เท่ากับ +1.5M)', rule(bare.o, 'cable_over_30cm')?.status === 'applied'
+    && bare.o?.unitPrice === price('BH-01 113x50-220-750W+1.5M').o?.unitPrice && !bare.p.parts.some((x) => x.kind === 'unknown'));
+  check('สายตัวเลขเปล่า: ช่องกรอกประกอบกลับเป็นรหัสเดิม', bare.p.form !== undefined && buildBhCode(bare.p.form) === 'BH-01 113x50-220-750W-1.5');
+  check('สายตัวเลขเปล่า: เลข 2–3 หลักยังเป็นแรงดัน (ไม่ใช่สาย 50 เมตร)', rule(price('BH-01 100x50-220-500W-50').o, 'cable_over_30cm')?.status !== 'applied');
+
+  const n3 = price('BH-03 180x33-230-848W-N');
+  check('BH-03 -N = ออกน็อตครั้งเดียว (เท่ากับไม่ระบุขั้วไฟ)', rule(n3.o, 'nut')?.status === 'applied' && n3.o?.unitPrice === price('BH-03 180x33-230-848W').o?.unitPrice
+    && !n3.p.parts.some((x) => x.kind === 'unknown'));
+  check('BH-03 -N: ช่องกรอกประกอบกลับเป็นรหัสเดิม', n3.p.form !== undefined && buildBhCode(n3.p.form) === 'BH-03 180x33-230-848W-N');
+
+  const minIds = [...bh01.constraints, ...bh03.constraints].filter((c) => c.id.startsWith('MIN_'));
+  check('ข้อห้ามขนาดเล็กสุดทุกข้อของ BH เป็น "เตือน" (BH-01 ห้าข้อ · BH-03 สองข้อ)', minIds.length === 7 && minIds.every((c) => c.level === 'warn'), minIds.map((c) => `${c.id}:${c.level}`).join(' · '));
 
   console.log(`\n${fail ? RED : GREEN}${pass} ผ่าน · ${fail} ตก${RESET}`);
 }

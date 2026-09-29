@@ -148,6 +148,28 @@ for (const width of [1280, 390]) {
   await page.click('input[aria-label="สายถักสแตนเลส"]');
   await settle();
 
+  // เจาะรู (ไม่อยู่ในรหัส · mockup แบบ B 2026-09-29) — เพิ่มแถวได้ · รวม mm ตามแถวที่ครบ · ราคาเปลี่ยน รหัสไม่เปลี่ยน
+  const addHole = async () => { await (await page.$('xpath/.//button[contains(., "เพิ่มขนาดรู")]'))!.click(); await settle(); };
+  const holeCode = await codeValue();
+  const noHoles = await text();
+  await addHole();
+  await setNumber('ขนาดรู (mm) แถว 1', '20');
+  await setNumber('จำนวนรู แถว 1', '2');
+  body = await text();
+  ok('เจาะรู 2 รู × Ø20 → รวม 40 mm · ราคาเปลี่ยน · รหัสไม่เปลี่ยน', body.includes('รวม 40 mm') && body !== noHoles && (await codeValue()) === holeCode, await codeValue());
+  await addHole();
+  await setNumber('ขนาดรู (mm) แถว 2', '12');
+  ok('เพิ่มแถวที่สอง 1 รู × Ø12 → รวม 52 mm', (await text()).includes('รวม 52 mm'));
+  await page.screenshot({ path: join(tmpdir(), `pricing-holes-${width}.png`), fullPage: true });
+  await page.click('button[aria-label="ลบแถวเจาะรู 2"]');
+  await settle();
+  ok('ลบแถวที่สอง → กลับเป็นรวม 40 mm', (await text()).includes('รวม 40 mm') && (await page.$('input[aria-label="ขนาดรู (mm) แถว 2"]')) === null);
+  await typeCode(await codeValue());
+  ok('พิมพ์รหัสเดิมซ้ำ → ช่องเจาะรูยังอยู่', (await page.$eval('input[aria-label="ขนาดรู (mm) แถว 1"]', (el) => (el as HTMLInputElement).value)) === '20');
+  await page.click('button[aria-label="ลบแถวเจาะรู 1"]');
+  await settle();
+  ok('ลบแถวสุดท้าย → ไม่มีค่าเจาะรู ราคากลับเท่าเดิม', (await page.$('input[aria-label="ขนาดรู (mm) แถว 1"]')) === null && !(await text()).includes('รวม 40 mm'));
+
   // ช่อง "รุ่น" ช่องเดียวรวม BH กับ TS แบ่งกลุ่ม (เจ้าของเคาะข้อ 9 · 2026-09-29) — TS 11 ตาราง (TS_-12 สองหน้า) + BH 4 รุ่น
   const groups = await page.$$eval('select[aria-label="รุ่น"] optgroup', (gs) => gs.map((g) => `${(g as HTMLOptGroupElement).label}:${g.children.length}`));
   ok('เลือกรุ่นจาก dropdown ในช่อง "รุ่น" (ไม่มีการ์ดแยกแล้ว) · กลุ่ม TS 11 + BH 4',

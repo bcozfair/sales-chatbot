@@ -67,7 +67,24 @@ export interface CatalogFamilySpec {
    * `code` = ตัวเลือก (`option`) ที่กฎของสมุดราคาใช้เปิด ⇒ ราคาอยู่ที่สมุดราคาที่เดียว ที่นี่มีแค่ชื่อ
    */
   addons?: CatalogOption[];
+  /**
+   * true = มีช่อง "เจาะรู" นอกรหัส (หมายเหตุของแคตตาล็อกทั้งสามเล่ม: "ถ้ามีเจาะรูควรระบุขนาดและตำแหน่งเจาะรู")
+   * ราคาอยู่ที่กฎ `hold` ของสมุดราคา (ชีต "Hold (OD-mm) 5฿ / mm.") — ที่นี่มีแค่ว่ารุ่นนี้กรอกได้
+   */
+  holes?: boolean;
 }
+
+/**
+ * รูที่เจาะ หนึ่งแถว = รูขนาดเดียวกัน `count` รู เส้นผ่านศูนย์กลาง `mm` — **ไม่อยู่ในรหัส** (รหัสจริงไม่มีท่อนนี้)
+ * เจ้าของตอบ 2026-09-29: คิดต่อรู × ขนาด mm · เลือก mockup แบบ B (หลายขนาดได้ เพิ่มแถว)
+ */
+export interface HoleSpec {
+  count: number;
+  mm: number;
+}
+
+/** เพดานของช่องเจาะรู — กันค่าหลุดจากหน้าจอ ไม่ใช่ข้อจำกัดการผลิต */
+export const HOLE_LIMITS = { rows: 8, count: 99, mm: 1000 } as const;
 
 /** ค่าที่กรอกในช่อง — ตัวเดียวกันทั้งตอนอ่านรหัสออกมาและตอนประกอบรหัสกลับ */
 export interface BhForm {
@@ -94,6 +111,8 @@ export interface BhForm {
   amp?: string;
   /** สิ่งที่ต้องบวกเพิ่มที่ติ๊กไว้ (`CatalogFamilySpec.addons[].code`) — **ไม่อยู่ในรหัส** เหมือนขนาดเต๋า */
   addons?: string[];
+  /** รูที่เจาะ (ไม่อยู่ในรหัส เหมือนขนาดเต๋า) */
+  holes?: HoleSpec[];
   mat?: string;
   /**
    * ท่อนที่อยู่นอกแคตตาล็อก (`S000` · `(HPT)` · `50CM` · `2P`) ตามตำแหน่งที่มันอยู่ในรหัส
@@ -199,6 +218,7 @@ export const BH_CATALOG: CatalogFamilySpec[] = [
       mat: { label: 'วัสดุ', kind: 'choice', options: MAT },
     },
     addons: ADDONS,
+    holes: true,
   },
   {
     family: 'BH-01C', head: 'BH-01C', name: '2 Piece Band Heater',
@@ -213,6 +233,7 @@ export const BH_CATALOG: CatalogFamilySpec[] = [
       mat: { label: 'วัสดุ', kind: 'choice', options: MAT },
     },
     addons: ADDONS,
+    holes: true,
   },
   {
     family: 'BH-02', head: 'BH-02', name: 'Strip Heater',
@@ -227,6 +248,7 @@ export const BH_CATALOG: CatalogFamilySpec[] = [
       mat: { label: 'วัสดุ', kind: 'choice', options: MAT },
     },
     addons: ADDONS,
+    holes: true,
   },
   {
     family: 'BH-03', head: 'BH-03', name: 'Ceramic Band Heater',
@@ -239,6 +261,7 @@ export const BH_CATALOG: CatalogFamilySpec[] = [
       amp: AMP_SLOT,
     },
     addons: ADDONS,
+    holes: true,
   },
 ];
 

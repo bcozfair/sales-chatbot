@@ -11,7 +11,7 @@
 //    … --data <dir> --new-rules [--apply --by <username>]                        เติม "กฎบวกเพิ่มที่แมปเพิ่งมี" ลงเล่มปัจจุบัน ไม่แก้กฎ/ราคาเดิมสักช่อง
 //    … --data <dir> --rounding [--apply --by <username>]                         ปรับ "วิธีปัดเศษ" ของกฎเดิมให้ตรงแมป ไม่แตะตัวเลขราคาสักช่อง
 //    … --data <dir> --aliases  [--apply --by <username>]                         ปรับ "รายชื่อรหัสที่ใช้ตารางเดียวกัน" ให้ตรงแมป ไม่แตะตัวเลขราคาสักช่อง
-//    … --data <dir> --catalog  [--apply --by <username>]                         ปรับ "สูตรที่ระบบคิดเอง + ข้อห้าม" ให้ตรงแมป (แคตตาล็อก BH) ไม่แตะตัวเลขราคาสักช่อง
+//    … --data <dir> --catalog  [--apply --by <username>]                         ปรับ "สูตรที่ระบบคิดเอง + ข้อห้าม + ช่องที่ระบุของกฎ/ตัวเลือก C" ให้ตรงแมป (แคตตาล็อก BH) ไม่แตะตัวเลขราคาของกฎเดิม
 //    … --data <dir> --out <ไฟล์.json>                                           เขียนเป็นไฟล์ (ไม่แตะฐาน)
 //
 //  **`--data` ไม่มีค่าเริ่มต้นโดยตั้งใจ** — ยุคไฟล์ตั้งต้นที่ `data/` ซึ่งถูกเสิร์ฟออกเว็บโดยไม่ตรวจสิทธิ์
@@ -853,7 +853,12 @@ async function applyAliases(fromFile: PriceBook, opts: { apply: boolean; by: str
 
 /**
  * `--catalog` — ปรับ **สูตรที่ระบบคิดเอง** (`derivedDims`) และ **ข้อห้าม** (`constraints`) ของรุ่นในฐานให้ตรงแมป
- * ราคาตั้ง · กฎบวกเพิ่ม · อัตรา · ตัวเลือก C คงเดิมทุกไบต์ (ตัวคิดอยู่ที่ `catalogRules.ts` — ด่านใช้ตัวเดียวกัน)
+ * บวก **ช่องที่ระบุทีละช่อง** ของกฎบวกเพิ่ม/ตัวเลือก C และกฎใหม่ที่ไม่มีราคาในชีต (รายการปิดใน `catalogRules.ts`)
+ * ตัวเลขราคาตั้ง · อัตรา · จำนวนเงินของกฎเดิมคงเดิมทุกไบต์ (ตัวคิดอยู่ที่ `catalogRules.ts` — ด่านใช้ตัวเดียวกัน)
+ *
+ * ครั้งที่สอง (เจ้าของตอบ 2026-09-29): ขนาดเล็กกว่าแคตตาล็อก = เตือน · BH-03 คิดค่ากำลังไฟทุกขนาด · ชื่อกฎ "เจาะรู" ·
+ * กฎ PL-5 ว่าง (ยังไม่มีราคา) · BH-03C ยืนยันแล้ว — **รหัสบางตัวราคาเปลี่ยน** (BH-03 พื้นที่เกิน 100 แพงขึ้นตามกำลังไฟ ·
+ * รหัสที่เคยติดขนาดเล็กสุดได้ราคา) รายงานก่อน–หลังอยู่ใน `diag:pricing-catalog`
  *
  * ครั้งแรกที่ใช้: แคตตาล็อก BH (เจ้าของเคาะ 2026-09-28) — สูตรพื้นที่ BH-02 ตามรูปทรง (สี่เหลี่ยม/วงกลม/โดนัท ·
  * Special = ขอราคา) และขนาดเล็กสุด ID 25 (BH-01) · 60 (BH-01C) · ความสูงตามการออกขั้วไฟ แทน "OD 65" ของชีต
@@ -872,19 +877,20 @@ async function applyCatalog(fromFile: PriceBook, opts: { apply: boolean; by: str
   }
   const models = { ...state.book.models };
   for (const ch of changes) {
-    models[ch.code] = withFields(state.book.models[ch.code]!, { derivedDims: ch.model.derivedDims, constraints: ch.model.constraints });
+    const { derivedDims, constraints, adders, variant } = ch.model;
+    models[ch.code] = withFields(state.book.models[ch.code]!, { derivedDims, constraints, adders, variant });
     console.log(`\n${ch.code}:`);
     for (const n of ch.notes) console.log(`  ${n}`);
   }
   if (!opts.apply) {
-    console.log(`\n(ยังไม่ได้เขียนลงฐาน — ${changes.length} รุ่น · ใส่ --apply --by <username> เพื่อบันทึก · ไม่แตะตัวเลขราคา)`);
+    console.log(`\n(ยังไม่ได้เขียนลงฐาน — ${changes.length} รุ่น · ใส่ --apply --by <username> เพื่อบันทึก · ไม่แตะตัวเลขราคาของกฎเดิม)`);
     return 0;
   }
   const at = new Date().toISOString();
   const revision = await commitBookChange({
     parent: state.revision,
     kind: 'model',
-    next: { ...state.book, models, edited: { at, by: opts.by ?? undefined, note: 'ปรับสูตรพื้นที่และขนาดเล็กสุดตามแคตตาล็อก BH (เจ้าของเคาะ 2026-09-28) — ไม่แตะตัวเลขราคา' } },
+    next: { ...state.book, models, edited: { at, by: opts.by ?? undefined, note: 'ปรับกติกาแคตตาล็อก BH ตามแมป (เจ้าของเคาะ 2026-09-28 · 2026-09-29) — ไม่แตะตัวเลขราคาของกฎเดิม' } },
     changed: changes.map((c) => c.code),
     by: opts.by,
   });

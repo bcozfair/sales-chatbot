@@ -433,6 +433,12 @@ function computeAdder(
   const rateFrom = a.byAxis ? `อัตราของ${axisLabel(a.byAxis)} ${axes[a.byAxis]}` : 'อัตราเดียวทุกกรณี';
 
   if (a.kind === 'flat') {
+    // ว่าง ≠ 0 เหมือนช่องราคาทุกที่ในสมุด — กฎที่ตั้งโครงไว้ก่อนมีราคา (PL-5 ของ BH · เจ้าของ 2026-09-29
+    // "ทำโครงสร้างไว้ให้พิมพ์ค่าภายหลังได้") ต้องขึ้น "ยังไม่มีราคา" ไม่ใช่บวก 0 บาทแล้วคืนราคาหน้าตาปกติ
+    if (a.amount === undefined && rate === undefined) {
+      steps.push('ยังไม่ได้กรอกจำนวนเงินของกฎนี้');
+      return { amount: 0, noRate: true, blocked: `${a.label}: ยังไม่มีราคา — กรอกที่หน้าสมุดราคา`, steps };
+    }
     const amt = a.amount ?? rate ?? 0;
     steps.push(a.amount !== undefined ? `บวกเงินคงที่ ${fmt(money(amt))} บาท` : `บวกเงินคงที่ตาม${rateFrom} = ${fmt(money(amt))} บาท`);
     return { amount: money(amt), steps };
@@ -534,6 +540,9 @@ export function resolveModel(book: PriceBook, code: string): PriceModel | undefi
   }
   return undefined;
 }
+
+/** ที่มาของค่าที่กรอกในช่องนอกรหัส (`ProductConfig.offCode`) */
+const OFF_CODE = 'กรอกในช่องนอกรหัส (รหัสไม่ได้บอก)';
 
 export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome {
   const model = resolveModel(book, cfg.model);
@@ -650,14 +659,14 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
       from: derivedText[k]
         ? `คำนวณ: ${derivedText[k]}`
         : cfg.dims && k in cfg.dims
-          ? `ระบุในรหัส${std !== undefined ? ` (มาตรฐานของรุ่น ${fmt(std)})` : ''}`
+          ? `${cfg.offCode?.includes(k) ? OFF_CODE : 'ระบุในรหัส'}${std !== undefined ? ` (มาตรฐานของรุ่น ${fmt(std)})` : ''}`
           : 'มาตรฐานของรุ่น — รหัสไม่ได้ระบุ (รวมอยู่ในราคาตั้งแล้ว)',
     });
   }
   for (const o of options) {
     if (o.startsWith(SUBCODE_PREFIX)) continue;
     const by = subCodes.find((sc) => sc.effect === 'option' && sc.value === o);
-    inputs.push({ kind: 'option', key: o, label: optionLabel(o), value: 'มี', from: by ? `รหัสย่อย ${by.subCode}` : 'ระบุในรหัส' });
+    inputs.push({ kind: 'option', key: o, label: optionLabel(o), value: 'มี', from: by ? `รหัสย่อย ${by.subCode}` : cfg.offCode?.includes(o) ? OFF_CODE : 'ระบุในรหัส' });
   }
 
   const violations: Violation[] = pending.map((s) => ({
