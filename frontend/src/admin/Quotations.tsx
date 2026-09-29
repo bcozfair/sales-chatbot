@@ -14,7 +14,6 @@ import {
   FileSpreadsheet,
   Calendar,
   ChevronDown,
-  X,
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
@@ -25,6 +24,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { DeleteQuotationModal } from './DeleteQuotationModal';
+import { ExportHistoryModal } from './ExportHistoryModal';
 
 interface QuotationItem {
   model?: string;
@@ -154,20 +154,6 @@ const EXPORT_COMPANIES: { value: ExportCompany; company: string }[] = [
 const EXPORT_BTN =
   'flex items-center gap-1 px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-bold text-slate-600 hover:border-[var(--brand-fg)] hover:text-[var(--brand-fg)] hover:bg-[var(--brand)]/5 transition-colors';
 
-/** 1 ครั้งที่กดปุ่มส่งออก (GET /api/admin/quotations/export-batches) */
-interface ExportBatch {
-  id: string;
-  exported_at: string;
-  exported_by_username: string | null;
-  format: string;
-  quotation_count: number;
-  row_count: number;
-  /** ใบในชุดที่ยังนับว่า "ส่งออกแล้ว" — น้อยกว่า quotation_count แปลว่าถูกถอยไปบางส่วน */
-  active_count: number;
-  /** ตัวกรองที่ใช้ตอนกดส่งออก — ชุดที่ส่งออกก่อนแยก QP/QT จะไม่มีคีย์ company */
-  filters?: { company?: string } | null;
-}
-
 // Status color mapping
 const STATUS_STYLES: Record<string, { bg: string; text: string; label: string }> = {
   draft: { bg: 'bg-amber-50 border-amber-200', text: 'text-amber-700', label: 'ร่าง' },
@@ -296,10 +282,8 @@ export const Quotations: React.FC = () => {
   /** กางกลุ่ม "ต้องแก้มือก่อน" ค้างไว้ไหม — จำไว้ระหว่างเปิด/ปิดเมนูในเซสชันเดียวกัน */
   const [manualOpen, setManualOpen] = useState(true);
 
-  // ประวัติการส่งออก + การถอยเครื่องหมาย
+  // ประวัติการส่งออก (กล่องแยกไฟล์ ExportHistoryModal) + การถอยเครื่องหมายของใบเดียว
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [batches, setBatches] = useState<ExportBatch[]>([]);
-  const [isLoadingBatches, setIsLoadingBatches] = useState(false);
   const [unmarkingId, setUnmarkingId] = useState<string | null>(null);
 
   /** ใบที่กำลังถูกถามยืนยันลบ — null = กล่องปิดอยู่ */
@@ -529,48 +513,9 @@ export const Quotations: React.FC = () => {
     }
   };
 
-  const fetchBatches = useCallback(async () => {
-    setIsLoadingBatches(true);
-    try {
-      const response = await fetch('/api/admin/quotations/export-batches?limit=50', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (!response.ok) throw new Error('ไม่สามารถดึงประวัติการส่งออกได้');
-      const result: { data: ExportBatch[] } = await response.json();
-      setBatches(result.data || []);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการโหลดประวัติการส่งออก');
-    } finally {
-      setIsLoadingBatches(false);
-    }
-  }, [token]);
-
   const openHistory = () => {
     setExportMenuOpen(false);
     setHistoryOpen(true);
-    fetchBatches();
-  };
-
-  // ถอยทั้งชุด — ใช้ตอนไฟล์ทั้งไฟล์นำเข้า Odoo ไม่ผ่าน
-  const handleUnmarkBatch = async (batch: ExportBatch) => {
-    if (!window.confirm(`ยกเลิกเครื่องหมายส่งออกของทั้งชุด (${batch.active_count} ใบ)?\nใบทั้งหมดในชุดนี้จะกลับมาอยู่ในชุดที่ส่งออกครั้งถัดไป`)) return;
-    setUnmarkingId(batch.id);
-    setError(null);
-    try {
-      const response = await fetch(`/api/admin/quotations/export-batches/${batch.id}/unmark`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (!response.ok) throw new Error('ไม่สามารถยกเลิกเครื่องหมายส่งออกของชุดนี้ได้');
-      const result: { reverted: number } = await response.json();
-      showToast(`ยกเลิกเครื่องหมายส่งออกแล้ว ${result.reverted} ใบ`);
-      fetchBatches();
-      fetchQuotations();
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการยกเลิกเครื่องหมายส่งออก');
-    } finally {
-      setUnmarkingId(null);
-    }
   };
 
   const showToast = (msg: string) => {
@@ -603,9 +548,9 @@ export const Quotations: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      {/* Success Toast */}
+      {/* Success Toast — z-[60] ให้อยู่เหนือกล่องโต้ตอบ (Modal = z-50) เพราะถอยทั้งชุดแจ้งผลขณะกล่องประวัติยังเปิดอยู่ */}
       {successMsg && (
-        <div className="fixed bottom-5 right-5 z-50 flex items-center gap-3 bg-card border border-slate-200 border-l-4 border-l-[var(--brand-fg)] p-4 rounded-2xl shadow-xl shadow-slate-200/50 text-slate-800 text-sm animate-fade-in">
+        <div className="fixed bottom-5 right-5 z-[60] flex items-center gap-3 bg-card border border-slate-200 border-l-4 border-l-[var(--brand-fg)] p-4 rounded-2xl shadow-xl shadow-slate-200/50 text-slate-800 text-sm animate-fade-in">
           <CheckCircle2 className="w-5 h-5 text-[var(--brand-fg)]" />
           <span>{successMsg}</span>
         </div>
@@ -1194,104 +1139,16 @@ export const Quotations: React.FC = () => {
         </div>
       )}
 
-      {/* ── Export History Modal ── */}
       {historyOpen && (
-        <div
-          className="fixed inset-0 z-40 bg-black/60 flex items-start justify-center p-4 sm:p-8 overflow-y-auto"
-          onClick={() => setHistoryOpen(false)}
-        >
-          <div
-            className="bg-card border border-slate-200 rounded-2xl shadow-xl w-full max-w-3xl my-8"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center gap-2 px-5 py-4 border-b border-slate-100">
-              <History className="w-5 h-5 text-[var(--brand-fg)]" />
-              <h3 className="text-base font-bold text-slate-900">ประวัติการส่งออก Odoo</h3>
-              <div className="flex-1" />
-              <button
-                onClick={() => setHistoryOpen(false)}
-                className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
-                title="ปิด"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {isLoadingBatches && (
-              <div className="p-10 flex flex-col items-center justify-center gap-3">
-                <Loader2 className="w-7 h-7 text-[var(--brand-fg)] animate-spin" />
-                <p className="text-slate-500 text-sm font-medium">กำลังโหลดประวัติ...</p>
-              </div>
-            )}
-
-            {!isLoadingBatches && batches.length === 0 && (
-              <div className="p-10 text-center text-slate-500 flex flex-col items-center gap-2">
-                <FileSpreadsheet className="w-9 h-9 text-slate-300" />
-                <p className="font-bold">ยังไม่มีประวัติการส่งออก</p>
-              </div>
-            )}
-
-            {!isLoadingBatches && batches.length > 0 && (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm border-collapse">
-                  <thead>
-                    <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 text-[11px] font-semibold uppercase tracking-wider">
-                      <th className="px-4 py-3">เวลา</th>
-                      <th className="px-4 py-3">ผู้ส่งออก</th>
-                      <th className="px-4 py-3 text-center">บริษัท</th>
-                      <th className="px-4 py-3 text-center">ไฟล์</th>
-                      <th className="px-4 py-3 text-right">จำนวนใบ</th>
-                      <th className="px-4 py-3 text-center">จัดการ</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {batches.map((batch) => (
-                      <tr key={batch.id} className="hover:bg-slate-50/40 transition-colors">
-                        <td className="px-4 py-2.5 text-slate-700">{formatDate(batch.exported_at)}</td>
-                        <td className="px-4 py-2.5 text-slate-700">{batch.exported_by_username || '-'}</td>
-                        {/* ชุดที่ส่งออกก่อนแยก QP/QT ไม่มีคีย์นี้ — ตอนนั้นไฟล์เดียวมีทั้งสองบริษัทปนกัน */}
-                        <td className="px-4 py-2.5 text-center text-slate-700 font-semibold">
-                          {batch.filters?.company || '-'}
-                        </td>
-                        <td className="px-4 py-2.5 text-center">
-                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border bg-slate-50 border-slate-200 text-slate-600">
-                            {batch.format}
-                          </span>
-                        </td>
-                        <td className="px-4 py-2.5 text-right font-mono text-slate-800">
-                          {batch.active_count}
-                          {/* ต่างจาก quotation_count แปลว่าบางใบถูกถอยเครื่องหมายไปแล้ว */}
-                          {batch.active_count !== batch.quotation_count && (
-                            <span className="text-slate-400"> / {batch.quotation_count}</span>
-                          )}
-                          <span className="block text-[10px] text-slate-400">{batch.row_count} แถว</span>
-                        </td>
-                        <td className="px-4 py-2.5 text-center">
-                          <button
-                            type="button"
-                            disabled={batch.active_count === 0 || unmarkingId === batch.id}
-                            onClick={() => handleUnmarkBatch(batch)}
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-card hover:bg-amber-50 text-slate-600 hover:text-amber-700 border border-slate-200 hover:border-amber-200 rounded-xl text-xs font-semibold transition-all active:scale-95 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
-                            title="ยกเลิกเครื่องหมายส่งออกของทั้งชุด"
-                          >
-                            {unmarkingId === batch.id
-                              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                              : <RotateCcw className="w-3.5 h-3.5" />}
-                            ยกเลิกทั้งชุด
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            <p className="px-5 py-3 text-[11px] leading-snug text-slate-500 border-t border-slate-100 bg-slate-50 rounded-b-2xl">
-              "ยกเลิกทั้งชุด" ใช้ตอนไฟล์ทั้งไฟล์นำเข้า Odoo ไม่ผ่าน — ใบทั้งหมดในชุดจะกลับมาอยู่ในชุดที่ส่งออกครั้งถัดไป
-            </p>
-          </div>
-        </div>
+        <ExportHistoryModal
+          token={token}
+          formatTime={formatDate}
+          onClose={() => setHistoryOpen(false)}
+          onUnmarked={(reverted) => {
+            showToast(`ยกเลิกเครื่องหมายส่งออกแล้ว ${reverted} ใบ`);
+            fetchQuotations();
+          }}
+        />
       )}
 
       {deleteTarget && (

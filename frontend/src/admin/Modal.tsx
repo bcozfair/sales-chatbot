@@ -36,6 +36,13 @@ interface Props {
    *   — ห้าเสาของตารางส่วนต่างที่ `lg` (512px) ทำให้คอลัมน์ "ส่วนต่าง" ตกขอบ
    */
   size?: 'md' | 'lg' | 'xl';
+  /**
+   * `true` = กล่องสูงคงที่ 90% ของจอ และเนื้อ **ไม่เลื่อนเอง** — ผู้เรียกวางแถบคงที่ (ตัวกรอง/แบ่งหน้า)
+   * กับกล่องเลื่อนของรายการเอง (เพิ่ม 2026-09-29 ตอนทำกล่องประวัติการส่งออก Odoo)
+   * ทำไมสูงคงที่ ไม่ใช่ "สูงไม่เกิน": กล่องที่มีตัวกรอง พอกรองจนเหลือแถวเดียวแล้วกล่องหด
+   * ตัวกรองที่กำลังพิมพ์อยู่จะกระโดดไปกลางจอใต้มือ
+   */
+  fill?: boolean;
   children: React.ReactNode;
 }
 
@@ -53,7 +60,7 @@ const TONE: Record<ModalTone, string> = {
 };
 
 export const Modal: React.FC<Props> = ({
-  icon: Icon, title, tone = 'brand', onClose, footer, size = 'md', children,
+  icon: Icon, title, tone = 'brand', onClose, footer, size = 'md', fill = false, children,
 }) => {
   // Esc ต้องปิดได้ทุกกล่องที่ปิดได้ — คนที่ใช้คีย์บอร์ดล้วนไม่มีทางอื่นถ้าไม่มีอันนี้
   useEffect(() => {
@@ -68,7 +75,7 @@ export const Modal: React.FC<Props> = ({
       <div
         role="dialog"
         aria-modal="true"
-        className={`w-full ${WIDTH[size]} max-h-[90vh] flex flex-col bg-card rounded-2xl shadow-2xl border border-slate-200 overflow-hidden`}
+        className={`w-full ${WIDTH[size]} ${fill ? 'h-[90vh]' : 'max-h-[90vh]'} flex flex-col bg-card rounded-2xl shadow-2xl border border-slate-200 overflow-hidden`}
       >
         <div className="flex items-center gap-3 px-5 py-4 border-b border-slate-200 shrink-0">
           <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${TONE[tone]}`}>
@@ -86,8 +93,9 @@ export const Modal: React.FC<Props> = ({
           )}
         </div>
 
-        {/* เนื้อเลื่อนได้ ส่วนหัวกับแถบปุ่มอยู่กับที่ — รายการกฎยาว ๆ บนจอเตี้ยต้องยังกดปุ่มได้ */}
-        <div className="overflow-y-auto">{children}</div>
+        {/* เนื้อเลื่อนได้ ส่วนหัวกับแถบปุ่มอยู่กับที่ — รายการกฎยาว ๆ บนจอเตี้ยต้องยังกดปุ่มได้
+            (`fill` = ผู้เรียกจัดส่วนที่เลื่อนเอง · min-h-0 ให้กล่องเลื่อนข้างในหดตามความสูงที่เหลือได้) */}
+        <div className={fill ? 'flex-1 min-h-0 flex flex-col' : 'overflow-y-auto'}>{children}</div>
 
         {footer && (
           <div className="flex flex-wrap items-center justify-end gap-2 px-5 py-3 border-t border-slate-200 bg-slate-50 shrink-0">

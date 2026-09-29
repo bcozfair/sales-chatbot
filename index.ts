@@ -44,6 +44,7 @@ import {
   unmarkExportBatch,
   getExportBatches,
   countExportBatches,
+  getExportBatchExporters,
   deleteQuotationConfirmed,
   listApiLogs,
   countApiLogs,
@@ -4649,12 +4650,25 @@ app.get('/api/admin/quotations/manual-review-counts', adminAuthMiddleware, requi
 
 // --- API Endpoint: ประวัติชุดการส่งออก Odoo ---
 // ประวัติ "ชุดการส่งออก" ไม่ใช่รายการใบ — คนที่ส่งออกไม่ได้ก็ไม่มีชุดของตัวเองให้ดู
+// ตัวกรองทุกช่องไม่บังคับ · ค่าที่ไม่ผ่านรูปแบบถูกทิ้งเงียบ ๆ (= ไม่กรองช่องนั้น) ไม่ใช่ 400 เพราะเป็นกล่องดูประวัติ
 app.get('/api/admin/quotations/export-batches', adminAuthMiddleware, requireCapability('page.quotations'), requireRole('admin', 'approver', 'subadmin'), async (req: any, res: any) => {
   try {
     const limit = Math.min(parseInt(req.query.limit) || 20, 100);
-    const offset = parseInt(req.query.offset) || 0;
-    const [data, total] = await Promise.all([getExportBatches(limit, offset), countExportBatches()]);
-    res.json({ data, total });
+    const offset = Math.max(parseInt(req.query.offset) || 0, 0);
+    const text = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+    const isoDay = (v: unknown) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : '');
+    const company = text(req.query.company, 2).toUpperCase();
+    const filters = {
+      quotationNo: text(req.query.q, 50) || undefined,
+      company: company === 'QP' || company === 'QT' ? company : undefined,
+      exportedBy: text(req.query.exportedBy, 100) || undefined,
+      dateFrom: isoDay(req.query.dateFrom) || undefined,
+      dateTo: isoDay(req.query.dateTo) || undefined,
+    };
+    const [data, total, exporters] = await Promise.all([
+      getExportBatches(limit, offset, filters), countExportBatches(filters), getExportBatchExporters(),
+    ]);
+    res.json({ data, total, exporters });
   } catch (err: any) {
     console.error("GET /api/admin/quotations/export-batches error:", err);
     res.status(500).json({ error: 'Internal Server Error' });

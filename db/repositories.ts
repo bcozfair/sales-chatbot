@@ -779,13 +779,17 @@ export function odooManualBucketCondition(bucket: string | null, paramIndex: num
  *    การ cast เป็น ::timestamp ก่อน บังคับให้เข้า overload ที่ถูกต้อง ผลลัพธ์จึงไม่ขึ้นกับ TimeZone ของ DB
  *    (เช็คได้ด้วย pg_typeof — ต้องได้ `timestamp with time zone` ทั้งสองฝั่ง)
  */
-export function createdAtFromThaiDayCondition(paramIndex: number): string {
-  return `q.created_at >= (($${paramIndex}::date)::timestamp AT TIME ZONE 'Asia/Bangkok')`;
+export function createdAtFromThaiDayCondition(paramIndex: number, column = 'q.created_at'): string {
+  return `${column} >= (($${paramIndex}::date)::timestamp AT TIME ZONE 'Asia/Bangkok')`;
 }
 
-/** ขอบบน = เที่ยงคืนของ "วันถัดจาก" dateTo ตามโซนไทย → ใช้คู่กับ '<' เพื่อรวมทั้งวันของ dateTo */
-export function createdAtToThaiDayCondition(paramIndex: number): string {
-  return `q.created_at < ((($${paramIndex}::date)::timestamp + INTERVAL '1 day') AT TIME ZONE 'Asia/Bangkok')`;
+/**
+ * ขอบบน = เที่ยงคืนของ "วันถัดจาก" dateTo ตามโซนไทย → ใช้คู่กับ '<' เพื่อรวมทั้งวันของ dateTo
+ * `column` ไม่ส่ง = `q.created_at` (ทุกจุดเดิม) · ส่งชื่อคอลัมน์ timestamptz อื่นได้ เช่น
+ * `b.exported_at` ของประวัติการส่งออก — ให้กติกา "วันไทย" มีที่เดียวจริง ไม่ต้องเขียน SQL ซ้ำ
+ */
+export function createdAtToThaiDayCondition(paramIndex: number, column = 'q.created_at'): string {
+  return `${column} < ((($${paramIndex}::date)::timestamp + INTERVAL '1 day') AT TIME ZONE 'Asia/Bangkok')`;
 }
 
 /**
@@ -1065,30 +1069,93 @@ export async function unmarkExportBatch(db: DbExecutor, batchId: string): Promis
 }
 
 /**
+ * ตัวกรองของกล่อง "ประวัติการส่งออก Odoo" — ทุกช่องไม่บังคับ · ค่าที่ส่งมาต้องผ่านการตรวจที่ endpoint แล้ว
+ * (บริษัทอยู่ในรายการปิด · วันที่เป็น 'yyyy-mm-dd') ที่นี่ไม่ตรวจซ้ำ แค่ผูกเป็นพารามิเตอร์
+ */
+export interface ExportBatchFilters {
+  /** ส่วนหนึ่งของเลขที่ใบ — ไม่สนตัวพิมพ์และขีด (`qp2609` เจอ `QP-260905987`) */
+  quotationNo?: string;
+  /** `filters.company` ตอนกดส่งออก — ชุดเก่าก่อนแยก QP/QT ไม่มีคีย์นี้ จึงหลุดทุกครั้งที่เลือกบริษัท */
+  company?: string;
+  exportedBy?: string;
+  /** วันตามเวลาไทยของ `exported_at` — กติกาเดียวกับตัวกรองวันที่ของหน้าประวัติใบเสนอราคา */
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+/** เลขที่ใบในตาราง log `alias` ตรงกับคำค้นที่พารามิเตอร์ `$i` ไหม — ตัดขีดและไม่สนตัวพิมพ์ทั้งสองฝั่ง */
+function exportLogNoMatches(alias: string, i: number): string {
+  return `strpos(replace(upper(${alias}.quotation_no), '-', ''), replace(upper($${i}), '-', '')) > 0`;
+}
+
+/** WHERE ของตาราง `quotation_export_batches b` — ใช้ร่วมกันระหว่างรายการกับยอดรวม ไม่งั้นเลขหน้าเพี้ยน */
+function exportBatchWhere(f: ExportBatchFilters, params: unknown[]): string {
+  const bind = (v: unknown) => { params.push(v); return params.length; };
+  const conds: string[] = [];
+  if (f.quotationNo) {
+    conds.push(`EXISTS (SELECT 1 FROM quotation_export_log h
+                         WHERE h.batch_id = b.id AND ${exportLogNoMatches('h', bind(f.quotationNo))})`);
+  }
+  if (f.company) conds.push(`b.filters->>'company' = $${bind(f.company)}`);
+  if (f.exportedBy) conds.push(`b.exported_by_username = $${bind(f.exportedBy)}`);
+  if (f.dateFrom) conds.push(createdAtFromThaiDayCondition(bind(f.dateFrom), 'b.exported_at'));
+  if (f.dateTo) conds.push(createdAtToThaiDayCondition(bind(f.dateTo), 'b.exported_at'));
+  return conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+}
+
+/**
  * ประวัติชุดการส่งออก — active_count = จำนวนใบที่ยังนับว่า "ส่งออกแล้ว" (ยังไม่ถูกถอย)
+ * ค้นด้วยเลขที่ใบแล้วได้ matched_no (เลขแรกที่เจอในชุด) + matched_count ไว้บอกบนจอว่าชุดนี้ติดมาเพราะใบไหน
  * ตัวนี้เป็น SELECT ล้วนนอก transaction จึงคืน [] เมื่อ error ตามกติกาหัวไฟล์
  */
-export async function getExportBatches(limit: number, offset: number): Promise<any[]> {
+export async function getExportBatches(limit: number, offset: number, f: ExportBatchFilters = {}): Promise<any[]> {
   try {
+    const params: unknown[] = [];
+    const where = exportBatchWhere(f, params);
+    const hit = f.quotationNo
+      ? `LEFT JOIN LATERAL (
+           SELECT MIN(m.quotation_no) AS no, COUNT(*)::int AS n
+             FROM quotation_export_log m
+            WHERE m.batch_id = b.id AND ${exportLogNoMatches('m', params.push(f.quotationNo))}
+         ) hit ON true`
+      : '';
     const { rows } = await pool.query(
       `SELECT b.id, b.exported_at, b.exported_by_id, b.exported_by_username, b.format,
               b.quotation_count, b.row_count, b.filters,
               COUNT(l.id) FILTER (WHERE l.reverted_at IS NULL)::int AS active_count
+              ${f.quotationNo ? ', hit.no AS matched_no, hit.n AS matched_count' : ''}
          FROM quotation_export_batches b
          LEFT JOIN quotation_export_log l ON l.batch_id = b.id
-        GROUP BY b.id
+         ${hit}
+         ${where}
+        GROUP BY b.id${f.quotationNo ? ', hit.no, hit.n' : ''}
         ORDER BY b.exported_at DESC
-        LIMIT $1 OFFSET $2`, [limit, offset]);
+        LIMIT $${params.push(limit)} OFFSET $${params.push(offset)}`, params);
     return rows;
   } catch (err) { logErr('getExportBatches', err); return []; }
 }
 
-/** จำนวนชุดส่งออกทั้งหมด (ไว้ทำ pagination ของหน้าประวัติ) */
-export async function countExportBatches(): Promise<number> {
+/** จำนวนชุดส่งออกที่ตรงตัวกรอง (ไว้ทำ pagination ของหน้าประวัติ) */
+export async function countExportBatches(f: ExportBatchFilters = {}): Promise<number> {
   try {
-    const { rows } = await pool.query(`SELECT COUNT(*)::int AS n FROM quotation_export_batches`);
+    const params: unknown[] = [];
+    const where = exportBatchWhere(f, params);
+    const { rows } = await pool.query(`SELECT COUNT(*)::int AS n FROM quotation_export_batches b ${where}`, params);
     return rows[0]?.n || 0;
   } catch (err) { logErr('countExportBatches', err); return 0; }
+}
+
+/**
+ * ตัวเลือกของช่อง "ผู้ส่งออก" — มาจากคนที่เคยส่งออกจริงเท่านั้น
+ * (docs/design.md: ตัวเลือกที่เลือกแล้วได้ตารางว่างทุกครั้ง คือตัวเลือกที่ไม่ควรมี)
+ */
+export async function getExportBatchExporters(): Promise<string[]> {
+  try {
+    const { rows } = await pool.query(
+      `SELECT DISTINCT exported_by_username AS u FROM quotation_export_batches
+        WHERE exported_by_username IS NOT NULL ORDER BY 1`);
+    return rows.map((r) => r.u);
+  } catch (err) { logErr('getExportBatchExporters', err); return []; }
 }
 
 /**

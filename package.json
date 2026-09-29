@@ -100,7 +100,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "diag:lc-ui": "tsx scripts/diag/lcUiProbe.ts",
     "diag:oc-ui": "tsx scripts/diag/odooContactsUiProbe.ts",
-    "diag:dead-classes": "tsx scripts/diag/deadClasses.ts"
+    "diag:dead-classes": "tsx scripts/diag/deadClasses.ts",
+    "diag:export-history-ui": "tsx scripts/diag/exportHistoryUi.ts"
   },
   "dependencies": {
     "@line/bot-sdk": "^11.0.0",

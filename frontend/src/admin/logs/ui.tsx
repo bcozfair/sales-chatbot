@@ -307,9 +307,11 @@ export const Pagination: React.FC<{
   size: number;
   total: number;
   unit?: string;
+  /** ตัวเลือกจำนวนต่อหน้า — ไม่ส่ง = ชุดกลาง `PAGE_SIZE_OPTIONS` (กล่องประวัติการส่งออกใช้ชุดที่เริ่มจาก 10) */
+  sizes?: readonly number[];
   onPage: (p: number) => void;
   onSize: (s: number) => void;
-}> = ({ page, pages, size, total, unit = 'รายการ', onPage, onSize }) => (
+}> = ({ page, pages, size, total, unit = 'รายการ', sizes = PAGE_SIZE_OPTIONS, onPage, onSize }) => (
   <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-t border-slate-100">
     <div className="flex items-center gap-2 text-xs text-slate-500">
       <span className="tabular-nums">
@@ -321,7 +323,7 @@ export const Pagination: React.FC<{
         value={size}
         onChange={(e) => onSize(Number(e.target.value))}
       >
-        {PAGE_SIZE_OPTIONS.map((n) => (
+        {sizes.map((n) => (
           <option key={n} value={n}>{n} ต่อหน้า</option>
         ))}
       </select>
