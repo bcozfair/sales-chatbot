@@ -187,6 +187,21 @@ docker rm cf-tunnel                                    # เมื่อมั�
 `curl` **ต้องมี `-4`** — เครื่องนี้ออก IPv6 ไม่ได้ ถ้าไม่ใส่จะค้างแล้วสรุปผิดว่า tunnel ยังไม่ขึ้น
 · ถอยกลับได้ทุกเมื่อ เพราะ token อยู่ใน `.env` แล้ว ⇒ `docker compose up -d tunnel` ตัวใหม่ได้เสมอ
 
+**อัปรุ่น cloudflared (ทำแล้ว 2026-09-29: 2026.9.1 → 2026.9.3 · ไม่มีช่วงล่ม)** — image ตรึงเลขรุ่นใน
+`docker-compose.yml` · แก้เลขแล้ว `up -d tunnel` ตรง ๆ จะ **ดับตัวเก่าก่อนขึ้นตัวใหม่** (ล่มไม่กี่วินาที)
+⇒ ขึ้นตัวสำรองรุ่นใหม่คู่ไว้ก่อน แล้วค่อยสลับ:
+
+```bash
+V=2026.9.3; docker pull cloudflare/cloudflared:$V
+docker run -d --name cf-tunnel-standby --network primus-chatbot_default \
+  -e TUNNEL_TOKEN="$(grep '^CF_TUNNEL_TOKEN=' .env | cut -d= -f2-)" \
+  cloudflare/cloudflared:$V tunnel --no-autoupdate --protocol http2 run
+docker logs cf-tunnel-standby 2>&1 | grep -c "Registered tunnel connection"   # รอให้ได้ 4
+docker compose up -d tunnel                       # สลับตัวหลัก (ตัวสำรองรับงานระหว่างนั้น)
+docker compose logs tunnel | grep -E "Version |Registered tunnel connection"  # ต้องได้ 4 + รุ่นใหม่
+docker stop -t 40 cf-tunnel-standby && docker rm cf-tunnel-standby
+```
+
 **ระหว่าง deploy ปกติ tunnel ไม่ถูกแตะ** — `docker compose up -d --build` จะ recreate เฉพาะ `app`
 (ตั้งใจไม่ผูก `depends_on` ไว้) ⇒ โดเมนตอบ 502 ระหว่าง app ขึ้นใหม่ แล้วกลับมาเองโดยไม่ต้องทำอะไร
 ⚠️ ต่างจาก `docker compose down` ซึ่งหลังย้ายแล้วจะดับ tunnel ไปด้วย (เดิมมันรอด)
