@@ -31,7 +31,8 @@ CREATE TABLE IF NOT EXISTS public.local_products (
   product_template_id integer     PRIMARY KEY
                                   DEFAULT nextval('public.local_product_template_id_seq'),
 
-  -- ตรงกับ products.internal_reference ของแถวคู่กัน
+  -- ตรงกับ products.internal_reference ของแถวคู่กัน · เข้า Odoo แล้ว ⇒ ถูกเขียนทับเป็นรหัสของ Odoo
+  -- (เจ้าของ 2026-10-01 · ไม่เก็บรหัสเดิม · ใบเสนอราคาถูกทับพร้อมกันในทรานแซกชันเดียว · แผน §8.4)
   internal_reference  text        NOT NULL,
   -- รหัสต้นแบบที่สืบทอดมา · หลักฐาน ไม่ใช่ FK (ต้นแบบถูก archive ใน Odoo แล้วหายได้)
   parent_reference    text,
@@ -64,17 +65,18 @@ CREATE TABLE IF NOT EXISTS public.local_products (
 
   exported_at         timestamptz,            -- ดาวน์โหลดไฟล์ไปคีย์ Odoo ครั้งล่าสุด
 
-  -- ── สี่คอลัมน์นี้ "ระบบเขียน" เท่านั้น ไม่มี endpoint ให้คนกด (แผน §7) ──
+  -- ── สามคอลัมน์นี้ "ระบบเขียน" เท่านั้น ไม่มี endpoint ให้คนกด (แผน §7) ──
   -- ยืนยันจากตาราง products อย่างเดียว (เจ้าของ 2026-10-01): แถวของ Odoo ที่ internal_reference
   -- หรือ model ตรงกัน
   odoo_matched_at          timestamptz,
   odoo_matched_template_id integer,           -- product_template_id ของแถว Odoo ที่จับคู่ได้
-  -- รหัสฝั่ง Odoo — ต่างจาก internal_reference ได้เมื่อจับคู่ด้วย model (แอดมินคีย์ด้วยรหัสอื่น)
-  odoo_matched_reference   text,
   odoo_matched_by          text,               -- reference | model
 
   -- วัด 2026-09-21: ทั้ง 51,648 รหัสยาว 14 ตัว [A-Z0-9] เท่ากันหมด ⇒ เป็น CHECK ได้ ไม่ใช่การเดา
-  CONSTRAINT local_products_ref_shape CHECK (internal_reference ~ '^[A-Z0-9]{14}$'),
+  -- ใช้กับรหัสที่ "เราออก" เท่านั้น — เข้า Odoo แล้วรหัสเป็นของ Odoo (แอดมินคีย์อะไรมาก็ได้) ⇒ ไม่ตรวจรูป
+  -- ไม่งั้นการทับรหัสชน CHECK แล้ว reconcile ROLLBACK ทุกรอบ สินค้าตัวนั้นค้างตลอดไป
+  CONSTRAINT local_products_ref_shape CHECK (
+    odoo_matched_at IS NOT NULL OR internal_reference ~ '^[A-Z0-9]{14}$'),
   CONSTRAINT local_products_ref_tier_check CHECK (
     ref_tier IN ('boundary', 'max_plus_one', 'manual')),
   CONSTRAINT local_products_price_source_check CHECK (price_source IN ('pricebook', 'manual')),
@@ -86,8 +88,10 @@ CREATE TABLE IF NOT EXISTS public.local_products (
     odoo_matched_by IS NULL OR odoo_matched_by IN ('reference', 'model'))
 );
 
+-- ไม่ซ้ำเฉพาะรหัสที่ยังรอเข้า Odoo — แถวที่เข้าแล้วถือรหัสของ Odoo ซึ่งอาจตรงกับแถวอื่นที่จับคู่
+-- แถว Odoo เดียวกัน (ทับรหัสแล้วชน unique = reconcile ROLLBACK ทุกรอบ)
 CREATE UNIQUE INDEX IF NOT EXISTS uq_local_products_ref
-  ON public.local_products (internal_reference);
+  ON public.local_products (internal_reference) WHERE odoo_matched_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_local_products_pending
   ON public.local_products (created_at) WHERE odoo_matched_at IS NULL;
 
