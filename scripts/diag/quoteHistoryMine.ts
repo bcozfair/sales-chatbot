@@ -161,7 +161,7 @@ const admin = admins[0];
   const q2 = await api(admin, '/api/admin/quotations/export-counts?exported=imported');
   ok('ยอดค้างของคิวแก้มือไม่ขึ้นกับตัวกรอง', q1.queue.total === q2.queue.total, `${q1.queue.total} = ${q2.queue.total}`);
   ok('ตัวกรองตั้งต้น ("ยังไม่ส่งออก") เห็นคิวแก้มือครบ', q1.queue.outside === 0, `นอกตัวกรอง ${q1.queue.outside}`);
-  ok('ตัวกรอง "นำเข้า Odoo แล้ว" มองไม่เห็นใบค้างเลย ⇒ นอกตัวกรอง = ยอดค้างทั้งหมด', q2.queue.outside === q2.queue.total,
+  ok('ตัวกรอง "นำเข้าแล้ว" มองไม่เห็นใบค้างเลย ⇒ นอกตัวกรอง = ยอดค้างทั้งหมด', q2.queue.outside === q2.queue.total,
     `${q2.queue.outside} = ${q2.queue.total}`);
 }
 for (const s of [subWith, subNone].filter(Boolean)) {

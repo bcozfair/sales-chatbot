@@ -4706,7 +4706,7 @@ app.delete('/api/admin/quotations/:id', adminAuthMiddleware, requireCapability('
 app.get('/api/admin/quotations/export-counts', adminAuthMiddleware, requireCapability('page.quotations'), async (req: any, res: any) => {
   try {
     const filter = await odooExportFilterOf(req);
-    // ไม่ดึง item_details ทั้งก้อน (ตัวกรอง "Odoo ทั้งหมด" = ทุกใบในระบบ) — `selectExportableQuotes`
+    // ไม่ดึง item_details ทั้งก้อน (ตัวกรอง "สถานะทั้งหมด" = ทุกใบในระบบ) — `selectExportableQuotes`
     // ถามแค่ว่า "มีรายการไหม" จึงส่งอาร์เรย์แทนที่ยาวเท่าเดิมไปแทน กติกาจริงยังอยู่ที่ฟังก์ชันนั้นที่เดียว
     const { rows } = await pool.query(
       `SELECT q.quotation_no,

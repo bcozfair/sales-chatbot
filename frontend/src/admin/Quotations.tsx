@@ -209,7 +209,7 @@ function getStatusStyle(status: string) {
 
 /**
  * สถานะ Odoo ของใบเสนอราคา — 3 ขั้นเรียงตามลำดับที่เกิดจริง และเดินหน้าทางเดียว
- *   ยังไม่ส่งออก → รอนำเข้า (ส่งออกไฟล์แล้วแต่ยังไม่เห็นใน Odoo) → นำเข้า Odoo แล้ว
+ *   ยังไม่ส่งออก → รอนำเข้า (ส่งออกไฟล์แล้วแต่ยังไม่เห็นใน Odoo) → นำเข้าแล้ว
  * อ่านจาก snapshot ในตาราง quotations ไม่ใช่ join สดกับ sale_orders — Odoo เปลี่ยนชื่อเอกสาร
  * ตอนยืนยัน/ออกบิล เลข Q* จึงหายไปจากฝั่งนั้นได้ ถ้า join สดสถานะจะเด้งกลับเองทั้งที่สำเร็จแล้ว
  */
@@ -218,7 +218,7 @@ type OdooStage = 'imported' | 'pending' | 'not_exported';
 const ODOO_STAGE_STYLES: Record<OdooStage, { bg: string; text: string; dot: string; label: string; hint: string }> = {
   imported: {
     bg: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700', dot: 'bg-emerald-500',
-    label: 'นำเข้า Odoo แล้ว', hint: 'พบใบนี้เป็นเอกสารในระบบ Odoo แล้ว',
+    label: 'นำเข้าแล้ว', hint: 'พบใบนี้เป็นเอกสารในระบบ Odoo แล้ว',
   },
   pending: {
     bg: 'bg-amber-50 border-amber-200', text: 'text-amber-700', dot: 'bg-amber-400',
@@ -856,9 +856,9 @@ export const Quotations: React.FC = () => {
         >
           <option value="no">ยังไม่ส่งออก</option>
           <option value="pending" title="ส่งออกไฟล์แล้วแต่ยังไม่พบใบนี้ใน Odoo">รอนำเข้า</option>
-          <option value="imported">นำเข้า Odoo แล้ว</option>
-          <option value="yes" title="รอนำเข้า + นำเข้า Odoo แล้ว">ส่งออกแล้ว</option>
-          <option value="all">Odoo ทั้งหมด</option>
+          <option value="imported">นำเข้าแล้ว</option>
+          <option value="yes" title="รอนำเข้า + นำเข้าแล้ว">ส่งออกแล้ว</option>
+          <option value="all">สถานะทั้งหมด</option>
         </FilterSelect>
 
         {/* ป้ายของใบ — กรองร่วมกับตัวกรองเดิมได้ทุกตัว
@@ -1088,7 +1088,7 @@ export const Quotations: React.FC = () => {
                           </span>
                         </td>
 
-                        {/* Odoo status: ยังไม่ส่งออก → รอนำเข้า → นำเข้า Odoo แล้ว */}
+                        {/* Odoo status: ยังไม่ส่งออก → รอนำเข้า → นำเข้าแล้ว */}
                         <td className="px-4 py-2.5 text-center whitespace-nowrap">
                           {(() => {
                             const stage = getOdooStage(quote);
