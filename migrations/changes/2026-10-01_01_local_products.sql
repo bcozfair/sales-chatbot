@@ -31,8 +31,8 @@ CREATE TABLE IF NOT EXISTS public.local_products (
   product_template_id integer     PRIMARY KEY
                                   DEFAULT nextval('public.local_product_template_id_seq'),
 
-  -- ตรงกับ products.internal_reference ของแถวคู่กัน · เข้า Odoo แล้ว ⇒ ถูกเขียนทับเป็นรหัสของ Odoo
-  -- (เจ้าของ 2026-10-01 · ไม่เก็บรหัสเดิม · ใบเสนอราคาถูกทับพร้อมกันในทรานแซกชันเดียว · แผน §8.4)
+  -- ตรงกับ products.internal_reference ของแถวคู่กัน · **ไม่ถูกเขียนทับ** — "เข้า Odoo แล้ว" = Odoo มีรหัสนี้
+  -- ตรงตัว (เจ้าของ 2026-10-01 · แผน §6.3)
   internal_reference  text        NOT NULL,
   -- รหัสต้นแบบที่สืบทอดมา · หลักฐาน ไม่ใช่ FK (ต้นแบบถูก archive ใน Odoo แล้วหายได้)
   parent_reference    text,
@@ -65,33 +65,25 @@ CREATE TABLE IF NOT EXISTS public.local_products (
 
   exported_at         timestamptz,            -- ดาวน์โหลดไฟล์ไปคีย์ Odoo ครั้งล่าสุด
 
-  -- ── สามคอลัมน์นี้ "ระบบเขียน" เท่านั้น ไม่มี endpoint ให้คนกด (แผน §7) ──
-  -- ยืนยันจากตาราง products อย่างเดียว (เจ้าของ 2026-10-01): แถวของ Odoo ที่ internal_reference
-  -- หรือ model ตรงกัน
+  -- ── สองคอลัมน์นี้ "ระบบเขียน" เท่านั้น ไม่มี endpoint ให้คนกด (แผน §7) ──
+  -- ยืนยันจากตาราง products อย่างเดียว: แถวของ Odoo ที่ internal_reference ตรงกัน (เจ้าของ 2026-10-01)
+  -- model ที่ซ้ำกับแถว Odoo รหัสอื่นเป็นแค่ป้ายเตือนตอนอ่าน ไม่ใช่การจับคู่ ⇒ ไม่มีคอลัมน์
   odoo_matched_at          timestamptz,
-  odoo_matched_template_id integer,           -- product_template_id ของแถว Odoo ที่จับคู่ได้
-  odoo_matched_by          text,               -- reference | model
+  odoo_matched_template_id integer,           -- product_template_id ของแถว Odoo ที่รหัสตรง
 
   -- วัด 2026-09-21: ทั้ง 51,648 รหัสยาว 14 ตัว [A-Z0-9] เท่ากันหมด ⇒ เป็น CHECK ได้ ไม่ใช่การเดา
-  -- ใช้กับรหัสที่ "เราออก" เท่านั้น — เข้า Odoo แล้วรหัสเป็นของ Odoo (แอดมินคีย์อะไรมาก็ได้) ⇒ ไม่ตรวจรูป
-  -- ไม่งั้นการทับรหัสชน CHECK แล้ว reconcile ROLLBACK ทุกรอบ สินค้าตัวนั้นค้างตลอดไป
-  CONSTRAINT local_products_ref_shape CHECK (
-    odoo_matched_at IS NOT NULL OR internal_reference ~ '^[A-Z0-9]{14}$'),
+  CONSTRAINT local_products_ref_shape CHECK (internal_reference ~ '^[A-Z0-9]{14}$'),
   CONSTRAINT local_products_ref_tier_check CHECK (
     ref_tier IN ('boundary', 'max_plus_one', 'manual')),
   CONSTRAINT local_products_price_source_check CHECK (price_source IN ('pricebook', 'manual')),
   CONSTRAINT local_products_model_not_blank CHECK (btrim(model) <> ''),
   CONSTRAINT local_products_name_not_blank CHECK (btrim(name) <> ''),
   -- ช่วงเลขเป็นข้อตกลงที่ตัวกวาดตอน sync พึ่งพา ⇒ บังคับที่ฐาน ไม่ใช่แค่ที่ sequence
-  CONSTRAINT local_products_id_range CHECK (product_template_id >= 900000000),
-  CONSTRAINT local_products_matched_by_check CHECK (
-    odoo_matched_by IS NULL OR odoo_matched_by IN ('reference', 'model'))
+  CONSTRAINT local_products_id_range CHECK (product_template_id >= 900000000)
 );
 
--- ไม่ซ้ำเฉพาะรหัสที่ยังรอเข้า Odoo — แถวที่เข้าแล้วถือรหัสของ Odoo ซึ่งอาจตรงกับแถวอื่นที่จับคู่
--- แถว Odoo เดียวกัน (ทับรหัสแล้วชน unique = reconcile ROLLBACK ทุกรอบ)
 CREATE UNIQUE INDEX IF NOT EXISTS uq_local_products_ref
-  ON public.local_products (internal_reference) WHERE odoo_matched_at IS NULL;
+  ON public.local_products (internal_reference);
 CREATE INDEX IF NOT EXISTS idx_local_products_pending
   ON public.local_products (created_at) WHERE odoo_matched_at IS NULL;
 

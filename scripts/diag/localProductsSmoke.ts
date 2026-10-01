@@ -1,7 +1,12 @@
 /**
  * npm run diag:local-products — ด่านของโมดูล "สินค้าเพิ่มเอง" (docs/plan-local-products.md §10)
  *
- * ก้อน J1 มีข้อ 6–7 (ตัวกวาดตอน sync + reconcile + ทับรหัสตาม Odoo) · ข้อ 1–5 และ 8–19 เติมตามเฟสที่ลงโค้ด
+ * J1 = ข้อ 6–7 (ตัวกวาดตอน sync + reconcile: รหัสตรงเท่านั้น · model ซ้ำเป็นป้ายเตือน)
+ * J2 = ข้อ 1–5 · 8 · 11–17 · 19 (ออกรหัส · ต้นแบบ · ชื่อ · สร้าง/แก้/ลบ · ออกเลขใหม่ · ส่งออก · ด่านสิทธิ์)
+ * ข้อ 9–10 (ธง custom_product) มากับ J3
+ *
+ * ข้อ 1 · 13 · 14 อ่าน `products` ของจริงผ่าน pool (อีก connection · SELECT อย่างเดียว) — ตัวเลขเป็นรายงาน
+ * gate คือเกณฑ์ที่เขียนไว้ในแต่ละข้อ ไม่ใช่ค่าเป๊ะ (ข้อมูลโตทุกวัน · ห้ามเทียบกับ golden ที่ขึ้นกับข้อมูล)
  *
  * ── ทำบนตารางชั่วคราวที่ "บัง" ของจริง แล้ว ROLLBACK เสมอ ────────────────────────────
  * `CREATE TEMP TABLE products / local_products / quotations` ใน transaction เดียว ⇒ SQL ที่ไม่ใส่
@@ -11,12 +16,22 @@
  * **ห้ามเปลี่ยน ROLLBACK เป็น COMMIT** · ข้อ 0 หยุดทั้งด่านก่อนเขียนถ้าตารางที่เห็นไม่ใช่ของชั่วคราว
  */
 import type pg from 'pg';
+import { readFileSync } from 'node:fs';
 import { pool } from '../../config/db.js';
 import {
-  countPendingLocalProducts, deleteMatchedLocalProductRows, markMatchedFromProducts,
-  rewriteQuotationItemsForMatches, sweepShadowedLocalProducts,
+  countPendingLocalProducts, markMatchedFromProducts, findOdooModelConflicts, sweepShadowedLocalProducts,
 } from '../../db/localProductsRepo.js';
-import { reconcileLocalProductOdooLinks } from '../../services/localProducts.js';
+import {
+  reconcileLocalProductOdooLinks, suggestLocalProduct, listProducts, previewNextRef, createLocalProduct, updateLocalProductById,
+  deleteLocalProductById, reissueLocalProductRef, exportProducts, decidePriceSource, defaultMinimumPrice,
+  LocalProductError,
+} from '../../services/localProducts.js';
+import {
+  buildRefIndex, nextReference, nextReferenceFromIndex, REF_SHAPE,
+} from '../../utils/productRefPattern.js';
+import {
+  suggestParent, suggestName, namePrefix, modelKeyBare, isCustomModel, isCustomRef,
+} from '../../utils/productNamePattern.js';
 import { upsertProductRows } from '../sync/syncProducts.js';
 
 let pass = 0;
@@ -50,13 +65,16 @@ async function setup(c: pg.PoolClient): Promise<void> {
   await c.query(`CREATE TEMP TABLE products (LIKE public.products INCLUDING ALL) ON COMMIT DROP`);
   // ฐานที่ยังไม่รัน migration 2026-10-01_01 ไม่มีคอลัมน์นี้ — เติมให้ตารางชั่วคราวด้วยนิยามเดียวกัน
   await c.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'odoo'`);
-  await c.query(`
-    CREATE TEMP TABLE local_products (
-      product_template_id integer PRIMARY KEY, internal_reference text NOT NULL, model text NOT NULL,
-      created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      odoo_matched_at timestamptz, odoo_matched_template_id integer, odoo_matched_by text
-    ) ON COMMIT DROP`);
+  // ตารางทะเบียนสร้างจาก **ไฟล์ migration ตรง ๆ** (เปลี่ยนแค่ชื่อให้เป็นของชั่วคราว) ⇒ CHECK/unique/default
+  // ในด่านเป็นตัวเดียวกับที่จะขึ้นฐานจริงเสมอ ไม่มีสำเนาแบบให้เพี้ยน · sequence เริ่มสูงกว่า id ที่ข้อ 6–7 ตั้งเอง
+  const mig = readFileSync(new URL('../../migrations/changes/2026-10-01_01_local_products.sql', import.meta.url), 'utf-8');
+  const body = /CREATE TABLE IF NOT EXISTS public\.local_products \(([\s\S]*?)\n\);/.exec(mig)?.[1];
+  if (!body) throw new Error('หา CREATE TABLE local_products ในไฟล์ migration ไม่เจอ');
+  await c.query(`CREATE TEMP SEQUENCE local_product_template_id_seq AS integer START WITH 900000100 MINVALUE 900000001`);
+  await c.query(`CREATE TEMP TABLE local_products (${body.replace(/public\.local_product_template_id_seq/g, 'local_product_template_id_seq')}) ON COMMIT DROP`);
+  for (const m of mig.matchAll(/CREATE (UNIQUE )?INDEX IF NOT EXISTS (\w+)\s+ON public\.local_products ([^;]+);/g)) {
+    await c.query(`CREATE ${m[1] ?? ''}INDEX ${m[2]} ON local_products ${m[3]}`);
+  }
   await c.query(`CREATE TEMP TABLE quotations (LIKE public.quotations INCLUDING ALL) ON COMMIT DROP`);
 }
 
@@ -80,25 +98,30 @@ async function insertLocal(c: pg.PoolClient, id: number, ref: string, model: str
     [id, ref, model]
   );
   await c.query(
-    `INSERT INTO local_products (product_template_id, internal_reference, model) VALUES ($1, $2, $3)`,
+    `INSERT INTO local_products (product_template_id, internal_reference, model, name) VALUES ($1, $2, $3, $3)`,
     [id, ref, model]
   );
 }
 
 /** แถวที่ "Odoo ส่งมา" โดยตรง — source ได้ 'odoo' จาก DEFAULT เหมือนที่ sync เขียน */
-async function insertOdoo(c: pg.PoolClient, id: number, ref: string, model: string): Promise<void> {
+async function insertOdoo(c: pg.PoolClient, id: number, ref: string, model: string, name: string = model,
+  extra: { brand?: string; production?: string } = {}): Promise<void> {
   await c.query(
-    `INSERT INTO products (product_template_id, internal_reference, name, model)
-     VALUES ($1, $2, $3, $3)`,
-    [id, ref, model]
+    `INSERT INTO products (product_template_id, internal_reference, name, model, brand, production, unit_of_measure)
+     VALUES ($1, $2, $3, $4, $5, $6, 'Pcs')`,
+    [id, ref, name, model, extra.brand ?? null, extra.production ?? null]
   );
 }
 
-/** อ่านทะเบียนด้วย id — รหัสถูกทับได้ จึงใช้รหัสเป็นกุญแจหาไม่ได้ */
+/** เรียกแล้วต้องล้มด้วยรหัสที่คาดไว้ — คืน error ให้ตรวจ detail ต่อ */
+async function expectError(fn: () => Promise<unknown>): Promise<LocalProductError | null> {
+  try { await fn(); return null; } catch (e) { return e instanceof LocalProductError ? e : null; }
+}
+
 async function registry(c: pg.PoolClient, id: number) {
   const { rows } = await c.query<{
-    internal_reference: string; odoo_matched_by: string | null; odoo_matched_template_id: number | null;
-  }>(`SELECT internal_reference, odoo_matched_by, odoo_matched_template_id
+    internal_reference: string; odoo_matched_at: string | null; odoo_matched_template_id: number | null;
+  }>(`SELECT internal_reference, odoo_matched_at, odoo_matched_template_id
         FROM local_products WHERE product_template_id = $1`, [id]);
   return rows[0];
 }
@@ -158,8 +181,8 @@ try {
   const { rows: keepC } = await c.query(`SELECT 1 FROM products WHERE product_template_id = $1 AND source = 'local'`, [LOCAL_C]);
   check('แถว local ที่รหัสไม่อยู่ในหน้านั้นไม่ถูกแตะ', keepC.length === 1);
 
-  const none = await sweepShadowedLocalProducts(c, [], []);
-  check('หน้าที่ไม่มีรหัสเลย ⇒ ไม่ยิงคำสั่ง (คืน 0)', none === 0);
+  const swept0 = await sweepShadowedLocalProducts(c, [], []);
+  check('หน้าที่ไม่มีรหัสเลย ⇒ ไม่ยิงคำสั่ง (คืน 0)', swept0 === 0);
 
   // upsert ซ้ำแถวเดิม (รอบ sync ถัดไป) ต้องไม่เปลี่ยน source กลับ และ source ไม่อยู่ในลิสต์ของ upsert
   await upsertProductRows(c, [gatewayRow(ODOO_A, REF_A, 'ZZ-99 odoo A2')], true);
@@ -168,105 +191,314 @@ try {
   check('รอบถัดไปอัปเดตแถวเดิม source ยังเป็น odoo', srcAgain[0]?.source === 'odoo' && srcAgain[0]?.model === 'ZZ-99 odoo A2');
 
   // ── ข้อ 7 · reconcile ─────────────────────────────────────────────────────
-  section('ข้อ 7 · ระบบรู้เองว่าเข้า Odoo แล้ว — จากตาราง products: รหัสหรือ model ตรงกัน');
+  section('ข้อ 7 · เข้า Odoo แล้ว = internal_reference ตรงเท่านั้น · model ซ้ำ = ป้ายเตือน ไม่แปลงอะไร');
 
   await insertOdoo(c, 170009, 'FZZP9ZZZ880009', 'ZZ-99 local A');    // model ตรงกับ A แต่ A มีรหัสตรงอยู่แล้ว
   await insertOdoo(c, 170002, 'FZZP9ZZZ880002', '  ZZ-99 local B ');  // รหัสอื่น · model ตรง (ช่องว่างหัวท้าย)
   await insertOdoo(c, 170005, 'FZZP9ZZZ880005', 'ZZ-99 local E');
   await insertOdoo(c, 170006, 'FZZP9ZZZ880006', 'ZZ-99 local E');
 
-  // ใบที่อ้างสินค้า local — สถานะต่างกัน (เจ้าของเคาะ "ทุกใบ") · ชนิดของ id ต่างกัน (เลข/สตริง)
+  // ใบที่อ้างสินค้า local B — ต้องไม่ถูกแตะสักไบต์ (ไม่มีการแปลงรหัสอีกแล้ว)
   const qB = await insertQuote(c, 'QP-T-0001', 'confirmed', [
-    { model: 'ZZ-99 local B', internal_reference: REF_B, product_id: LOCAL_B, name: 'ชื่อเดิม B', price: 123 },
-    { model: 'OPT-1', internal_reference: 'FOPTXXXXXX0001', product_id: 5555, is_optional: true,
-      linked_to_product_id: LOCAL_B },
-    { model: 'NORMAL-1', internal_reference: 'FNORMALXXX0001', product_id: 4444 },
+    { model: 'ZZ-99 local B', internal_reference: REF_B, product_id: LOCAL_B },
   ]);
-  const qBstr = await insertQuote(c, 'QP-T-0002', 'cancelled', [
-    { model: 'ZZ-99 local B', internal_reference: REF_B, product_id: String(LOCAL_B) },
-  ]);
-  const qA = await insertQuote(c, null as unknown as string, 'draft', [
-    { model: 'ZZ-99 local A', internal_reference: REF_A, product_id: LOCAL_A },
-  ]);
-  const qC = await insertQuote(c, 'QP-T-0003', 'confirmed', [
-    { model: 'ZZ-99 local C', internal_reference: REF_C, product_id: LOCAL_C },
-  ]);
-  const qNull = await insertQuote(c, 'QP-T-0004', 'confirmed', null);
-  const qObj = await insertQuote(c, 'QP-T-0005', 'confirmed', { not: 'an array' });
-  const cBefore = JSON.stringify(await quoteItems(c, qC));
+  const qBefore = JSON.stringify(await quoteItems(c, qB));
 
-  const matches = await markMatchedFromProducts(c);
-  const nRef = matches.filter((m) => m.by === 'reference').length;
-  const nModel = matches.filter((m) => m.by === 'model').length;
-  check('จับคู่ได้ 3 รายการ (รหัส 1 · model 2) · C ไม่ถูกแตะ', nRef === 1 && nModel === 2,
-    JSON.stringify(matches));
-
+  const matched = await markMatchedFromProducts(c);
+  check('จับคู่ได้ 1 รายการ (A · รหัสตรง) — model ตรงไม่นับเป็นการจับคู่', matched === 1, `ได้ ${matched}`);
   const a = await registry(c, LOCAL_A);
-  check('A · รหัสตรงชนะ model ตรง ⇒ by=reference · รหัสเท่าเดิม · id ของแถว Odoo ที่รหัสตรง',
-    a?.odoo_matched_by === 'reference' && a.odoo_matched_template_id === ODOO_A && a.internal_reference === REF_A,
-    JSON.stringify(a));
-
+  check('A · ประทับเข้า Odoo แล้ว · id ของแถว Odoo ที่รหัสตรง · รหัสเท่าเดิม',
+    !!a?.odoo_matched_at && a.odoo_matched_template_id === ODOO_A && a.internal_reference === REF_A, JSON.stringify(a));
   const b = await registry(c, LOCAL_B);
-  check('B · model ตรง (btrim) ⇒ by=model · ทะเบียนถูกทับเป็นรหัสของ Odoo · ไม่เหลือรหัสเดิม',
-    b?.odoo_matched_by === 'model' && b.odoo_matched_template_id === 170002 && b.internal_reference === 'FZZP9ZZZ880002',
-    JSON.stringify(b));
-  check('B · รหัสเดิมไม่เหลือในทะเบียน',
-    (await c.query(`SELECT 1 FROM local_products WHERE internal_reference = $1`, [REF_B])).rows.length === 0);
+  check('B · model ตรงแต่รหัสต่าง ⇒ ยังไม่นำเข้า · รหัสในทะเบียนไม่ถูกทับ',
+    b?.odoo_matched_at === null && b.internal_reference === REF_B, JSON.stringify(b));
+  check('E · ยังไม่นำเข้า', (await registry(c, LOCAL_E))?.odoo_matched_at === null);
+  check('ยังไม่นำเข้าเหลือ 3 (B · C · E)', (await countPendingLocalProducts(c)) === 3);
+  check('ใบที่อ้าง B ไม่ถูกแตะสักไบต์', JSON.stringify(await quoteItems(c, qB)) === qBefore);
+  check('ไม่แตะ updated_at ของใบ', (await quoteUpdatedAt(c, qB)).startsWith('2026-01-01'));
+  check('รันซ้ำไม่จับคู่ซ้ำ', (await markMatchedFromProducts(c)) === 0);
 
-  const e = await registry(c, LOCAL_E);
-  check('E · model ตรงหลายแถว ⇒ เอา id ใหม่สุด · รหัสเป็นของแถวนั้น',
-    e?.odoo_matched_template_id === 170006 && e.internal_reference === 'FZZP9ZZZ880006', JSON.stringify(e));
+  const conflicts = await findOdooModelConflicts(c, [
+    { id: LOCAL_B, model: 'ZZ-99 local B', ref: REF_B },
+    { id: LOCAL_C, model: 'ZZ-99 local C', ref: REF_C },
+    { id: LOCAL_E, model: 'ZZ-99 local E', ref: REF_E },
+  ]);
+  check('ป้ายเตือน · B ⇒ "model นี้ซ้ำกับ FZZP9ZZZ880002 ใน Odoo" (เทียบแบบ btrim)',
+    conflicts.get(LOCAL_B)?.map((x) => x.internal_reference).join() === 'FZZP9ZZZ880002', JSON.stringify(conflicts.get(LOCAL_B)));
+  check('ป้ายเตือน · E ⇒ ทั้งสองแถวของ Odoo (ใหม่สุดก่อน)',
+    conflicts.get(LOCAL_E)?.map((x) => x.internal_reference).join() === 'FZZP9ZZZ880006,FZZP9ZZZ880005');
+  check('ป้ายเตือน · C ไม่มีแถว Odoo model เดียวกัน ⇒ ไม่มีป้าย', !conflicts.has(LOCAL_C));
+  check('แถว local ของ B · C · E ยังอยู่ใน products (ไม่มีอะไรถูกลบ/ทับ)',
+    (await localRowExists(c, LOCAL_B)) && (await localRowExists(c, LOCAL_C)) && (await localRowExists(c, LOCAL_E)));
+  const listed = await listProducts({ filter: 'all' }, c);
+  const lb = listed.items.find((x) => x.product_template_id === LOCAL_B);
+  const la = listed.items.find((x) => x.product_template_id === LOCAL_A);
+  check('รายการ · A = imported · B = not_imported พร้อมป้าย model ซ้ำ',
+    la?.status === 'imported' && lb?.status === 'not_imported' && lb.odoo_model_conflicts.length === 1 &&
+    lb.quotation_count === 1, JSON.stringify({ a: la?.status, b: lb?.status, c: lb?.odoo_model_conflicts }));
 
-  check('C · ยังไม่เข้า Odoo ⇒ ไม่ถูกประทับ', (await registry(c, LOCAL_C))?.odoo_matched_by === null);
-  check('ยังค้างเหลือ 1 (แถว C)', (await countPendingLocalProducts(c)) === 1);
+  // ════════════════════════════════════════════════════════════════════════
+  //  J2 — บนตารางชั่วคราวชุดเดียวกัน (ข้อมูลสังเคราะห์ล้วน ไม่ขึ้นกับฐานจริง)
+  // ════════════════════════════════════════════════════════════════════════
+  section('ข้อ 2–4 · ตัวออกรหัส: golden 12 เคสของ §1.4 (ข้อมูลพี่น้องสังเคราะห์ตามที่วัดไว้)');
+  const span = (prefix: string, from: number, to: number, width: number, skip: number[] = []) =>
+    Array.from({ length: to - from + 1 }, (_, i) => from + i).filter((n) => !skip.includes(n))
+      .map((n) => prefix + String(n).padStart(width, '0'));
+  // ตระกูล TGM06: 815 ตัวกระจาย 35–9122 (เลขรุ่น ไม่ใช่ตัวนับ) — ห่างกันพอที่จะไม่หนาแน่นในกลุ่มย่อยไหนเลย
+  const tgm = Array.from({ length: 815 }, (_, i) => 35 + Math.round((i * (9122 - 35)) / 814));
+  if (!tgm.includes(1140)) tgm[100] = 1140;
+  const tgmRefs = tgm.map((n) => 'FTGP1TGM06' + String(n).padStart(4, '0'));
+  const GOLDEN: [string, string[], string, string][] = [
+    ['FTCP2TSK040073', span('FTCP2TSK04', 0, 2921, 4, [5, 77, 900, 1500]), 'FTCP2TSK042922', 'boundary'],
+    ['FCUP2TSK040073', span('FCUP2TSK04', 0, 175, 4), 'FCUP2TSK040176', 'boundary'],
+    ['FHTP2XCH021363', span('FHTP2XCH02', 0, 2328, 4, [1, 2, 3, 40, 41, 500, 501, 502, 2000]), 'FHTP2XCH022329', 'boundary'],
+    ['FRDP2TSP090184', span('FRDP2TSP09', 0, 412, 4, [7, 8]), 'FRDP2TSP090413', 'boundary'],
+    ['FCDT1TTM214000', span('FCDT1TTM214', 0, 8, 3), 'FCDT1TTM214009', 'boundary'],
+    ['FPTT2XPD000001', span('FPTT2XPD', 0, 2, 6), 'FPTT2XPD000003', 'boundary'],
+    ['FTGP1TGM060035', tgmRefs, 'FTGP1TGM069123', 'max_plus_one'],
+    ['FTGP1TGM061140', tgmRefs, 'FTGP1TGM069123', 'max_plus_one'],
+    ['FACBYFD1000000', ['FACBYFD1000000'], 'FACBYFD1000001', 'max_plus_one'],
+    ['FACP1CONXX0000', ['FACP1CONXX0000'], 'FACP1CONXX0001', 'max_plus_one'],
+    ['FTGP1TGM65129R', ['FTGP1TGM65129R', ...[96, 98, 100, 102, 104, 106, 108, 110].map((n) => 'FTGP1TGM65' + String(n).padStart(4, '0'))], 'FTGP1TGM650111', 'max_plus_one'],
+    ['FCDT1PCB09W000', ['FCDT1PCB09W000'], 'FCDT1PCB09W001', 'max_plus_one'],
+  ];
+  for (const [parent, sibs, want, tier] of GOLDEN) {
+    const got = nextReference(sibs, parent);
+    check(`ข้อ 2 · ${parent} ⇒ ${want} (${tier})`, got?.ref === want && got.boundary.tier === tier,
+      got ? `${got.ref} ${got.boundary.tier} L=${got.boundary.prefixLength}` : 'null');
+  }
+  check('ข้อ 3 · ตระกูลที่ไม่มีเลขวิ่ง (TGM06) ได้เลข **พร้อมป้าย max_plus_one** ไม่ใช่ถูกปฏิเสธ',
+    nextReference(tgmRefs, 'FTGP1TGM060035')?.boundary.tier === 'max_plus_one');
+  // กลุ่มที่เต็มถึง 9999 ที่ L=10 (หลวม ๆ — ไม่ผ่านชั้น 1) ⇒ ชั้น 2 ห้ามถอยไป L=9/8 แล้วออก …070000
+  const full = Array.from({ length: 100 }, (_, i) => 'FAAP1BBB06' + String(i * 101).padStart(4, '0')).concat('FAAP1BBB069999');
+  const shifted = nextReference(full, 'FAAP1BBB060000');
+  check('ข้อ 4 · ชั้น 2 ไม่ทำให้อักขระ 9–10 (รุ่นย่อย) ขยับ — ออกไม่ได้ดีกว่าออกเป็นรหัสของรุ่นอื่น',
+    shifted === null || shifted.ref.slice(0, 10) === 'FAAP1BBB06', shifted ? shifted.ref : 'null (ให้คนพิมพ์เอง)');
+  check('ข้อ 4 · รหัสต้นแบบผิดรูป (มีขีด) ⇒ null ไม่ใช่ throw', nextReference(['FTGP1TGM-64009'], 'FTGP1TGM-64009') === null);
 
-  // ── ทับรหัสในใบ ──
-  const nQuotes = await rewriteQuotationItemsForMatches(c, matches);
-  check('ทับในใบ 3 ใบ (B ยืนยัน · B ยกเลิก · A ร่าง) — ใบของ C / ใบที่ไม่มีรายการไม่ถูกแตะ', nQuotes === 3, `ทับ ${nQuotes}`);
+  section('ข้อ 15 · สั่งทำหรือมาตรฐาน เดาจาก -S### ใน model');
+  check('`TSK-04(S2)6x50+5M-S000` = สั่งทำ', isCustomModel('TSK-04(S2)6x50+5M-S000'));
+  check('`TSK-04(S2)6x50+5M` = มาตรฐาน', !isCustomModel('TSK-04(S2)6x50+5M'));
 
-  const itB = await quoteItems(c, qB);
-  check('ใบ B · บรรทัดสินค้า ⇒ รหัส/ id ของ Odoo (ชนิดเลขคงเดิม) · ชื่อ ราคา model ไม่แตะ',
-    itB[0].internal_reference === 'FZZP9ZZZ880002' && itB[0].product_id === 170002 &&
-    itB[0].name === 'ชื่อเดิม B' && itB[0].price === 123 && itB[0].model === 'ZZ-99 local B', JSON.stringify(itB[0]));
-  check('ใบ B · สินค้าเสริมที่ผูกกับบรรทัดนั้น ⇒ linked_to_product_id เป็น id ของ Odoo · ช่องอื่นไม่แตะ',
-    itB[1].linked_to_product_id === 170002 && itB[1].product_id === 5555 && itB[1].internal_reference === 'FOPTXXXXXX0001',
-    JSON.stringify(itB[1]));
-  check('ใบ B · บรรทัดสินค้าปกติไม่แตะ · ลำดับบรรทัดคงเดิม',
-    // jsonb เรียง key ใหม่เอง ⇒ เทียบทีละช่อง ไม่ใช่เทียบสตริง
-    Object.keys(itB[2]).length === 3 && itB[2].model === 'NORMAL-1' &&
-    itB[2].internal_reference === 'FNORMALXXX0001' && itB[2].product_id === 4444 &&
-    itB.map((x: any) => x.model).join(',') === 'ZZ-99 local B,OPT-1,NORMAL-1');
-  const itBs = await quoteItems(c, qBstr);
-  check('ใบที่ยกเลิกก็ทับ · product_id ที่เป็นสตริงยังเป็นสตริง',
-    itBs[0].internal_reference === 'FZZP9ZZZ880002' && itBs[0].product_id === '170002', JSON.stringify(itBs[0]));
-  const itA = await quoteItems(c, qA);
-  check('ใบ A (จับคู่ด้วยรหัส) · รหัสเท่าเดิม · product_id เป็น id ของ Odoo',
-    itA[0].internal_reference === REF_A && itA[0].product_id === ODOO_A, JSON.stringify(itA[0]));
-  check('ใบของ C ไม่ถูกแตะสักไบต์', JSON.stringify(await quoteItems(c, qC)) === cBefore);
-  check('ใบที่ item_details เป็น null / ไม่ใช่ array ไม่พัง ไม่ถูกแตะ',
-    (await quoteItems(c, qNull)) === null && JSON.stringify(await quoteItems(c, qObj)) === '{"not":"an array"}');
-  check('ไม่แตะ updated_at ของใบ (LIFF หา "ใบที่เพิ่งยืนยัน" ด้วยคอลัมน์นี้)',
-    (await quoteUpdatedAt(c, qB)).startsWith('2026-01-01') && (await quoteUpdatedAt(c, qA)).startsWith('2026-01-01'));
-  check('ทับซ้ำด้วยชุดว่างไม่ยิงคำสั่ง (คืน 0)', (await rewriteQuotationItemsForMatches(c, [])) === 0);
+  section('ข้อ 17 · ที่มาของราคา server ตัดสิน · ราคาขั้นต่ำ 70%');
+  check('ราคาเท่าสมุด ⇒ pricebook', decidePriceSource(1234.5, 1234.5) === 'pricebook');
+  check('แก้ทับแม้สตางค์เดียว ⇒ manual', decidePriceSource(1234.51, 1234.5) === 'manual');
+  check('ไม่ได้กดคิดราคา ⇒ manual', decidePriceSource(1000, null) === 'manual');
+  check('ราคาขั้นต่ำตั้งต้น = 70% ปัดสตางค์ (333.33 ⇒ 233.33)', defaultMinimumPrice(333.33) === 233.33);
 
-  const again = await markMatchedFromProducts(c);
-  check('รันซ้ำไม่จับคู่ซ้ำ ไม่ทับซ้ำ (เดินหน้าทางเดียว)', again.length === 0);
+  section('ข้อ 5 · 8 · 13–14 · 19 · สร้างจริงบนตารางชั่วคราว');
+  // ตระกูลสังเคราะห์: มาตรฐาน FTCP2QQQ04 (10 ตัว) · สั่งทำ FCUP2QQQ04 (3 ตัว) · คำนำหน้าชื่อมีเว้นวรรคสองช่อง
+  const PFX = 'Thermocouple K Type  "Primus" ';
+  for (let i = 0; i < 10; i++) {
+    await insertOdoo(c, 180100 + i, `FTCP2QQQ04${String(i).padStart(4, '0')}`, `QQQ-04(S2)6x${50 + i}+5M`,
+      `${PFX}QQQ-04(S2)6x${50 + i}+5M`, { brand: 'Primus', production: 'Production 2(PM)' });
+  }
+  for (let i = 0; i < 3; i++) {
+    await insertOdoo(c, 180200 + i, `FCUP2QQQ04${String(i).padStart(4, '0')}`, `QQQ-04(S2)6x${50 + i}+5M-S00${i}`,
+      `${PFX}QQQ-04(S2)6x${50 + i}+5M-S00${i}`, { brand: 'Primus', production: 'Production 2(PM)' });
+  }
+  const sg = await suggestLocalProduct({ model: '  QQQ-04(S2)8x100+2M ', salesPrice: '1000' }, c);
+  check('suggest · มาตรฐาน ⇒ ต้นแบบในตระกูล FTCP2QQQ04 · รหัส FTCP2QQQ040010 (boundary)',
+    sg.parent?.internal_reference.startsWith('FTCP2QQQ04') === true && sg.ref?.internal_reference === 'FTCP2QQQ040010' &&
+    sg.ref?.tier === 'boundary', JSON.stringify({ p: sg.parent?.internal_reference, r: sg.ref }));
+  check('suggest · ชื่อ = คำนำหน้าของต้นแบบทุกไบต์ (เว้นวรรคสองช่องรอด) + model ที่ trim แล้ว',
+    sg.name === `${PFX}QQQ-04(S2)8x100+2M`, JSON.stringify(sg.name));
+  check('suggest · ช่องสืบทอดมาจากต้นแบบ · production ไม่อยู่ในช่องสืบทอด (§2.1)',
+    sg.inherited.brand === 'Primus' && sg.inherited.unit_of_measure === 'Pcs' && !('production' in sg.inherited));
+  check('suggest · ราคาขั้นต่ำ 70% มาจาก server', sg.minimum_sales_price === 700);
+  const sgCu = await suggestLocalProduct({ model: 'QQQ-04(S2)8x100+2M-S123' }, c);
+  check('suggest · มี -S### ⇒ ต้นแบบตระกูลสั่งทำ FCUP2QQQ04 · รหัส FCUP2QQQ040003',
+    sgCu.parent?.internal_reference.startsWith('FCUP2QQQ04') === true && sgCu.ref?.internal_reference === 'FCUP2QQQ040003',
+    JSON.stringify({ p: sgCu.parent?.internal_reference, r: sgCu.ref?.internal_reference }));
+  const sgNone = await suggestLocalProduct({ model: 'ไม่มีต้นแบบ-1' }, c);
+  check('suggest · หาต้นแบบไม่ได้ ⇒ ให้คนเลือก (ไม่เดา)', sgNone.parent === null && sgNone.ref === null && !!sgNone.ref_message);
+  const sgDup = await suggestLocalProduct({ model: 'QQQ-04(S2)6x50+5M' }, c);
+  check('suggest · model ซ้ำ ⇒ บอกแถวที่ชน', sgDup.duplicate.length === 1);
 
-  const removed = await deleteMatchedLocalProductRows(c);
-  // A ถูกตัวกวาดลบไปแล้วตอน sync (ข้อ 6) ⇒ รอบนี้ลบ B กับ E
-  check('ลบแถว local ที่เข้า Odoo แล้วออกจาก products (B · E)',
-    removed === 2 && !(await localRowExists(c, LOCAL_B)) && !(await localRowExists(c, LOCAL_E)), `ลบ ${removed}`);
-  check('แถว local ที่ยังไม่เข้า Odoo (C) ยังอยู่ · แถวของ Odoo ไม่ถูกแตะ',
-    (await localRowExists(c, LOCAL_C)) &&
-    (await c.query(`SELECT 1 FROM products WHERE product_template_id IN (170002, 170005, 170006)`)).rows.length === 3);
-  const { rows: dupB } = await c.query(`SELECT count(*)::int AS n FROM products WHERE btrim(model) = 'ZZ-99 local B'`);
-  check('model ของ B เหลือแถวเดียว (ของ Odoo) — ไม่มีสินค้าซ้ำในผลค้นหา', dupB[0]?.n === 1);
-  check('ลบซ้ำไม่มีอะไรให้ลบ', (await deleteMatchedLocalProductRows(c)) === 0);
+  const created = await createLocalProduct({
+    model: 'QQQ-04(S2)8x100+2M', sales_price: 1000, parent_reference: sg.parent!.internal_reference,
+    internal_reference: sg.ref!.internal_reference, pricebook_price: 1000, price_book_revision: 17,
+  }, 7, c);
+  check('สร้าง · รหัสตามพรีวิว · ราคาขั้นต่ำ 700 · ที่มาราคา pricebook · ชื่อ/ช่องสืบทอดตั้งให้',
+    created.internal_reference === 'FTCP2QQQ040010' && created.minimum_sales_price === 700 &&
+    created.price_source === 'pricebook' && created.price_book_revision === 17 && created.ref_tier === 'boundary' &&
+    created.name === `${PFX}QQQ-04(S2)8x100+2M` && created.brand === 'Primus' && created.created_by === 7,
+    JSON.stringify(created));
+  const { rows: pRow } = await c.query(
+    `SELECT source, is_system_item, production, quantity_on_hand::int AS q, sales_price::float8 AS sp
+       FROM products WHERE product_template_id = $1`, [created.product_template_id]);
+  check('ข้อ 8 · แถวจริงใน products: source=local · ค้นเจอ (is_system_item=false) · สต็อก 0 · production ว่าง',
+    pRow[0]?.source === 'local' && pRow[0]?.is_system_item === false && pRow[0]?.q === 0 &&
+    pRow[0]?.production === null && pRow[0]?.sp === 1000, JSON.stringify(pRow[0]));
 
-  // ── แถว Odoo ที่ model ตรงแต่รหัสว่าง ⇒ ไม่จับคู่ (ทับแล้วจะได้รหัสว่าง) ──
-  await insertOdoo(c, 170010, '', 'ZZ-99 local C');
-  check('แถว Odoo ที่รหัสว่าง ⇒ ไม่นับเป็นการจับคู่ · C ยังค้าง',
-    (await markMatchedFromProducts(c)).length === 0 && (await registry(c, LOCAL_C))?.odoo_matched_by === null);
+  const dupErr = await expectError(() => createLocalProduct({
+    model: ' QQQ-04(S2)6x50+5M ', sales_price: 10, parent_reference: 'FTCP2QQQ040000' }, null, c));
+  check('ข้อ 5 · model ซ้ำกับแถวของ Odoo (ช่องว่างหัวท้าย) ⇒ 409 DUPLICATE_MODEL',
+    dupErr?.code === 'DUPLICATE_MODEL' && dupErr.status === 409);
+  const dupLocal = await expectError(() => createLocalProduct({
+    model: 'QQQ-04(S2)8x100+2M', sales_price: 10, parent_reference: 'FTCP2QQQ040000' }, null, c));
+  check('ข้อ 5 · model ซ้ำกับสินค้าเพิ่มเองตัวก่อน ⇒ 409', dupLocal?.code === 'DUPLICATE_MODEL');
+
+  // 4c · พรีวิวไม่ใช่การจอง
+  const preview = await previewNextRef('FTCP2QQQ040000', c);
+  await createLocalProduct({ model: 'QQQ-04(S2)9x1+1M', sales_price: 50, parent_reference: 'FTCP2QQQ040000' }, null, c);
+  const raced = await expectError(() => createLocalProduct({
+    model: 'QQQ-04(S2)9x2+1M', sales_price: 50, parent_reference: 'FTCP2QQQ040000',
+    internal_reference: preview.ref!.internal_reference }, null, c));
+  check('ข้อ 4c · พรีวิวค้างไว้แล้วมีคนแทรก ⇒ 409 REF_CHANGED พร้อมรหัสใหม่ ไม่ใช่บันทึกทับ',
+    raced?.code === 'REF_CHANGED' && (raced.detail as any)?.ref?.internal_reference === 'FTCP2QQQ040012',
+    `${preview.ref?.internal_reference} → ${JSON.stringify(raced?.detail)}`);
+
+  // 4b · พิมพ์รหัสเอง
+  const badShape = await expectError(() => createLocalProduct({
+    model: 'QQQ-M1', sales_price: 5, ref_manual: true, internal_reference: 'abc' }, null, c));
+  const taken = await expectError(() => createLocalProduct({
+    model: 'QQQ-M1', sales_price: 5, ref_manual: true, internal_reference: 'FTCP2QQQ040003' }, null, c));
+  const manual = await createLocalProduct({
+    model: 'QQQ-M1', sales_price: 5, ref_manual: true, internal_reference: 'ftcp2qqq049000' }, null, c);
+  check('ข้อ 4b · พิมพ์เอง: ผิดรูป 400 · ซ้ำ 409 · ถูก ⇒ ref_tier=manual (ตัวพิมพ์เล็กแปลงเป็นใหญ่)',
+    badShape?.status === 400 && taken?.code === 'REF_TAKEN' && manual.ref_tier === 'manual' &&
+    manual.internal_reference === 'FTCP2QQQ049000');
+  check('ข้อ 4b · ไม่มีต้นแบบ ⇒ ชื่อ = model (ไม่มีคำนำหน้าให้ลอก)', manual.name === 'QQQ-M1');
+
+  // 17 · แก้ราคาทับ ⇒ manual
+  const edited = await updateLocalProductById(created.product_template_id, { sales_price: 1100 }, c);
+  check('ข้อ 17 · แก้ราคาทับราคาสมุด ⇒ price_source=manual · ราคาขั้นต่ำเดิมไม่ถูกเขียนทับ',
+    edited.price_source === 'manual' && edited.minimum_sales_price === 700 && edited.sales_price === 1100);
+  const { rows: pAfter } = await c.query(`SELECT sales_price::float8 AS sp FROM products WHERE product_template_id = $1`,
+    [created.product_template_id]);
+  check('ข้อ 17 · แก้สองที่พร้อมกัน (products ตาม)', pAfter[0]?.sp === 1100);
+
+  // 11 · ห้ามแก้ model / ห้ามลบ เมื่อมีใบอ้าง
+  await insertQuote(c, 'QP-T-0100', 'confirmed', [
+    { model: created.model, internal_reference: created.internal_reference, product_id: created.product_template_id },
+  ]);
+  const lockModel = await expectError(() => updateLocalProductById(created.product_template_id, { model: 'QQQ-NEW' }, c));
+  const lockDel = await expectError(() => deleteLocalProductById(created.product_template_id, c));
+  const okName = await updateLocalProductById(created.product_template_id, { name: 'ชื่อใหม่' }, c);
+  check('ข้อ 11 · มีใบอ้าง ⇒ เปลี่ยน model 409 · ลบ 409 · แก้ชื่อได้',
+    lockModel?.code === 'LOCKED' && lockDel?.code === 'LOCKED' && okName.name === 'ชื่อใหม่');
+  await deleteLocalProductById(manual.product_template_id, c);
+  check('ข้อ 11 · ไม่มีใบอ้าง ⇒ ลบได้ทั้งสองที่',
+    (await c.query(`SELECT 1 FROM local_products WHERE product_template_id = $1
+                    UNION ALL SELECT 1 FROM products WHERE product_template_id = $1`, [manual.product_template_id])).rows.length === 0);
+
+  // ออกเลขใหม่ — มีใบอ้าง ⇒ ห้าม (ไม่ทับใบ) · ไม่มีใบอ้าง ⇒ รหัสเดิมเข้า rejected_refs · exported_at ล้าง
+  const reLocked = await expectError(() => reissueLocalProductRef(created.product_template_id, {}, c));
+  check('ออกเลขใหม่ · มีใบอ้างรหัสนี้แล้ว ⇒ 409 LOCKED (ระบบไม่ทับรหัสในใบ)', reLocked?.code === 'LOCKED');
+  const solo = await createLocalProduct({ model: 'QQQ-04(S2)9x3+1M', sales_price: 80, parent_reference: 'FTCP2QQQ040000' }, null, c);
+  await c.query(`UPDATE local_products SET exported_at = NOW() WHERE product_template_id = $1`, [solo.product_template_id]);
+  const re = await reissueLocalProductRef(solo.product_template_id, {}, c);
+  const { rows: soloP } = await c.query(`SELECT internal_reference FROM products WHERE product_template_id = $1`, [solo.product_template_id]);
+  check('ออกเลขใหม่ · ไม่มีใบอ้าง ⇒ รหัสใหม่ · เดิมเข้า rejected_refs · exported_at ล้าง · products ตาม',
+    re.product.internal_reference !== solo.internal_reference && re.product.rejected_refs.includes(solo.internal_reference) &&
+    re.product.exported_at === null && soloP[0]?.internal_reference === re.product.internal_reference,
+    JSON.stringify({ old: solo.internal_reference, now: re.product.internal_reference, rej: re.product.rejected_refs }));
+
+  // 19 · พี่น้องนับรหัสที่ยังไม่นำเข้า + rejected_refs (แม้แถวใน products ถูกกวาดไปแล้ว)
+  await c.query(`DELETE FROM products WHERE product_template_id = $1`, [re.product.product_template_id]);
+  const after = await previewNextRef('FTCP2QQQ040000', c);
+  const maxSeen = Math.max(Number(re.product.internal_reference.slice(10)), Number(solo.internal_reference.slice(10)));
+  check('ข้อ 19 · /next-ref ไม่ออกเลขที่ยังไม่นำเข้า หรือเลขใน rejected_refs',
+    !!after.ref && Number(after.ref.internal_reference.slice(10)) > maxSeen, after.ref?.internal_reference);
+
+  // ส่งออก
+  const rowsOut = await exportProducts({ filter: 'not_matched' }, c);
+  const { rows: stamped } = await c.query(`SELECT count(*)::int AS n FROM local_products WHERE exported_at IS NOT NULL`);
+  check('ส่งออก · ได้แถวของที่ยังไม่เข้า Odoo (12 คอลัมน์) และประทับ exported_at ให้',
+    rowsOut.length >= 2 && rowsOut.every((r) => r.length === 12) && stamped[0]?.n >= 2,
+    `แถว ${rowsOut.length} · ประทับ ${stamped[0]?.n}`);
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  ข้อ 12 · 16 — ด่านสิทธิ์และตัวคิดราคาตัวเดียว (อ่านซอร์ส)
+  // ════════════════════════════════════════════════════════════════════════
+  section('ข้อ 12 · 16 · ด่านที่จุด mount + ปุ่มคิดราคาใช้ตัวจัดการเดียวกัน');
+  const indexSrc = readFileSync(new URL('../../index.ts', import.meta.url), 'utf-8');
+  const pricingSrc = readFileSync(new URL('../../routes/pricingLab.ts', import.meta.url), 'utf-8');
+  const gateAt = indexSrc.indexOf(`app.use('/api/admin/webquote/products', adminAuthMiddleware, requireCapability('quote.manage_products'));`);
+  const routerAt = indexSrc.indexOf(`app.use('/api/admin/webquote/products', localProductsRouter);`);
+  check('ข้อ 12 · ทุกเส้นใต้ /api/admin/webquote/products ผ่านด่าน quote.manage_products ก่อนถึง router',
+    gateAt >= 0 && routerAt > gateAt);
+  check('ข้อ 16 · POST …/products/price = pricingQuoteHandler ตัวเดียวกับ POST /api/admin/pricing/quote (ไม่มีตัวคิดราคาสองตัว)',
+    /app\.post\('\/api\/admin\/webquote\/products\/price',[^\n]*requireCapability\('quote\.manage_products'\)[^\n]*pricingQuoteHandler\);/.test(indexSrc) &&
+    /^pricingLabRouter\.post\('\/quote', pricingQuoteHandler\);$/m.test(pricingSrc));
+  const svcSrc = readFileSync(new URL('../../services/localProducts.ts', import.meta.url), 'utf-8');
+  const routeSrc = readFileSync(new URL('../../routes/localProducts.ts', import.meta.url), 'utf-8');
+  check('ข้อ 16 · โมดูลนี้ไม่ import services/pricingLab (ถอดโมดูลคิดราคาได้ทั้งก้อน)',
+    !/from '\.\.\/services\/pricingLab|from '\.\/pricingLab/.test(svcSrc + routeSrc));
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  ข้อ 1 · 13 · 14 — อ่านฐานจริง (pool = อีก connection · SELECT อย่างเดียว)
+  // ════════════════════════════════════════════════════════════════════════
+  section('ข้อ 1 · ลองทุกรหัสในฐานจริงเป็นต้นแบบ');
+  const { rows: realRows } = await pool.query<{ internal_reference: string; model: string; name: string | null }>(
+    `SELECT internal_reference, model, name FROM products WHERE internal_reference IS NOT NULL`);
+  const realRefs = realRows.map((r) => r.internal_reference);
+  const realSet = new Set(realRefs);
+  const realIdx = buildRefIndex(realRefs);
+  let t1 = 0, t2 = 0, collide = 0, unexplained = 0;
+  const noneRefs: string[] = [];
+  for (const ref of realRefs) {
+    const r = nextReferenceFromIndex(realIdx, ref);
+    if (!r) {
+      noneRefs.push(ref);
+      // ออกไม่ได้ต้องมีเหตุ: รหัสผิดรูป หรือไม่มีกลุ่ม L ≥ 10 ที่นับต่อได้ (ที่เหลือคือ L=9/8 ซึ่งจะเปลี่ยนรุ่นย่อย)
+      const fitsAt10Plus = [10, 11, 12, 13].some((L) => {
+        const tail = ref.slice(L);
+        return REF_SHAPE.test(ref) && realRefs.some((x) => x.startsWith(ref.slice(0, L)) && /^\d+$/.test(x.slice(L))
+          && Number(x.slice(L)) + 1 < 10 ** (14 - L)) && tail !== undefined;
+      });
+      if (fitsAt10Plus) unexplained++;
+      continue;
+    }
+    if (realSet.has(r.ref)) collide++;
+    if (r.boundary.tier === 'boundary') t1++; else t2++;
+  }
+  const pct = (n: number) => ((100 * n) / realRefs.length).toFixed(2);
+  console.log(`   ${realRefs.length} รหัส · ชั้น 1 ${t1} (${pct(t1)}%) · ชั้น 2 ${t2} (${pct(t2)}%) · ออกไม่ได้ ${noneRefs.length}`);
+  check('ข้อ 1 · รหัสใหม่ชนของเดิมในฐาน 0 ตัว', collide === 0, `ชน ${collide}`);
+  check('ข้อ 1 · ทุกเคสที่ออกไม่ได้มีเหตุ (รหัสผิดรูป หรือนับต่อแล้วรุ่นย่อยจะเปลี่ยน) — ให้คนพิมพ์เอง',
+    unexplained === 0, `${noneRefs.length} เคส · อธิบายไม่ได้ ${unexplained} · ${noneRefs.slice(0, 5).join(' ')}`);
+
+  section('ข้อ 13 · 14 · ต้นแบบและชื่อ — ซ่อนสินค้าทีละตัวแล้วให้ระบบเลือก (ฐานจริง)');
+  const usable = realRows.filter((r) => REF_SHAPE.test(r.internal_reference) && r.model);
+  const byBare = new Map<string, typeof usable>();
+  for (const r of usable) {
+    const b = modelKeyBare(r.model);
+    if (!b) continue;
+    const list = byBare.get(b);
+    if (list) list.push(r); else byBare.set(b, [r]);
+  }
+  const acc = { cu: { n: 0, picked: 0, hit: 0 }, std: { n: 0, picked: 0, hit: 0 } };
+  let nameN = 0, nameOk = 0;
+  for (const r of usable) {
+    const b = modelKeyBare(r.model);
+    if (!b) continue;
+    const a = acc[isCustomRef(r.internal_reference) ? 'cu' : 'std'];
+    a.n++;
+    const pick = suggestParent(r.model, byBare.get(b)!.filter((x) => x !== r));
+    if (pick) {
+      a.picked++;
+      if (pick.familyPrefix === r.internal_reference.slice(0, 10)) a.hit++;
+    }
+    if (namePrefix(r.name, r.model) !== null) {
+      nameN++;
+      if (suggestName(r.model, r) === r.name) nameOk++;
+    }
+  }
+  for (const [k, a] of Object.entries(acc)) {
+    const hit = (100 * a.hit) / Math.max(a.picked, 1);
+    console.log(`   ${k === 'cu' ? 'สั่งทำ' : 'มาตรฐาน'}: ${a.n} ตัว · เลือกให้ได้ ${a.picked} · ตระกูลตรง ${hit.toFixed(2)}% ของที่เลือกให้`);
+    check(`ข้อ 13 · ${k === 'cu' ? 'สั่งทำ' : 'มาตรฐาน'} · ตระกูลที่เลือกให้ตรงของจริง ≥ 90% (ของเคสที่ระบบเลือกให้)`, hit >= 90, `${hit.toFixed(2)}%`);
+  }
+  check('ข้อ 14 · ใช้ตัวเองเป็นต้นแบบ ⇒ ชื่อที่ตั้งให้ = ชื่อจริงทุกแถวที่ชื่อลงท้ายด้วย model',
+    nameN > 0 && nameOk === nameN, `${nameOk}/${nameN}`);
+  check('ข้อ 14 · ต้นแบบชื่อไม่เข้ารูปแบบ ⇒ ใช้คำนำหน้าที่ตระกูลใช้มากสุด ไม่ใช่ว่าง',
+    suggestName('X-1', { internal_reference: 'FAAAAAAAAA0001', model: 'X-0', name: 'ชื่ออื่น' }, [
+      { internal_reference: 'FAAAAAAAAA0002', model: 'X-2', name: 'Heater "PM" X-2' },
+      { internal_reference: 'FAAAAAAAAA0003', model: 'X-3', name: 'Heater "PM" X-3' },
+      { internal_reference: 'FAAAAAAAAA0004', model: 'X-4', name: 'Other X-4' },
+    ]) === 'Heater "PM" X-1');
 
   // ── ข้อ 7b · ไม่มีตารางต้องไม่ throw (อ่านฐานจริงผ่าน pool — อีก connection) ─────────
   section('ข้อ 7b · reconcile ห้าม throw');

@@ -177,8 +177,9 @@ import { apiLogMiddleware, getRequestId } from './config/apiLogger.js';
 import { insertQuotationDeleteAudit } from './db/logRepositories.js';
 import { logsRouter } from './routes/logs.js';
 import { dataDirectoryRouter } from './routes/dataDirectory.js';
-import { pricingLabRouter, pricebookRouter } from './routes/pricingLab.js';
+import { pricingLabRouter, pricebookRouter, pricingQuoteHandler } from './routes/pricingLab.js';
 import { localContactsRouter } from './routes/localContacts.js';
+import { localProductsRouter } from './routes/localProducts.js';
 import {
   initApiLogWriter,
   stopApiLogWriter,
@@ -301,6 +302,18 @@ app.use(
   requireCapability('page.odoocontacts'),
 );
 app.use('/api/admin/webquote/contacts', localContactsRouter);
+
+// ── "สินค้าเพิ่มเอง" (local_products) — ดู routes/localProducts.ts ──────────────────────────
+// แผน: docs/plan-local-products.md ก้อน J2 · ยังไม่มี UI เรียก (หน้าต่างกลางหน้าขอใบที่ J6 · หน้ารายการที่ J4)
+// สิทธิ์บังคับที่บรรทัดแรกบรรทัดเดียวคร่อมทุกเส้น: ช่อง `quote.manage_products` ค่าเริ่มต้น
+// admin · approver · subadmin (เจ้าของยืนยัน 2026-10-01 — ใน LINE คือเซลส์ จึงไม่เปิดให้เพิ่ม)
+// ถอนโมดูลออก = ลบ 4 บรรทัดนี้ + 1 ช่องใน capabilities.ts + 1 บรรทัดใน syncService.ts
+// + ตัวกวาดใน scripts/sync/syncProducts.ts + ไฟล์ของโมดูล (ดูหัว routes/localProducts.ts)
+app.use('/api/admin/webquote/products', adminAuthMiddleware, requireCapability('quote.manage_products'));
+// ปุ่มคิดราคา (§13.5) — **ตัวจัดการเดียวกับ POST /api/admin/pricing/quote** ไม่ใช่สำเนา ⇒ ราคาตรงกันเสมอ
+// และกดได้ทุกคนที่เพิ่มสินค้าได้แม้ไม่มี page.pricing (เจ้าของ 2026-10-01) · ถอด pricingLab = ลบบรรทัดนี้
+app.post('/api/admin/webquote/products/price', adminAuthMiddleware, requireCapability('quote.manage_products'), express.json({ limit: '64kb' }), pricingQuoteHandler);
+app.use('/api/admin/webquote/products', localProductsRouter);
 
 // Serve admin portal dashboard
 app.get('/admin', (req: any, res: any) => {

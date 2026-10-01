@@ -100,6 +100,7 @@ export type QuoteCapability =
   | 'quote.unmark_export'
   | 'quote.payment_terms_override'
   | 'quote.manage_contacts'
+  | 'quote.manage_products'
   | 'quote.act_as_any_salesperson'
   | 'approval.decide'
   | 'users.set_issuer_identity';
@@ -290,6 +291,19 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     //    ช่องนี้คุมแค่ "ใครสร้างได้" ไม่ได้คุมว่า "ใครเห็น"
     defaults: switchFor('allow', 'allow', 'allow', 'deny'),
     enforcedAt: 'จุด mount /api/admin/webquote/contacts ใน index.ts (5 เส้น)',
+  },
+  {
+    key: 'quote.manage_products',
+    group: 'quote',
+    label: 'เพิ่ม/แก้สินค้าใหม่ที่ยังไม่มีใน Odoo',
+    modes: SWITCH,
+    // เจ้าของยืนยัน 2026-10-01: ตั้งตาม quote.manage_contacts เป๊ะ — หน้าเว็บเท่านั้น ไม่เปิดให้ LINE
+    // (docs/plan-local-products.md §2.3) · ช่องนี้รวมปุ่มคิดราคาของฟอร์มด้วย (ไม่ต้องมี page.pricing)
+    //
+    // ⚠️ "เพิ่มจาก LINE ไม่ได้" ≠ "ไม่โผล่ใน LINE" — สินค้าที่เพิ่มเป็นแถวจริงใน products ⇒
+    //    เซลส์ค้นเจอและเสนอราคาได้ (ใบติดธง custom_product) · ช่องนี้คุมแค่ "ใครสร้างได้"
+    defaults: switchFor('allow', 'allow', 'allow', 'deny'),
+    enforcedAt: 'จุด mount /api/admin/webquote/products ใน index.ts (+ POST …/price)',
   },
   {
     key: 'quote.payment_terms_override',
