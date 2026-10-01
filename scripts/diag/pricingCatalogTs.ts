@@ -9,6 +9,8 @@
  *   3. **คำตอบของเจ้าของ 2026-09-29 เก้าข้อ** เป็นจริงในตัวคิดราคา — เทียบ "ความสัมพันธ์" ที่ต้องจริงเสมอ
  *      ไม่ใช่ตัวเลขราคา (ไม่มี golden — CLAUDE.md): NTC = ฐาน K/J + กฎ NTC · T = แกนเปล่า + หุ้มเทปล่อนเต็ม L1 ·
  *      Spring P ราคาเท่ามีสปริง · F1/F2 = แถวเดียวกัน · หัก L เปิดกฎของชีต ฯลฯ
+ *   5. **TS_-01 ค่านอกแคตตาล็อก = ต้องขอราคาจากฝ่ายผลิต** (เจ้าของเคาะ B#2–B#8 + UI แบบ A · 2026-09-29) — ค่าที่ตารางไม่มี
+ *      ขึ้นขอราคา · แอดมินเพิ่มช่อง (`applySheetEdit` ตัวเดียวกับ API · ในหน่วยความจำ) แล้วคิดได้ทันที · TS_-01-0 ไม่เปลี่ยน
  *
  * เล่มที่ใช้: เล่มปัจจุบันในฐาน (SELECT อย่างเดียว) + แถวรหัสย่อยจาก `catalog-subcodes.json` ที่ฐานยังไม่มี + ค่ามาตรฐาน
  * เมื่อรหัสไม่ระบุจากแมป (`axisDefaults` — ตัวเดียวกับ `importer.ts --extras-only`) — **ประกอบในหน่วยความจำ ไม่เขียนฐาน**
@@ -24,6 +26,9 @@ import { withSubCodes } from '../../services/pricingLab/bookStore.js';
 import { modelOfCode, parseProductCode, type CodePicks } from '../../services/pricingLab/code.js';
 import { computePrice } from '../../services/pricingLab/engine.js';
 import { TS_CATALOG, buildTsCode, readTsForm, sameTsCode, slotOptions, tsFamilyOfModel, type TsForm } from '../../services/pricingLab/catalogTs.js';
+import { EditRejected, applySheetEdit } from '../../services/pricingLab/modelEditor.js';
+import { checkPriceModel } from '../../services/pricingLab/modelShape.js';
+import { axisValues } from '../../services/pricingLab/code.js';
 import type { PriceBook, SubCode } from '../../services/pricingLab/types.js';
 
 const GREEN = '\x1b[32m', RED = '\x1b[31m', DIM = '\x1b[2m', BOLD = '\x1b[1m', RESET = '\x1b[0m';
@@ -196,8 +201,12 @@ async function main(): Promise<void> {
   const ss11 = book.models['TSK-11']?.adders.find((a) => a.id === 'cable_over_1m')?.rates?.['สายสแตนเลสถัก'];
   check('ข้อ 5: TSP-11 +3M ไม่บอกชนิดสาย = คิดสายสแตนเลสถัก', none11.o?.status === 'priced' && line(none11.o, /สาย/) === (ss11 ?? NaN) * 2, `${line(none11.o, /สาย/)}`);
 
-  // ข้อ 6: TS-14 B ไม่บวก · TS-18 B +ตามกฎหัวอลูมิเนียมใหญ่
-  check('ข้อ 6: TSK-14 …-BU ราคาเท่า …-U', price('TSK-14 13x500+150-BU').o?.unitPrice === price('TSK-14 13x500+150-U').o?.unitPrice && price('TSK-14 13x500+150-BU').o?.status === 'priced');
+  // ข้อ 6: TS-14 B = กฎ "หัวกระโหลก Blacklite ใหญ่" ของชีต (เจ้าของแก้ในฐานแล้วยืนยัน 2026-09-29 "บวกตามที่ผมแก้" — เดิมไม่บวก)
+  //         · TS-18 B +ตามกฎหัวอลูมิเนียมใหญ่
+  const b14 = price('TSK-14 13x500+150-BU');
+  const u14 = price('TSK-14 13x500+150-U');
+  const bl14 = line(b14.o, /Blacklite/i);
+  check('ข้อ 6: TSK-14 …-BU = …-U + กฎ "หัวกระโหลก Blacklite ใหญ่"', b14.o?.status === 'priced' && bl14 !== undefined && b14.o.unitPrice === (u14.o?.unitPrice ?? NaN) + bl14, `+${bl14}`);
   const b18 = price('TSP-18(1.5)9.5-9.5x100+20-BU');
   const u18 = price('TSP-18(1.5)9.5-9.5x100+20-U');
   const alu = line(b18.o, /อลูมิเนียม/);
@@ -224,6 +233,77 @@ async function main(): Promise<void> {
       r.o?.violations.map((v) => v.message).join(' · '));
   }
   check('TS-12 แกน 1.5 กับ Type J ขึ้นคำเตือนตามแคตตาล็อก', price('TSJ-12 1.5x100+1MS').p.warnings.some((w) => /Type K/.test(w)));
+
+  // ── 5. TS_-01: ค่านอกแคตตาล็อก = ต้องขอราคาจากฝ่ายผลิต ─────────────────────────────
+  section('5. TS_-01 ค่านอกแคตตาล็อก = ต้องขอราคาจากฝ่ายผลิต · แอดมินเพิ่มช่องเองได้ (เจ้าของเคาะ 2026-09-29)');
+  const k01 = book.models['TSK-01']!;
+  const asked = (o: ReturnType<typeof price>['o']) => o?.status === 'quoteOnRequest' && o.violations.some((v) => v.askPrice && v.level === 'quoteOnRequest');
+  const lenRate = (d: string) => k01.adders.find((a) => a.byAxis === 'D')?.rates?.[d];
+  // ค่าที่ตารางยังไม่มี — หาเอง ไม่ผูกกับข้อมูลวันนี้
+  const freeT = ['M97', 'M93', 'M89'].find((t) => !axisValues(k01, 'thread').some((v) => v.toUpperCase().startsWith(t)))!;
+  const freeS = ['TSQ', 'TSW', 'TSY'].find((x) => !axisValues(k01, 'sensor').includes(x))!;
+  const freeD = ['97', '93', '89'].find((d) => lenRate(d) === undefined)!;
+  check(`B#3/B#4: เกลียว ${freeT} (ไม่อยู่ในตาราง) → ต้องขอราคา ไม่ใช่ "อ่านไม่ออก/ไม่รับผลิต"`, asked(price(`TSK-01(${freeT})4.8+1M`).o)
+    && !price(`TSK-01(${freeT})4.8+1M`).p.parts.some((x) => x.kind === 'unknown'));
+  check('B#7: TSK-01(S2) → ต้องขอราคา (ไม่แปลงหุนเป็น 1/4”) · TSK-04(S2) ยังเป็น 1/4” ตามเดิม',
+    asked(price('TSK-01(S2)4.8+1M').o) && price('TSK-04(S2)6x100+1M').o?.status === 'priced');
+  const tse = price('TSE-01(M6)4.8+1M');
+  check('B#6: TSE-01 → ได้รุ่น TSK-01 แล้วขึ้นต้องขอราคา · TS-01 เปล่า ๆ ยังไม่มีรุ่น', tse.p.model === 'TSK-01' && asked(tse.o) && !price('TS-01(M6)4.8+1M').p.model);
+  const m6 = price('TSK-01(M6)4.8+1M').o?.unitPrice ?? NaN;
+  const d4 = price('TSK-01(M6)4x105+1M');
+  const d5 = price('TSK-01(M6)5x105+1M');
+  check('B#2: แกน 4 = ราคาตั้ง + อัตราแกน 4.8 · แกน 5 = + อัตราแกน 6 · ไม่มีท่อนที่ยังไม่รวม',
+    d4.o?.status === 'priced' && d4.o.unitPrice === m6 + (lenRate('4.8') ?? NaN) && d5.o?.status === 'priced' && d5.o.unitPrice === m6 + (lenRate('6') ?? NaN)
+      && ![d4, d5].some((r) => r.o?.violations.some((v) => v.partial) || r.p.parts.some((x) => x.kind === 'unknown')),
+    `${d4.o?.unitPrice} · ${d5.o?.unitPrice}`);
+  check(`B#2: แกน ${freeD} (ใหญ่กว่าขนาดที่มีอัตรา) → ต้องขอราคา แม้ไม่ยาวเกินมาตรฐาน`, asked(price(`TSK-01(M6)${freeD}+1M`).o));
+  const m8on48 = price('TSK-01(M8)4.8+1M');
+  check('B#8: M8 กับแกน 4.8 → คิดราคาตามเดิม + เตือนแกนไม่คู่กับเกลียว', m8on48.o?.status === 'priced'
+    && m8on48.o.unitPrice === price('TSK-01(M8)6+1M').o?.unitPrice && m8on48.p.warnings.some((w) => /ใช้แกน 6 mm/.test(w)));
+  check('B#8: M6 กับแกน 5 (คิดอัตรา 6) → เตือนว่า M6 ใช้แกน 4.8', d5.p.warnings.some((w) => /M6 ใช้แกน 4\.8 mm/.test(w)));
+  for (const [alt, main] of [['M8x1.25', 'M8'], ['M10x1.5', 'M10']] as const) {
+    const a = price(`TSK-01(${alt})6+1M`);
+    check(`หมายเหตุใต้ตาราง: ${alt} ราคาเท่า ${main} และได้ช่องกรอก (${alt})`, a.o?.status === 'priced'
+      && a.o.unitPrice === price(`TSK-01(${main})6+1M`).o?.unitPrice && a.p.tsForm?.values.thread === alt);
+  }
+  const t010 = price('TSK-01-0(M12)+1M');
+  check('TS_-01-0 ไม่เปลี่ยน: เกลียวที่ตารางไม่มียังเป็น "อ่านไม่ออก" ไม่ใช่ขอราคา',
+    t010.p.parts.some((x) => x.kind === 'unknown') && !t010.o?.violations.some((v) => v.askPrice));
+
+  // แอดมินเพิ่มช่องเองจากหน้าชีต — ตัวรับเดียวกับ PUT /sheet (ในหน่วยความจำ ไม่เขียนฐาน)
+  const cable = k01.axisDefaultsBy?.cable?.values ?? {};
+  const firstCable = Object.values(cable)[0];
+  const edited = applySheetEdit(book, k01.sheet!, {
+    'TSK-01': {
+      addValues: { thread: [freeT, '1/8”'].filter((x) => !axisValues(k01, 'thread').includes(x)), sensor: [freeS] },
+      cells: { [`TSK/TSJ | ${freeT}`]: 123, [`${freeS} | M6x1.0`]: 321 },
+      adderRates: { len_l1: [{ value: freeD, rate: 77 }] },
+      ...(firstCable ? { defaultsBy: { cable: { ...cable, [freeS]: firstCable } } } : {}),
+    },
+  });
+  const book2: PriceBook = { ...book, models: edited.models };
+  const price2 = (code: string) => { const p = parseProductCode(code, book2); return { p, o: p.cfg ? computePrice(p.cfg, book2) : null }; };
+  const warned = (o: ReturnType<typeof price>['o']) => !!o?.violations.some((v) => v.askPrice && v.level === 'warn');
+  check('เพิ่มคอลัมน์/แถว/ขนาดแกนแล้วสมุดยังผ่านตัวตรวจรูปแบบ', checkPriceModel(edited.models['TSK-01'], 'TSK-01').length === 0);
+  const own = price2(`TSK-01(${freeT})4.8+1M`);
+  check(`กรอกช่อง TSK/TSJ × ${freeT} แล้วคิดได้ทันที + เตือนว่าใช้ราคาที่แอดมินใส่`, own.o?.status === 'priced' && own.o.unitPrice === 123 && warned(own.o));
+  check(`ช่องส้มที่ยังว่าง (TST × ${freeT}) = ยังขอราคาอยู่`, asked(price2(`TST-01(${freeT})4.8+1M`).o));
+  check('คอลัมน์ที่เพิ่มแต่ยังไม่กรอก (1/8”) = ยังขอราคาอยู่', asked(price2('TSK-01(1/8)4.8+1M').o));
+  const ownS = price2(`${freeS}-01(M6)4.8+1M`);
+  check(`แถวหัววัด ${freeS} ที่เพิ่ม → ${freeS}-01 คิดจากแถวของตัวเอง`, ownS.o?.status === 'priced' && ownS.o.unitPrice === 321 && warned(ownS.o));
+  check(`แถว ${freeS} ช่องที่ยังว่าง (M8) = ยังขอราคาอยู่`, asked(price2(`${freeS}-01(M8)4.8+1M`).o));
+  const ownD = price2(`TSK-01(M6)${freeD}x105+1M`);
+  check(`แกน ${freeD} ที่เพิ่มพร้อมอัตรา → ราคาตั้งของคอลัมน์เกลียว + อัตราใหม่`, ownD.o?.status === 'priced' && ownD.o.unitPrice === m6 + 77 && warned(ownD.o));
+  const rejects = (body: unknown) => { try { applySheetEdit(book, k01.sheet!, { 'TSK-01': body }); return false; } catch (e) { return e instanceof EditRejected; } };
+  check('ตัวรับปฏิเสธ: เกลียวที่ชนคอลัมน์เดิม (M8x1.25) · ค่าที่อยู่ในแคตตาล็อก (TSK · แกน 6) · รูปแบบผิด (m12)',
+    rejects({ addValues: { thread: ['M8x1.25'] } }) && rejects({ addValues: { sensor: ['TSK'] } })
+      && rejects({ adderRates: { len_l1: [{ value: '6.0', rate: 1 }] } }) && rejects({ addValues: { thread: ['m12'] } }));
+  check('ตัวรับปฏิเสธ: เพิ่มค่านอกแคตตาล็อกให้ TS_-01-0 (ยังไม่ได้ตั้ง)', (() => {
+    try { applySheetEdit(book, k01.sheet!, { 'TSK-01-0': { addValues: { thread: ['M12'] } } }); return false; } catch (e) { return e instanceof EditRejected; }
+  })());
+  const again = (body: unknown) => { try { return applySheetEdit(book2, k01.sheet!, { 'TSK-01': body }); } catch (e) { return e instanceof EditRejected ? null : undefined; } };
+  check('เอาออก: คอลัมน์ที่ยังมีตัวเลขเอาออกไม่ได้ · ล้างตัวเลขพร้อมกันแล้วเอาออกได้',
+    again({ removeValues: { thread: [freeT] } }) === null && !!again({ cells: { [`TSK/TSJ | ${freeT}`]: null }, removeValues: { thread: [freeT] } }));
 }
 
 main()

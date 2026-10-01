@@ -72,6 +72,7 @@
     "diag:pricebook-sheets-ui": "tsx scripts/diag/pricebookSheetsUi.ts",
     "diag:pricing-rules-ts-ui": "tsx scripts/diag/pricingRulesTsUi.ts",
     "diag:pricebook-subcodes-ui": "tsx scripts/diag/pricebookSubcodesUi.ts",
+    "diag:pricebook-ask-ui": "tsx scripts/diag/pricebookAskPriceUi.ts",
     "diag:pricing-model-edit": "tsx scripts/diag/pricingModelEdit.ts",
     "diag:pricing-import": "tsx scripts/diag/pricingImport.ts",
     "diag:pb-ui": "tsx scripts/diag/pricebookUiProbe.ts",

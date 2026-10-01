@@ -36,7 +36,7 @@ import type { PriceBook, PriceModel, Predicate, ProductConfig } from './types.js
 import { resolveModel } from './engine.js';
 import { findSubCode, subCodeOption } from './subcodes.js';
 import { ADDONS, AMP, BH_CATALOG, SHAPE_AXIS, bhSpec, buildBhCode, sameBhCode, type BhFamily, type BhForm, type HoleSpec, type SizeKey } from './catalogBh.js';
-import { MODEL_SUFFIX, NTC_HEADS, NTC_NUMBERS, TS_ADDONS, readTsForm, tsFamilyOfModel, tsSpec, type TsForm } from './catalogTs.js';
+import { MODEL_SUFFIX, NTC_HEADS, NTC_NUMBERS, TS_ADDONS, TS_CATALOG, readTsForm, tsFamilyOfModel, tsSpec, type TsFamilySpec, type TsForm } from './catalogTs.js';
 
 /** หนึ่งรหัสย่อยในรหัสสินค้า พร้อมคำอธิบายว่าระบบอ่านมันว่าอะไร — ใช้โชว์ให้คนตรวจก่อนเชื่อราคา */
 export interface CodePart {
@@ -203,6 +203,119 @@ function threadFromHun(hun: number): string[] {
     8: ['1"', '8/8"']
   };
   return eighths[hun] ?? [];
+}
+
+// ── ค่านอกแคตตาล็อก = ต้องขอราคาจากฝ่ายผลิต (`TsFamilySpec.askPrice` · เจ้าของสั่ง 2026-09-29 · TS_-01 ก่อน) ──────
+//
+// ตัวอ่านบอกแค่ว่า "ค่านี้อยู่นอกแคตตาล็อก" (`cfg.askPrice`) — **ไม่ตัดสินราคา**: engine ดูเองว่าตารางมีราคาของค่านั้นหรือยัง
+// (ยังไม่มี = ขอราคา · แอดมินเพิ่มช่องแล้วกรอก = คิดได้ + เตือน) ⇒ ใส่ราคาจากหน้าสมุดราคาแล้วมีผลทันทีโดยไม่แตะไฟล์นี้
+// หน้าสมุดราคา (`modelEditor.ts`) กับตัวนับรหัสจริง (`subcodeView.ts`) ใช้ฟังก์ชันชุดนี้ชุดเดียว — ห้ามเขียนกติกาชุดที่สอง
+
+/** แคตตาล็อกของรุ่นนี้ ถ้าตั้งให้ "ค่านอกแคตตาล็อก = ขอราคา" — ไม่มี = รุ่นนี้ใช้กติกาเดิม */
+export function askSpecOf(model: PriceModel): TsFamilySpec | undefined {
+  const fam = tsFamilyOfModel(model.code);
+  const spec = fam ? tsSpec(fam) : undefined;
+  return spec?.askPrice ? spec : undefined;
+}
+
+/** เกลียวในรหัส → คอลัมน์ของตาราง (ตรงตัว → นิ้วไม่มีเครื่องหมาย → มิลตามเลขหลัง M) — **ไม่แปลงหุน** (ดู `TsFamilySpec.askPrice`) */
+function resolveThread(values: string[], raw: string): string | undefined {
+  return matchValue(values, raw) ?? matchInchThread(values, raw) ?? matchMetricThread(values, raw);
+}
+
+/**
+ * คอลัมน์เกลียวของตารางที่เป็นของแคตตาล็อก (ตัวเลือก → คอลัมน์) — `''` ของแคตตาล็อก = เกลียวมาตรฐานของรุ่น (`axisDefaults`)
+ * คอลัมน์ที่ไม่อยู่ในนี้ = แอดมินเพิ่มเองจากหน้าชีต (นอกแคตตาล็อก)
+ */
+function catalogThreadCols(model: PriceModel, spec: TsFamilySpec): Map<string, string> {
+  const axis = spec.askPrice?.thread ?? 'thread';
+  const values = axisValues(model, axis);
+  const out = new Map<string, string>();
+  for (const o of spec.slots.thread?.options ?? []) {
+    const col = o.code === '' ? model.axisDefaults?.[axis] : resolveThread(values, o.code);
+    if (col && !out.has(col)) out.set(col, o.code);
+  }
+  return out;
+}
+
+/** หัวรหัสของแคตตาล็อก (`TS` + ชนิด Sensor) */
+const catalogSensorHeads = (spec: TsFamilySpec) => (spec.slots.sensor?.options ?? []).map((o) => `TS${o.code}`);
+
+/**
+ * ค่านอกแคตตาล็อกในรูปที่ใช้เป็นชื่อช่องของตาราง — ตัวอ่านรหัส · ชิปบนหน้าสมุดราคา · ตัวรับค่าที่แอดมินเพิ่ม ใช้ตัวเดียวกัน
+ * (หน้าจอพิมพ์ค่าเองได้ ⇒ ตัวรับปฏิเสธค่าที่ไม่ใช่รูปนี้ ไม่ใช่แปลงให้เงียบ ๆ แล้วช่องที่กรอกไว้หลุดคีย์)
+ *   เกลียว: `1/8` → `1/8”` (แบบหัวคอลัมน์เดิม) · `m12x1.5` → `M12x1.5` · อื่น ๆ ตัวพิมพ์ใหญ่ · ชนิด Sensor: `E` / `tse` → `TSE`
+ *   ขนาดแกน: ตัวเลขล้วน (`5.0` → `5`)
+ */
+export function canonicalAskValue(slot: 'sensor' | 'thread' | 'd', raw: string): string | undefined {
+  const s = norm(raw);
+  if (slot === 'd') {
+    if (!/^\d+(\.\d+)?$/.test(s) || Number(s) <= 0 || Number(s) >= 1000) return undefined;
+    return String(Number(s));
+  }
+  if (slot === 'sensor') {
+    const u = s.toUpperCase();
+    if (u.startsWith('TS')) return /^TS[A-Z]{1,3}$/.test(u) ? u : undefined;
+    return /^[A-Z]{1,3}$/.test(u) ? `TS${u}` : undefined;
+  }
+  const t = s.replace(/"$/, '');
+  if (/^\d+\/\d+$/.test(t)) return `${t}”`;
+  const m = t.match(/^M(\d+(?:\.\d+)?)(?:X(\d+(?:\.\d+)?))?$/i);
+  if (m) return `M${m[1]}${m[2] ? `x${m[2]}` : ''}`;
+  return /^[A-Z0-9][A-Z0-9./-]{0,11}$/i.test(t) ? t.toUpperCase() : undefined;
+}
+
+/**
+ * ค่าที่แอดมินจะเพิ่มเป็นช่องใหม่ของตาราง ใช้ได้ไหม — คืนข้อความเหตุผลเมื่อไม่ได้ (`modelEditor.ts` ปฏิเสธการบันทึก)
+ * กันสองอย่างที่ทำให้ราคาเดิมเพี้ยนเงียบ ๆ: ค่าที่ตัวอ่านรหัสจับเข้าช่องเดิมอยู่แล้ว (`M8x1.25` = คอลัมน์ M8 ·
+ * `M6x0.75` ทำให้ `M6` กำกวมจนหาคอลัมน์ไม่เจอ) และค่าที่อยู่ในแคตตาล็อก (ต้องแก้ที่ช่องเดิม ไม่ใช่เพิ่มช่องซ้ำ)
+ */
+export function askValueProblem(model: PriceModel, slot: 'sensor' | 'thread' | 'd', value: string): string | undefined {
+  const spec = askSpecOf(model);
+  const axis = spec?.askPrice?.[slot];
+  if (!spec || !axis) return `${model.code} ไม่ได้ตั้งให้เพิ่มค่านอกแคตตาล็อกของช่องนี้`;
+  if (canonicalAskValue(slot, value) !== value) return `"${value}" ไม่ใช่รูปแบบที่ใช้ได้`;
+  if (slot === 'thread') {
+    const hit = resolveThread(axisValues(model, axis), value);
+    if (hit) return `เกลียว ${value} คิดราคาตามคอลัมน์ ${hit} อยู่แล้ว`;
+  } else if (slot === 'sensor') {
+    if (catalogSensorHeads(spec).includes(value)) return `${value} อยู่ในแคตตาล็อกแล้ว`;
+    if (axisValues(model, axis).some((v) => v.toUpperCase() === value)) return `มีแถว ${value} อยู่แล้ว`;
+  } else {
+    if ((spec.slots.d?.options ?? []).some((o) => Number(o.code) === Number(value))) return `แกน ${value} mm อยู่ในแคตตาล็อกแล้ว`;
+    const keys = model.adders.filter((a) => a.byAxis === axis).flatMap((a) => Object.keys(a.rates ?? {}));
+    if (keys.some((k) => Number(k) === Number(value))) return `มีแกน ${value} mm อยู่แล้ว`;
+  }
+  return undefined;
+}
+
+/**
+ * ค่าที่ตารางของรุ่นนี้มีอยู่แต่ **อยู่นอกแคตตาล็อก** (แกน → ค่า) — หน้าสมุดราคาระบายสีส้ม + ปุ่มเอาออก
+ * (ค่าเหล่านี้มาจากการกด "+ เพิ่ม" ที่หน้าชีต · ไม่มีในไฟล์ราคา Excel)
+ */
+export function offCatalogValues(model: PriceModel): Record<string, string[]> {
+  const spec = askSpecOf(model);
+  if (!spec?.askPrice) return {};
+  const out: Record<string, string[]> = {};
+  const { sensor, thread, d } = spec.askPrice;
+  if (thread) {
+    const cat = catalogThreadCols(model, spec);
+    const off = axisValues(model, thread).filter((v) => !cat.has(v));
+    if (off.length) out[thread] = off;
+  }
+  if (sensor) {
+    const heads = catalogSensorHeads(spec);
+    // แถวของตารางเขียนแบบ `TSK/TSJ` — แถวที่ไม่มีหัวรหัสของแคตตาล็อกสักตัว = เพิ่มเอง
+    const off = axisValues(model, sensor).filter((v) => !v.toUpperCase().split(/[^A-Z0-9]+/).some((t) => heads.includes(t)));
+    if (off.length) out[sensor] = off;
+  }
+  if (d) {
+    const cat = (spec.slots.d?.options ?? []).map((o) => Number(o.code));
+    const keys = [...new Set(model.adders.filter((a) => a.byAxis === d).flatMap((a) => Object.keys(a.rates ?? {})))];
+    const off = keys.filter((k) => !cat.includes(Number(k)));
+    if (off.length) out[d] = off;
+  }
+  return out;
 }
 
 /**
@@ -463,6 +576,109 @@ function catalogOnlySize(c: Ctx, slot: string, raw: string, tableValues: string[
 }
 
 /**
+ * เกลียวในวงเล็บของรุ่นที่ "ค่านอกแคตตาล็อก = ขอราคา" — คืนคอลัมน์ **ของแคตตาล็อก** ที่ใช้คิด (นอกแคตตาล็อก = `undefined`)
+ * ลำดับ: คอลัมน์ของตาราง (ตรงตัว · นิ้ว · มิล — ไม่แปลงหุน) → ตารางรหัสย่อย → นอกแคตตาล็อก = ค่าของตัวเองในแกนเกลียว
+ * ค่าของตัวเองไม่มีคอลัมน์ = engine ตอบ "ต้องขอราคาจากฝ่ายผลิต" · แอดมินเพิ่มคอลัมน์แล้วกรอก = คิดได้เลย
+ */
+function readAskThread(c: Ctx, spec: TsFamilySpec, raw: string): string | undefined {
+  const axis = spec.askPrice!.thread!;
+  const text = `(${raw})`;
+  const cat = catalogThreadCols(c.model, spec);
+  const hit = resolveThread(axisValues(c.model, axis), raw);
+  if (hit) {
+    c.cfg.axes = { ...c.cfg.axes, [axis]: hit };
+    // M8x1.25 · M10x1.5 = ตัวหนังสือแดงใต้คอลัมน์ของชีต — ราคาเดียวกับคอลัมน์ข้างบน (ตัวเลือกในแคตตาล็อกด้วย 2026-09-29)
+    const same = /x/i.test(raw) && norm(raw).toLowerCase() !== norm(hit).toLowerCase();
+    if (!cat.has(hit)) {
+      c.cfg.askPrice = { ...c.cfg.askPrice, [axis]: hit };
+      const shown = same ? canonicalAskValue('thread', raw) ?? raw : hit;
+      add(c, { text, reads: `เกลียว ${shown} — นอกแคตตาล็อก ${spec.head}${same ? ` คิดตามคอลัมน์ ${hit}` : ''} ใช้ราคาที่เพิ่มไว้ในสมุดราคา`, kind: 'axis' });
+      return undefined;
+    }
+    add(c, { text, reads: same ? `เกลียว ${canonicalAskValue('thread', raw) ?? raw} — ราคาเดียวกับ ${hit} (หมายเหตุใต้ตารางของชีต)` : `เกลียว ${hit}`, kind: 'axis' });
+    return hit;
+  }
+  if (readFromTable(c, raw, text)) return undefined;
+  const v = canonicalAskValue('thread', raw)!;
+  c.cfg.axes = { ...c.cfg.axes, [axis]: v };
+  c.cfg.askPrice = { ...c.cfg.askPrice, [axis]: v };
+  add(c, {
+    text,
+    reads: `เกลียว ${v} — ไม่อยู่ในแคตตาล็อก ${spec.head} (มี ${[...cat.keys()].join(' · ')}) ⇒ ต้องขอราคาจากฝ่ายผลิต`,
+    kind: 'axis',
+  });
+  return undefined;
+}
+
+/**
+ * ขนาดแกนนอกแคตตาล็อกของรุ่นที่ "ค่านอกแคตตาล็อก = ขอราคา" — ใช้อัตราความยาวแกนของ **ขนาดถัดขึ้นไปที่มีอัตรา**
+ * (เจ้าของเคาะ B#2 2026-09-29: ≤ 4.8 คิดเท่า 4.8 · > 4.8 ถึง 6 คิดเท่า 6 · ใหญ่กว่านั้นขอราคา) — ยึดคีย์ของอัตราในสมุด
+ * ไม่ใช่ตัวเลขในโค้ด ⇒ แอดมินเพิ่มแกน 8 พร้อมอัตราแล้ว แกน 7–8 คิดได้เอง · คืนคีย์อัตราที่ใช้
+ */
+function readAskD(c: Ctx, spec: TsFamilySpec, dText: string, dRates: string[]): string {
+  const axis = spec.askPrice!.d!;
+  const n = Number(dText);
+  const cat = (spec.slots.d?.options ?? []).map((o) => o.code);
+  const keys = dRates.filter((k) => /^\d+(\.\d+)?$/.test(k)).sort((a, b) => Number(a) - Number(b));
+  const up = keys.find((k) => Number(k) >= n);
+  if (up) {
+    c.cfg.axes = { ...c.cfg.axes, [axis]: up };
+    const own = !cat.some((x) => Number(x) === Number(up));
+    if (own) c.cfg.askPrice = { ...c.cfg.askPrice, [axis]: up };
+    add(c, {
+      text: dText,
+      reads: `แกน ${dText} mm — แคตตาล็อก ${spec.head} มีแกน ${cat.join(' · ')} mm ⇒ คิดอัตราความยาวแกนของแกน ${up} mm${own ? ' (อัตราที่เพิ่มไว้ในสมุดราคา)' : ''}`,
+      kind: 'axis',
+    });
+    return up;
+  }
+  const v = canonicalAskValue('d', dText)!;
+  c.cfg.axes = { ...c.cfg.axes, [axis]: v };
+  c.cfg.askPrice = { ...c.cfg.askPrice, [axis]: v };
+  add(c, {
+    text: dText,
+    reads: `แกน ${dText} mm — ใหญ่กว่าทุกขนาดที่สมุดราคามีอัตรา (${keys.join(' · ') || '—'} mm) ⇒ ต้องขอราคาจากฝ่ายผลิต`,
+    kind: 'axis',
+  });
+  return v;
+}
+
+/** ขนาดแกน (คีย์อัตรา) → คอลัมน์เกลียวที่แคตตาล็อกจับคู่ไว้ (`TsFamilySpec.dThreads`) */
+function pairedThreadCols(model: PriceModel, spec: TsFamilySpec): Map<string, Set<string>> {
+  const axis = spec.askPrice?.thread ?? 'thread';
+  const values = axisValues(model, axis);
+  const out = new Map<string, Set<string>>();
+  for (const [d, codes] of Object.entries(spec.dThreads ?? {})) {
+    const cols = codes.map((x) => (x === '' ? model.axisDefaults?.[axis] : resolveThread(values, x))).filter((x): x is string => !!x);
+    out.set(d, new Set(cols));
+  }
+  return out;
+}
+
+/**
+ * หัวรหัสที่ไม่อยู่ในแคตตาล็อก (`TSE-01`) ของรุ่นที่ "ค่านอกแคตตาล็อก = ขอราคา" — คืน true เมื่อจัดการแล้ว
+ * **คิดได้จากแถวที่ชื่อตรงกับหัวรหัสเท่านั้น** (แอดมินเพิ่มจากหน้าชีต) — ห้ามใช้ `matchSensor` ที่ไล่หาแบบหลวม
+ * เพราะนั่นคือทางถอยข้ามชนิดเซนเซอร์ที่เจ้าของสั่งถอดไปแล้ว (2026-09-28 · `TSR-04` เคยได้ราคา Type K)
+ */
+function readAskSensor(c: Ctx, prefix: string): boolean {
+  const spec = askSpecOf(c.model);
+  const axis = spec?.askPrice?.sensor;
+  if (!spec || !axis || catalogSensorHeads(spec).includes(prefix)) return false;
+  const own = axisValues(c.model, axis).find((v) => v.toUpperCase() === prefix);
+  const v = own ?? prefix;
+  c.cfg.axes = { ...c.cfg.axes, [axis]: v };
+  c.cfg.askPrice = { ...c.cfg.askPrice, [axis]: v };
+  add(c, {
+    text: prefix,
+    reads: own
+      ? `หัววัด ${v} — นอกแคตตาล็อก ${spec.head} ใช้แถวที่เพิ่มไว้ในสมุดราคา`
+      : `หัววัด ${prefix} — ไม่อยู่ในแคตตาล็อก ${spec.head} (มี ${catalogSensorHeads(spec).join(' · ')}) ⇒ ต้องขอราคาจากฝ่ายผลิต`,
+    kind: 'axis',
+  });
+  return true;
+}
+
+/**
  * ไวยากรณ์ร่วมของ TC แบบ "แกน × เกลียว" — `TS_-04(S_) 6x100+1M` (TS-04!A7)
  * วงเล็บ = ขนาดเกลียว · ก่อน x = แกน D · หลัง x = ความยาว L1 · +NM = ความยาวสาย
  *
@@ -476,9 +692,20 @@ function readTsGeneric(c: Ctx, rest: string, prefix: string, letter = ''): void 
   const hasThread = axisValues(c.model, 'thread').length > 0;
   const hasD = axisValues(c.model, 'D').length > 0;
   const dRates = hasD ? [] : [...new Set(c.model.adders.filter((a) => a.byAxis === 'D').flatMap((a) => Object.keys(a.rates ?? {})))];
+  // รุ่นที่ "ค่านอกแคตตาล็อก = ขอราคา" (TS_-01) — เกลียว/แกนที่ตารางไม่มีไม่ใช่ "อ่านไม่ออก" แต่เป็นค่าที่ต้องขอราคา
+  const ask = askSpecOf(c.model);
+  /** คอลัมน์เกลียวของแคตตาล็อกที่ใช้คิด + ข้อความในรหัส — ไว้เตือน "แกนไม่คู่กับเกลียว" (B#8) · นอกแคตตาล็อก = ไม่เตือน */
+  let threadCol: string | undefined;
+  let threadText = '';
+  /** อัตราความยาวแกนที่ใช้ (หลังปัดขึ้นเป็นขนาดที่มีอัตรา) */
+  let dUsed: string | undefined;
 
   const paren = rest.match(/^\(([^)]*)\)/);
-  if (paren && !hasThread) {
+  if (paren && ask?.askPrice?.thread && canonicalAskValue('thread', paren[1] ?? '') !== undefined) {
+    threadText = paren[1] ?? '';
+    threadCol = readAskThread(c, ask, threadText);
+    rest = rest.slice(paren[0].length);
+  } else if (paren && !hasThread) {
     // รุ่นที่ไม่มีแกนเกลียว แต่รหัสมีวงเล็บมา — ลองตารางรหัสย่อยก่อน ไม่งั้นบอกว่าอ่านไม่ออก
     const raw = paren[1] ?? '';
     if (!readFromTable(c, raw, `(${raw})`)) {
@@ -506,7 +733,8 @@ function readTsGeneric(c: Ctx, rest: string, prefix: string, letter = ''): void 
       c.cfg.unread = { ...c.cfg.unread, thread: `(${raw})` };
       add(c, {
         text: `(${raw})`,
-        reads: `เกลียวมิล ${raw.toUpperCase()} — ตารางราคา ${c.model.sheet ?? c.model.code} มีแต่เกลียวนิ้ว ยังไม่ได้ตั้งค่าว่าคิดเท่าไหร่`,
+        // บอกเกลียวที่ตารางมีจริง — เดิมเขียนว่า "มีแต่เกลียวนิ้ว" ทั้งที่ตาราง TS_-01 / TS_-01-0 มีเกลียวมิลหลายขนาด (ข้อ C · 2026-09-29)
+        reads: `เกลียว ${raw.toUpperCase()} — ตารางราคา ${c.model.sheet ?? c.model.code} มีเกลียว ${threads.join(' · ')} ยังไม่ได้ตั้งค่าว่า ${raw.toUpperCase()} คิดเท่าไหร่`,
         kind: 'unknown',
         subCode: raw
       });
@@ -520,6 +748,11 @@ function readTsGeneric(c: Ctx, rest: string, prefix: string, letter = ''): void 
   } else if (hasThread && !c.model.axisDefaults?.thread) {
     // รุ่นที่มีเกลียวมาตรฐาน (TS_-01 = 1/4” · TS_-01-0 = M5 ตามแคตตาล็อก) ไม่ต้องเตือน — engine ใช้ค่านั้นแล้วบอกบนบรรทัดราคา
     c.warnings.push('รหัสนี้ไม่มีวงเล็บบอกขนาดเกลียว — ใส่เกลียวต่อท้ายเลขรุ่นแล้วคิดใหม่ เช่น TSK-01(M6)');
+  }
+  if (!paren && ask?.askPrice?.thread) {
+    // ไม่มีวงเล็บ = เกลียวมาตรฐานของรุ่น (1/4” ของแคตตาล็อก) — ใช้ตรวจแกนคู่เกลียวด้วย
+    threadCol = c.model.axisDefaults?.[ask.askPrice.thread];
+    threadText = threadCol ?? '';
   }
 
   const core = rest.match(/^([0-9.]+[A-WYZ]*)(?:x([0-9.]+))?/i);
@@ -563,21 +796,41 @@ function readTsGeneric(c: Ctx, rest: string, prefix: string, letter = ''): void 
       // ต่อ 100 mm (เจ้าของสั่ง 2026-09-25) ⇒ ต้องจำไว้ ไม่งั้นรหัสที่มี `x` จะขึ้น "รหัสไม่ได้บอกขนาดแกน"
       const hit = matchValue(dRates, dText)!;
       c.cfg.axes = { ...c.cfg.axes, D: hit };
-      add(c, { text: dText, reads: `แกน D = ${hit} mm`, kind: 'axis' });
+      dUsed = hit;
+      // ขนาดที่แอดมินเพิ่มเองจากหน้าชีต (นอกแคตตาล็อก) — engine เตือนว่าใช้อัตราที่แอดมินใส่
+      const own = ask?.askPrice?.d && !(ask.slots.d?.options ?? []).some((o) => Number(o.code) === Number(hit));
+      if (own) c.cfg.askPrice = { ...c.cfg.askPrice, D: hit };
+      add(c, { text: dText, reads: own ? `แกน D = ${hit} mm — นอกแคตตาล็อก ${ask!.head} ใช้อัตราที่เพิ่มไว้ในสมุดราคา` : `แกน D = ${hit} mm`, kind: 'axis' });
     } else if (Number(dText) === c.model.standard.dia_mm) {
       // TS-01 ทั้งรุ่นใช้แกนขนาดเดียว (ชีตเขียนไว้ในรหัสมาตรฐานเอง) ⇒ ตัวเลขนี้ไม่ได้เลือกอะไร
       add(c, { text: dText, reads: `แกน ${dText} mm — ขนาดเดียวของรุ่นนี้ ไม่มีผลกับราคา`, kind: 'noPrice' });
     } else if (readFromTable(c, dText)) {
       // ขนาดแกนที่แคตตาล็อกบอกความหมายไว้ (TS_-01: 6 mm คู่กับเกลียว M8/M10) — ตั้งในตารางรหัสย่อย
+    } else if (ask?.askPrice?.d && canonicalAskValue('d', dText) !== undefined) {
+      dUsed = readAskD(c, ask, dText, dRates);
     } else {
       add(c, {
         text: dText,
-        reads: `ตารางราคา ${c.model.sheet ?? c.model.code} มีขนาดแกนเดียวคือ ${c.model.standard.dia_mm ?? '—'} mm — ยังไม่ได้ตั้งค่าว่า ${dText} คิดเท่าไหร่`,
+        // บอกขนาดที่มีอัตราจริง — เดิมเขียนว่า "มีขนาดแกนเดียวคือ 4.8 mm" ทั้งที่แกน 6 ก็มีอัตรา (ข้อ C · 2026-09-29)
+        reads: `ตารางราคา ${c.model.sheet ?? c.model.code} ${
+          dRates.length ? `มีอัตราความยาวแกนของแกน ${[...dRates].sort((a, b) => Number(a) - Number(b)).join(' · ')} mm`
+          : c.model.standard.dia_mm !== undefined ? `มีขนาดแกนเดียวคือ ${c.model.standard.dia_mm} mm` : 'ไม่ได้แยกราคาตามขนาดแกน'
+        } — ยังไม่ได้ตั้งค่าว่า ${dText} คิดเท่าไหร่`,
         kind: 'unknown',
         subCode: dText
       });
       // รหัสบอกขนาดแกนมาแล้วแต่อ่านไม่ออก — กฎความยาวแกนต้องขึ้น "ยังไม่รวม" ไม่ใช่ "รหัสไม่ได้บอก"
       if (dRates.length) c.cfg.unread = { ...c.cfg.unread, D: dText };
+    }
+    // แกนไม่คู่กับเกลียวตามแคตตาล็อก (M8 กับแกน 4.8 · M6 กับแกน 5→6) — เตือนแต่คิดราคาตามแกนในรหัส (เจ้าของเคาะ B#8)
+    if (ask?.dThreads && dUsed !== undefined && threadCol !== undefined) {
+      const pairs = pairedThreadCols(c.model, ask);
+      const want = pairs.get(dUsed);
+      const need = [...pairs].find(([, cols]) => cols.has(threadCol!))?.[0];
+      if (want && !want.has(threadCol) && need !== undefined) {
+        const shown = canonicalAskValue('thread', threadText) ?? threadText;
+        c.warnings.push(`แคตตาล็อก ${ask.head}: เกลียว ${shown} ใช้แกน ${need} mm — รหัสนี้แกน ${dText} mm (คิดราคาตามแกนในรหัส)`);
+      }
     }
     if (core[2]) {
       // ความยาวแกนคิดเงินได้ก็ต่อเมื่อชีตมีคอลัมน์ "บวกเพิ่ม 100 mm ละ" ของรุ่นนั้น
@@ -1167,7 +1420,15 @@ function findModel(book: PriceBook, prefix: string, num: string, suffix: string)
     if (!NTC_HEADS[prefix] || !NTC_NUMBERS.includes(num)) return undefined;
     prefix = 'TSN';
   }
-  return resolveModel(book, `${prefix}-${num}${suffix}`) ?? resolveModel(book, `${prefix}-${num}`);
+  const own = resolveModel(book, `${prefix}-${num}${suffix}`) ?? resolveModel(book, `${prefix}-${num}`);
+  if (own) return own;
+  // หัวรหัสนอกแคตตาล็อกของตารางที่ตั้งให้ "ขอราคา" (`TSE-01` · เจ้าของเคาะ B#6 2026-09-29) — ได้รุ่นเพื่อขึ้น "ต้องขอราคาจากฝ่ายผลิต"
+  // และให้แอดมินเพิ่มแถวของตัวเองได้ · ไม่ใช่ทางถอยข้ามชนิดเซนเซอร์: ตัวอ่านคิดจากแถวชื่อตรงกันเท่านั้น (`readAskSensor`)
+  if (/^TS[A-Z]+$/.test(prefix)) {
+    const spec = TS_CATALOG.find((s) => s.askPrice?.sensor && s.head === `TS_-${num}`);
+    if (spec) return resolveModel(book, spec.model);
+  }
+  return undefined;
 }
 
 /** รุ่นที่ใช้เลขรุ่นนี้ (ไว้บอกคนพิมพ์ว่าตารางนั้นใช้กับรหัสไหน เมื่อหัวรหัสไม่อยู่ในรายชื่อ) */
@@ -1270,7 +1531,7 @@ export function parseProductCode(input: string, book: PriceBook, picks: CodePick
     // หัววัดอ่านหลังส่วนขนาด เพราะบางชีตคิดมันเป็น "คอลัมน์ของตารางราคาตั้ง" (ต้องรู้แกนอื่นก่อน)
     // และบางชีตคิดเป็น "กฎบวกเพิ่ม" — `readSensor` ดูจากสมุดราคาเองว่าเป็นแบบไหน
     if (NTC_HEADS[prefix]) readNtcHead(c, prefix);
-    else readSensor(c, prefix, letter);
+    else if (!readAskSensor(c, prefix)) readSensor(c, prefix, letter);
   }
 
   if (prefix !== 'BH') {

@@ -81,9 +81,11 @@ interface Props {
    *  — สองสิทธิ์แยกกัน ⇒ คนแก้ราคาได้อาจเปิดหน้าคำนวณไม่ได้ ปุ่มต้องหายไปด้วย ไม่ใช่กดแล้วเจอหน้าที่ยิง API ไม่ผ่าน */
   canQuote: boolean;
   onOpenQuote: () => void;
+  /** มาจากปุ่ม "ต้องขอราคา" ของหน้าคำนวณราคา — เปิดชีตนี้เลยแล้วเลื่อนไปที่กล่องขอราคาของรุ่น */
+  openAt?: { sheet: string; model: string } | null;
 }
 
-export const PriceBook: React.FC<Props> = ({ canQuote, onOpenQuote }) => {
+export const PriceBook: React.FC<Props> = ({ canQuote, onOpenQuote, openAt }) => {
   const { token } = useAuth();
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const jsonHeaders = useMemo(
@@ -101,7 +103,7 @@ export const PriceBook: React.FC<Props> = ({ canQuote, onOpenQuote }) => {
   /** รหัสรุ่นที่กำลังแก้ราคาอยู่ — หน้าแก้กินทั้งจอ ไม่ใช่กล่องซ้อน เพราะมันคือจอทำงาน ไม่ใช่คำถามสั้น ๆ */
   const [editingModel, setEditingModel] = useState<string | null>(null);
   /** ชีตที่เปิดแบบ Excel อยู่ (`SheetEditor`) */
-  const [editingSheet, setEditingSheet] = useState<string | null>(null);
+  const [editingSheet, setEditingSheet] = useState<string | null>(openAt?.sheet ?? null);
 
   const loadOverview = useCallback(async () => {
     try {
@@ -221,9 +223,12 @@ export const PriceBook: React.FC<Props> = ({ canQuote, onOpenQuote }) => {
 
   if (editingSheet) {
     const codes = sheets.find((g) => g.sheet === editingSheet)?.models.map((m) => m.code) ?? [];
+    const sheetUnread = unread === undefined ? undefined : unread === null ? null : (unread.sheets.find((s) => s.sheet === editingSheet) ?? null);
     return (
       <SheetEditor
         sheet={editingSheet}
+        askFound={sheetUnread === undefined ? undefined : sheetUnread?.askPrice ?? null}
+        focusAsk={openAt?.sheet === editingSheet ? openAt.model : null}
         products={Object.fromEntries(models.map((m) => [m.code, m.products]))}
         authHeaders={authHeaders}
         onAdvanced={setEditingModel}
@@ -239,7 +244,7 @@ export const PriceBook: React.FC<Props> = ({ canQuote, onOpenQuote }) => {
           rows={allSet}
           models={models}
           axisLabels={axisLabels}
-          unread={unread === undefined ? undefined : unread === null ? null : (unread.sheets.find((s) => s.sheet === editingSheet) ?? null)}
+          unread={sheetUnread}
           token={token ?? ''}
           authHeaders={authHeaders}
           onChanged={subCodesChanged}

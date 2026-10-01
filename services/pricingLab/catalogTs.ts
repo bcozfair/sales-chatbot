@@ -56,6 +56,23 @@ export interface TsFamilySpec {
   defaults: Record<string, string>;
   /** บวกเพิ่มที่ชีตมีราคาแต่แคตตาล็อก/รหัสไม่มีท่อนนี้ (หัก L · หักฉาก — ข้อ 8) · `code` = option ของกฎในสมุดราคา */
   addons?: CatalogOption[];
+  /**
+   * ช่องที่ **ค่านอกแคตตาล็อก = ต้องขอราคาจากฝ่ายผลิต** และแอดมินเพิ่มค่านั้นเป็นช่องในตารางของชีตได้เองจากหน้าสมุดราคา
+   * (ช่องของแคตตาล็อก → แกนในสมุดราคา) — เจ้าของสั่ง 2026-09-29 (TS_-01 ก่อน · เคาะ mockup `ts01-ask-price` แบบ A):
+   * *"ทุกข้อที่ต้องขอราคาจากฝ่ายผลิต ต้องมี ui รองรับให้สามารถเอาราคามาใส่ได้ภายหลังเองได้โดยไม่ต้องมาแก้โค้ดอีก"*
+   *   · `sensor` — หัวรหัสที่ไม่อยู่ในรายการ (`TSE-01`) ได้รุ่นนี้ แต่คิดได้จาก **แถวของตัวเองเท่านั้น** (ไม่ยืมแถวอื่น)
+   *   · `thread` — เกลียวที่ไม่อยู่ในรายการ (M12 · S1–S4 · 1/8) = คอลัมน์ของตัวเอง · ไม่แปลง "หุน" เป็นเกลียวนิ้ว
+   *     (`S2` = 1/4” **NPT** ไม่ใช่ 1/4” ของตาราง — เจ้าของเคาะ B#7)
+   *   · `d` — ขนาดแกนที่ไม่อยู่ในรายการ ใช้อัตราความยาวแกนของ **ขนาดถัดขึ้นไปที่มีอัตรา** (4 → 4.8 · 5 → 6 · เจ้าของเคาะ B#2)
+   *     ใหญ่กว่าทุกขนาดที่มีอัตรา = ขอราคา · แอดมินเพิ่มขนาดใหม่พร้อมอัตรา = ราคาตั้งของคอลัมน์เกลียว + อัตราใหม่
+   * ไม่มีช่องนี้ = รุ่นนั้นใช้กติกาเดิมทุกอย่าง (ค่าที่ตารางไม่มี = อ่านไม่ออก)
+   */
+  askPrice?: { sensor?: string; thread?: string; d?: string };
+  /**
+   * ขนาดแกน → เกลียวที่แคตตาล็อกจับคู่ไว้ (ค่าในรายการของช่อง) — ไม่คู่ = **เตือน ไม่บล็อก** และคิดราคาตามแกนในรหัส
+   * (เจ้าของเคาะ B#8 2026-09-29: ราคาตั้งไม่ขึ้นกับแกน · Odoo ขาย `TSK-01(M6)5x50+1M` ที่ 160 + อัตราแกน 6)
+   */
+  dThreads?: Record<string, string[]>;
 }
 
 /** ค่าที่กรอกในช่อง — ตัวเดียวกันทั้งตอนอ่านรหัสออกมาและตอนประกอบกลับ */
@@ -121,7 +138,9 @@ export const TS_CATALOG: TsFamilySpec[] = [
       { sep: 'x' }, { slot: 'l1' }, { sep: '+' }, { slot: 'cl' }, { sep: 'M' }, { slot: 'cable' }, { slot: 'ground' }],
     slots: {
       sensor: ch('ชนิด Sensor', [...TC_KJT, ...RTD]),
-      thread: ch('ขนาดเกลียว', [o('', '1/4 นิ้ว (Standard)'), o('5/16', '5/16 นิ้ว'), o('M6', 'M6 x 1.0'), o('M8', 'M8 x 1.0'), o('M10', 'M10 x 1.25')]),
+      // M8x1.25 · M10x1.5 = ตัวหนังสือแดงใต้ตารางของชีต ("*M8x1.25" ใต้ M8x1.0) — ราคาเดียวกับคอลัมน์ข้างบน (เจ้าของสั่ง 2026-09-29)
+      thread: ch('ขนาดเกลียว', [o('', '1/4 นิ้ว (Standard)'), o('5/16', '5/16 นิ้ว'), o('M6', 'M6 x 1.0'), o('M8', 'M8 x 1.0'),
+        o('M8x1.25', 'M8 x 1.25 — ราคาเดียวกับ M8'), o('M10', 'M10 x 1.25'), o('M10x1.5', 'M10 x 1.5 — ราคาเดียวกับ M10')]),
       d: ch('ขนาดแกน', [o('4.8', '4.8 mm (1/4”, 5/16”, M6)'), o('6', '6 mm (M8, M10)')]),
       mat: ch('วัสดุ', [o('', 'SUS 304')]),
       l1: { ...L1, placeholder: '5', optional: true, hint: 'None = 5 mm · ระบุความยาวได้ตามต้องการ' },
@@ -130,6 +149,8 @@ export const TS_CATALOG: TsFamilySpec[] = [
       ground: ch('Ground', GROUND),
     },
     defaults: { sensor: 'K', thread: 'M6', d: '4.8', mat: '', l1: '', cl: '1', cable: '', ground: '' },
+    askPrice: { sensor: 'sensor', thread: 'thread', d: 'D' },
+    dThreads: { '4.8': ['', '5/16', 'M6'], '6': ['M8', 'M8x1.25', 'M10', 'M10x1.5'] },
   },
   {
     family: 'TS_-01-0', head: 'TS_-01-0', name: 'Thermocouple / RTD · Hold Size (ID1) + Cable', model: 'TSK-01-0',
@@ -372,9 +393,12 @@ export function buildTsCode(form: TsForm): string {
 // ── อ่านรหัสกลับเป็นช่อง ─────────────────────────────────────────────────────────
 
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
-/** ตัวเลือกของช่องเป็น regex — ยาวก่อนสั้น (`PA` ก่อน `P` · `6.35` ก่อน `6`) · ตัวว่างไม่อยู่ในรายการ (ช่องทั้งช่องเป็น optional เอง) */
+/**
+ * ตัวเลือกของช่องเป็น regex — ยาวก่อนสั้น (`PA` ก่อน `P` · `6.35` ก่อน `6`) · ตัวว่างไม่อยู่ในรายการ (ช่องทั้งช่องเป็น optional เอง)
+ * เป็นตัวพิมพ์ใหญ่เพราะรหัสถูกทำเป็นตัวพิมพ์ใหญ่ก่อนเทียบ (`M8x1.25` → `M8X1.25`) — `readTsForm` แปลงกลับเป็นรหัสในรายการ
+ */
 function alt(options: CatalogOption[]): string {
-  return [...new Set(options.map((x) => x.code).filter(Boolean))].sort((a, b) => b.length - a.length).map(esc).join('|');
+  return [...new Set(options.map((x) => x.code.toUpperCase()).filter(Boolean))].sort((a, b) => b.length - a.length).map(esc).join('|');
 }
 const NUM = '\\d+(?:\\.\\d+)?';
 
@@ -433,6 +457,13 @@ export function readTsForm(input: string, family: TsFamily): TsForm | undefined 
   const values: Record<string, string> = {};
   for (const key of Object.keys(spec.slots)) values[key] = m.groups[key] ?? '';
   if (!spec.slots.probe) delete values.probe;
+  // ค่าที่อ่านได้เป็นตัวพิมพ์ใหญ่ (`M8X1.25`) → รหัสตามรายการ (`M8x1.25`) ไม่งั้นช่องเลือกบนจอหาตัวเลือกไม่เจอ · ชนิดหัววัดก่อน Sensor
+  for (const key of ['probe', ...Object.keys(spec.slots).filter((k) => k !== 'probe')]) {
+    const slot = spec.slots[key];
+    if (slot?.kind !== 'choice' || !values[key]) continue;
+    const hit = slotOptions(slot, values).find((x) => x.code.toUpperCase() === values[key]!.toUpperCase());
+    if (hit) values[key] = hit.code;
+  }
   // หัว NTC/PTC ต้องคู่กับ 2/10 · หัว TS ต้องคู่กับ K J T … (regex รวมทั้งสองชุดไว้ในกลุ่มเดียว)
   const sensorOk = spec.slots.sensor ? slotOptions(spec.slots.sensor, values).some((x) => x.code === values.sensor) : true;
   if (!sensorOk) return undefined;

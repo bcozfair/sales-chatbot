@@ -194,6 +194,8 @@ interface BaseResult {
   missing?: boolean;
   /** คิดไม่ได้เพราะค่าแกนนั้น "ตั้งไว้แต่ยังไม่มีราคา" (`unpriced`) — ไม่ใช่ไม่รับผลิต */
   noRate?: boolean;
+  /** คิดไม่ได้เพราะค่าแกนอยู่นอกแคตตาล็อกและตารางยังไม่มีราคา (`ProductConfig.askPrice`) — ต้องขอราคาจากฝ่ายผลิต */
+  quote?: boolean;
   /** วิธีหาราคาตั้งทีละขั้น (ดู `PriceTrace`) */
   steps: string[];
 }
@@ -205,7 +207,8 @@ function computeBase(
   dims: Record<string, number>,
   seen: Set<string>,
   unread: Record<string, string> = {},
-  catalogOnly: Record<string, string> = {}
+  catalogOnly: Record<string, string> = {},
+  askPrice: Record<string, string> = {}
 ): BaseResult {
   const base = model.base;
 
@@ -218,7 +221,7 @@ function computeBase(
     if (!parent) {
       return { ok: false, amount: 0, label: 'ฐานราคา', reason: `ไม่มีรุ่น ${base.model} ในสมุดราคา`, steps: [] };
     }
-    const r = computeBase(parent, book, axes, dims, seen, unread, catalogOnly);
+    const r = computeBase(parent, book, axes, dims, seen, unread, catalogOnly, askPrice);
     return {
       ...r,
       label: `${r.label} (ฐานของ ${parent.code})`,
@@ -272,6 +275,20 @@ function computeBase(
           noRate: true,
           reason: `ตารางราคาตั้งของ ${model.code} ยังไม่มีแถว${listedOnly.map((a) => `${axisLabel(a)} ${axes[a]}`).join(' · ')} — แคตตาล็อกมีขนาดนี้แต่ชีต Excel ยังไม่มีราคา`,
           steps: [...steps, `${listedOnly.map((a) => `${axisLabel(a)} ${axes[a]}`).join(' · ')} อยู่ในแคตตาล็อก แต่ตารางราคาไม่มีแถวนี้ (ยังไม่มีราคา ไม่ใช่ไม่รับผลิต)`],
+        };
+      }
+      // ค่านอกแคตตาล็อก (เกลียว M12 · หัววัด TSE ของ TS_-01) ที่ตารางยังไม่มีราคา — "ต้องขอราคาจากฝ่ายผลิต" ตามที่เจ้าของเคาะ
+      // 2026-09-29 ไม่ใช่ "ไม่รับผลิต" · มาก่อน `unpriced` เพราะคอลัมน์ที่แอดมินเพิ่มแล้วยังว่างก็ยังเป็นการขอราคาอยู่
+      const asked = base.axes.filter((a) => askPrice[a] !== undefined && askPrice[a] === axes[a]);
+      if (asked.length) {
+        const what = asked.map((a) => `${axisLabel(a)} ${axes[a]}`).join(' · ');
+        return {
+          ok: false,
+          amount: 0,
+          label: 'ฐานราคา',
+          quote: true,
+          reason: `${what} ไม่อยู่ในแคตตาล็อก — ต้องขอราคาจากฝ่ายผลิต`,
+          steps: [...steps, `${what} ไม่อยู่ในแคตตาล็อก และตารางราคาตั้งยังไม่มีราคาของช่องนี้ — ได้ราคาแล้วเพิ่มในตารางของชีต${model.sheet ? ` ${model.sheet}` : ''} ที่หน้าสมุดราคา`],
         };
       }
       // ค่าที่ตั้งไว้ให้กรอกราคาทีหลัง ≠ ช่องที่ชีตเว้นไว้ — อย่างแรก "ยังไม่มีราคา" อย่างหลัง "ไม่รับผลิต"
@@ -643,7 +660,7 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
         : setBy[k]
           ? `รหัสย่อย ${setBy[k]}`
           : k in given
-            ? 'ระบุในรหัส'
+            ? cfg.askPrice?.[k] !== undefined && cfg.askPrice[k] === axes[k] ? 'ระบุในรหัส — นอกแคตตาล็อก' : 'ระบุในรหัส'
             : defaultedBy[k]
               ? `${defaultedBy[k]} — รหัสไม่ได้ระบุ`
               : unreadText !== undefined ? 'รหัสบอกมาแต่ระบบอ่านไม่ออก' : 'รหัสไม่ได้ระบุ',
@@ -711,7 +728,7 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
           `รหัสย่อย ${ownBase[0].subCode} (${ownBase[0].reads}) ตั้งราคาตั้งต้นเอง = ${fmt(money(ownBase[0].amount ?? 0))} บาท — ไม่ใช้ตารางราคาตั้ง`,
         ],
       }
-    : computeBase(model, book, axes, dims, new Set([model.code]), cfg.unread, cfg.catalogOnly);
+    : computeBase(model, book, axes, dims, new Set([model.code]), cfg.unread, cfg.catalogOnly, cfg.askPrice);
   const baseWaits = model.base.kind === 'matrix' && model.base.axes.some((a) => pendingAxes.has(a));
   const traceBase: TraceBase = { ok: base.ok, label: base.label, steps: [...base.steps] };
   if (!base.ok && baseWaits) {
@@ -733,9 +750,12 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
     }
     traceBase.steps.push(`หาราคาตั้งไม่ได้: ${base.reason ?? 'ไม่มีราคาฐาน'}`);
     violations.push({
-      id: 'NO_BASE_PRICE', level: 'block', message: base.reason ?? 'ไม่มีราคาฐาน',
+      id: base.quote ? 'ASK_PRICE' : 'NO_BASE_PRICE',
+      level: base.quote ? 'quoteOnRequest' : 'block',
+      message: base.reason ?? 'ไม่มีราคาฐาน',
       ...(base.missing ? { missing: true } : {}),
       ...(base.noRate ? { noRate: true } : {}),
+      ...(base.quote ? { askPrice: true } : {}),
     });
   } else {
     running = base.amount;
@@ -745,12 +765,27 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
     const detail = fromDefault.length ? [base.detail, `(${fromDefault.join(' · ')})`].filter(Boolean).join(' ') : base.detail;
     breakdown.push({ step: 'base', label: base.label, detail, amount: base.amount, running });
     traceBase.amount = base.amount;
+    // ช่องที่แอดมินเพิ่มเอง (นอกแคตตาล็อก) มีราคาแล้ว — คิดได้ แต่ต้องบอกว่าราคามาจากไหน (ไม่ใช่ของ Excel)
+    for (const a of baseAxes.filter((x) => cfg.askPrice?.[x] !== undefined && cfg.askPrice[x] === axes[x])) {
+      violations.push({ id: `ASK_PRICE_SET:${a}`, level: 'warn', askPrice: true, message: `${axisLabel(a)} ${axes[a]} ไม่อยู่ในแคตตาล็อก — ใช้ราคาที่แอดมินใส่ในสมุดราคา` });
+    }
     const std = Object.entries(model.standard);
     if (std.length && !ownBase[0]) {
       traceBase.steps.push(
         `ราคาตั้งนี้รวมสเปกมาตรฐานไว้แล้ว: ${std.map(([k, v]) => `${dimLabel(k)} ${fmt(v)}`).join(' · ')} — ส่วนที่เกินคิดเพิ่มในกฎข้างล่าง`
       );
     }
+  }
+
+  // ค่านอกแคตตาล็อกของแกนที่ไม่ใช่แกนของตารางราคาตั้ง (ขนาดแกนของ TS_-01 = อัตราของกฎความยาวแกน) — ยังไม่มีอัตรา
+  // = ทั้งชิ้นต้องขอราคา แม้ใบนี้จะไม่ยาวเกินมาตรฐาน (เจ้าของเคาะ B#2: "แกนขนาดอื่นให้ขอราคา") · มีอัตราที่แอดมินเพิ่มแล้ว = เตือน
+  const baseAxisSet = new Set(model.base.kind === 'matrix' ? model.base.axes : []);
+  for (const [a, v] of Object.entries(cfg.askPrice ?? {})) {
+    if (baseAxisSet.has(a) || axes[a] !== v) continue;
+    const rated = model.adders.some((x) => !x.disabled && x.byAxis === a && x.rates?.[v] !== undefined);
+    violations.push(rated
+      ? { id: `ASK_PRICE_SET:${a}`, level: 'warn', askPrice: true, message: `${axisLabel(a)} ${v} ไม่อยู่ในแคตตาล็อก — ใช้อัตราที่แอดมินใส่ในสมุดราคา` }
+      : { id: `ASK_PRICE:${a}`, level: 'quoteOnRequest', askPrice: true, message: `${axisLabel(a)} ${v} ไม่อยู่ในแคตตาล็อก — ต้องขอราคาจากฝ่ายผลิต` });
   }
 
   // ── วิธีคิดทีละขั้น ③: กฎบวกเพิ่มทุกข้อ รวมข้อที่ไม่ได้คิด ────────────────────
@@ -796,6 +831,12 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
         violations.push({ id: a.id, level: 'warn', message: r.partial, partial: true });
         tr.status = 'waiting';
         tr.reason = r.partial;
+        continue;
+      }
+      // ค่านอกแคตตาล็อกที่กฎนี้ยังไม่มีอัตรา — ฟ้อง "ต้องขอราคา" ไปแล้วข้างบน ไม่ใช่ "ไม่รับผลิต/ยังไม่มีราคา"
+      if (r.noRate && a.byAxis && cfg.askPrice?.[a.byAxis] !== undefined && cfg.askPrice[a.byAxis] === axes[a.byAxis]) {
+        tr.status = 'waiting';
+        tr.reason = `${axisLabel(a.byAxis)} ${axes[a.byAxis]} ไม่อยู่ในแคตตาล็อก — ต้องขอราคาจากฝ่ายผลิต`;
         continue;
       }
       // แกนที่รอรหัสย่อยกำหนดค่า — ฟ้องไปแล้วครั้งเดียวข้างบน ไม่ต้องขึ้น "รหัสไม่ได้บอก" ซ้ำ

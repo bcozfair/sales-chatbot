@@ -4,7 +4,7 @@ import { Button } from '../Button';
 import { ErrorBox } from '../logs/ui';
 import { errMsg } from '../logs/format';
 import { ReviewModal, type DiffRow } from './ModelPriceEditor';
-import type { EditorAdder, EditorView } from './types';
+import type { AskValue, EditorAdder, EditorView } from './types';
 
 /**
  * หน้า "สมุดรายชีต" — หนึ่งชีตของไฟล์ราคา Excel = หนึ่งหน้า วางตารางแบบเดียวกับในชีต
@@ -37,6 +37,7 @@ import type { EditorAdder, EditorView } from './types';
  *       คอลัมน์ "ชนิดสาย รุ่นเริ่มต้น" = `axisDefaultsBy` — **มีผลกับราคา** (สายของรหัสที่ไม่บอกชนิดสาย · เจ้าของยืนยัน)
  *       ตัวหนังสือแดงใต้คอลัมน์ · คอลัมน์พื้นเหลือง = `layout` — แสดงผลอย่างเดียว (ตารางสองแกนเท่านั้น)
  *   · เพิ่ม/ลบแถวหรือคอลัมน์ไม่ได้จากจอนี้ (แม่แบบ Excel) — จอแก้ได้แค่ตัวเลขในช่องที่ชีตมี
+ *     **ยกเว้นค่านอกแคตตาล็อกของรุ่นที่ตั้ง `askPrice`** (TS_-01 · 2026-09-29) — กล่อง "ต้องขอราคาจากฝ่ายผลิต" ใต้ตาราง (ดู `AskCard`)
  * บันทึกทั้งชีตเป็นครั้งเดียว (`PUT /api/admin/pricebook/sheet/:sheet`) — เหตุผลที่หัว routes/pricingLab.ts
  *
  * ⚠️ ราคาอยู่ใน state ของจอนี้เท่านั้น (โหลดตอนเปิด) — ไม่มีอะไรอยู่ใน bundle ดูหัว ModelPriceEditor.tsx
@@ -86,6 +87,115 @@ interface Draft {
   highlight: boolean[];
   /** แกนที่เติม → ค่าของแต่ละแถว (ตามลำดับแถว) · '' = ไม่มีค่าเริ่มต้น */
   defaults: Record<string, string[]>;
+  /**
+   * ค่านอกแคตตาล็อกที่กด "+ เพิ่ม" แล้วยังไม่บันทึก (แกน → ค่า) — แถว/คอลัมน์ใหม่ต่อท้ายของเดิม
+   * ⇒ ตำแหน่งใน `cells` / `rowNote` / `defaults` / `colNotes` / `highlight` = ของเดิมก่อน แล้วค่าที่เพิ่มตามลำดับ (`allRows`/`allCols`)
+   */
+  added: Record<string, string[]>;
+  /** ค่านอกแคตตาล็อกที่บันทึกไว้แล้วแต่กด ✕ เอาออก — ยังอยู่ใน `cells` (ตำแหน่งไม่ขยับ) แค่ไม่วาด */
+  removed: Record<string, string[]>;
+}
+
+/* ── ค่านอกแคตตาล็อก = ต้องขอราคาจากฝ่ายผลิต (`EditorView.askPrice` · เจ้าของเคาะ mockup `ts01-ask-price` แบบ A 2026-09-29) ──
+   "ทุกข้อที่ต้องขอราคาจากฝ่ายผลิต ต้องมี ui รองรับให้สามารถเอาราคามาใส่ได้ภายหลังเองได้โดยไม่ต้องมาแก้โค้ดอีก"
+   · ตารางหน้าตาเดิม · กล่องแดงใต้ตาราง = ค่านอกแคตตาล็อกที่พบในรหัสจริง (นับสดที่ `GET /unread`) กด "+ เพิ่ม" = ช่องใหม่สีส้ม
+   · **ช่องส้มที่ว่าง = ยังขอราคาอยู่** (ไม่ใช่ 0 และไม่ใช่ไม่รับผลิต) · ขนาดแกนใหม่ต้องกรอกอัตราพร้อมกัน (ว่าง = ไม่ถูกเพิ่ม)
+   · ตัวรับฝั่งเซิร์ฟเวอร์ตรวจทุกค่าซ้ำด้วยกติกาเดียวกับตัวอ่านรหัส (`askValueProblem`) — จอนี้ไม่ใช่ด่าน */
+
+type AskSlot = NonNullable<EditorView['askPrice']>['slots'][number];
+
+/**
+ * ค่าที่พิมพ์เอง → รูปที่ใช้เป็นชื่อช่อง — **ต้องตรงกับ `canonicalAskValue` ฝั่งเซิร์ฟเวอร์ทุกข้อ** (เซิร์ฟเวอร์ปฏิเสธค่าที่ไม่ใช่รูปนี้
+ * แทนการแปลงให้เงียบ ๆ เพราะช่องราคาที่กรอกไว้อ้างชื่อนี้) · `1/8` → `1/8”` · `m12x1.5` → `M12x1.5` · `E` → `TSE` · `5.0` → `5`
+ */
+function canonAsk(slot: AskSlot['slot'], raw: string): string | undefined {
+  const s = raw.replace(/[\u201C\u201D\u2033\u00A0]/g, '"').replace(/[\u2018\u2019\u2032]/g, "'").replace(/\s+/g, '');
+  if (slot === 'd') {
+    if (!/^\d+(\.\d+)?$/.test(s) || Number(s) <= 0 || Number(s) >= 1000) return undefined;
+    return String(Number(s));
+  }
+  if (slot === 'sensor') {
+    const u = s.toUpperCase();
+    if (u.startsWith('TS')) return /^TS[A-Z]{1,3}$/.test(u) ? u : undefined;
+    return /^[A-Z]{1,3}$/.test(u) ? `TS${u}` : undefined;
+  }
+  const t = s.replace(/"$/, '');
+  if (/^\d+\/\d+$/.test(t)) return `${t}”`;
+  const m = t.match(/^M(\d+(?:\.\d+)?)(?:X(\d+(?:\.\d+)?))?$/i);
+  if (m) return `M${m[1]}${m[2] ? `x${m[2]}` : ''}`;
+  return /^[A-Z0-9][A-Z0-9./-]{0,11}$/i.test(t) ? t.toUpperCase() : undefined;
+}
+
+const PLACE_TH: Record<AskSlot['place'], string> = { col: 'คอลัมน์ใหม่', row: 'แถวใหม่', rate: 'ช่องในตารางความยาวแกน' };
+
+const rowAxisOf = (v: EditorView) => (v.base.kind === 'matrix' ? v.base.axes[0] : undefined);
+const colAxisOf = (v: EditorView) => (v.base.kind === 'matrix' && v.base.axes.length === 2 ? v.base.axes[1] : undefined);
+/** แถว/คอลัมน์ทั้งหมดของร่าง (ของเดิม + ที่เพิ่ง "+ เพิ่ม") — ตำแหน่งตรงกับ `d.cells` ทุกช่อง */
+const allRows = (v: EditorView, d: Draft) =>
+  v.base.kind === 'matrix' ? [...v.base.rows, ...(d.added[rowAxisOf(v)!] ?? [])] : [];
+const allCols = (v: EditorView, d: Draft) =>
+  v.base.kind === 'matrix' ? [...v.base.cols, ...(colAxisOf(v) ? d.added[colAxisOf(v)!] ?? [] : [])] : [];
+const gone = (d: Draft, axis: string | undefined, value: string) => !!axis && (d.removed[axis] ?? []).includes(value);
+/** ค่านอกแคตตาล็อก (บันทึกแล้ว หรือเพิ่งเพิ่ม) — ระบายส้ม */
+const offCat = (v: EditorView, d: Draft, axis: string | undefined, value: string) =>
+  !!axis && ((v.askPrice?.off[axis] ?? []).includes(value) || (d.added[axis] ?? []).includes(value));
+/** ช่องของแกนนี้ในกล่องขอราคา */
+const slotOfAxis = (v: EditorView, axis: string | null | undefined) => v.askPrice?.slots.find((s) => s.axis === axis);
+
+/** "+ เพิ่ม" — แถว/คอลัมน์ใหม่ว่างทั้งแถว · ขนาดแกนใหม่ได้ช่องอัตราว่าง · ค่าที่เพิ่ง ✕ ไปแค่เอากลับมา */
+function addAsk(v: EditorView, d: Draft, slot: AskSlot, value: string): Draft {
+  if (gone(d, slot.axis, value)) return { ...d, removed: { ...d.removed, [slot.axis]: d.removed[slot.axis]!.filter((x) => x !== value) } };
+  const added = { ...d.added, [slot.axis]: [...(d.added[slot.axis] ?? []), value] };
+  if (slot.place === 'rate') {
+    return { ...d, added, rates: { ...d.rates, [slot.adder!]: { ...d.rates[slot.adder!], [value]: '' } } };
+  }
+  const width = allCols(v, d).length;
+  if (slot.place === 'row') {
+    // ค่าเริ่มต้นตามแถว (ชนิดสายมาตรฐาน) — ใช้ค่าที่แถวเดิมใช้มากที่สุด แก้ได้ในคอลัมน์นั้นก่อนบันทึก
+    const common = (vals: string[]) => {
+      const n = new Map<string, number>();
+      for (const x of vals) if (x) n.set(x, (n.get(x) ?? 0) + 1);
+      return [...n].sort((a, b) => b[1] - a[1])[0]?.[0] ?? '';
+    };
+    return {
+      ...d,
+      added,
+      cells: [...d.cells, Array.from({ length: width }, () => '')],
+      rowNote: [...d.rowNote, ''],
+      defaults: Object.fromEntries(Object.entries(d.defaults).map(([k, vals]) => [k, [...vals, common(vals)]])),
+    };
+  }
+  return { ...d, added, cells: d.cells.map((row) => [...row, '']), colNotes: [...d.colNotes, ''], highlight: [...d.highlight, false] };
+}
+
+/** ✕ — ค่าที่เพิ่งเพิ่มหายไปทั้งแถว/คอลัมน์ · ค่าที่บันทึกแล้วจำไว้ว่าเอาออก (ขนาดแกน = ล้างอัตรา = คีย์หายตอนบันทึก) */
+function removeAsk(v: EditorView, d: Draft, slot: AskSlot, value: string): Draft {
+  const mine = d.added[slot.axis] ?? [];
+  const k = mine.indexOf(value);
+  if (k < 0) {
+    const removed = { ...d.removed, [slot.axis]: [...(d.removed[slot.axis] ?? []), value] };
+    if (slot.place === 'rate') return { ...d, removed, rates: { ...d.rates, [slot.adder!]: { ...d.rates[slot.adder!], [value]: '' } } };
+    return { ...d, removed };
+  }
+  const added = { ...d.added, [slot.axis]: mine.filter((x) => x !== value) };
+  if (slot.place === 'rate') {
+    const rest = { ...(d.rates[slot.adder!] ?? {}) };
+    delete rest[value];
+    return { ...d, added, rates: { ...d.rates, [slot.adder!]: rest } };
+  }
+  const base = v.base.kind === 'matrix' ? (slot.place === 'row' ? v.base.rows.length : v.base.cols.length) : 0;
+  const at = base + k;
+  const cut = <T,>(list: T[]) => list.filter((_, i) => i !== at);
+  if (slot.place === 'row') {
+    return {
+      ...d,
+      added,
+      cells: cut(d.cells),
+      rowNote: cut(d.rowNote),
+      defaults: Object.fromEntries(Object.entries(d.defaults).map(([key, vals]) => [key, cut(vals)])),
+    };
+  }
+  return { ...d, added, cells: d.cells.map(cut), colNotes: cut(d.colNotes), highlight: cut(d.highlight) };
 }
 
 /** กฎที่เป็นคอลัมน์ในตารางหลัก (แยกตามแกนแถว) — ซ้าย = "บวกเพิ่ม 100 mm ละ" · ขวา = ที่เหลือ */
@@ -138,13 +248,20 @@ function toDraft(v: EditorView): Draft {
     variantPrices: Object.fromEntries(
       v.adders.filter((a) => !a.rates).map((a) => [a.id, str(v.variant?.adderPrices?.[a.id])]),
     ),
+    added: {},
+    removed: {},
   };
 }
 
-/** ค่าแกนของกฎหนึ่งข้อที่จอมีช่องให้ — กฎในตารางหลัก = ทุกแถวของตาราง · ที่เหลือ = ค่าที่สมุดรู้จัก */
-function rateKeys(v: EditorView, a: EditorAdder): string[] {
+/**
+ * ค่าแกนของกฎหนึ่งข้อที่จอมีช่องให้ — กฎในตารางหลัก = ทุกแถวของตาราง · ที่เหลือ = ค่าที่สมุดรู้จัก
+ * + ขนาดนอกแคตตาล็อกที่เพิ่งกด "+ เพิ่ม" ของกฎที่เป็นช่องของกล่องขอราคา (ขนาดแกนของ TS_-01)
+ */
+function rateKeys(v: EditorView, a: EditorAdder, d?: Draft): string[] {
   const own = a.rates!.map((r) => r.value);
-  if (v.base.kind !== 'matrix' || a.byAxis !== v.base.axes[0]) return own;
+  const slot = slotOfAxis(v, a.byAxis);
+  const extra = d && slot?.place === 'rate' && slot.adder === a.id ? d.added[slot.axis] ?? [] : [];
+  if (v.base.kind !== 'matrix' || a.byAxis !== v.base.axes[0]) return [...own, ...extra.filter((x) => !own.includes(x))];
   return [...new Set([...gridRows(v).rows, ...own])];
 }
 const rateWas = (a: EditorAdder, k: string) => a.rates!.find((r) => r.value === k)?.rate ?? null;
@@ -165,13 +282,14 @@ function invalidCells(models: EditorView[], drafts: Record<string, Draft>): stri
     const d = drafts[v.code];
     if (!d) continue;
     if (v.base.kind === 'matrix') {
-      const { rows, cols } = v.base;
+      const rows = allRows(v, d);
+      const cols = allCols(v, d);
       rows.forEach((r, i) => cols.forEach((c, j) => bad(`${v.title} ${r} × ${c.split(SEP).join(' ')}`, d.cells[i]?.[j])));
     }
     if (v.base.kind === 'banded') v.base.bands.forEach((b, i) => bad(`${v.title} ช่วง ${b.label}`, d.bands[i]));
     for (const a of v.adders) {
       if (a.rates) {
-        for (const k of rateKeys(v, a)) bad(`${v.title} ${a.label} ${k}`, d.rates[a.id]?.[k]);
+        for (const k of rateKeys(v, a, d)) bad(`${v.title} ${a.label} ${k}`, d.rates[a.id]?.[k]);
       } else {
         const s = d.prices[a.id] ?? '';
         if (parse(s) === null) out.push(`${v.title} ${a.label} — ราคาว่างไม่ได้ (จะเลิกคิดรายการนี้ ให้ปิดกฎที่ปุ่ม “กฎและเงื่อนไข”)`);
@@ -202,9 +320,31 @@ function buildDiff(models: EditorView[], drafts: Record<string, Draft>): DiffRow
     const d = drafts[v.code];
     if (!d) continue;
     if (v.base.kind === 'matrix' && v.base.cells) {
-      const { rows: rs, cols, cells } = v.base;
+      const { cells } = v.base;
+      const rA = rowAxisOf(v);
+      const cA = colAxisOf(v);
+      // ค่านอกแคตตาล็อกที่เพิ่ม/เอาออก — บอกเป็นบรรทัดของตัวเองก่อนตัวเลข
+      for (const s of v.askPrice?.slots ?? []) {
+        for (const x of d.added[s.axis] ?? []) {
+          const rate = s.place === 'rate' ? toNum(d.rates[s.adder!]?.[x] ?? '') : undefined;
+          rows.push({
+            what: `${v.title} · เพิ่ม${s.axisTh} ${x} (นอกแคตตาล็อก)`,
+            was: '—',
+            now: s.place !== 'rate' ? `${PLACE_TH[s.place]} — ช่องที่ยังว่าง = ต้องขอราคา`
+              : rate === null ? 'ไม่ถูกเพิ่ม — ยังไม่ได้กรอกอัตรา' : 'เพิ่มพร้อมอัตรา',
+            warn: rate === null,
+          });
+        }
+        for (const x of d.removed[s.axis] ?? []) {
+          rows.push({ what: `${v.title} · เอา${s.axisTh} ${x} ออก`, was: 'นอกแคตตาล็อก', now: 'เอาออก — รหัสที่ใช้ค่านี้กลับไปขึ้น “ต้องขอราคา”' });
+        }
+      }
+      const rs = allRows(v, d);
+      const cols = allCols(v, d);
       rs.forEach((r, i) => cols.forEach((c, j) => {
-        priceRow(`${v.title} · ราคาตั้ง ${r} × ${c.split(SEP).join(' ')}`, cells[i]![j] ?? null, toNum(d.cells[i]![j]!), 'ไม่รับผลิต');
+        if (gone(d, rA, r) || gone(d, cA, c)) return;
+        const ask = offCat(v, d, rA, r) || offCat(v, d, cA, c);
+        priceRow(`${v.title} · ราคาตั้ง ${r} × ${c.split(SEP).join(' ')}`, cells[i]?.[j] ?? null, toNum(d.cells[i]![j]!), ask ? 'ต้องขอราคา' : 'ไม่รับผลิต');
       }));
     }
     if (v.base.kind === 'banded') {
@@ -215,10 +355,12 @@ function buildDiff(models: EditorView[], drafts: Record<string, Draft>): DiffRow
       });
     }
     if (v.base.kind === 'matrix') {
-      const { rows: rs, cols } = v.base;
+      const rs = allRows(v, d);
+      const cols = allCols(v, d);
       const L = v.layout;
       for (const df of v.defaultsBy) {
         rs.forEach((r, i) => {
+          if (gone(d, rowAxisOf(v), r)) return;
           const was = df.values[r] ?? '';
           const now = d.defaults[df.axis]?.[i] ?? '';
           if (was !== now) {
@@ -232,11 +374,13 @@ function buildDiff(models: EditorView[], drafts: Record<string, Draft>): DiffRow
         });
       }
       rs.forEach((r, i) => {
+        if (gone(d, rowAxisOf(v), r)) return;
         const was = L.rowNote?.values[r] ?? '';
         const now = d.rowNote[i]!.trim();
         if (was !== now) rows.push({ what: `${v.title} · ${L.rowNote?.label ?? 'หมายเหตุ'} ${r}`, was: was || 'ว่าง', now: now || 'ว่าง' });
       });
       cols.forEach((c, j) => {
+        if (gone(d, colAxisOf(v), c)) return;
         const was = L.colNotes[c] ?? '';
         const now = d.colNotes[j]!.trim();
         if (was !== now) rows.push({ what: `${v.title} · ข้อความใต้คอลัมน์ ${c}`, was: was || 'ว่าง', now: now || 'ว่าง' });
@@ -248,7 +392,7 @@ function buildDiff(models: EditorView[], drafts: Record<string, Draft>): DiffRow
     }
     for (const a of v.adders) {
       if (a.rates) {
-        for (const k of rateKeys(v, a)) {
+        for (const k of rateKeys(v, a, d)) {
           priceRow(`${v.title} · ${a.label} · ${a.byAxisTh ?? ''} ${k || '(ว่าง)'}`.replace(/\s+/g, ' '),
             rateWas(a, k), toNum(d.rates[a.id]?.[k] ?? ''), 'ต้องขอราคา', ` ${unitOf(a)}`);
         }
@@ -287,13 +431,24 @@ function buildBody(models: EditorView[], drafts: Record<string, Draft>) {
     const body: Record<string, unknown> = {};
     const cells: Record<string, number | null> = {};
     if (v.base.kind === 'matrix' && v.base.cells) {
-      const { rows: rs, cols, cells: was } = v.base;
-      rs.forEach((r, i) => cols.forEach((c, j) => {
+      const { cells: was } = v.base;
+      // รวมแถว/คอลัมน์ที่เพิ่งเพิ่ม (ช่องใหม่ส่งเฉพาะที่กรอก) และที่กด ✕ (ตัวเลขที่ล้างไปต้องส่ง null ไปด้วย)
+      allRows(v, d).forEach((r, i) => allCols(v, d).forEach((c, j) => {
         const now = toNum(d.cells[i]![j]!);
-        if ((was[i]![j] ?? null) !== now) cells[cellKey(r, c)] = now;
+        if ((was[i]?.[j] ?? null) !== now) cells[cellKey(r, c)] = now;
       }));
     }
     if (Object.keys(cells).length) body.cells = cells;
+    // ค่านอกแคตตาล็อก (แถว/คอลัมน์) — ขนาดแกนไปกับอัตราใน `adderRates` (ว่าง = ไม่ถูกเพิ่ม)
+    const addValues: Record<string, string[]> = {};
+    const removeValues: Record<string, string[]> = {};
+    for (const s of v.askPrice?.slots ?? []) {
+      if (s.place === 'rate') continue;
+      if (d.added[s.axis]?.length) addValues[s.axis] = d.added[s.axis]!;
+      if (d.removed[s.axis]?.length) removeValues[s.axis] = d.removed[s.axis]!;
+    }
+    if (Object.keys(addValues).length) body.addValues = addValues;
+    if (Object.keys(removeValues).length) body.removeValues = removeValues;
     if (v.base.kind === 'banded') {
       const bandPrices: Record<string, number | null> = {};
       v.base.bands.forEach((b, i) => {
@@ -306,7 +461,7 @@ function buildBody(models: EditorView[], drafts: Record<string, Draft>) {
     const adderPrices: Record<string, number | null> = {};
     for (const a of v.adders) {
       if (a.rates) {
-        const changed = rateKeys(v, a)
+        const changed = rateKeys(v, a, d)
           .map((k) => ({ value: k, rate: toNum(d.rates[a.id]?.[k] ?? '') }))
           .filter((r) => r.rate !== rateWas(a, r.value));
         if (changed.length) adderRates[a.id] = changed;
@@ -333,7 +488,8 @@ function buildBody(models: EditorView[], drafts: Record<string, Draft>) {
     }
     // หน้าตาของชีตส่งทั้งชุดเมื่อมีอะไรเปลี่ยน (ชุดเล็ก — backend เรียงตามลำดับแถว/คอลัมน์ให้เอง)
     if (v.base.kind === 'matrix' && v.base.axes.length === 2) {
-      const { rows: rs, cols } = v.base;
+      const rs = allRows(v, d);
+      const cols = allCols(v, d);
       const next: Layout = {
         rowNote: Object.fromEntries(rs.map((r, i) => [r, d.rowNote[i]!.trim()]).filter(([, t]) => t)),
         colNotes: Object.fromEntries(cols.map((c, j) => [c, d.colNotes[j]!.trim()]).filter(([, t]) => t)),
@@ -346,12 +502,13 @@ function buildBody(models: EditorView[], drafts: Record<string, Draft>) {
       if (!same) body.layout = next;
     }
     if (v.base.kind === 'matrix') {
-      const rs = v.base.rows;
+      const rs = allRows(v, d);
+      const keep = (r: string) => !gone(d, rowAxisOf(v), r);
       let defaultsBy: Record<string, Record<string, string>> | undefined;
       for (const df of v.defaultsBy) {
         const now = d.defaults[df.axis] ?? [];
-        if (rs.some((r, i) => (df.values[r] ?? '') !== (now[i] ?? ''))) {
-          defaultsBy = { ...defaultsBy, [df.axis]: Object.fromEntries(rs.map((r, i) => [r, now[i] ?? ''])) };
+        if (rs.some((r, i) => keep(r) && (df.values[r] ?? '') !== (now[i] ?? ''))) {
+          defaultsBy = { ...defaultsBy, [df.axis]: Object.fromEntries(rs.map((r, i) => [r, now[i] ?? '']).filter(([r]) => keep(r!))) };
         }
       }
       if (defaultsBy) body.defaultsBy = defaultsBy;
@@ -376,16 +533,18 @@ const GridInput: React.FC<{
   required?: boolean;
   /** ช่องที่ยังไม่มีราคาโดยตั้งใจ (กฎที่ตั้งโครงไว้ก่อน เช่น PL-5 ของ BH) — ว่างได้ และทาสีเหลืองให้เห็นว่ารอกรอก */
   pending?: boolean;
+  /** ช่องของค่านอกแคตตาล็อก — ว่าง = ต้องขอราคาจากฝ่ายผลิต · ทาสีส้ม (สีเดียวกับหัวคอลัมน์/แถวที่เพิ่ม) */
+  ask?: boolean;
   placeholder?: string;
   emptyTitle?: string;
   onChange: (v: string) => void;
-}> = ({ value, was, label, highlight, tint, required, pending, placeholder = '—', emptyTitle = 'ว่าง = ไม่รับผลิต (ไม่ใช่ราคา 0)', onChange }) => {
+}> = ({ value, was, label, highlight, tint, required, pending, ask, placeholder = '—', emptyTitle = 'ว่าง = ไม่รับผลิต (ไม่ใช่ราคา 0)', onChange }) => {
   const p = parse(value);
   const invalid = p === undefined || (required && p === null);
   const changed = toNum(value) !== toNum(was) || invalid;
   const empty = value.trim() === '';
   return (
-    <td className={`border border-slate-200 p-0 ${invalid ? 'bg-red-50' : changed ? 'bg-blue-50' : pending && empty ? 'bg-amber-50' : highlight ? 'bg-yellow-200' : tint ? 'bg-emerald-50/60' : ''}`}>
+    <td className={`border border-slate-200 p-0 ${invalid ? 'bg-red-50' : changed ? 'bg-blue-50' : ask ? 'bg-orange-50' : pending && empty ? 'bg-amber-50' : highlight ? 'bg-yellow-200' : tint ? 'bg-emerald-50/60' : ''}`}>
       <input
         inputMode="decimal"
         aria-label={label}
@@ -396,7 +555,7 @@ const GridInput: React.FC<{
         onChange={(e) => onChange(e.target.value)}
         // แบบ Excel: คลิกช่องแล้วพิมพ์ทับได้เลย — ไม่งั้นเลขใหม่ไปต่อท้ายเลขเดิม (250 → 250260)
         onFocus={(e) => e.currentTarget.select()}
-        className={`block w-full min-w-[68px] bg-transparent px-2.5 py-2 text-center text-[13.5px] tabular-nums outline-none ${pending && empty ? 'placeholder:text-amber-700 placeholder:text-[12px]' : 'placeholder:text-slate-300'} focus:bg-card focus:ring-2 focus:ring-inset focus:ring-[var(--brand-border-strong)] ${
+        className={`block w-full min-w-[68px] bg-transparent px-2.5 py-2 text-center text-[13.5px] tabular-nums outline-none ${ask && empty ? 'placeholder:text-orange-700 placeholder:text-[12px]' : pending && empty ? 'placeholder:text-amber-700 placeholder:text-[12px]' : 'placeholder:text-slate-300'} focus:bg-card focus:ring-2 focus:ring-inset focus:ring-[var(--brand-border-strong)] ${
           invalid ? 'font-bold text-red-700' : changed ? 'font-bold text-blue-700' : 'text-slate-900'
         }`}
       />
@@ -480,8 +639,16 @@ const ExtrasBox: React.FC<{ v: EditorView; d: Draft; patch: Patch }> = ({ v, d, 
   );
 };
 
-/** กฎที่แยกตามแกนที่ไม่ใช่ของตาราง (หน้าแปลน TS-18) — ตารางเล็กแยกตามค่า แบบ "ราคาหน้าแปลน" ในชีต */
-const AxisBox: React.FC<{ v: EditorView; a: EditorAdder; d: Draft; patch: Patch }> = ({ v, a, d, patch }) => (
+/**
+ * กฎที่แยกตามแกนที่ไม่ใช่ของตาราง (หน้าแปลน TS-18 · ความยาวแกนของ TS_-01) — ตารางเล็กแยกตามค่า แบบ "ราคาหน้าแปลน" ในชีต
+ * กฎที่เป็นช่องของกล่องขอราคา (ขนาดแกน TS_-01) มีแถวนอกแคตตาล็อกสีส้ม + ✕ และแถวที่เพิ่งเพิ่มต้องกรอกอัตรา (ว่าง = ไม่ถูกเพิ่ม)
+ */
+const AxisBox: React.FC<{ v: EditorView; a: EditorAdder; d: Draft; patch: Patch }> = ({ v, a, d, patch }) => {
+  const slot = slotOfAxis(v, a.byAxis);
+  const mine = slot?.place === 'rate' && slot.adder === a.id ? slot : undefined;
+  const keys = rateKeys(v, a, d).filter((k) => !mine || !gone(d, mine.axis, k));
+  const was = (k: string) => a.rates!.find((r) => r.value === k)?.rate ?? null;
+  return (
   <div className="max-w-full overflow-x-auto rounded-xl border border-amber-300">
     <table className="border-collapse text-[13px]">
       <thead>
@@ -496,24 +663,43 @@ const AxisBox: React.FC<{ v: EditorView; a: EditorAdder; d: Draft; patch: Patch 
         </tr>
       </thead>
       <tbody>
-        {a.rates!.map((r) => (
-          <tr key={r.value}>
-            <th scope="row" className="border border-slate-200 bg-card px-3 py-1.5 text-left font-semibold text-slate-800 whitespace-nowrap">
-              {r.value || '(ว่าง)'}
-            </th>
-            <GridInput
-              label={`${v.title} ${a.label} — ${r.value}`}
-              value={d.rates[a.id]?.[r.value] ?? ''}
-              was={str(r.rate)}
-              emptyTitle="ว่าง = ต้องขอราคา (ไม่ใช่ฟรี)"
-              onChange={(val) => patch((x) => ({ ...x, rates: { ...x.rates, [a.id]: { ...x.rates[a.id], [r.value]: val } } }))}
-            />
-          </tr>
-        ))}
+        {keys.map((k) => {
+          const off = !!mine && offCat(v, d, mine.axis, k);
+          const fresh = !!mine && (d.added[mine.axis] ?? []).includes(k);
+          return (
+            <tr key={k}>
+              <th scope="row" className={`border border-slate-200 px-3 py-1.5 text-left font-semibold whitespace-nowrap ${off ? 'bg-orange-50 text-orange-800' : 'bg-card text-slate-800'}`}>
+                {k || '(ว่าง)'}
+                {off && <span className="ml-1.5 text-[10px] font-normal">นอกแคตตาล็อก</span>}
+                {off && (
+                  <button type="button" onClick={() => patch((x) => removeAsk(v, x, mine!, k))}
+                          aria-label={`เอา${mine!.axisTh} ${k} ออก`} title={`เอา${mine!.axisTh} ${k} ออก`}
+                          className="ml-1 text-[12px] text-slate-500 hover:text-red-600">✕</button>
+                )}
+              </th>
+              <GridInput
+                label={`${v.title} ${a.label} — ${k}`}
+                value={d.rates[a.id]?.[k] ?? ''}
+                was={str(was(k))}
+                ask={off && !(d.rates[a.id]?.[k] ?? '').trim()}
+                placeholder={fresh ? 'กรอกอัตรา' : undefined}
+                emptyTitle={fresh ? 'ต้องกรอกอัตราพร้อมกัน — ว่างแล้วบันทึก = ไม่ถูกเพิ่ม' : 'ว่าง = ต้องขอราคา (ไม่ใช่ฟรี)'}
+                onChange={(val) => patch((x) => ({ ...x, rates: { ...x.rates, [a.id]: { ...x.rates[a.id], [k]: val } } }))}
+              />
+            </tr>
+          );
+        })}
       </tbody>
     </table>
+    {mine && (
+      <p className="border-t border-amber-200 bg-yellow-50 px-3 py-1 text-[11px] leading-relaxed text-slate-500 max-w-[320px]">
+        {mine.axisTh}ที่ไม่มีในตาราง: เล็กกว่า = ใช้อัตราของขนาดถัดขึ้นไป · ใหญ่กว่าขนาดที่มีอัตรา = ต้องขอราคา ·
+        ขนาดที่เพิ่มใหม่ต้องกรอกอัตราพร้อมกัน แล้วคิดราคาตั้งของคอลัมน์เกลียวเดิม + อัตรานี้
+      </p>
+    )}
   </div>
-);
+  );
+};
 
 /** แถบหมายเหตุใต้ตาราง — ในชีตเป็นแถบสีส้ม "สายยาวกว่า 1 M บวกเพิ่มตามราคาสาย"
     ราคาสายจริงอยู่อีกชีต (TS-21+22+25) ซึ่งสมุดลอกมาไว้ในกฎของแต่ละรุ่น ⇒ วางให้แก้ตรงนี้เลย */
@@ -592,11 +778,28 @@ const MatrixGrid: React.FC<{
   patch: Patch;
 }> = ({ v, d, patch }) => {
   if (v.base.kind !== 'matrix' || !v.base.cells) return null;
-  const { rows: baseRows, cols, cells, axes, axesTh } = v.base;
+  const { cells, axes, axesTh } = v.base;
   const three = axes.length === 3;
   const L = v.layout;
   const { left, right } = rowAdders(v);
-  const { rows, extra } = gridRows(v);
+  const rA = rowAxisOf(v);
+  const cA = colAxisOf(v);
+  // แถว/คอลัมน์ของร่าง = ของเดิม + ค่านอกแคตตาล็อกที่เพิ่งเพิ่ม (ตำแหน่งใน `d.cells`) · ที่กด ✕ ไม่วาด
+  const baseRows = allRows(v, d);
+  const colsAll = allCols(v, d);
+  const cols = colsAll.filter((c) => !gone(d, cA, c));
+  const grid = gridRows(v);
+  const extra = grid.extra;
+  const rows = [...grid.rows, ...(rA ? d.added[rA] ?? [] : [])].filter((r) => !gone(d, rA, r));
+  const rowSlot = slotOfAxis(v, rA);
+  const colSlot = slotOfAxis(v, cA);
+  /** ✕ ได้เมื่อยังไม่มีตัวเลขสักช่อง (ค่าที่เพิ่งเพิ่มเอาออกได้เสมอ — ยังไม่ได้บันทึก) */
+  const emptyCol = (j: number) => d.cells.every((row) => !(row[j] ?? '').trim());
+  const emptyRow = (i: number) => (d.cells[i] ?? []).every((x) => !x.trim());
+  const xBtn = (what: string, onClick: () => void) => (
+    <button type="button" onClick={onClick} aria-label={`เอา${what} ออก`} title={`เอา${what} ออก (ยังไม่มีตัวเลขในช่อง)`}
+            className="ml-1 font-normal text-slate-500 hover:text-red-600">✕</button>
+  );
   /** แถวข้อความใต้ตาราง (ตัวหนังสือแดง) — โผล่เฉพาะชีตที่มี เพิ่มใหม่ทำผ่านแม่แบบ Excel */
   const hasColNotes = !three && Object.keys(L.colNotes).length > 0;
   const head = (i: number) => `${axesTh[i] ?? axes[i]} (${(axes[i] ?? '').toUpperCase()})`;
@@ -671,8 +874,18 @@ const MatrixGrid: React.FC<{
               </tr>
             )}
             <tr>
-              {cols.map((c, j) => (
-                three ? (
+              {cols.map((c) => {
+                const j = colsAll.indexOf(c);
+                if (!three && colSlot && offCat(v, d, cA, c)) {
+                  return (
+                    <th key={c} className="border-2 border-orange-300 bg-orange-50 px-3 py-1.5 text-center font-bold text-orange-800 whitespace-nowrap">
+                      {c}
+                      {(d.added[cA!] ?? []).includes(c) || emptyCol(j) ? xBtn(`${colSlot.axisTh} ${c}`, () => patch((x) => removeAsk(v, x, colSlot, c))) : null}
+                      <span className="block text-[10px] font-normal">นอกแคตตาล็อก</span>
+                    </th>
+                  );
+                }
+                return three ? (
                   <th key={c} className={`${TH_HEAD} whitespace-nowrap`}>{c.split(SEP)[1]}</th>
                 ) : (
                   <th key={c} className="border border-slate-200 bg-emerald-100 p-0 text-center font-bold text-emerald-800 whitespace-nowrap">
@@ -688,36 +901,51 @@ const MatrixGrid: React.FC<{
                       {stdCol === c && <span className="block text-[10px] font-semibold text-emerald-700">มาตรฐาน</span>}
                     </button>
                   </th>
-                )
-              ))}
+                );
+              })}
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => {
               const i = baseRows.indexOf(r);
               const only = extra.has(r);
+              const offRow = !!rowSlot && offCat(v, d, rA, r);
+              /** แถวที่เพิ่งเพิ่ม — คอลัมน์บวกเพิ่มตามแถวยังไม่มีช่องให้ (บันทึกแล้วค่อยกรอก) */
+              const fresh = !!rA && (d.added[rA] ?? []).includes(r);
               return (
                 <tr key={r}>
                   <th scope="row"
                       title={only ? 'แถวนี้มีแค่ราคาบวกเพิ่ม ไม่มีราคาตั้ง (ตัวแดงในไฟล์)' : undefined}
-                      className={`sticky left-0 z-10 border border-slate-200 bg-emerald-50 px-3 py-2 text-left font-bold whitespace-nowrap ${only ? 'text-red-600' : 'text-emerald-800'}`}>
+                      className={`sticky left-0 z-10 border border-slate-200 px-3 py-2 text-left font-bold whitespace-nowrap ${
+                        offRow ? 'bg-orange-50 text-orange-800' : `bg-emerald-50 ${only ? 'text-red-600' : 'text-emerald-800'}`}`}>
                     {r}
+                    {offRow && (fresh || emptyRow(i)) && xBtn(`${rowSlot!.axisTh} ${r}`, () => patch((x) => removeAsk(v, x, rowSlot!, r)))}
+                    {offRow && <span className="block text-[10px] font-normal">นอกแคตตาล็อก</span>}
                   </th>
-                  {left.map((a) => rateCell(a, r, true))}
-                  {cols.map((c, j) => (only ? <NoCell key={c} /> : (
-                    <GridInput
-                      key={c}
-                      label={`${v.title} ราคาตั้ง ${r} × ${c.split(SEP).join(' ')}`}
-                      value={d.cells[i]![j]!}
-                      was={str(cells[i]![j])}
-                      highlight={!three && d.highlight[j]}
-                      onChange={(val) => patch((x) => ({
-                        ...x,
-                        cells: x.cells.map((row, ri) => (ri === i ? row.map((cc, ci) => (ci === j ? val : cc)) : row)),
-                      }))}
-                    />
-                  )))}
-                  {right.map((a) => rateCell(a, r, false))}
+                  {left.map((a) => (fresh ? <NoCell key={a.id} /> : rateCell(a, r, true)))}
+                  {cols.map((c) => {
+                    const j = colsAll.indexOf(c);
+                    if (only) return <NoCell key={c} />;
+                    const ask = offRow || (!!colSlot && offCat(v, d, cA, c));
+                    const now = d.cells[i]?.[j] ?? '';
+                    return (
+                      <GridInput
+                        key={c}
+                        label={`${v.title} ราคาตั้ง ${r} × ${c.split(SEP).join(' ')}`}
+                        value={now}
+                        was={str(cells[i]?.[j])}
+                        highlight={!three && d.highlight[j]}
+                        ask={ask && !now.trim()}
+                        placeholder={ask ? 'ขอราคา' : undefined}
+                        emptyTitle={ask ? 'ว่าง = ต้องขอราคาจากฝ่ายผลิต (ไม่ใช่ราคา 0 และไม่ใช่ไม่รับผลิต)' : undefined}
+                        onChange={(val) => patch((x) => ({
+                          ...x,
+                          cells: x.cells.map((row, ri) => (ri === i ? row.map((cc, ci) => (ci === j ? val : cc)) : row)),
+                        }))}
+                      />
+                    );
+                  })}
+                  {right.map((a) => (fresh ? <NoCell key={a.id} /> : rateCell(a, r, false)))}
                   {v.defaultsBy.map((df) => {
                     if (only) return <NoCell key={df.axis} />;
                     const cur = d.defaults[df.axis]?.[i] ?? '';
@@ -762,7 +990,7 @@ const MatrixGrid: React.FC<{
               <tr>
                 <td className="sticky left-0 z-10 bg-card" />
                 {left.map((a) => <td key={a.id} />)}
-                {cols.map((c, j) => (
+                {cols.map((c) => { const j = colsAll.indexOf(c); return (
                   <td key={c} className="p-0">
                     <input
                       aria-label={`${v.title} ข้อความใต้คอลัมน์ ${c}`}
@@ -778,7 +1006,7 @@ const MatrixGrid: React.FC<{
                       }`}
                     />
                   </td>
-                ))}
+                ); })}
                 {right.map((a) => <td key={a.id} />)}
                 {v.defaultsBy.map((df) => <td key={df.axis} />)}
                 {L.rowNote && <td />}
@@ -791,6 +1019,7 @@ const MatrixGrid: React.FC<{
         หน่วย บาท · ช่องว่าง = ไม่รับผลิตแบบนั้น (ไม่ใช่ราคา 0) · พื้นฟ้า = ช่องที่แก้แล้วยังไม่บันทึก
         {!three && <> · พื้นเหลือง = คอลัมน์ที่ไฟล์ราคาไฮไลต์ไว้ (คลิกหัวคอลัมน์เพื่อเปลี่ยน)</>}
         {extra.size > 0 && <> · แถวตัวแดง = มีแค่ราคาบวกเพิ่ม ไม่มีราคาตั้ง (เพิ่มราคาตั้งผ่านแม่แบบ Excel)</>}
+        {v.askPrice && <> · <b className="text-orange-700">ช่องสีส้ม = ค่านอกแคตตาล็อกที่รอใส่ราคา (ว่าง = ต้องขอราคาจากฝ่ายผลิต)</b></>}
         {v.defaultsBy.map((df) => (
           <React.Fragment key={df.axis}>
             {' · '}<b className="text-slate-600">คอลัมน์ “{df.label}” มีผลกับราคา</b> — รหัสที่ไม่ได้บอก{df.axisTh} ใช้ค่าในคอลัมน์นี้คิด
@@ -874,6 +1103,109 @@ const BandGrid: React.FC<{ v: EditorView; d: Draft; patch: Patch }> = ({ v, d, p
   );
 };
 
+/* ── กล่อง "ต้องขอราคาจากฝ่ายผลิต" (แบบ A) ─────────────────────────────────── */
+
+/**
+ * ค่านอกแคตตาล็อกที่พบในรหัสจริงของรุ่นนี้ (นับสด) — กด "+ เพิ่ม" = ช่องใหม่สีส้มในตาราง (ยังไม่บันทึกจนกด "ตรวจก่อนบันทึก")
+ * + ช่องพิมพ์ค่าที่ยังไม่เคยเจอ · ค่าที่อยู่ในตารางแล้วขึ้น "อยู่ในตารางแล้ว" (ดูจากร่าง ไม่ใช่จากตัวนับ)
+ */
+const AskCard: React.FC<{
+  v: EditorView;
+  d: Draft;
+  patch: Patch;
+  /** `undefined` = กำลังนับ · `null` = นับไม่สำเร็จ */
+  found: AskValue[] | null | undefined;
+}> = ({ v, d, patch, found }) => {
+  const slots = v.askPrice?.slots ?? [];
+  const [slotAxis, setSlotAxis] = useState(slots[0]?.axis ?? '');
+  const [text, setText] = useState('');
+  const [why, setWhy] = useState('');
+  if (!v.askPrice || !slots.length) return null;
+  /** ค่านี้อยู่ในตาราง (ร่าง) แล้วไหม */
+  const inTable = (s: AskSlot, value: string) => {
+    if (gone(d, s.axis, value)) return false;
+    if ((d.added[s.axis] ?? []).includes(value)) return true;
+    if (s.place === 'row') return allRows(v, d).includes(value);
+    if (s.place === 'col') return allCols(v, d).includes(value);
+    const a = v.adders.find((x) => x.id === s.adder);
+    return !!a?.rates?.some((r) => Number(r.value) === Number(value));
+  };
+  const add = (s: AskSlot, value: string) => patch((x) => addAsk(v, x, s, value));
+  const addOwn = () => {
+    const s = slots.find((x) => x.axis === slotAxis) ?? slots[0]!;
+    const value = canonAsk(s.slot, text);
+    if (!value) { setWhy(`“${text.trim()}” ไม่ใช่${s.axisTh}ที่ใช้ได้`); return; }
+    if (inTable(s, value)) { setWhy(`${s.axisTh} ${value} อยู่ในตารางแล้ว`); return; }
+    setWhy('');
+    setText('');
+    add(s, value);
+  };
+  return (
+    <div id={`ask-${v.code}`} data-testid="ask-price" className="mt-3.5 overflow-hidden rounded-2xl border border-red-200 bg-red-50 scroll-mt-4">
+      <div className="border-b border-red-200 px-4 py-2.5">
+        <h3 className="text-[14px] font-bold text-red-700">ต้องขอราคาจากฝ่ายผลิต — ค่านอกแคตตาล็อกที่พบในรหัสสินค้าจริง</h3>
+        <p className="mt-0.5 text-[12px] text-slate-700">
+          รหัสที่มีค่าเหล่านี้ตอนนี้ขึ้น “ต้องขอราคาจากฝ่ายผลิต” · ได้ราคาแล้วกด <b>+ เพิ่ม</b> ให้เป็นช่องในตาราง แล้วกรอกตัวเลข →
+          คิดราคาได้เองทันทีหลังบันทึก
+        </p>
+      </div>
+      {slots.map((s) => {
+        const list = (found ?? []).filter((f) => f.model === v.code && f.axis === s.axis);
+        return (
+          <div key={s.axis} className="grid gap-x-3 gap-y-1.5 border-b border-red-100 bg-card px-4 py-2.5 sm:grid-cols-[150px_minmax(0,1fr)]">
+            <div className="pt-1 text-[12px] font-bold text-slate-700">{s.axisTh} → {PLACE_TH[s.place]}</div>
+            <div className="flex flex-wrap gap-1.5">
+              {found === undefined && <span className="text-[12px] text-slate-400">กำลังนับจากรหัสสินค้าจริง …</span>}
+              {found === null && <span className="text-[12px] text-slate-400">นับไม่สำเร็จ — ยังเพิ่มเองได้ที่แถว “ค่าอื่น”</span>}
+              {found && list.length === 0 && <span className="text-[12px] text-slate-400">ไม่พบในรหัสสินค้าจริง</span>}
+              {list.map((f) => {
+                const done = inTable(s, f.value);
+                return (
+                  <button
+                    key={f.value}
+                    type="button"
+                    disabled={done}
+                    onClick={() => add(s, f.value)}
+                    title={`ตัวอย่าง: ${f.example}`}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12.5px] ${
+                      done ? 'border-orange-300 bg-orange-50 text-orange-800' : 'border-slate-200 bg-card text-slate-800 hover:border-[var(--brand-border)]'}`}
+                  >
+                    <b className="font-mono">{f.value}{s.slot === 'd' ? ' mm' : ''}</b>
+                    <span className="text-[11px] text-slate-400">{f.count.toLocaleString('en-US')} รหัส</span>
+                    <span className={`font-bold ${done ? 'text-orange-700' : 'text-[var(--brand-fg)]'}`}>{done ? '✓ อยู่ในตารางแล้ว' : '+ เพิ่ม'}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+      <div className="grid gap-x-3 gap-y-1.5 bg-card px-4 py-2.5 sm:grid-cols-[150px_minmax(0,1fr)]">
+        <div className="pt-1 text-[12px] font-bold text-slate-700">ค่าอื่น</div>
+        <div>
+          <div className="flex flex-wrap items-center gap-1.5 text-[12px] text-slate-500">
+            <span>พิมพ์ค่าที่ยังไม่เคยเจอ</span>
+            <select aria-label="ช่องที่จะเพิ่ม" value={slotAxis} onChange={(e) => { setSlotAxis(e.target.value); setWhy(''); }}
+                    className="rounded-lg border border-slate-200 bg-card px-2 py-1 text-[12px] text-slate-800">
+              {slots.map((s) => <option key={s.axis} value={s.axis}>{s.axisTh}</option>)}
+            </select>
+            <input aria-label="ค่าที่จะเพิ่ม" value={text} onChange={(e) => { setText(e.target.value); setWhy(''); }}
+                   onKeyDown={(e) => { if (e.key === 'Enter' && text.trim()) addOwn(); }}
+                   placeholder={slots.find((x) => x.axis === slotAxis)?.slot === 'd' ? 'เช่น 8' : slots.find((x) => x.axis === slotAxis)?.slot === 'sensor' ? 'เช่น TSE' : 'เช่น M12'}
+                   className="w-[110px] rounded-lg border border-slate-200 bg-card px-2 py-1 font-mono text-[12px] text-slate-900" />
+            <Button size="sm" disabled={!text.trim()} onClick={addOwn}>+ เพิ่ม</Button>
+          </div>
+          {why && <p role="alert" className="mt-1 text-[11.5px] text-red-700">{why}</p>}
+        </div>
+      </div>
+      <p className="border-t border-red-100 bg-card px-4 py-2 text-[11.5px] leading-relaxed text-slate-500">
+        ช่องสีส้มที่ปล่อยว่าง = <b>ยังขอราคาอยู่</b> (ไม่ใช่ราคา 0 และไม่ใช่ไม่รับผลิต) ·
+        ขนาดแกนที่เพิ่มต้องกรอกอัตราพร้อมกัน (ว่าง = ไม่ถูกเพิ่ม) · เอาคอลัมน์/แถวที่เพิ่มออกได้ด้วยปุ่ม ✕ ถ้ายังไม่มีตัวเลขในช่องนั้น
+      </p>
+    </div>
+  );
+};
+
 /* ── หนึ่งตารางของชีต (= หนึ่งรุ่นในสมุด) ──────────────────────────────────── */
 
 const SheetTable: React.FC<{
@@ -882,7 +1214,9 @@ const SheetTable: React.FC<{
   products: number | null | undefined;
   patch: Patch;
   onAdvanced: () => void;
-}> = ({ v, d, products, patch, onAdvanced }) => {
+  /** ค่านอกแคตตาล็อกที่พบในรหัสจริง (ทั้งชีต — กรองตามรุ่นในกล่องเอง) */
+  askFound: AskValue[] | null | undefined;
+}> = ({ v, d, products, patch, onAdvanced, askFound }) => {
   const rowAx = v.base.kind === 'matrix' ? v.base.axes[0] : null;
   const axisAdders = v.adders.filter((a) => a.rates && a.byAxis !== rowAx);
   const cables = axisAdders.filter((a) => a.byAxis === 'cable');
@@ -914,6 +1248,14 @@ const SheetTable: React.FC<{
         </span>
         <p className="basis-full text-[11px] text-slate-400">
           ใช้กับรหัส <span className="font-mono">{[v.code, ...v.aliases].join(', ')}</span>
+          {/* หัววัดนอกแคตตาล็อกที่เพิ่มเป็นแถว (TSE) — รหัสของมันคิดจากตารางนี้ด้วย */}
+          {(() => {
+            const rA = rowAxisOf(v);
+            const own = slotOfAxis(v, rA)?.slot === 'sensor'
+              ? allRows(v, d).filter((r) => offCat(v, d, rA, r) && !gone(d, rA, r)).map((r) => `${r}${v.code.replace(/^[A-Z]+/, '')}`)
+              : [];
+            return own.length ? <span className="font-mono text-orange-700">, {own.join(', ')} (นอกแคตตาล็อก)</span> : null;
+          })()}
         </p>
       </div>
 
@@ -926,6 +1268,7 @@ const SheetTable: React.FC<{
         </div>
 
         {v.base.kind === 'matrix' && <MatrixGrid v={v} d={d} patch={patch} />}
+        {v.base.kind === 'matrix' && <AskCard v={v} d={d} patch={patch} found={askFound} />}
         {v.base.kind === 'banded' && <BandGrid v={v} d={d} patch={patch} />}
         {v.base.kind === 'ref' && (
           <p className="text-[13px] text-slate-600">ใช้ตารางราคาตั้งของรุ่น <b className="font-mono">{v.base.model}</b></p>
@@ -953,7 +1296,11 @@ export const SheetEditor: React.FC<{
   onBack: (saved: boolean) => void;
   /** ส่วนใต้ตาราง — "ตัวอักษรในรหัส" / "ยังอ่านไม่ออกในชีตนี้" (`SheetSubCodes` · แก้แล้วมีผลทันที ไม่ผูกกับปุ่มตรวจของตาราง) */
   children?: React.ReactNode;
-}> = ({ sheet, products, authHeaders, onAdvanced, onBack, children }) => {
+  /** ค่านอกแคตตาล็อกที่พบในรหัสจริงของชีตนี้ (`GET /unread`) — `undefined` = กำลังนับ · `null` = นับไม่สำเร็จ */
+  askFound?: AskValue[] | null;
+  /** เปิดมาจากปุ่ม "ต้องขอราคา" ของหน้าคำนวณราคา — เลื่อนไปที่กล่องขอราคาของรุ่นนี้ */
+  focusAsk?: string | null;
+}> = ({ sheet, products, authHeaders, onAdvanced, onBack, children, askFound, focusAsk }) => {
   const jsonHeaders = useMemo(
     () => ({ ...authHeaders, 'Content-Type': 'application/json' }),
     [authHeaders],
@@ -994,6 +1341,15 @@ export const SheetEditor: React.FC<{
     const t = setTimeout(() => { void load(); }, 0);
     return () => clearTimeout(t);
   }, [load]);
+
+  // มาจากปุ่มของหน้าคำนวณราคา — เลื่อนไปที่กล่อง "ต้องขอราคา" ครั้งเดียวหลังโหลดชีตเสร็จ
+  const focused = useRef(false);
+  useEffect(() => {
+    if (!models || !focusAsk || focused.current) return;
+    focused.current = true;
+    const t = setTimeout(() => document.getElementById(`ask-${focusAsk}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+    return () => clearTimeout(t);
+  }, [models, focusAsk]);
 
   const diff = useMemo(() => (models ? buildDiff(models, drafts) : []), [models, drafts]);
   const invalid = useMemo(() => (models ? invalidCells(models, drafts) : []), [models, drafts]);
@@ -1049,7 +1405,8 @@ export const SheetEditor: React.FC<{
           </h1>
           <p className="text-[11px] text-slate-400 mt-0.5">
             {models.length} ตาราง · แก้ตัวเลขในช่องได้เลย แล้วกด “ตรวจก่อนบันทึก” ·
-            เพิ่ม/ลบแถวหรือคอลัมน์ใช้แม่แบบ Excel · เพิ่ม/ลบกฎใช้ปุ่ม “กฎและเงื่อนไข”
+            เพิ่ม/ลบแถวหรือคอลัมน์ใช้แม่แบบ Excel{models.some((v) => v.askPrice) && <> (ค่านอกแคตตาล็อกเพิ่มได้ที่กล่อง “ต้องขอราคาจากฝ่ายผลิต” ใต้ตาราง)</>} ·
+            เพิ่ม/ลบกฎใช้ปุ่ม “กฎและเงื่อนไข”
           </p>
         </div>
         <div className="flex w-full gap-2 sm:w-auto">
@@ -1078,6 +1435,7 @@ export const SheetEditor: React.FC<{
             products={products[v.code]}
             patch={patchOf(v.code)}
             onAdvanced={() => advanced(v.code)}
+            askFound={askFound}
           />
         ))}
       </div>

@@ -196,7 +196,8 @@ export interface PriceOutcome {
   /** `missing` = คิดไม่ได้เพราะรหัสไม่ได้บอกค่า (ไม่ใช่ไม่รับผลิต) — ดู `Violation` ฝั่ง backend */
   /** `noRate` = รหัสบอกค่าแล้วแต่กฎบวกเพิ่มยังไม่มีราคาของค่านั้น (ไม่ใช่ไม่รับผลิตเหมือนกัน) */
   /** `partial` = กฎข้อนั้นยังไม่รวมในราคา เพราะอ่านค่าในรหัสไม่ออก (ราคาเฉพาะส่วนที่คำนวณได้) */
-  violations: { id: string; level: 'block' | 'quoteOnRequest' | 'warn'; message: string; missing?: boolean; noRate?: boolean; partial?: boolean }[];
+  /** `askPrice` = มาจากค่านอกแคตตาล็อก (ขอราคา / ใช้ราคาที่แอดมินเพิ่ม) — จอโชว์ปุ่มไปใส่ราคาที่หน้าสมุดราคา */
+  violations: { id: string; level: 'block' | 'quoteOnRequest' | 'warn'; message: string; missing?: boolean; noRate?: boolean; partial?: boolean; askPrice?: boolean }[];
   bookVersion: string;
   /** วิธีคิดทีละขั้น — ข้อความทุกบรรทัดเขียนมาจากเซิร์ฟเวอร์ในจุดเดียวกับที่คิดเงิน ดู `PriceTrace` ฝั่ง backend */
   trace?: PriceTrace;
@@ -228,11 +229,21 @@ export interface UnreadToken {
   reads: string;
 }
 
+/** ค่านอกแคตตาล็อกที่พบในรหัสจริง — ชิปของกล่อง "ต้องขอราคาจากฝ่ายผลิต" (`subcodeView.ts` · รวมค่าที่อยู่ในตารางแล้ว) */
+export interface AskValue {
+  model: string;
+  axis: string;
+  value: string;
+  count: number;
+  example: string;
+}
 export interface SheetUnread {
   sheet: string;
   codes: number;
   unread: number;
   tokens: UnreadToken[];
+  /** เซิร์ฟเวอร์รุ่นก่อนไม่มีช่องนี้ */
+  askPrice?: AskValue[];
 }
 
 export interface UnreadSummary {
@@ -447,6 +458,15 @@ export interface EditorView {
   derived: { name: string; label: string; argsTh: string; consts: string; formulaTh: string; whenTh: string }[];
   /** ค่ามาตรฐานที่รวมในราคาตั้งแล้ว */
   standard: { dim: string; dimTh: string; value: number }[];
+  /**
+   * ช่องที่เพิ่ม "ค่านอกแคตตาล็อก" ได้จากจอ (ต้องขอราคาจากฝ่ายผลิต) — `null`/ไม่มี = รุ่นนี้ไม่ได้ตั้ง
+   * `place`: row = แถวของตาราง · col = คอลัมน์ · rate = ขนาดในกฎ `adder` · `off` = ค่านอกแคตตาล็อกที่อยู่ในตารางแล้ว
+   */
+  askPrice?: {
+    head: string;
+    slots: { slot: 'sensor' | 'thread' | 'd'; axis: string; axisTh: string; place: 'row' | 'col' | 'rate'; adder?: string }[];
+    off: Record<string, string[]>;
+  } | null;
   vocab: {
     options: { key: string; label: string }[];
     dims: { key: string; label: string }[];

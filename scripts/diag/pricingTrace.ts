@@ -64,7 +64,14 @@ function inconsistency(o: PriceOutcome): string {
     if (v.partial && t.rules.find((r) => r.id === v.id)?.status !== 'waiting') return `คำเตือน ${v.id} (ยังไม่รวม) แต่กฎนั้นไม่ได้ขึ้นยังไม่รวม`;
   }
   const hits = t.checks.filter((c) => c.hit).length;
-  const fromConstraints = o.violations.filter((v) => !ruleIds.has(v.id) && !v.id.startsWith('SUBCODE_') && v.id !== 'NO_BASE_PRICE').length;
+  // คำเตือนจากค่านอกแคตตาล็อก (`askPrice` · TS_-01 2026-09-29) ไม่ได้มาจากข้อห้าม — ตรวจแยกข้างล่าง
+  const fromConstraints = o.violations.filter((v) => !ruleIds.has(v.id) && !v.id.startsWith('SUBCODE_') && v.id !== 'NO_BASE_PRICE' && !v.askPrice).length;
+  // "ต้องขอราคา" จากค่านอกแคตตาล็อก ⇒ ห้ามมีราคาที่หน้าตาเหมือนราคาเต็ม และวิธีคิดต้องบอกว่าขอราคาที่ราคาตั้งหรือที่กฎ
+  if (o.violations.some((v) => v.askPrice && v.level === 'quoteOnRequest')) {
+    if (o.status === 'priced') return 'ค่านอกแคตตาล็อกขึ้นขอราคา แต่สถานะเป็นคิดราคาได้';
+    const told = [...t.base.steps, ...t.rules.map((r) => r.reason ?? '')].some((x) => /ไม่อยู่ในแคตตาล็อก/.test(x));
+    if (!told && !o.violations.some((v) => v.askPrice && v.id.startsWith('ASK_PRICE:'))) return 'ขอราคาแต่วิธีคิดไม่บอกเหตุผล';
+  }
   if (hits !== fromConstraints) return `ข้อห้ามขึ้น "ติด" ${hits} ข้อ แต่มีคำเตือนจากข้อห้าม ${fromConstraints}`;
   return '';
 }

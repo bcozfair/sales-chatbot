@@ -259,6 +259,8 @@ function AdminContent() {
   const subTab = route.sub;
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  /** ปุ่ม "ต้องขอราคา" ของหน้าคำนวณราคา → เปิดสมุดราคาที่ชีตของรุ่นนั้นตรงกล่องขอราคา (ไปทางเมนู = หน้าแรกของสมุดตามเดิม) */
+  const [bookAt, setBookAt] = useState<{ sheet: string; model: string } | null>(null);
   /**
    * กลุ่มไหนกางอยู่ — เก็บเฉพาะกลุ่มที่ "คนกดหุบเอง" เท่านั้น
    * **ค่าเริ่มต้นคือกางทุกกลุ่ม** (เจ้าของเลือกเมื่อ 2026-09-15) — เปิดมาเห็นเมนูครบทุกบรรทัด
@@ -431,6 +433,7 @@ function AdminContent() {
   }
 
   const goTo = (tab: MainTab) => {
+    setBookAt(null);
     navigate({ tab, sub: subTab });
     setMobileOpen(false);
     if (LOG_TABS.has(tab)) setLastLogTab(tab);
@@ -830,12 +833,13 @@ function AdminContent() {
             <div className="animate-fade-in">
               <PricingLab
                 canEditBook={visibleTabs.includes('pricebook')}
-                onOpenBook={() => goTo('pricebook')}
+                onOpenBook={(at) => { goTo('pricebook'); setBookAt(at ?? null); }}
               />
             </div>
           ) : effectiveTab === 'pricebook' ? (
             <div className="animate-fade-in">
               <PriceBook
+                openAt={bookAt}
                 canQuote={visibleTabs.includes('pricing')}
                 onOpenQuote={() => goTo('pricing')}
               />

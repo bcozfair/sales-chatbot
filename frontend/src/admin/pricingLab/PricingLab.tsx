@@ -68,10 +68,25 @@ function notPricedTitle(o: PriceOutcome | null): string {
   return 'ยังคิดราคาไม่ได้';
 }
 
+/**
+ * "ต้องขอราคาจากฝ่ายผลิต" ที่มาจากค่านอกแคตตาล็อก (`Violation.askPrice`) — ได้ราคาแล้วแอดมินใส่เองได้ที่หน้าชีต
+ * (เจ้าของสั่ง 2026-09-29 · mockup `ts01-ask-price` ตัวอย่างที่ 1) · ปุ่มขึ้นเฉพาะคนที่เปิดหน้าสมุดราคาได้
+ */
+const AskPriceLink: React.FC<{ outcome: PriceOutcome | null; sheet?: string; canEditBook: boolean; onOpen: () => void }> = ({ outcome, sheet, canEditBook, onOpen }) => {
+  if (!canEditBook || !sheet || !outcome?.violations.some((v) => v.askPrice && v.level === 'quoteOnRequest')) return null;
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2 text-[12px] text-slate-500">
+      <span>ได้ราคาแล้ว ใส่ได้ที่</span>
+      <Button size="sm" icon={BookOpen} onClick={onOpen}>สมุดราคา › {sheet} › ต้องขอราคา</Button>
+    </div>
+  );
+};
+
 interface Props {
   /** คนนี้เปิดหน้า "สมุดราคา" ได้ไหม (มาจากเมนูที่เขาเห็นจริง = ช่อง `page.pricebook`) */
   canEditBook: boolean;
-  onOpenBook: () => void;
+  /** `at` = เปิดชีตของรุ่นนี้ตรงกล่อง "ต้องขอราคา" (ปุ่มของผลที่ต้องขอราคา) · ไม่ส่ง = หน้าแรกของสมุด */
+  onOpenBook: (at?: { sheet: string; model: string }) => void;
 }
 
 export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
@@ -169,6 +184,10 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
   }, [loadOverview]);
 
   const modelCode = result?.parsed.model ?? overview?.models[0]?.code ?? '*';
+  const resultSheet = overview?.models.find((m) => m.code === result?.outcome?.model)?.sheet;
+  const openAsk = () => { if (resultSheet && result?.outcome) onOpenBook({ sheet: resultSheet, model: result.outcome.model }); };
+  /** ราคาที่ได้มาจากช่องนอกแคตตาล็อกที่แอดมินใส่เอง — บอกไว้ใต้ราคา (ไม่ใช่ราคาของ Excel) */
+  const askSet = (result?.outcome?.violations ?? []).filter((v) => v.askPrice && v.level === 'warn').map((v) => v.message);
   /** ชื่อรุ่นที่ขึ้นจอ (`BH-01` → `BH-01,02`) — ตัวคิดราคาตอบเป็นรหัสในฐาน */
   const modelName = (c?: string) => overview?.models.find((m) => m.code === c)?.name ?? c;
 
@@ -209,7 +228,7 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
         }
       >
         {canEditBook && (
-          <Button icon={BookOpen} onClick={onOpenBook}>
+          <Button icon={BookOpen} onClick={() => onOpenBook()}>
             <span className="sm:hidden">สมุดราคา</span>
             <span className="hidden sm:inline">แก้ราคาในสมุดราคา</span>
           </Button>
@@ -258,6 +277,7 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
               <TsCatalogTemplate spec={tsSpec} families={families} form={tsForm} onChange={editTsForm} onFamily={pickFamily} />
             ) : null}
             {result && <CatalogResult result={result} notIncluded={notIncluded} />}
+            {result && <AskPriceLink outcome={result.outcome} sheet={resultSheet} canEditBook={canEditBook} onOpen={openAsk} />}
           </div>
         )}
       </div>
@@ -344,6 +364,9 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
                       <span className="tabular-nums">{result.outcome.unitPrice.toLocaleString()} บาท</span>
                     </div>
                   </div>
+                  {askSet.map((t) => (
+                    <div key={t} className="mt-3 rounded-lg px-3 py-2 text-xs border bg-sky-50 border-sky-200 text-sky-800">{t}</div>
+                  ))}
                   {notIncluded.length > 0 && (
                     <div className="flex gap-2.5 rounded-xl px-3.5 py-2.5 mt-3 text-xs leading-relaxed bg-amber-50 border border-amber-200 text-amber-800">
                       <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
@@ -367,6 +390,9 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
                     || 'ตารางราคาเว้นช่องนี้ว่างไว้ — ต้องถามฝ่ายขาย'
                   }
                 />
+              )}
+              {result.outcome?.status !== 'priced' && (
+                <AskPriceLink outcome={result.outcome} sheet={resultSheet} canEditBook={canEditBook} onOpen={openAsk} />
               )}
             </div>
           </TableCard>

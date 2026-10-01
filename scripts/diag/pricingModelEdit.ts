@@ -356,12 +356,19 @@ if (!ts01 || !ts010 || ts01.base.kind !== 'matrix') {
     modelEditorView(strict, strict.models['TSK-01-0']!).title === 'TS_-01-0');
   for (const [code, why] of [
     ['TS-01(M6)4.8+1M', 'ไม่มีตัวอักษรชนิดเซนเซอร์'], ['TS-01-0(M5)+1M', 'ไม่มีตัวอักษรชนิดเซนเซอร์'],
-    ['TS-14 6x200+150', 'ไม่มีตัวอักษรชนิดเซนเซอร์'], ['TSE-01(M6)4.8+1M', 'ไม่มีชนิดเซนเซอร์ E'],
+    ['TS-14 6x200+150', 'ไม่มีตัวอักษรชนิดเซนเซอร์'], ['TSE-01-0(M5)+1M', 'ไม่มีชนิดเซนเซอร์ E'],
     ['TSR-04(S3)6x150+1.5M', 'ไม่มีชนิดเซนเซอร์ R'], ['TSE-06(S2)6x100', 'ไม่มีชนิดเซนเซอร์ E'],
   ] as const) {
     const p = parseProductCode(code, strict);
     check(`${code} ไม่ยืมตารางของชนิดอื่น — ขึ้นว่าตารางใช้กับรหัสไหน`,
       !p.model && p.problems.some((s) => s.includes(why) && s.includes('ใช้กับรหัส')), p.model ?? p.problems.join(' | '));
+  }
+  // TSE-01 = หัวรหัสนอกแคตตาล็อกของตารางที่ตั้งให้ "ขอราคา" (เจ้าของเคาะ B#6 2026-09-29) — ได้รุ่นแต่ไม่ยืมแถวของชนิดอื่น
+  {
+    const p = parseProductCode('TSE-01(M6)4.8+1M', strict);
+    const o = p.cfg ? computePrice(p.cfg, strict) : null;
+    check('TSE-01(M6)4.8+1M ได้รุ่น TSK-01 แต่ไม่ยืมแถวของชนิดอื่น — ต้องขอราคาจากฝ่ายผลิต',
+      p.model === 'TSK-01' && o?.status === 'quoteOnRequest' && o.unitPrice === 0 && p.cfg?.axes?.sensor === 'TSE', `${o?.status} ${p.cfg?.axes?.sensor}`);
   }
   for (const [code, want] of [['TSK-01(M6)4.8+1M', 'TSK-01'], ['TSPA-01-0(M5)+1M', 'TSK-01-0'], ['TSK-14 6x200+150', 'TS-14'],
     ['TSJ-14 6x200+150', 'TS-14'], ['TSR-14(S4)15x100-BU', 'TS-14'], ['TST-04(S2)6x100+1M', 'TSK-04'],
@@ -750,10 +757,9 @@ if (ts01 && ts010) {
   price('TSP-01(M6)4.8x50+2MTSU', 1190, 'รวมกับค่าสาย: 920 + 110 + 160');
   price('TSK-01 4.8x300+1M', 490, 'ไม่มีวงเล็บ = 1/4” 160 + 3 × 110');
   price('TSK-01(M8)6+1M', 190, 'ไม่มี x ⇒ ไม่มีค่าความยาว (เหมือนเดิม)');
-  const bad = run('TSK-01(M6)5x50+1M');
-  check('TSK-01(M6)5x50+1M — ขนาดแกน 5 ไม่มีในกฎ ⇒ "ยังไม่รวม" (partial) ไม่ใช่ "รหัสไม่ได้บอก"',
-    bad.r.violations.some((v) => v.partial && /ความยาวแกน/.test(v.message)) && !bad.r.violations.some((v) => v.missing),
-    bad.r.violations.map((v) => JSON.stringify(v)).join('|'));
+  // แกน 5 ไม่มีในกฎ ⇒ ใช้อัตราของขนาดถัดขึ้นไป (6) + เตือนแกนไม่คู่กับเกลียว (เจ้าของเคาะ B#2/B#8 2026-09-29 — เดิม "ยังไม่รวม")
+  const bad = price('TSK-01(M6)5x50+1M', 280, 'แกน 5 ⇒ อัตราแกน 6: 160 + 120');
+  check('  และเตือนว่า M6 ใช้แกน 4.8 ตามแคตตาล็อก', bad.p.warnings.some((w) => /M6 ใช้แกน 4\.8/.test(w)), bad.p.warnings.join(' | '));
   const x0 = run('TSK-01-0(M6)x50+1M');
   check('TS_-01-0 ไม่มีแกน ⇒ ไม่ได้กฎความยาวไปด้วย · x ในรหัสขึ้นแดง (ไม่ใช่คิดเงินเงียบ ๆ)',
     !b9.models['TSK-01-0']!.adders.some((a) => a.dim === 'L1') && x0.p.parts.some((x) => /^x50/.test(x.text) && x.kind === 'unknown')
@@ -935,7 +941,8 @@ console.log('\n── 12. เกลียวที่อ่านไม่ออ
     check('  และไม่ใช่ราคาของเกลียวมาตรฐาน 1/4”', quarter.r.status !== 'priced' || quarter.r.unitPrice !== bare.r.unitPrice,
       `${why(bare)} vs ${why(quarter)}`);
     // บอกเกลียวมาแล้วแต่ตารางไม่มี ⇒ ห้ามเติมเกลียวมาตรฐานของรุ่น (1/4” · M5) แล้วคิดราคาของเกลียวคนละขนาด
-    for (const code of ['TSK-01(M12)+2M', 'TSK-01(S1)+2M', 'TSK-01-0(15)+2M']) {
+    // (TS_-01 เกลียวนอกแคตตาล็อก = "ต้องขอราคา" ตั้งแต่ 2026-09-29 — ด่าน diag:pricing-catalog-ts ข้อ 5 · ที่นี่ตรวจรุ่นที่ยังใช้กติกาเดิม)
+    for (const code of ['TSK-01-0(M12)+2M', 'TSK-01-0(S1)+2M', 'TSK-01-0(15)+2M']) {
       const x = run(code);
       const raw = code.match(/\([^)]*\)/)![0];
       check(`${code} — ตารางไม่มีเกลียวนี้ ⇒ ไม่ได้ราคา และบอกว่า "อ่าน ${raw} ไม่ออก" ไม่ใช่ "รหัสไม่ได้ระบุ"`,

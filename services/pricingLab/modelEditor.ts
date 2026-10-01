@@ -20,6 +20,7 @@
 
 import { AXIS_TH, DIM_TH, FORMULA_TH, KIND_TH, OPTION_TH, axisLabel, dimLabel, displayName } from './labels.js';
 import { scopeRank } from './subcodes.js';
+import { askSpecOf, askValueProblem, offCatalogValues } from './code.js';
 import type { Adder, Band, ModelVariant, Money, Predicate, PriceBook, PriceModel, RoundMode, SheetLayout } from './types.js';
 
 // ── ที่หน้าจออ่าน ────────────────────────────────────────────────────────────
@@ -123,6 +124,18 @@ export interface EditorView {
   derived: { name: string; label: string; argsTh: string; consts: string; formulaTh: string; whenTh: string }[];
   /** ค่ามาตรฐานที่รวมในราคาตั้งแล้ว แยกเป็นช่อง (`standardTh` คือข้อความเดียวกันต่อเป็นบรรทัด) */
   standard: { dim: string; dimTh: string; value: number }[];
+  /**
+   * ช่องที่แอดมินเพิ่ม **ค่านอกแคตตาล็อก** ได้เองจากหน้าชีต (= ค่าที่หน้าคำนวณราคาขึ้น "ต้องขอราคาจากฝ่ายผลิต" ·
+   * `TsFamilySpec.askPrice` · เจ้าของเคาะ mockup `ts01-ask-price` แบบ A 2026-09-29) — `null` = รุ่นนี้ไม่ได้ตั้ง
+   *   `slots[].place`: `row` = แถวของตาราง · `col` = คอลัมน์ของตาราง · `rate` = ขนาดในกฎที่แยกราคาตามแกนนั้น (`adder`)
+   *   `off` = ค่าที่มีอยู่แล้วแต่อยู่นอกแคตตาล็อก (แกน → ค่า) — จอระบายสีส้ม และเอาออกได้เมื่อยังไม่มีตัวเลข
+   * ตัวรับ (`applyModelEdit`) ตรวจซ้ำทุกค่าด้วยกติกาชุดเดียวกับตัวอ่านรหัส (`askValueProblem`) — จอไม่ใช่ด่าน
+   */
+  askPrice: {
+    head: string;
+    slots: { slot: 'sensor' | 'thread' | 'd'; axis: string; axisTh: string; place: 'row' | 'col' | 'rate'; adder?: string }[];
+    off: Record<string, string[]>;
+  } | null;
   /** คำศัพท์ให้ช่องเลือกในกล่อง "แก้กฎ" — รายการปิด ไม่ใช่ช่องพิมพ์อิสระ */
   vocab: {
     options: { key: string; label: string }[];
@@ -466,6 +479,7 @@ export function modelEditorView(book: PriceBook, m: PriceModel): EditorView {
       whenTh: d.when ? whenToText(d.when) : '',
     })),
     standard: Object.entries(m.standard ?? {}).map(([dim, value]) => ({ dim, dimTh: dimLabel(dim), value })),
+    askPrice: askView(m),
     vocab: {
       options: Object.entries(OPTION_TH).map(([key, label]) => ({ key, label })),
       dims: Object.entries(DIM_TH).map(([key, label]) => ({ key, label })),
@@ -474,6 +488,26 @@ export function modelEditorView(book: PriceBook, m: PriceModel): EditorView {
       series: seriesVocab(book, m)
     }
   };
+}
+
+/** ดู `EditorView.askPrice` */
+function askView(m: PriceModel): EditorView['askPrice'] {
+  const spec = askSpecOf(m);
+  if (!spec?.askPrice || m.base.kind !== 'matrix') return null;
+  const axes = m.base.axes;
+  type Slot = NonNullable<EditorView['askPrice']>['slots'][number];
+  const slots = (['thread', 'sensor', 'd'] as const).flatMap((slot): Slot[] => {
+    const axis = spec.askPrice![slot];
+    if (!axis) return [];
+    const at = { slot, axis, axisTh: axisLabel(axis) };
+    const i = axes.indexOf(axis);
+    if (i === 0) return [{ ...at, place: 'row' as const }];
+    if (i === 1 && axes.length === 2) return [{ ...at, place: 'col' as const }];
+    if (i >= 0) return [];
+    const adder = m.adders.find((a) => a.byAxis === axis && a.rates);
+    return adder ? [{ ...at, place: 'rate' as const, adder: adder.id }] : [];
+  });
+  return { head: spec.head, slots, off: offCatalogValues(m) };
 }
 
 // ── ที่หน้าจอส่งกลับมา ───────────────────────────────────────────────────────
@@ -780,13 +814,85 @@ function readVariant(raw: unknown, adders: Adder[], prev?: ModelVariant): ModelV
   };
 }
 
+type Matrix = Extract<PriceModel['base'], { kind: 'matrix' }>;
+
+/** ช่องของแคตตาล็อกที่แกนนี้เป็น (สำหรับตรวจค่าที่เพิ่ม) — ไม่ได้ตั้ง = เพิ่มจากจอไม่ได้ */
+function askSlotOf(m: PriceModel, axis: string): 'sensor' | 'thread' | 'd' | undefined {
+  const ask = askSpecOf(m)?.askPrice;
+  return ask ? (['sensor', 'thread', 'd'] as const).find((k) => ask[k] === axis) : undefined;
+}
+
+/**
+ * ค่านอกแคตตาล็อกที่กด "+ เพิ่ม" มา (`addValues: { แกน: [ค่า] }`) → แถว/คอลัมน์ "ยังไม่มีราคา" (`unpriced`) ของตาราง
+ * ทำ **ก่อน** อ่านช่องราคา เพราะช่องของค่าใหม่ต้องอยู่ในตารางก่อน `readCells` จะยอมรับ · ตรวจทีละค่ากับตารางที่โตขึ้นแล้ว
+ * (สองค่าในการบันทึกเดียวกันต้องไม่ทำให้กันกำกวม) · ขนาดแกนไม่ได้มาทางนี้ — มากับอัตราใน `adderRates` (ว่าง = ไม่เพิ่ม)
+ */
+function addAskValues(m: PriceModel, raw: unknown): PriceModel {
+  if (raw === undefined) return m;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) reject('ค่านอกแคตตาล็อก: รูปแบบไม่ถูกต้อง');
+  if (m.base.kind !== 'matrix') reject(`${m.code}: เพิ่มค่านอกแคตตาล็อกได้เฉพาะตารางสองแกน`);
+  let base = m.base as Matrix;
+  for (const [axis, list] of Object.entries(raw as Record<string, unknown>)) {
+    const slot = askSlotOf(m, axis);
+    if (!slot || !base.axes.includes(axis)) reject(`${m.code}: เพิ่ม${axisLabel(axis)}นอกแคตตาล็อกจากหน้าจอไม่ได้`);
+    if (!Array.isArray(list) || list.length > 30) reject(`${axisLabel(axis)}ที่เพิ่ม: ต้องเป็นรายการไม่เกิน 30 ค่า`);
+    for (const v of list as unknown[]) {
+      if (typeof v !== 'string') reject(`${axisLabel(axis)}ที่เพิ่ม: รูปแบบไม่ถูกต้อง`);
+      const why = askValueProblem({ ...m, base }, slot!, v as string);
+      if (why) reject(`เพิ่ม${axisLabel(axis)} ${v as string} ไม่ได้ — ${why}`);
+      base = { ...base, unpriced: { ...base.unpriced, [axis]: [...(base.unpriced?.[axis] ?? []), v as string] } };
+    }
+  }
+  return { ...m, base };
+}
+
+/**
+ * ค่านอกแคตตาล็อกที่กด ✕ เอาออก (`removeValues`) — ทำ **หลัง** อ่านช่องราคา · ได้เฉพาะค่านอกแคตตาล็อกที่ไม่มีตัวเลขเหลือสักช่อง
+ * (มีตัวเลข = ต้องลบตัวเลขก่อน ไม่งั้นราคาที่แอดมินใส่ไว้หายไปกับการกดครั้งเดียว) · ข้อความ/ค่าเริ่มต้นของแถวนั้นหายตาม
+ */
+function removeAskValues(before: PriceModel, next: PriceModel, raw: unknown): PriceModel {
+  if (raw === undefined) return next;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) reject('ค่าที่เอาออก: รูปแบบไม่ถูกต้อง');
+  if (next.base.kind !== 'matrix') reject(`${next.code}: เอาค่าออกได้เฉพาะตารางสองแกน`);
+  let base = next.base as Matrix;
+  const off = offCatalogValues(before);
+  const gone: Record<string, string[]> = {};
+  for (const [axis, list] of Object.entries(raw as Record<string, unknown>)) {
+    const i = base.axes.indexOf(axis);
+    if (i < 0 || !Array.isArray(list)) reject(`เอา${axisLabel(axis)}ออก: รูปแบบไม่ถูกต้อง`);
+    for (const v of list as unknown[]) {
+      if (typeof v !== 'string' || !(off[axis] ?? []).includes(v)) reject(`เอา${axisLabel(axis)} ${String(v)} ออกไม่ได้ — ไม่ใช่ค่านอกแคตตาล็อกที่เพิ่มไว้`);
+      if (Object.keys(base.cells).some((k) => k.split(SEP)[i] === v)) reject(`${axisLabel(axis)} ${v as string}: ลบตัวเลขในช่องของค่านี้ให้หมดก่อน แล้วค่อยเอาออก`);
+      const left = (base.unpriced?.[axis] ?? []).filter((x) => x !== v);
+      const { [axis]: _drop, ...rest } = base.unpriced ?? {};
+      base = { ...base, unpriced: left.length ? { ...rest, [axis]: left } : rest };
+      gone[axis] = [...(gone[axis] ?? []), v as string];
+    }
+  }
+  if (base.unpriced && Object.keys(base.unpriced).length === 0) {
+    const { unpriced: _u, ...plain } = base;
+    base = plain;
+  }
+  const out: PriceModel = { ...next, base };
+  // ค่าเริ่มต้นตามแถว (ชนิดสายมาตรฐานของหัววัดที่เอาออก) ไม่ต้องค้างอยู่ในสมุด
+  const rowGone = gone[base.axes[0]!] ?? [];
+  if (rowGone.length && out.axisDefaultsBy) {
+    out.axisDefaultsBy = Object.fromEntries(Object.entries(out.axisDefaultsBy).map(([k, d]) => [
+      k, d.by === base.axes[0] ? { ...d, values: Object.fromEntries(Object.entries(d.values).filter(([r]) => !rowGone.includes(r))) } : d,
+    ]));
+  }
+  return out;
+}
+
 /**
  * รวมสิ่งที่หน้าจอส่งมาเข้ากับรุ่นเดิม — **ต่อจากของเดิมเสมอ ไม่ใช่แทนที่ทั้งก้อน**
  * ช่องที่หน้าจอไม่ได้เปิดให้แก้ (`standard` · `derivedDims` · `aliases` · ข้อความของ
  * `constraints`) ต้องเดินทางมาจากเล่มปัจจุบัน ไม่ใช่จาก body ⇒ ยิง API ตรงก็ลบมันไม่ได้
  */
-export function applyModelEdit(current: PriceModel, body: unknown, book?: PriceBook): PriceModel {
+export function applyModelEdit(original: PriceModel, body: unknown, book?: PriceBook): PriceModel {
   const b = (body ?? {}) as Record<string, unknown>;
+  // ค่านอกแคตตาล็อกที่เพิ่มจากหน้าชีตต้องเข้าตารางก่อน — ช่องราคา/ค่าเริ่มต้น/ข้อความของแถวใหม่อ้างถึงมันได้
+  const current = addAskValues(original, b.addValues);
   const known = (a: Adder) => new Set(knownRateKeys(book, current, a));
 
   // ไม่ส่ง `adders` มา = กฎคงเดิมทั้งชุด แก้ได้แค่ตัวเลขใน `adderRates` (หน้าสมุดรายชีตใช้ทางนี้ —
@@ -809,6 +915,16 @@ export function applyModelEdit(current: PriceModel, body: unknown, book?: PriceB
       // (ไม่ขยาย `knownRateKeys` เพราะหน้าแก้ทีละรุ่นจะได้ช่องว่างเพิ่มหลายสิบช่อง — เหตุผลที่หัวฟังก์ชันนั้น)
       if (current.base.kind === 'matrix' && a.byAxis === current.base.axes[0]) {
         for (const r of matrixValues(current.base)[0]!) allowed.add(r);
+      }
+      // ขนาดนอกแคตตาล็อกที่แอดมินเพิ่มพร้อมอัตรา (แกน 8 ของ TS_-01) — ตรวจกติกาเดียวกับตัวอ่านรหัส · ช่องว่าง = ไม่เพิ่ม
+      const slot = a.byAxis ? askSlotOf(current, a.byAxis) : undefined;
+      if (slot === 'd') {
+        for (const k of sent.keys()) {
+          if (allowed.has(k) || k in a.rates) continue;
+          const why = askValueProblem(current, slot, k);
+          if (why) reject(`เพิ่ม${axisLabel(a.byAxis!)} ${k} ไม่ได้ — ${why}`);
+          allowed.add(k);
+        }
       }
       const merged = [...new Set([...Object.keys(a.rates), ...allowed])]
         .map((k) => sent.get(k) ?? (k in a.rates! ? { value: k, rate: a.rates![k] } : undefined))
@@ -928,7 +1044,7 @@ export function applyModelEdit(current: PriceModel, body: unknown, book?: PriceB
     if (layout) next.layout = layout;
     else delete next.layout;
   }
-  return next;
+  return removeAskValues(original, next, b.removeValues);
 }
 
 /**

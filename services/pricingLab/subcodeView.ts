@@ -21,6 +21,9 @@ import type { PriceBook, SubCode } from './types.js';
  *    · ท่อนที่ **เพิ่มแถวรหัสย่อยแล้วอ่านออก** (`CodePart.subCode`) แยกกองจากท่อนที่ต้องแก้ที่ตาราง/ตัวอ่าน
  *      (ขนาดที่ตารางไม่มี `10.2` · `+400`) — ให้กด "+" ตั้งรหัสย่อยกับท่อนหลังคือพาคนไปทางที่แก้ไม่ได้
  *
+ * 3. `askPrice` ต่อชีต — ค่านอกแคตตาล็อกที่พบในรหัสจริง (`ProductConfig.askPrice` · TS_-01 2026-09-29) = ชิปของกล่อง
+ *    "ต้องขอราคาจากฝ่ายผลิต" บนหน้าชีต · นับในรอบเดียวกับข้อ 2 (อ่านรหัสครั้งเดียว)
+ *
  * ⚠️ **งานนับรันในโปรเซสเดียวกับ webhook ของ LINE** — อ่านรหัส 17,879 ตัวใช้ ~1.9 วินาที CPU
  *   (วัด 2026-09-29 หลังจำค่าแกนใน `axisValues` · ก่อนหน้านั้น 11.4 วินาที) ⇒ แบ่งเป็นช่วงไม่เกิน
  *   `SLICE_MS` แล้วคืนเครื่องให้ event loop ทุกช่วง ไม่งั้นบอทค้างทั้งระบบตลอดเวลาที่มีคนเปิดหน้านี้
@@ -52,6 +55,18 @@ export interface UnreadToken {
   reads: string;
 }
 
+/**
+ * ค่านอกแคตตาล็อกที่พบในรหัสจริง (`ProductConfig.askPrice`) — ชิป "+ เพิ่ม" ของกล่อง "ต้องขอราคาจากฝ่ายผลิต" บนหน้าชีต
+ * (เจ้าของเคาะ mockup `ts01-ask-price` แบบ A 2026-09-29) · นับรวมค่าที่แอดมินเพิ่มเข้าตารางแล้วด้วย — จอเป็นคนติดป้าย "อยู่ในตารางแล้ว"
+ */
+export interface AskValue {
+  model: string;
+  axis: string;
+  value: string;
+  count: number;
+  example: string;
+}
+
 export interface SheetUnread {
   sheet: string;
   /** รหัสสินค้าที่ตกรุ่นในชีตนี้ */
@@ -60,6 +75,8 @@ export interface SheetUnread {
   unread: number;
   /** เรียงจากเจอบ่อยไปน้อย · ตัดที่ `TOP_TOKENS` */
   tokens: UnreadToken[];
+  /** เรียงจากเจอบ่อยไปน้อย · มีเฉพาะชีตที่รุ่นตั้งให้ "ค่านอกแคตตาล็อก = ขอราคา" */
+  askPrice: AskValue[];
 }
 
 export interface UnreadSummary {
@@ -87,9 +104,9 @@ const yieldToLoop = () => new Promise<void>((r) => setImmediate(r));
 
 async function measure(book: PriceBook): Promise<UnreadSummary> {
   const raw = await listCatalogCodes();
-  const perSheet = new Map<string, { codes: number; unread: number; tokens: Map<string, UnreadToken> }>();
+  const perSheet = new Map<string, { codes: number; unread: number; tokens: Map<string, UnreadToken>; ask: Map<string, AskValue> }>();
   for (const m of Object.values(book.models)) {
-    if (!perSheet.has(sheetOf(m))) perSheet.set(sheetOf(m), { codes: 0, unread: 0, tokens: new Map() });
+    if (!perSheet.has(sheetOf(m))) perSheet.set(sheetOf(m), { codes: 0, unread: 0, tokens: new Map(), ask: new Map() });
   }
 
   let sliceStart = performance.now();
@@ -103,7 +120,14 @@ async function measure(book: PriceBook): Promise<UnreadSummary> {
     if (!m) continue;
     const bucket = perSheet.get(sheetOf(m))!;
     bucket.codes += 1;
-    const unknown = parseProductCode(code, book).parts.filter((p) => p.kind === 'unknown');
+    const parsed = parseProductCode(code, book);
+    for (const [axis, value] of Object.entries(parsed.cfg?.askPrice ?? {})) {
+      const key = `${m.code}|${axis}|${value}`;
+      const hit = bucket.ask.get(key);
+      if (hit) hit.count += 1;
+      else bucket.ask.set(key, { model: m.code, axis, value, count: 1, example: code });
+    }
+    const unknown = parsed.parts.filter((p) => p.kind === 'unknown');
     if (unknown.length === 0) continue;
     bucket.unread += 1;
     const seen = new Set<string>();
@@ -122,6 +146,7 @@ async function measure(book: PriceBook): Promise<UnreadSummary> {
     codes: b.codes,
     unread: b.unread,
     tokens: [...b.tokens.values()].sort((x, y) => y.count - x.count || x.text.localeCompare(y.text)).slice(0, TOP_TOKENS),
+    askPrice: [...b.ask.values()].sort((x, y) => y.count - x.count || x.value.localeCompare(y.value)),
   }));
   return {
     measuredAt: new Date().toISOString(),
