@@ -250,7 +250,7 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     label: 'แก้ใบเดิมแล้วออกใหม่ (revise)',
     modes: SWITCH,
     defaults: switchFor('allow', 'allow', 'allow', 'allow'),
-    enforcedAt: 'POST /api/admin/webquote/revise',
+    enforcedAt: 'POST /api/admin/webquote/revise · GET /api/admin/webquote/revisable (รายการให้เลือก)',
   },
   {
     key: 'quote.view_all',

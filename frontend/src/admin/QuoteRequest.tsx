@@ -7,7 +7,7 @@
 //    ส่วนที่ 0  แถบตัวตนของใบ            → QuoteIssuerProfile.tsx
 //    ส่วนที่ 1  ช่องวางข้อความ            → POST /api/admin/webquote/propose  (ยังไม่เขียน DB)
 //    ส่วนที่ 2  **ตัวเอกสาร**             → POST /api/admin/webquote/preview  (ยังไม่เขียน DB)
-//    ส่วนที่ 3  revise จากเลขที่ใบ        → POST /api/admin/webquote/revise   → เติมกลับเข้าใบ
+//    ส่วนที่ 3  revise เลือกใบจากรายการ   → RevisePicker.tsx → POST /api/admin/webquote/revise → เติมกลับเข้าใบ
 //
 //  ── "เอกสารคือฟอร์ม" — ไม่มีขั้นฟอร์มแยกจากขั้นใบร่างอีกแล้ว (เจ้าของเคาะ 2026-09-17) ──────
 //  เดิมหน้านี้เดินสองขั้น (`stage: form → review`) คือกรอกในตาราง 8 คอลัมน์ก่อน แล้วกด "ดูใบร่าง"
@@ -40,6 +40,7 @@ import { PageHeader } from './PageHeader';
 import { QuoteIssuerProfile, type QuoteIssuerIdentity } from './QuoteIssuerProfile';
 import { Button } from './Button';
 import { ComboBox, type ComboOption } from './PersonComboBox';
+import { RevisePicker } from './RevisePicker';
 import { ConfirmIssueModal } from './ConfirmIssueModal';
 import { describeApiError } from './apiError';
 import { LocalContactModal, DeleteContactModal } from './LocalContactModal';
@@ -2764,7 +2765,6 @@ export const QuoteRequest: React.FC = () => {
   const [replacesRequestId, setReplacesRequestId] = useState<string | null>(null);
 
   // ── ส่วนที่ 3 ──
-  const [reviseNo, setReviseNo] = useState('');
   const [revising, setRevising] = useState(false);
   const [reviseError, setReviseError] = useState('');
   const [reviseFrom, setReviseFrom] = useState('');
@@ -3882,8 +3882,9 @@ export const QuoteRequest: React.FC = () => {
   //  แต่หน้านี้ไม่ยืนยันร่างตัวนั้น — มันเอา *รายการ* มาเปิดในฟอร์มให้แก้ได้เต็มรูปแบบ แล้วไป
   //  ออกใบจริงที่ปุ่มยืนยันเส้นเดียวกับทางปกติ · ร่างที่ค้างไว้ถูก insertDraftQuotations ลบทิ้ง
   //  ให้เองตอนสร้างใบจริง (คู่แอดมิน×เซลส์เดียวกัน) ⇒ ไม่มีร่างซ้อน
-  const doRevise = async () => {
-    if (!reviseNo.trim() || (!canPickAnySp && !spUserId)) return;
+  //  คืน true เมื่อสำเร็จ ⇒ ช่องเลือกใบ (RevisePicker) ล้างตัวเอง ส่วนแถบ "revision ของ …" รับช่วงต่อ
+  const doRevise = async (quotationNo: string): Promise<boolean> => {
+    if (!quotationNo.trim() || (!canPickAnySp && !spUserId)) return false;
     setRevising(true);
     setReviseError('');
     // แก้ใบเดิม = เซลส์ของใบเดิม (เจ้าของเคาะ 2026-09-24) ⇒ ไม่ส่งเซลส์ให้ server หาเอง
@@ -3895,7 +3896,7 @@ export const QuoteRequest: React.FC = () => {
         headers: { ...authHeaders, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sp_user_id: !canPickAnySp || pickedForRevise ? spUserId : undefined,
-          quotation_no: reviseNo,
+          quotation_no: quotationNo,
         }),
       });
       if (!res.ok) {
@@ -3972,8 +3973,10 @@ export const QuoteRequest: React.FC = () => {
       setResults([]);
       setStrandedIds([]);
       setText('');
+      return true;
     } catch (e) {
       setReviseError(e instanceof Error ? e.message : 'เตรียมใบแก้ไขไม่สำเร็จ');
+      return false;
     } finally {
       setRevising(false);
     }
@@ -4606,39 +4609,16 @@ export const QuoteRequest: React.FC = () => {
         />
       )}
 
-      {/* ── ส่วนที่ 3 — revise ── */}
-      <div className={`bg-card border border-slate-200 rounded-2xl shadow-sm p-4 space-y-3 ${blocked ? 'opacity-50 pointer-events-none' : ''}`}>
-        <div className="flex items-center gap-2">
-          <RotateCcw className="w-[18px] h-[18px]" style={{ color: BRAND }} />
-          <h3 className="text-sm font-bold text-slate-800">แก้ไขใบที่ออกไปแล้ว (revise)</h3>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <input
-            value={reviseNo}
-            onChange={(e) => setReviseNo(e.target.value)}
-            placeholder="เลขที่ใบ เช่น QP-260705030"
-            className="h-10 px-3 rounded-xl border border-slate-200 bg-slate-50 text-sm text-slate-800 outline-none focus:border-[var(--brand-fg)] focus:bg-card w-64"
-          />
-          <Button
-            variant="neutral"
-            tone="soft"
-            size="md"
-            icon={ArrowRight}
-            busy={revising}
-            disabled={!reviseNo.trim() || (!canPickAnySp && !spUserId) || (reviseNeedsPick && spSource !== 'manual')}
-            onClick={doRevise}
-          >
-            เตรียมใบแก้ไข
-          </Button>
-          <span className="text-xs text-slate-400">ใบที่ยังไม่มีเลขที่ (ร่าง) แก้แบบ revision ไม่ได้</span>
-        </div>
-        {reviseError && (
-          <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2 text-xs text-red-700">
-            <AlertTriangle className="w-4 h-4 shrink-0 mt-px" />
-            <span>{reviseError}</span>
-          </div>
-        )}
-      </div>
+      {/* ── ส่วนที่ 3 — revise: เลือกใบจากรายการ (RevisePicker.tsx · เจ้าของเคาะแบบ A 2026-10-01) ── */}
+      <RevisePicker
+        authHeaders={authHeaders}
+        lineCount={rows.length}
+        busy={revising}
+        submitDisabled={(!canPickAnySp && !spUserId) || (reviseNeedsPick && spSource !== 'manual')}
+        error={reviseError}
+        onRevise={doRevise}
+        blocked={blocked}
+      />
 
     </div>
   );

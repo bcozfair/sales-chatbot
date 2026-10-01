@@ -63,9 +63,11 @@ console.log('\n── ตัวตัดสินขอบเขต ────
 
   const src = readFileSync(new URL('../../index.ts', import.meta.url), 'utf8');
   // รายการถามเองหนึ่งจุด · ส่งออกกับตัวเลขในเมนูถามผ่าน odooExportFilterOf ตัวเดียวกัน (อีกหนึ่งจุด)
+  // · จุดที่สาม = ช่องเลือกใบที่จะแก้ไขของหน้าขอใบเสนอราคา (GET /webquote/revisable · 2026-10-01)
+  //   ซึ่งต้องใช้ขอบเขตเดียวกับหน้านี้โดยตั้งใจ (diag:revise-picker ตรวจฝั่งนั้น)
   const calls = src.match(/quoteViewScopeOf\(req\.admin, req\.query\.mine === '1'\)/g)?.length ?? 0;
   const viaFilter = src.match(/await odooExportFilterOf\(req\)/g)?.length ?? 0;
-  ok('รายการ · ส่งออก · ตัวเลขในเมนูส่งออก ถามขอบเขตด้วยปุ่มเดียวกัน', calls === 2 && viaFilter === 2,
+  ok('รายการ · ส่งออก · ตัวเลขในเมนูส่งออก ถามขอบเขตด้วยปุ่มเดียวกัน', calls === 3 && viaFilter === 2,
     `ถามตรง ${calls} จุด · ผ่านตัวกรองของไฟล์ ${viaFilter} จุด`);
   ok('ไม่มี endpoint ไหนถามสิทธิ์ตรง ๆ แล้วลืมปุ่ม', !/quoteScopeOf\(req\.admin\)/.test(src));
   const fe = readFileSync(new URL('../../frontend/src/admin/Quotations.tsx', import.meta.url), 'utf8');

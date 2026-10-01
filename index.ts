@@ -58,6 +58,8 @@ import {
   replaceRolePermissions,
   getAdminSalespersonIds,
   replaceAdminSalespersonIds,
+  searchRevisableQuotations,
+  QUOTE_SALESPERSON_NAME_SQL,
 } from './db/repositories.js';
 import {
   quoteViewScopeOf, ownQuoteScopeOf, capsOf, capabilityDef, invalidateCapabilityCache,
@@ -3382,6 +3384,29 @@ app.post('/api/admin/approvals/:requestId/cancel', adminAuthMiddleware, requireC
   }
 });
 
+/**
+ * รายการใบให้เลือกแก้ (ช่องค้นหาในส่วน "แก้ไขใบที่ออกไปแล้ว" · เจ้าของเคาะแบบ A 2026-10-01)
+ * ด่านเดียวกับปุ่ม revise (`quote.revise`) ไม่ใช่ `page.quotations` — คนที่แก้ใบได้แต่ไม่เห็นหน้าประวัติ
+ * ต้องเลือกใบได้ · ขอบเขตการมองเห็นถามตัวเดียวกับหน้าประวัติ (`quoteViewScopeOf`) ⇒ ปุ่ม
+ * "ใบของฉัน / ทั้งหมด" ตอบเหมือนกันทั้งสองหน้า · อ่านอย่างเดียว ไม่ enrich ทั้งใบ (แค่พอให้จำใบได้)
+ */
+app.get('/api/admin/webquote/revisable', adminAuthMiddleware, requireCapability('quote.revise'), async (req: any, res: any) => {
+  try {
+    const query = String(req.query.q ?? '').slice(0, 100);
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit)) || 20, 1), 50);
+    const { scope, viewAll } = await quoteViewScopeOf(req.admin, req.query.mine === '1');
+    const { rows, total } = await searchRevisableQuotations({ query, scope, limit });
+    // ตัวเลขบนปุ่ม "ใบของฉัน" = จำนวนที่จะเห็นถ้ากด (คำค้นเดียวกัน) — ดูทั้งหมดอยู่จึงต้องนับแยก
+    const mineTotal = scope
+      ? total
+      : (await searchRevisableQuotations({ query, scope: await ownQuoteScopeOf(req.admin), limit: 1 })).total;
+    res.json({ data: rows, total, mine_total: mineTotal, scope: scope ? 'own' : 'all', view_all: viewAll });
+  } catch (err: any) {
+    console.error('GET /api/admin/webquote/revisable error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 /** เลขที่ใบที่ยืนยันแล้ว → ร่าง revision · คืน `draft_quote_id` ให้ฟอร์มเปิดต่อในหน้าเดิม */
 app.post('/api/admin/webquote/revise', adminAuthMiddleware, requireCapability('quote.revise'), express.json(), async (req: any, res: any) => {
   try {
@@ -4239,7 +4264,7 @@ app.get('/api/admin/customers/types', adminAuthMiddleware, requireCapability('pa
 
 // พนักงานที่ถูกลบทำให้ q.user_id เป็น NULL (FK ON DELETE SET NULL) → join ไม่เจอชื่อ
 // แต่ชื่อ/เบอร์/รหัส ณ ตอนออกใบยังอยู่ใน snapshot q.employee_details จึง fallback ไปอ่านที่นั่น
-const SP_NAME_SQL = `COALESCE(s.name, q.employee_details->>'saleperson')`;
+const SP_NAME_SQL = QUOTE_SALESPERSON_NAME_SQL;
 const SP_PHONE_SQL = `COALESCE(s.phone, q.employee_details->>'sale_phone')`;
 const SP_CODE_SQL = `COALESCE(s.salesperson_id, q.employee_details->>'salesperson_id', q.salesperson_id)`;
 // ชื่อในช่อง "ผู้เสนอราคา" ของใบ — กติกาเดียวกับ pdfGenerator: ใบจากเว็บมี snapshot `issuer_name`

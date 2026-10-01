@@ -92,6 +92,18 @@ interface ComboProps<T extends ComboOption> {
    * (เช่นค้น "เอเทค" แล้ว server คืนชื่อที่สะกดต่างออกไป — กรองซ้ำจะทิ้งทิ้งหมด)
    */
   onQueryChange?: (q: string) => void;
+  /**
+   * วาดเนื้อในของแถวในรายการเอง — สำหรับรายการที่ชื่อบรรทัดเดียวจำไม่ได้ เช่น ใบเสนอราคา
+   * (เลขที่ + ลูกค้า + ยอด + วันที่ ในสองบรรทัด · ช่องเลือกใบที่จะแก้ไข 2026-10-01)
+   * ส่งมา = แทน `name` + `facts(…, 'list')` ในรายการ · ช่องที่เลือกแล้วยังวาดแบบเดิม
+   * · คีย์บอร์ด/ไฮไลต์/การหุบกล่องยังเป็นของโครงกลางทั้งหมด
+   */
+  renderOption?: (opt: T) => React.ReactNode;
+  /**
+   * กล่องหุบ (เลือกแล้ว · Esc · คลิกนอกกล่อง) — คำค้นข้างในถูกล้างทุกครั้งที่หุบ ⇒ ผู้เรียกที่ค้นเอง
+   * (`onQueryChange`) ใช้ตัวนี้ล้างคำค้นของตัวเองตาม ไม่งั้นเปิดรอบหน้าช่องว่างแต่รายการยังกรองด้วยคำเก่า
+   */
+  onClose?: () => void;
 }
 
 export function ComboBox<T extends ComboOption>({
@@ -112,6 +124,8 @@ export function ComboBox<T extends ComboOption>({
   badge,
   searchText,
   onQueryChange,
+  renderOption,
+  onClose,
 }: ComboProps<T>) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -124,10 +138,11 @@ export function ComboBox<T extends ComboOption>({
       if (boxRef.current?.contains(e.target as Node)) return;
       setOpen(false);
       setQuery('');
+      onClose?.();
     };
     document.addEventListener('mousedown', onPointer);
     return () => document.removeEventListener('mousedown', onPointer);
-  }, [open]);
+  }, [open, onClose]);
 
   const q = query.trim().toLowerCase();
   const filtered =
@@ -140,7 +155,7 @@ export function ComboBox<T extends ComboOption>({
   // ส่วนการกลับไปตัวแรกตอนพิมพ์ใหม่ ทำที่ onChange ของช่องค้น ซึ่งเป็นที่ที่ถูกจริง
   const activeIdx = filtered.length > 0 ? Math.min(active, filtered.length - 1) : 0;
 
-  const close = () => { setOpen(false); setQuery(''); };
+  const close = () => { setOpen(false); setQuery(''); onClose?.(); };
   const choose = (o: T) => { onPick(o); close(); };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -225,7 +240,7 @@ export function ComboBox<T extends ComboOption>({
                   onMouseEnter={() => setActive(i)}
                   onClick={() => choose(o)}
                   ref={(el) => { if (i === activeIdx) el?.scrollIntoView({ block: 'nearest' }); }}
-                  className={`w-full text-left px-3.5 py-2.5 text-sm flex items-center justify-between gap-2 ${
+                  className={`w-full text-left px-3.5 py-2.5 text-sm ${renderOption ? 'block' : 'flex items-center justify-between gap-2'} ${
                     o.id === value?.id
                       ? 'bg-[var(--brand-soft)] text-[var(--brand-fg)] font-semibold'
                       : i === activeIdx
@@ -233,8 +248,12 @@ export function ComboBox<T extends ComboOption>({
                         : 'text-slate-700'
                   }`}
                 >
-                  <span className="truncate">{o.name}</span>
-                  {facts?.(o, 'list')}
+                  {renderOption ? renderOption(o) : (
+                    <>
+                      <span className="truncate">{o.name}</span>
+                      {facts?.(o, 'list')}
+                    </>
+                  )}
                 </button>
               ))
             )}
