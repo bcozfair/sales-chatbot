@@ -121,7 +121,7 @@ import {
 import { handleEvent } from './handlers/lineHandler.js';
 import { buildAddressParts, buildThaiAddress } from './utils/address.js';
 import { buildPdfLink, buildPdfPath } from './utils/quotationLink.js';
-import { generateQuotationPDF, closePdfBrowser } from './pdfGenerator.js';
+import { generateQuotationPDF, closePdfBrowser, formatPersonNameWithSuffix } from './pdfGenerator.js';
 import { Parser } from 'json2csv';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -4230,6 +4230,23 @@ const SP_CODE_SQL = `COALESCE(s.salesperson_id, q.employee_details->>'salesperso
 // ชื่อในช่อง "ผู้เสนอราคา" ของใบ — กติกาเดียวกับ pdfGenerator: ใบจากเว็บมี snapshot `issuer_name`
 // ส่วนใบ LINE/ใบเก่าไม่มีคีย์นี้ ⇒ ช่องขวาของใบพิมพ์ชื่อเซลส์ จึงถอยไปใช้ชื่อเซลส์เหมือนกัน
 const ISSUER_NAME_SQL = `COALESCE(NULLIF(q.employee_details->>'issuer_name', ''), ${SP_NAME_SQL})`;
+// เรียงตามชื่อที่ "เห็นบนจอ" — จอตัด "คุณ" ออกตาม PDF (issuerDisplayOf) ถ้าเรียงด้วยค่าดิบ ชื่อจาก LINE
+// ("คุณX") จะไปกองอยู่หมวด ค. ทั้งหมดแทนที่จะเรียงปนกับชื่อจากเว็บตามตัวอักษรแรกจริง
+const ISSUER_SORT_SQL = `regexp_replace(${ISSUER_NAME_SQL}, '^คุณ\\s*', '')`;
+
+/**
+ * ชื่อผู้เสนอราคาตามที่ใบ PDF พิมพ์ (เจ้าของสั่ง 2026-10-01 "เหมือน PDF ทุกตัวอักษร")
+ * ใช้ `formatPersonNameWithSuffix` ตัวเดียวกับ pdfGenerator — ตัด "คุณ" นำหน้า + ห้อย (PM)/(THT)
+ * ⇒ ห้ามเขียนกติกาตัด/ห้อยชื่อซ้ำที่นี่หรือบนจอ วันที่ใบเปลี่ยน จอต้องเปลี่ยนตามเอง
+ * · ใบที่ออกเลขแล้ว: PDF ตัดสินบริษัทจากอักษรนำของเลขที่ (QT = THT) ⇒ ตรงกับ PDF ทุกตัวอักษร
+ * · ใบร่าง: PDF ถามบริษัทจากสินค้าบรรทัดแรก (resolveQuoteCompany · ยิงฐานต่อใบ) ซึ่งแพงเกินจะทำทั้งหน้า
+ *   และใบร่างยังไม่มีปุ่ม PDF ⇒ ตัดแค่ "คุณ" ไม่ห้อยวงเล็บ (ไม่เดาบริษัท)
+ */
+function issuerDisplayOf(name: string | null | undefined, quotationNo: string | null | undefined): string {
+  const no = String(quotationNo ?? '').trim();
+  if (no === '') return String(name ?? '').trim().replace(/^(คุณ)\s*/, '');
+  return formatPersonNameWithSuffix(name, no.toUpperCase().startsWith('QT'));
+}
 // ที่มาของใบ (บรรทัดเล็กใต้ชื่อผู้เสนอราคา) — เกณฑ์เดียวกับทั้งระบบ: ใบจากหน้าเว็บถือ user_id พร็อกซี
 // `web:<admin>:<sales>` (services/webIdentity.ts) · ห้ามใช้ `source_id` ซึ่งคือช่อง "Source" ของ Odoo
 // · user_id เป็น NULL ได้เมื่อเซลส์ถูกลบ (FK ON DELETE SET NULL) — มีแต่ใบ LINE เพราะแถวพร็อกซีไม่ถูกลบ
@@ -4258,7 +4275,7 @@ app.get('/api/admin/quotations', adminAuthMiddleware, requireCapability('page.qu
       created_at: 'q.created_at',
       customer_name: "(q.customer_details->>'customer_name')",
       salesperson_name: SP_NAME_SQL,
-      issuer_name: ISSUER_NAME_SQL,
+      issuer_name: ISSUER_SORT_SQL,
       total_sum: 'q.total_sum',
       status: 'q.status',
       odoo_exported_at: 'q.odoo_exported_at'
@@ -4353,6 +4370,8 @@ app.get('/api/admin/quotations', adminAuthMiddleware, requireCapability('page.qu
       salesperson_name: q.salesperson_name || '',
       salesperson_phone: q.salesperson_phone || '',
       salesperson_employee_code: q.salesperson_employee_code || null,
+      // ชื่อผู้เสนอราคาตามที่ใบ PDF พิมพ์ — ช่องขวาของใบ: มี issuer_name (ใบเว็บ) ใช้ตัวนั้น ไม่มีใช้ชื่อเซลส์
+      issuer_display: issuerDisplayOf(q.issuer_name || q.salesperson_name, q.quotation_no),
     }));
 
     // scope = ขอบเขตที่ใช้จริงรอบนี้ · view_all = กดดูทั้งหมดได้ไหม (หน้าจอใช้ซ่อนปุ่ม ไม่ต้องเดาจาก role)
@@ -4405,7 +4424,7 @@ app.get('/api/admin/quotations/export', adminAuthMiddleware, requireCapability('
       created_at: 'q.created_at',
       customer_name: "(q.customer_details->>'customer_name')",
       salesperson_name: SP_NAME_SQL,
-      issuer_name: ISSUER_NAME_SQL,
+      issuer_name: ISSUER_SORT_SQL,
       total_sum: 'q.total_sum',
       status: 'q.status',
       odoo_exported_at: 'q.odoo_exported_at'

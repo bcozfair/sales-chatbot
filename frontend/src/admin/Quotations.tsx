@@ -60,6 +60,8 @@ interface Quotation {
   salesperson_employee_code: string | null;
   /** ชื่อผู้เสนอราคา — มีเฉพาะใบจากเว็บ · null = ใบ LINE/ใบเก่า ซึ่งช่องผู้เสนอราคาบนใบคือชื่อเซลส์ */
   issuer_name?: string | null;
+  /** ชื่อผู้เสนอราคาตามที่ใบ PDF พิมพ์ (ตัด "คุณ" · ห้อย PM/THT) — เซิร์ฟเวอร์จัดรูปด้วยฟังก์ชันเดียวกับ PDF */
+  issuer_display?: string;
   /** ที่มาของใบ — คำนวณจาก user_id ที่เซิร์ฟเวอร์ (`web:` = หน้าเว็บ) ไม่ใช่ช่อง Source ของ Odoo */
   channel?: 'web' | 'line';
   total_sum: number;
@@ -997,14 +999,14 @@ export const Quotations: React.FC = () => {
                           </div>
                         </td>
 
-                        {/* ผู้เสนอราคา — กติกาเดียวกับช่องขวาของใบ PDF: ไม่มี issuer_name ⇒ ชื่อเซลส์
-                            **แสดงตรงตามใบทุกตัวอักษร ไม่เติม "คุณ"** (เจ้าของเลือกแบบ ข · 2026-10-01) — ใบ LINE
-                            ได้ "คุณX" จากตาราง salesperson ส่วนใบเว็บได้ชื่อ-นามสกุลของบัญชีแอดมิน บรรทัดที่มา
-                            ข้างล่างเป็นตัวอธิบายความต่างนี้ · เป็นข้อความจาง ไม่ใช่ป้ายสี เพราะแถวมีป้ายอยู่แล้ว */}
+                        {/* ผู้เสนอราคา — **เหมือนช่องขวาของใบ PDF ทุกตัวอักษร** (เจ้าของสั่ง 2026-10-01)
+                            ค่าดิบในฐานไม่ใช่สิ่งที่ใบพิมพ์: ใบ LINE เก็บ "คุณX" แต่ PDF ตัด "คุณ" แล้วห้อย (PM)/(THT)
+                            ⇒ ใช้ issuer_display ที่เซิร์ฟเวอร์จัดรูปด้วยฟังก์ชันเดียวกับ pdfGenerator ห้ามจัดรูปเองบนจอ
+                            · บรรทัดที่มาเป็นข้อความจาง ไม่ใช่ป้ายสี เพราะแถวมีป้ายอยู่แล้ว */}
                         <td className="px-4 py-2.5 whitespace-nowrap">
                           <div className="flex flex-col">
                             <span className="text-slate-700 text-sm">
-                              {quote.issuer_name || quote.salesperson_name || '-'}
+                              {quote.issuer_display || '-'}
                             </span>
                             {quote.channel && (
                               <span className="inline-flex items-center gap-1 text-xs text-slate-500">

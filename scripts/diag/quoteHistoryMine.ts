@@ -29,6 +29,7 @@ import jwt from 'jsonwebtoken';
 import { pool } from '../../config/db.js';
 import { getJwtSecret } from '../../config/jwt.js';
 import { can, quoteViewScopeOf } from '../../config/capabilities.js';
+import { formatPersonNameWithSuffix } from '../../pdfGenerator.js';
 
 const PORT = Number(process.env.QH_PORT ?? 3099);
 const BASE = `http://localhost:${PORT}`;
@@ -103,6 +104,18 @@ const admin = admins[0];
   ok('channel ตรงกับ user_id ทุกแถว', bad.length === 0 && r.data.length > 0, `${r.data.length} แถว · ผิด ${bad.length}`);
   const m = await api(admin, '/api/admin/quotations?exported=all&mine=1&limit=1');
   ok('admin กด "ใบของฉัน" ยอดเท่าตัวเลขบนปุ่ม', m.total === r.mine_total && m.scope === 'own', `${m.total} = ${r.mine_total}`);
+
+  // ชื่อผู้เสนอราคา = ที่ใบ PDF พิมพ์ทุกตัวอักษร (เจ้าของสั่ง 2026-10-01) — เทียบกับฟังก์ชันของ PDF ตรง ๆ
+  // ไม่ใช่สำเนากติกา ⇒ วันที่ PDF เปลี่ยนวิธีจัดชื่อ ข้อนี้ตามไปเอง
+  const issued = r.data.filter((q: any) => q.quotation_no);
+  const pdfName = (q: any) => formatPersonNameWithSuffix(q.issuer_name || q.salesperson_name, String(q.quotation_no).toUpperCase().startsWith('QT'));
+  const wrong = issued.filter((q: any) => q.issuer_display !== pdfName(q));
+  ok('ใบที่มีเลขที่: ชื่อผู้เสนอราคาตรงกับ PDF ทุกตัวอักษร', issued.length > 0 && wrong.length === 0,
+    `${issued.length} ใบ · ผิด ${wrong.length}${wrong[0] ? ` เช่น "${wrong[0].issuer_display}" ≠ "${pdfName(wrong[0])}"` : ''}`);
+  ok('ไม่มีชื่อผู้เสนอราคาขึ้นต้นด้วย "คุณ"', r.data.every((q: any) => !String(q.issuer_display ?? '').startsWith('คุณ')));
+  const drafts = r.data.filter((q: any) => !q.quotation_no);
+  ok('ใบร่าง: ไม่ห้อย (PM)/(THT) เพราะยังไม่รู้บริษัท', drafts.every((q: any) => !/\((PM|THT)\)$/.test(q.issuer_display ?? '')),
+    `${drafts.length} ใบ`);
 }
 for (const s of [subWith, subNone].filter(Boolean)) {
   const r = await api(s, '/api/admin/quotations?exported=all&limit=1');
@@ -176,6 +189,7 @@ const rowInfo = (page: Page) => page.$$eval('table tbody tr', (trs) => trs
     const badge = [...tds[1].querySelectorAll('span')].find((s) => /ทะลุกฎ|แก้มือ/.test(s.textContent ?? ''));
     const contact = [...tds[1].querySelectorAll('span')].find((s) => (s.textContent ?? '').startsWith('ติดต่อ:'));
     return {
+      name: issuer[0] ?? '',
       source: issuer[1] ?? '',
       hasBadge: !!badge,
       hasContact: !!contact,
@@ -192,6 +206,7 @@ const rowInfo = (page: Page) => page.$$eval('table tbody tr', (trs) => trs
   const rows = await rowInfo(page);
   ok('ทุกแถวมีบรรทัดที่มา (LINE / หน้าเว็บ)', rows.length > 0 && rows.every((r) => r.source === 'LINE' || r.source === 'หน้าเว็บ'),
     `${rows.length} แถว`);
+  ok('จอไม่แสดง "คุณ" หน้าชื่อผู้เสนอราคา (ตาม PDF)', rows.every((r) => !r.name.startsWith('คุณ')), rows.slice(0, 3).map((r) => r.name).join(' · '));
   await clickText(page, 'ส่งออก Odoo');
   await wait(150);
   const noteAll = await page.evaluate(() => document.body.innerText.includes('ไฟล์จะมีเฉพาะใบที่คุณเสนอราคา'));
