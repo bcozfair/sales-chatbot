@@ -311,7 +311,7 @@ npm run pricebook:calc -- --subcodes
 | `engine.ts` | `computePrice()` — pure function ห้าม import DB/network/LLM |
 | `code.ts` | `parseProductCode()` — "รหัสที่คนพิมพ์ → สเปก" ไม่คิดเงินเอง |
 | `catalogBh.ts` | แคตตาล็อก "การสั่งซื้อ" ของ BH — ลำดับท่อน + ตัวเลือก (ไม่มีราคา) · `buildBhCode` ช่องกรอก → รหัส · ตัวอ่านกลับอยู่ที่ `readBh` ใน code.ts (`docs/pricing-code-bh.md`) |
-| `catalogTs.ts` | แคตตาล็อก "การสั่งซื้อ" ของ TS 11 ตาราง — ลำดับท่อน + ตัวเลือก (ไม่มีราคา) · `buildTsCode` / `readTsForm` (ได้ช่องเฉพาะรหัสที่ประกอบกลับได้เดิมทุกตัวอักษร) · หัว NTC/PTC · Spring P · หัก L/หักฉาก นอกรหัส (`docs/pricing-code-ts-catalog.md`) |
+| `catalogTs.ts` | แคตตาล็อก "การสั่งซื้อ" ของ TS 11 ตาราง — ลำดับท่อน + ตัวเลือก (ไม่มีราคา) · `buildTsCode` / `readTsForm` (ตรงแคตตาล็อกทุกตัวอักษร) / `readTsFormLoose` (รหัสนอกรูปแบบ — ช่องพร้อม `issues` รายช่อง · ตั้งแต่ 2026-10-01 ทุกรหัสได้ช่อง) · หัว NTC/PTC · Spring P · หัก L/หักฉาก นอกรหัส (`docs/pricing-code-ts-catalog.md`) |
 | `subcodes.ts` | จับคู่รหัสย่อย: **แคบชนะกว้าง · ตรงตัวชนะแม่แบบ** |
 | `bookStore.ts` | อ่านเล่มปัจจุบันจากฐาน (cache เทียบเลขการบันทึกทุกครั้ง) + รวมรหัสย่อยจากตาราง (**ของในฐานชนะ**) |
 | `bookFile.ts` | แม่แบบ .xlsx ตอนมีคนกดปุ่มบนจอ — ปั้นไฟล์ออก · อ่านไฟล์ที่อัปเข้ามาจาก buffer |

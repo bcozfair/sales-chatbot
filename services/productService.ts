@@ -661,6 +661,12 @@ async function splitPartFuzzySearch(
 
   // คะแนนปานกลาง → AI pick (แล้วตรวจ key-token guard อีกชั้น)
   if (rows[0]._score >= 0.20) {
+    // ทุกตัวเลือกไม่ผ่าน guard อยู่แล้ว ⇒ AI ตอบอะไรผลก็เป็น null เสมอ ไม่ต้องเสียเวลารอ LLM
+    // (ทดลองกับประวัติ 2026-10-01: ยัดคำตอบทุกแบบ 9,810 รอบ ผลต่าง 0)
+    if (rows.every((r) => keyTokenMismatchReason(codeTrimmed, r) !== null)) {
+      console.log(`[findProduct] stage1.7 skip AI pick: all ${rows.length} candidates fail key-token guard`);
+      return null;
+    }
     const best = await pickBestWithAI(codeTrimmed, rows, numericCode, chatContext);
     if (best) {
       const reason = keyTokenMismatchReason(codeTrimmed, best);
@@ -767,14 +773,19 @@ async function fuzzySearch(codeTrimmed: string, qNorm: string, chatContext?: str
 
   // ── score ปานกลาง/ต่ำ (≥0.20) → ให้ AI เลือก (แล้วตรวจ key-token guard) ───
   else if (candidates[0]._score >= 0.20) {
-    console.log(`[findProduct] stage2 AI pick from ${candidates.length} candidates, top score=${candidates[0]._score}`);
-    const best = await pickBestWithAI(codeTrimmed, candidates, undefined, chatContext);
-    const reason = best ? keyTokenMismatchReason(codeTrimmed, best) : null;
-    if (best && !reason) {
-      return { found: true, product: best, candidates: [], report: '' };
-    }
-    if (best) {
-      console.log(`[findProduct] stage2 rejected AI pick ${best.model}: ${reason}`);
+    // ทุกตัวเลือกไม่ผ่าน guard อยู่แล้ว ⇒ AI ตอบอะไรก็ตกไปรายการรุ่นใกล้เคียงเหมือนเดิม ไม่ต้องเรียก
+    if (candidates.every((c) => keyTokenMismatchReason(codeTrimmed, c) !== null)) {
+      console.log(`[findProduct] stage2 skip AI pick: all ${candidates.length} candidates fail key-token guard`);
+    } else {
+      console.log(`[findProduct] stage2 AI pick from ${candidates.length} candidates, top score=${candidates[0]._score}`);
+      const best = await pickBestWithAI(codeTrimmed, candidates, undefined, chatContext);
+      const reason = best ? keyTokenMismatchReason(codeTrimmed, best) : null;
+      if (best && !reason) {
+        return { found: true, product: best, candidates: [], report: '' };
+      }
+      if (best) {
+        console.log(`[findProduct] stage2 rejected AI pick ${best.model}: ${reason}`);
+      }
     }
   }
 

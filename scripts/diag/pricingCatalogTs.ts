@@ -86,33 +86,44 @@ async function main(): Promise<void> {
   const { rows } = await pool.query<{ model: string }>(
     `SELECT DISTINCT model FROM products WHERE model ~* '^(TS[A-Z]*|[NP][0-9]{1,2})-(01|04|06|08|10|11|12|14|18)'`
   );
-  const byFamily = new Map<string, { all: number; form: number }>();
+  // ตั้งแต่ 2026-10-01 ทุกรหัสได้ช่อง (เจ้าของ: "ใช้หน้าตา ui เป็นมาตรฐานเดียวกัน อะไรไม่ตรงก็แค่แจ้งเตือน") —
+  // ตรงแคตตาล็อกทุกตัวอักษร (`readTsForm`) = เกณฑ์เดิมทุกข้อ · นอกรูปแบบ (`readTsFormLoose`) = ประกอบกลับเป็นรหัสเดิมเกือบทุกตัว
+  // (ตัวที่ไม่ได้คือท่อนที่เรียงต่างจากแคตตาล็อก — หน้าจอไม่เขียนทับรหัสจนกว่าคนจะแก้ช่อง)
+  const byFamily = new Map<string, { all: number; form: number; exact: number }>();
   const bad: string[] = [];
+  const looseBad: string[] = [];
   const priceDrift: string[] = [];
+  const noForm: string[] = [];
   for (const { model } of rows) {
     const m = modelOfCode(model, book);
     const fam = m ? tsFamilyOfModel(m.code) : undefined;
     if (!fam) continue;
     const r = price(model);
     const famKey = r.p.tsForm?.family ?? fam;
-    const stat = byFamily.get(famKey) ?? { all: 0, form: 0 };
+    const stat = byFamily.get(famKey) ?? { all: 0, form: 0, exact: 0 };
     stat.all++;
-    if (r.p.tsForm) {
+    if (!r.p.tsForm) noForm.push(model);
+    else {
       stat.form++;
+      const strict = !!readTsForm(model, fam);
+      if (strict) stat.exact++;
       const back = buildTsCode(r.p.tsForm);
-      if (!sameTsCode(back, model)) bad.push(`${model}  →  ${back}`);
+      if (!sameTsCode(back, model)) (strict ? bad : looseBad).push(`${model}  →  ${back}`);
       else if (sig(price(back)) !== sig(r)) priceDrift.push(`${model}  →  ${back}`);
     }
     byFamily.set(famKey, stat);
   }
-  let all = 0, withForm = 0;
+  let all = 0, exact = 0;
   for (const [fam, s] of [...byFamily.entries()].sort()) {
-    all += s.all; withForm += s.form;
-    console.log(`     ${fam.padEnd(9)} ${String(s.form).padStart(5)} / ${String(s.all).padStart(5)}  (${((s.form / s.all) * 100).toFixed(1)}%)`);
+    all += s.all; exact += s.exact;
+    console.log(`     ${fam.padEnd(9)} ตรงทุกตัวอักษร ${String(s.exact).padStart(5)} / ${String(s.all).padStart(5)}  (${((s.exact / s.all) * 100).toFixed(1)}%) · ได้ช่อง ${s.form}`);
   }
-  check(`รหัส TS ในฐาน ${all} ตัว · อ่านเป็นช่องตามแคตตาล็อกได้ ${withForm} ตัว (≥ 70%)`, all > 0 && withForm >= all * 0.7,
-    `${((withForm / Math.max(all, 1)) * 100).toFixed(1)}%`);
-  check('ทุกตัวที่อ่านเป็นช่องได้ ประกอบกลับเป็นรหัสเดิม', bad.length === 0, bad.slice(0, 5).join(' | '));
+  check('รหัส TS ที่รู้รุ่นได้ช่องกรอกทุกตัว (ไม่มีหน้า "ระบบอ่านรหัสนี้ว่าอะไร" แล้ว)', noForm.length === 0, noForm.slice(0, 4).join(' · '));
+  check(`รหัส TS ในฐาน ${all} ตัว · ตรงแคตตาล็อกทุกตัวอักษร ${exact} ตัว (≥ 70%)`, all > 0 && exact >= all * 0.7,
+    `${((exact / Math.max(all, 1)) * 100).toFixed(1)}%`);
+  check('ทุกตัวที่ตรงแคตตาล็อก ประกอบกลับเป็นรหัสเดิม', bad.length === 0, bad.slice(0, 5).join(' | '));
+  check(`นอกรูปแบบ: ประกอบกลับเป็นรหัสเดิม ≥ 99.5% (ไม่ได้ ${looseBad.length} ตัว — ท่อนที่เรียงต่างจากแคตตาล็อก)`,
+    looseBad.length <= all * 0.005, looseBad.slice(0, 3).join(' | '));
   check('ประกอบกลับแล้วคิดราคาได้เท่าพิมพ์รหัสเดิมทุกบาท', priceDrift.length === 0, priceDrift.slice(0, 5).join(' | '));
 
   // ── 2. ตัวเลือกทุกตัว → รหัส → อ่านกลับ → ไม่มีท่อนที่อ่านไม่ออก ─────────────────────
@@ -304,6 +315,45 @@ async function main(): Promise<void> {
   const again = (body: unknown) => { try { return applySheetEdit(book2, k01.sheet!, { 'TSK-01': body }); } catch (e) { return e instanceof EditRejected ? null : undefined; } };
   check('เอาออก: คอลัมน์ที่ยังมีตัวเลขเอาออกไม่ได้ · ล้างตัวเลขพร้อมกันแล้วเอาออกได้',
     again({ removeValues: { thread: [freeT] } }) === null && !!again({ cells: { [`TSK/TSJ | ${freeT}`]: null }, removeValues: { thread: [freeT] } }));
+
+  // ── 6. ทุกรหัสได้ช่องแบบเดียว · อะไรไม่ตรงแค่แจ้งเตือน (เจ้าของเคาะ mockup `pricing-one-form.html` 2026-10-01) ──────────
+  // ตรวจเฉพาะสิ่งที่ต้องจริงเสมอ (ป้ายของช่อง · ประกอบกลับ · ความสัมพันธ์ของราคา) ไม่เทียบตัวเลขราคากับไฟล์ที่จดไว้
+  section('6. รหัสนอกรูปแบบได้ช่องพร้อมป้ายเตือนรายช่อง · ต้องขอราคา = ราคาเท่าที่คิดได้');
+  {
+  const f = (code: string) => price(code);
+  const m5 = f('TSP-01-0(M5)+3MTU-S000');
+  check('ตัวอย่าง 1: เขียน (M5) มาตรฐานออกมา = ช่อง Hold เป็นค่ามาตรฐาน ไม่มีป้ายเตือน · ประกอบกลับคง (M5)',
+    m5.p.tsForm?.values.hold === '' && m5.p.tsForm.written?.hold === 'M5' && !m5.p.tsForm.issues?.hold
+      && sameTsCode(buildTsCode(m5.p.tsForm), 'TSP-01-0(M5)+3MTU-S000')
+      && m5.o?.unitPrice === f('TSP-01-0+3MTU-S000').o?.unitPrice);
+  const cm = f('TSK-01 4.8+30cm');
+  check('ตัวอย่าง 2: สายเป็น cm = ช่องสายเก็บ 30 หน่วย cm ไม่เตือน · แก้ชนิดสายแล้วยังเป็น cm',
+    cm.p.tsForm?.clUnit === 'cm' && cm.p.tsForm.values.cl === '30' && !cm.p.tsForm.issues
+      && sameTsCode(buildTsCode({ ...cm.p.tsForm, values: { ...cm.p.tsForm.values, cable: 'T' } }), 'TSK-01 4.8+30cmT'));
+  const d4 = f('TSK-01(M6)4+1.5M');
+  check('ตัวอย่าง 3: แกนนอกแคตตาล็อก = ป้าย off ที่ช่องแกน · เลือก 4.8 แล้วรหัสเป็นของแคตตาล็อก',
+    d4.p.tsForm?.issues?.d === 'off' && d4.p.tsForm.written?.d === '4' && d4.o?.status === 'priced'
+      && buildTsCode({ ...d4.p.tsForm, values: { ...d4.p.tsForm.values, d: '4.8' }, written: undefined, issues: undefined }) === 'TSK-01(M6)4.8+1.5M');
+  const ask = f('TSK-01(M13)4.8x50+2MT');
+  const sum = (ask.o?.breakdown ?? []).reduce((t, b) => t + (b.amount ?? 0), 0);
+  check('ตัวอย่าง 4: เกลียวต้องขอราคา = ป้าย ask · สถานะยังขอราคา · ราคาเท่าที่คิดได้ = ผลรวมกฎที่คิด (ไม่มีราคาตั้ง)',
+    ask.p.tsForm?.issues?.thread === 'ask' && ask.o?.status === 'quoteOnRequest' && sum > 0 && ask.o.unitPrice === sum
+      && !ask.o.breakdown.some((b) => b.step === 'base'), `${ask.o?.status} ${ask.o?.unitPrice} = ${sum}`);
+  const tse = f('TSE-01(M6)4.8+3M');
+  check('หัววัดต้องขอราคา + สายตั้งต้นที่ขึ้นกับหัววัด = ยังขอราคา (ไม่ตกเป็นไม่รับผลิต) · กฎที่คิดไม่ได้ขึ้น "ยังไม่รวม"',
+    tse.p.tsForm?.issues?.sensor === 'ask' && tse.o?.status === 'quoteOnRequest'
+      && !tse.o.violations.some((v) => v.level === 'block'), tse.o?.violations.map((v) => `${v.level}:${v.message}`).join(' · '));
+  const junk = f('TSK-01-L(M6)4.8+1M');
+  check('ตัวอย่าง 5: ท่อนที่อ่านไม่ออกหลังเลขรุ่น = ชิป · ช่องที่ตัวอ่านไม่ได้ใช้ = unread · ประกอบกลับที่ตำแหน่งเดิม',
+    junk.p.tsForm?.headJunk === '-L' && junk.p.tsForm.issues?.thread === 'unread' && junk.p.tsForm.issues?.d === 'unread'
+      && sameTsCode(buildTsCode(junk.p.tsForm), 'TSK-01-L(M6)4.8+1M'));
+  const h15 = f('TSK-01-0(15)+2M-S000');
+  check('ตัวอย่าง 6: TS_-01-0 เกลียวอ่านไม่ออก = ป้าย unread · คิดราคาไม่ได้เหมือนเดิม',
+    h15.p.tsForm?.issues?.hold === 'unread' && h15.o?.status === 'notManufacturable');
+  const exactForm = f('TSK-01(M6)4.8+1M');
+  check('รหัสตรงแคตตาล็อก = ไม่มีของ "ตามที่เขียน" ติดมา (ช่องแบบเดิมทุกอย่าง)',
+    !!exactForm.p.tsForm && !exactForm.p.tsForm.issues && !exactForm.p.tsForm.written && !exactForm.p.tsForm.tail && !exactForm.p.tsForm.omit);
+  }
 }
 
 main()

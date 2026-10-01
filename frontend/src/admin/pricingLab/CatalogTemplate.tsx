@@ -29,10 +29,10 @@ const INPUT =
   'h-9 rounded-lg bg-card border border-slate-200 text-slate-900 font-mono text-[14px] font-semibold ' +
   'focus:outline-none focus:border-[var(--brand-border-strong)] focus:ring-2 focus:ring-[var(--brand-soft)]';
 
-const Slot: React.FC<{ cap: string; children: React.ReactNode; hint?: string }> = ({ cap, children, hint }) => (
+const Slot: React.FC<{ cap: string; children: React.ReactNode; hint?: string; tone?: Tone }> = ({ cap, children, hint, tone }) => (
   <div className="flex flex-col items-center gap-1" title={hint}>
     {children}
-    <span className="text-[10.5px] text-slate-500 whitespace-nowrap">{cap}</span>
+    <span className={`text-[10.5px] text-slate-500 whitespace-nowrap ${tone ? TONE_CAP[tone] : ''}`}>{cap}</span>
   </div>
 );
 
@@ -46,18 +46,42 @@ const Sep: React.FC<{ t: string }> = ({ t }) => (
  * (select ตัวจริงยังรับคลิก/คีย์บอร์ด และ aria อ่านข้อความเต็มได้ตามเดิม) · กว้างตามรหัสที่ยาวสุด ไม่ใช่คำอธิบาย
  */
 interface CodeOption { value: string; code: string; text?: string; group?: string }
+
+/**
+ * ระดับของ "ไม่ตรงแคตตาล็อก" (เจ้าของเคาะ mockup `pricing-one-form.html` 2026-10-01): เหลือง = เตือน คิดราคาได้ ·
+ * ส้ม = ต้องขอราคาจากฝ่ายผลิต · แดง = อ่านไม่ออกจนคิดราคาไม่ได้ — ช่องระบายสีแทนการ์ด "ระบบอ่านรหัสนี้ว่าอะไร"
+ */
+export type Tone = 'warn' | 'ask' | 'bad';
+/** พื้น + ขอบ — select ใช้แค่นี้ (ตัวอักษรของ select ต้องโปร่งใสไว้ ไม่งั้นข้อความของตัวเลือกโผล่ซ้อนรหัสที่วางทับ) */
+const TONE_FRAME: Record<Tone, string> = {
+  warn: '!bg-amber-50 !border-2 !border-amber-300',
+  ask: '!bg-orange-50 !border-2 !border-orange-500',
+  bad: '!bg-red-50 !border-2 !border-red-300',
+};
+const TONE_TEXT: Record<Tone, string> = { warn: 'text-amber-800', ask: 'text-orange-700', bad: 'text-red-700' };
+/** ช่องพิมพ์ / ชิป — พื้น ขอบ และสีตัวอักษร */
+const TONE_BOX: Record<Tone, string> = {
+  warn: `${TONE_FRAME.warn} !text-amber-800`,
+  ask: `${TONE_FRAME.ask} !text-orange-700`,
+  bad: `${TONE_FRAME.bad} !text-red-700`,
+};
+const TONE_CAP: Record<Tone, string> = { warn: '!text-amber-700 font-semibold', ask: '!text-orange-700 font-semibold', bad: '!text-red-700 font-semibold' };
+
 const CodeSelect: React.FC<{
   label: string; value: string; options: CodeOption[]; placeholder?: string; onChange: (v: string) => void;
-}> = ({ label, value, options, placeholder, onChange }) => {
+  /** ข้อความที่โชว์ในช่องแทนรหัสของตัวเลือก — ค่าตามที่รหัสเขียน (`M5` ของค่ามาตรฐาน · ค่านอกแคตตาล็อก) */
+  shown?: string;
+  tone?: Tone;
+}> = ({ label, value, options, placeholder, onChange, shown, tone }) => {
   const cur = options.find((o) => o.value === value);
-  const ch = Math.max(placeholder?.length ?? 0, ...options.map((o) => o.code.length)) + 4;
+  const ch = Math.max(placeholder?.length ?? 0, shown?.length ?? 0, ...options.map((o) => o.code.length)) + 4;
   const item = (o: CodeOption) => (
     <option key={o.value} className="bg-card text-slate-900" value={o.value}>{o.text ? `${o.code} · ${o.text}` : o.code}</option>
   );
   const groups = [...new Set(options.map((o) => o.group).filter((g): g is string => !!g))];
   return (
     <div className="relative font-mono text-[14px]" style={{ width: `${ch}ch` }}>
-      <select className={`${INPUT} w-full pl-2 pr-6 text-transparent appearance-none cursor-pointer`} value={value} aria-label={label}
+      <select className={`${INPUT} w-full pl-2 pr-6 text-transparent appearance-none cursor-pointer ${tone ? TONE_FRAME[tone] : ''}`} value={value} aria-label={label}
               onChange={(e) => onChange(e.target.value)}>
         {placeholder !== undefined && <option className="bg-card text-slate-900" value="">{placeholder}</option>}
         {groups.length
@@ -65,8 +89,9 @@ const CodeSelect: React.FC<{
           : options.map(item)}
       </select>
       <span aria-hidden="true"
-            className={`pointer-events-none absolute inset-y-0 left-0 flex items-center pl-2 font-semibold ${cur ? 'text-slate-900' : 'text-slate-400'}`}>
-        {cur?.code ?? placeholder}
+            className={`pointer-events-none absolute inset-y-0 left-0 flex items-center pl-2 font-semibold ${
+              tone ? TONE_TEXT[tone] : cur || shown ? 'text-slate-900' : 'text-slate-400'}`}>
+        {shown ?? cur?.code ?? placeholder}
       </span>
       {/* ลูกศรของเบราว์เซอร์ใช้สีตัวอักษร ⇒ หายไปพร้อมข้อความที่ซ่อน จึงวาดเอง */}
       <ChevronDown aria-hidden="true" className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
@@ -119,9 +144,20 @@ const HoleRows: React.FC<{ rows: HoleRow[]; onChange: (rows: HoleRow[], now?: bo
 
 /** ช่อง "รุ่น" — ช่องแรกของรหัส ใช้ร่วมกันทั้ง BH และ TS (สลับข้ามซีรีส์ได้จากช่องนี้) */
 const FamilySlot: React.FC<{ families: FamilyChoice[]; value: string; onFamily: (v: string) => void }> = ({ families, value, onFamily }) => (
-  <Slot cap="รุ่น">
-    <CodeSelect label="รุ่น" value={value} options={families} onChange={(v) => v !== value && onFamily(v)} />
+  <Slot cap={value ? 'รุ่น' : 'ไม่พบรุ่นในสมุดราคา'} tone={value ? undefined : 'bad'}>
+    <CodeSelect label="รุ่น" value={value} options={families} placeholder={value ? undefined : 'เลือกรุ่น'}
+                tone={value ? undefined : 'bad'} onChange={(v) => v && v !== value && onFamily(v)} />
   </Slot>
+);
+
+/**
+ * รหัสที่ระบบไม่รู้ว่าเป็นรุ่นไหนในสมุดราคา — ช่องเดียวที่มีให้คือ "รุ่น" (ว่าง · แดง) ส่วนเหตุผลอยู่ในแถบเตือนข้างล่าง
+ * (mockup `pricing-one-form.html` ตัวอย่างที่ 7) · เลือกรุ่นแล้วได้ช่องของรุ่นนั้นตามค่าเริ่มต้น
+ */
+export const NoModelTemplate: React.FC<{ families: FamilyChoice[]; onFamily: (family: string) => void }> = ({ families, onFamily }) => (
+  <div className="flex flex-wrap items-start gap-1 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 pt-3 pb-2">
+    <FamilySlot families={families} value="" onFamily={onFamily} />
+  </div>
 );
 
 export const CatalogTemplate: React.FC<Props> = ({ catalog, families, form, onChange, onFamily }) => {
@@ -129,11 +165,14 @@ export const CatalogTemplate: React.FC<Props> = ({ catalog, families, form, onCh
   if (!spec) return null;
   const set = (patch: Partial<BhForm>, now?: boolean) => onChange({ ...form, ...patch }, now);
 
+  // รหัสนอกรูปแบบ (`loose`) ที่ไม่ได้บอกช่องตัวเลขนี้ — ระบายเหลือง "ไม่ได้ระบุ" (ช่องปกติที่เพิ่งลบตัวเลขไม่ระบาย)
+  const missing = (key: SizeKey | 'watt') => !!form.loose && form[key] === undefined && !(key === 'watt' && form.wattText);
   const num = (key: SizeKey | 'watt', slot: CatalogSlot, ch: number) => (
-    <Slot key={key} cap={`${slot.label}${slot.unit && key !== 'watt' ? ` ${slot.unit}` : ''}`} hint={slot.hint}>
+    <Slot key={key} cap={missing(key) ? 'ไม่ได้ระบุ' : `${slot.label}${slot.unit && key !== 'watt' ? ` ${slot.unit}` : ''}`} hint={slot.hint}
+          tone={missing(key) ? 'warn' : undefined}>
       <input
         type="number" inputMode="decimal" min={0}
-        className={`${INPUT} px-1.5 text-center`}
+        className={`${INPUT} px-1.5 text-center ${missing(key) ? TONE_BOX.warn : ''}`}
         style={{ width: `${ch}ch` }}
         value={form[key] ?? ''}
         aria-label={slot.label}
@@ -306,18 +345,58 @@ interface TsProps {
   form: TsForm;
   onChange: (next: TsForm, now?: boolean) => void;
   onFamily: (family: string) => void;
+  /** ผลคิดราคาตอนนี้ — ช่อง "อ่านไม่ออก" เป็นแดงเมื่อคิดราคาไม่ได้ · ช่องนอกแคตตาล็อกเป็นส้มเมื่อต้องขอราคา */
+  status?: 'priced' | 'quoteOnRequest' | 'notManufacturable';
 }
 
 const tsOptions = (slot: TsSlot, values: Record<string, string>): CatalogOption[] =>
   slot.optionsByProbe ? slot.optionsByProbe[values.probe ?? 'TS'] ?? [] : slot.options ?? [];
 
-export const TsCatalogTemplate: React.FC<TsProps> = ({ spec, families, form, onChange, onFamily }) => {
-  const set = (patch: Record<string, string>, now?: boolean) => onChange({ ...form, values: { ...form.values, ...patch } }, now);
+/** ค่าในช่องตามที่รหัสเขียนแต่ไม่อยู่ในรายการ — ใช้ค่านี้เป็นตัวเลือกพิเศษของ select ให้ค่าที่เลือกอยู่ถูกต้อง */
+const WRITTEN = '__written__';
+/** ท้ายรหัสแบบงานสั่งทำ (`-S000`) = ท่อนเสริมสีฟ้าแบบเดิม · ที่เหลือ = อ่านไม่ออก (เหลือง) */
+const isExtra = (t: string) => /^-[A-Z]+\d+$/i.test(t);
+
+export const TsCatalogTemplate: React.FC<TsProps> = ({ spec, families, form, onChange, onFamily, status }) => {
+  /** ค่าใหม่ในช่อง = ทิ้งของ "ตามที่รหัสเขียน" ของช่องนั้น (ค่า · ป้ายเตือน · ช่องที่รหัสไม่ได้เขียน) */
+  const forget = (key: string): Partial<TsForm> => {
+    const drop = <T,>(r?: Record<string, T>) => {
+      if (!r || !(key in r)) return r;
+      const rest = Object.fromEntries(Object.entries(r).filter(([k]) => k !== key));
+      return Object.keys(rest).length ? rest : undefined;
+    };
+    const omit = form.omit?.filter((k) => k !== key);
+    return { written: drop(form.written), issues: drop(form.issues), omit: omit?.length ? omit : undefined };
+  };
+  const set = (patch: Record<string, string>, now?: boolean) => {
+    let next: TsForm = { ...form, values: { ...form.values, ...patch } };
+    for (const k of Object.keys(patch)) next = { ...next, ...forget(k) };
+    onChange(next, now);
+  };
+  const toneOf = (key: string): Tone | undefined => {
+    const issue = form.issues?.[key];
+    if (!issue) return undefined;
+    if (issue === 'ask') return status === 'quoteOnRequest' ? 'ask' : 'warn';
+    if (issue === 'unread') return status === 'notManufacturable' ? 'bad' : 'warn';
+    return 'warn';
+  };
+  const capOf = (key: string, label: string): string => {
+    const issue = form.issues?.[key];
+    if (issue === 'ask') return status === 'quoteOnRequest' ? 'ขอราคาฝ่ายผลิต' : 'นอกแคตตาล็อก';
+    if (issue === 'off') return 'ไม่อยู่ในแคตตาล็อก';
+    if (issue === 'unread') return 'อ่านไม่ออก';
+    if (issue === 'missing') return 'ไม่ได้ระบุ';
+    return label;
+  };
+  const cm = form.clUnit === 'cm';
   const items: React.ReactNode[] = [<FamilySlot key="head" families={families} value={form.family} onFamily={onFamily} />];
   // ตัวคั่นวาดก่อนช่องถัดไปเสมอ แม้ช่องนั้นเป็น None — แผนผังแคตตาล็อกโชว์ทุกช่อง (รหัสจริงไม่เขียนท่อน None)
   for (const [i, it] of spec.layout.entries()) {
     if ('sep' in it) {
-      items.push(<Sep key={`sep-${i}`} t={it.sep === ' ' ? '␣' : it.sep} />);
+      // หน่วยของความยาวสายตามที่รหัสเขียน (`+30cm`) · TS_-11 ที่เขียนสายติดกับ M (`+5MPU`)
+      let t = it.sep === ' ' ? '␣' : it.sep;
+      if (t === 'M' || t === 'M-') t = `${cm ? 'cm' : 'M'}${t === 'M-' && !form.cableNoDash ? '-' : ''}`;
+      items.push(<Sep key={`sep-${i}`} t={t} />);
       continue;
     }
     if ('fixed' in it) {
@@ -330,13 +409,15 @@ export const TsCatalogTemplate: React.FC<TsProps> = ({ spec, families, form, onC
     const slot = spec.slots[key];
     if (!slot) continue;
     const value = form.values[key] ?? '';
+    const tone = toneOf(key);
     if (slot.kind === 'number') {
       const ch = Math.max(5, (slot.placeholder?.length ?? 0) + 3, value.length + 3);
+      const unit = key === 'cl' && cm ? 'cm' : slot.unit;
       items.push(
-        <Slot key={key} cap={`${slot.label}${slot.unit ? ` (${slot.unit})` : ''}`} hint={slot.hint}>
+        <Slot key={key} cap={capOf(key, `${slot.label}${unit ? ` (${unit})` : ''}`)} hint={slot.hint} tone={tone}>
           <input
             inputMode="decimal"
-            className={`${INPUT} px-1.5 text-center placeholder:text-slate-400 placeholder:font-medium`}
+            className={`${INPUT} px-1.5 text-center placeholder:text-slate-400 placeholder:font-medium ${tone ? TONE_BOX[tone] : ''}`}
             style={{ width: `${ch}ch` }}
             value={value}
             placeholder={slot.placeholder}
@@ -348,19 +429,27 @@ export const TsCatalogTemplate: React.FC<TsProps> = ({ spec, families, form, onC
       continue;
     }
     const opts = tsOptions(slot, form.values);
+    const written = form.written?.[key];
+    // ค่าตามที่รหัสเขียน: นอกรายการ = ตัวเลือกพิเศษ (ค่าที่เลือกอยู่) · อยู่ในรายการแต่เขียนต่าง (`M5` = ค่ามาตรฐาน) = แค่ข้อความที่โชว์
+    const outside = written !== undefined && !!form.issues?.[key] && !opts.some((o) => o.code === value && value !== '');
+    const options = opts.map((o) => ({ value: o.code, code: o.code || 'None', text: o.label }));
     items.push(
-      <Slot key={key} cap={slot.label} hint={slot.hint}>
+      <Slot key={key} cap={capOf(key, slot.label)} hint={slot.hint} tone={tone}>
         <CodeSelect
           label={slot.label}
-          value={value}
-          options={opts.map((o) => ({ value: o.code, code: o.code || 'None', text: o.label }))}
+          value={outside ? WRITTEN : value}
+          options={outside ? [{ value: WRITTEN, code: written!, text: 'ตามที่รหัสเขียน' }, ...options] : options}
+          placeholder={form.issues?.[key] === 'missing' ? '?' : undefined}
+          shown={written !== undefined && (outside || value === '') ? written : undefined}
+          tone={tone}
           onChange={(v) => {
+            if (v === WRITTEN) return;
             if (key !== 'probe') { set({ [key]: v }, true); return; }
             // เปลี่ยนชนิดหัววัด = ตัวเลือกของช่อง Sensor คนละชุด (TS → K J T … · N/P → 2K 10K)
             const next: Record<string, string> = { ...form.values, probe: v };
             const sensors = spec.slots.sensor ? tsOptions(spec.slots.sensor, next) : [];
             if (!sensors.some((o) => o.code === next.sensor)) next.sensor = sensors[0]?.code ?? '';
-            onChange({ ...form, values: next }, true);
+            onChange({ ...form, values: next, ...forget('probe') }, true);
           }}
         />
       </Slot>,
@@ -380,6 +469,29 @@ export const TsCatalogTemplate: React.FC<TsProps> = ({ spec, families, form, onC
       </Slot>,
     );
   }
+  // ท่อนที่อ่านไม่ออก (หลังเลขรุ่น + ท้ายรหัส) ต่อท้ายแถวเป็นชิป · กด ✕ = เอาออกจากรหัส (mockup ตัวอย่างที่ 5)
+  const chip = (k: string, text: string, extra: boolean, remove: () => void) => (
+    <Slot key={k} cap={extra ? 'นอกแคตตาล็อก' : 'อ่านไม่ออก'} tone={extra ? undefined : 'warn'}>
+      <span className={`h-9 inline-flex items-center gap-1 pl-2.5 pr-1 rounded-lg font-mono text-[14px] font-bold ${
+        extra ? 'bg-sky-50 border border-sky-200 text-sky-800' : TONE_BOX.warn}`}>
+        {text}
+        <button type="button" aria-label={`เอา ${text} ออก`} title="เอาออกจากรหัส" className="p-0.5 rounded hover:opacity-70" onClick={remove}>
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </span>
+    </Slot>
+  );
+  const chips: React.ReactNode[] = [];
+  if (form.headJunk) chips.push(chip('hj', form.headJunk.replace(/^-/, ''), false, () => onChange({ ...form, headJunk: undefined }, true)));
+  for (const [i, t] of (form.tail ?? []).entries()) {
+    const text = t.replace(/^-/, '');
+    if (!text) continue;
+    chips.push(chip(`t-${i}`, text, isExtra(t), () => {
+      const tail = (form.tail ?? []).filter((_, j) => j !== i);
+      onChange({ ...form, tail: tail.length ? tail : undefined }, true);
+    }));
+  }
+  if (chips.length) items.push(<Sep key="chips" t="·" />, ...chips);
 
   return (
     <div>
