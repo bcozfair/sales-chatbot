@@ -28,13 +28,14 @@ export function formForFamily(spec: CatalogFamilySpec, prev?: BhForm): BhForm {
  * ค่าเริ่มต้นเมื่อสลับไปตาราง TS — ค่าตั้งต้นของตารางนั้น (รหัสจริงที่พบบ่อย) แล้วยกช่องที่ตารางใหม่มีตัวเลือกเดียวกันมาจากค่าเดิม
  * (เปลี่ยน TS_-04 → TS_-06 แล้วชนิด Sensor/เกลียว/แกน/ความยาวไม่หาย) · ของนอกรหัส (บวกเพิ่ม) ยกมาเฉพาะที่ตารางใหม่มี
  */
-export function tsFormForFamily(spec: TsFamilySpec, prev?: { values?: Record<string, string>; addons?: string[] }): TsForm {
+export function tsFormForFamily(spec: TsFamilySpec, prev?: { values?: Record<string, string>; addons?: string[]; clUnit?: 'cm' }): TsForm {
   const values: Record<string, string> = { ...spec.defaults };
   const keep = (key: string) => {
     const v = prev?.values?.[key];
     const slot = spec.slots[key];
     if (v === undefined || !slot) return;
-    if (slot.kind === 'number') { if (v) values[key] = v; return; }
+    // ความยาวสายที่เขียนเป็น cm ไม่ยกไป — ตารางใหม่เริ่มที่หน่วย M ของแคตตาล็อก (30 cm ไม่ใช่ 30 M)
+    if (slot.kind === 'number') { if (v && !(key === 'cl' && prev?.clUnit === 'cm')) values[key] = v; return; }
     const opts = slot.optionsByProbe ? slot.optionsByProbe[values.probe ?? 'TS'] ?? [] : slot.options ?? [];
     if (opts.some((o) => o.code === v)) values[key] = v;
   };

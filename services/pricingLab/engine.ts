@@ -791,7 +791,11 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
   // ── วิธีคิดทีละขั้น ③: กฎบวกเพิ่มทุกข้อ รวมข้อที่ไม่ได้คิด ────────────────────
   const rules: TraceRule[] = [];
 
-  if (base.ok) {
+  // ราคาตั้งต้องขอจากฝ่ายผลิต (ค่านอกแคตตาล็อก) — กฎบวกเพิ่มยังคิดต่อ ให้หน้าจอแสดง "ราคาเท่าที่คิดได้" ไปก่อน
+  // (เจ้าของสั่ง 2026-10-01) · สถานะยังเป็น `quoteOnRequest` · กฎแบบ % รอราคาตั้ง (คิดจากยอดสะสมไม่ได้)
+  // ราคาตั้งที่หาไม่ได้ด้วยเหตุอื่น (ไม่รับผลิต · รหัสบอกไม่ครบ) ยังไม่คิดกฎเหมือนเดิม
+  const askBase = !base.ok && !!base.quote;
+  if (base.ok || askBase) {
     // `disabled` ถูกกรองทิ้งตรงนี้ ไม่ใช่ตอนโหลดสมุดราคา — เพื่อให้กฎที่ปิดไว้ยังอยู่ในสมุด
     // (ส่งออกไป Excel แล้วยังเห็น เปิดกลับมาใช้ได้) แค่ไม่มีผลกับราคา
     const fromSubCodes = subCodes
@@ -822,6 +826,11 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
           continue;
         }
       }
+      if (askBase && a.kind === 'percent') {
+        tr.status = 'waiting';
+        tr.reason = 'คิดเป็นเปอร์เซ็นต์ของยอดสะสม — รอราคาตั้งจากฝ่ายผลิต';
+        continue;
+      }
       if (variant?.adderPrices?.[a.id] !== undefined) {
         tr.steps.push(`ใช้ราคาของตัวเลือก ${variant.suffix} (${variant.label}) แทนราคาของรุ่นหลัก`);
       }
@@ -843,6 +852,14 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
       if (r.missing && a.byAxis && pendingAxes.has(a.byAxis)) {
         tr.status = 'waiting';
         tr.reason = `รอรหัสย่อยกำหนด${axisLabel(a.byAxis)}`;
+        continue;
+      }
+      // ราคาตั้งรอฝ่ายผลิตอยู่แล้ว — กฎที่คิดไม่ได้ (เช่นสายตั้งต้นที่ขึ้นกับหัววัดนอกแคตตาล็อก) ห้ามเปลี่ยนผลเป็น "ไม่รับผลิต"
+      // เดิมกฎไม่ถูกคิดเลยในกรณีนี้ ⇒ เหลือแค่บอกว่ายังไม่รวม
+      if (r.blocked && askBase) {
+        violations.push({ id: a.id, level: 'warn', message: r.blocked, partial: true });
+        tr.status = 'waiting';
+        tr.reason = r.blocked;
         continue;
       }
       if (r.blocked) {

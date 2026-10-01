@@ -3,11 +3,11 @@ import { Calculator, CircleDollarSign, AlertTriangle, BookOpen } from 'lucide-re
 import { useAuth } from '../../context/AuthContext';
 import { PageHeader } from '../PageHeader';
 import { Button } from '../Button';
-import { TableCard, EmptyState, ErrorBox } from '../logs/ui';
+import { ErrorBox } from '../logs/ui';
 import { errMsg, formatDateTime } from '../logs/format';
 import { SubCodeModal } from './SubCodeModal';
 import { CalcTrace } from './CalcTrace';
-import { CatalogTemplate, TsCatalogTemplate, type FamilyChoice } from './CatalogTemplate';
+import { CatalogTemplate, NoModelTemplate, TsCatalogTemplate, type FamilyChoice } from './CatalogTemplate';
 import { formForFamily, tsFormForFamily } from './catalogForm';
 import { type BhForm, type HoleRow, type QuoteOverview, type ParsedCode, type PriceOutcome, type TsForm } from './types';
 
@@ -42,6 +42,13 @@ import { type BhForm, type HoleRow, type QuoteOverview, type ParsedCode, type Pr
  * **ตั้งแต่ 2026-09-29 ซีรีส์ TS ทั้ง 11 ตารางได้ช่องกรอกแบบเดียวกัน** (เจ้าของ: "หน้าคำนวณราคาของซีรีย์ TS_ ทั้งหมด
  * ยังไม่ใช้รูปแบบแคตตาล็อคเหมือนซีรีย์ BH" · เคาะ mockup `pricing-catalogue-ts.html` + คำถาม 9 ข้อ "ตามที่แนะนำ")
  * — ช่อง "รุ่น" ช่องเดียวรวม BH กับ TS สลับข้ามซีรีส์ได้ · ช่องของ TS ส่งไปเป็น `tsForm` (`catalogTs.ts`)
+ *
+ * **ตั้งแต่ 2026-10-01 ทุกรหัสใช้ช่องกรอกแบบเดียว — การ์ด "ระบบอ่านรหัสนี้ว่าอะไร" เลิกใช้** (เจ้าของ: "ผมอยากให้ใช้
+ * หน้าตา ui เป็นมาตรฐานเดียวกัน อะไรไม่ตรงก็แค่แจ้งเตือน" · เคาะ mockup `pricing-one-form.html`) — รหัสนอกรูปแบบได้ช่อง
+ * ที่ระบายสีตาม `TsForm.issues` (เหลือง = เตือน · ส้ม = ขอราคา · แดง = คิดไม่ได้) · ท่อนที่อ่านไม่ออกเป็นชิปท้ายแถว
+ * และปุ่ม "＋ เพิ่ม" ย้ายมาอยู่ในแถบเตือน (`CatalogResult`) · รหัสที่ไม่รู้รุ่น = ช่อง "รุ่น" ว่างช่องเดียว + เหตุผล
+ * · รหัสบนสุด **ไม่ถูกเขียนทับจนกว่าคนแก้ช่อง** และแก้แล้วคงรูปที่เขียนมา (`written` · `clUnit` · ชิป)
+ * · ต้องขอราคาจากฝ่ายผลิต = โชว์ "ราคาเท่าที่คิดได้" ไปก่อน (เจ้าของสั่งตอนเคาะ mockup)
  */
 
 const HELP = 'ตัวอย่างในชีต — กดเพื่อลอง';
@@ -59,6 +66,9 @@ const isUnknown = (kind: string) => kind === 'unknown';
 /** ท่อนที่ยังไม่รวมในราคา — อ่านไม่ออก หรืออ่านออกแต่ต้องเลือกเพิ่ม (ขนาดเต๋า T) */
 const notInPrice = (kind: string) => kind === 'unknown' || kind === 'choose';
 
+/** สิ่งที่ยังไม่รวมในราคา · `add` = รหัสย่อยที่กด "＋ เพิ่ม" ได้ (ท่อนที่อ่านไม่ออก) */
+interface Missing { text: string; add?: string }
+
 /** "ไม่รับผลิต" ≠ "รหัสบอกไม่ครบ" ≠ "ยังไม่มีราคา" — คนละคำตอบกับลูกค้า (เดิมรวมกันหมด 2026-09-24) */
 function notPricedTitle(o: PriceOutcome | null): string {
   if (o?.status === 'quoteOnRequest') return 'ต้องขอราคาจากฝ่ายผลิต';
@@ -67,20 +77,6 @@ function notPricedTitle(o: PriceOutcome | null): string {
   if (o?.violations.some((v) => v.noRate)) return 'ยังไม่มีราคาในสมุดราคา';
   return 'ยังคิดราคาไม่ได้';
 }
-
-/**
- * "ต้องขอราคาจากฝ่ายผลิต" ที่มาจากค่านอกแคตตาล็อก (`Violation.askPrice`) — ได้ราคาแล้วแอดมินใส่เองได้ที่หน้าชีต
- * (เจ้าของสั่ง 2026-09-29 · mockup `ts01-ask-price` ตัวอย่างที่ 1) · ปุ่มขึ้นเฉพาะคนที่เปิดหน้าสมุดราคาได้
- */
-const AskPriceLink: React.FC<{ outcome: PriceOutcome | null; sheet?: string; canEditBook: boolean; onOpen: () => void }> = ({ outcome, sheet, canEditBook, onOpen }) => {
-  if (!canEditBook || !sheet || !outcome?.violations.some((v) => v.askPrice && v.level === 'quoteOnRequest')) return null;
-  return (
-    <div className="mt-2 flex flex-wrap items-center gap-2 text-[12px] text-slate-500">
-      <span>ได้ราคาแล้ว ใส่ได้ที่</span>
-      <Button size="sm" icon={BookOpen} onClick={onOpen}>สมุดราคา › {sheet} › ต้องขอราคา</Button>
-    </div>
-  );
-};
 
 interface Props {
   /** คนนี้เปิดหน้า "สมุดราคา" ได้ไหม (มาจากเมนูที่เขาเห็นจริง = ช่อง `page.pricebook`) */
@@ -138,8 +134,11 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
       if (!res.ok) throw new Error(out?.error ?? 'คิดราคาไม่สำเร็จ');
       setResult(out);
       if (body.form || body.tsForm) setCode(out.code ?? '');
+      // แก้ช่องอยู่ = ค่าในช่องเป็นของคนกรอก (ไม่ดีดกลับ) · รับเฉพาะสิ่งที่เซิร์ฟเวอร์ตัดสินใหม่: ป้ายเตือนรายช่อง / ธงนอกรูปแบบ
       if (!body.form) setForm(out.parsed?.form ?? null);
+      else setForm((cur) => (cur ? { ...cur, loose: out.parsed?.form?.loose } : cur));
       if (!body.tsForm) setTsForm(out.parsed?.tsForm ?? null);
+      else setTsForm((cur) => (cur ? { ...cur, issues: out.parsed?.tsForm?.issues } : cur));
     } catch (e: unknown) {
       if (mine !== seq.current) return;
       setError(errMsg(e));
@@ -186,24 +185,21 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
   const modelCode = result?.parsed.model ?? overview?.models[0]?.code ?? '*';
   const resultSheet = overview?.models.find((m) => m.code === result?.outcome?.model)?.sheet;
   const openAsk = () => { if (resultSheet && result?.outcome) onOpenBook({ sheet: resultSheet, model: result.outcome.model }); };
-  /** ราคาที่ได้มาจากช่องนอกแคตตาล็อกที่แอดมินใส่เอง — บอกไว้ใต้ราคา (ไม่ใช่ราคาของ Excel) */
-  const askSet = (result?.outcome?.violations ?? []).filter((v) => v.askPrice && v.level === 'warn').map((v) => v.message);
-  /** ชื่อรุ่นที่ขึ้นจอ (`BH-01` → `BH-01,02`) — ตัวคิดราคาตอบเป็นรหัสในฐาน */
-  const modelName = (c?: string) => overview?.models.find((m) => m.code === c)?.name ?? c;
 
   const bookMissing = overview && !overview.book.ok;
   /** สิ่งที่ยังไม่ได้รวมในราคา: กฎที่ข้ามเพราะอ่านค่าในรหัสไม่ออก + ท่อนที่อ่านไม่ออก/ยังต้องเลือก */
-  const notIncluded = result
+  const notIncluded: Missing[] = result
     ? [
-        ...(result.outcome?.violations ?? []).filter((v) => v.partial).map((v) => v.message),
-        ...result.parsed.parts.filter((p) => notInPrice(p.kind)).map((p) => `${p.text} — ${p.reads}`),
+        ...(result.outcome?.violations ?? []).filter((v) => v.partial).map((v) => ({ text: v.message })),
+        ...result.parsed.parts.filter((p) => notInPrice(p.kind))
+          .map((p) => ({ text: `${p.text} — ${p.reads}`, ...(isUnknown(p.kind) && canEditBook && p.text ? { add: p.text } : {}) })),
       ]
     : [];
   const catalog = overview?.catalog ?? [];
   const catalogTs = overview?.catalogTs ?? [];
   const tsSpec = tsForm ? catalogTs.find((c) => c.family === tsForm.family) : undefined;
   const bhMode = !!form && catalog.some((c) => c.family === form.family);
-  const catalogMode = bhMode || !!tsSpec;
+  const catalogMode = bhMode || !!tsSpec || !!result;
   /** ช่อง "รุ่น" ช่องเดียวรวมสองซีรีส์ (เจ้าของเคาะข้อ 9) — TS_-12 มีสองรายการตามแคตตาล็อกสองหน้า */
   const families: FamilyChoice[] = useMemo(() => [
     ...(overview?.catalogTs ?? []).map((c) => ({ value: c.family, code: c.head, text: c.name, group: 'TS — Temperature Sensor' })),
@@ -268,136 +264,24 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
           ))}
         </div>
 
-        {/* ── 1b. ช่องกรอกตามแคตตาล็อก + ราคา (เฉพาะรหัสที่มีแคตตาล็อก) ──────────── */}
+        {/* ── 2. ช่องกรอกตามแคตตาล็อก + ราคา — ทุกรหัสหน้าตาเดียวกัน (2026-10-01) ──────────── */}
         {catalogMode && (
           <div className="mt-3.5 pt-3.5 border-t border-slate-100">
             {bhMode && form ? (
               <CatalogTemplate catalog={catalog} families={families} form={form} onChange={editForm} onFamily={pickFamily} />
             ) : tsSpec && tsForm ? (
-              <TsCatalogTemplate spec={tsSpec} families={families} form={tsForm} onChange={editTsForm} onFamily={pickFamily} />
-            ) : null}
-            {result && <CatalogResult result={result} notIncluded={notIncluded} />}
-            {result && <AskPriceLink outcome={result.outcome} sheet={resultSheet} canEditBook={canEditBook} onOpen={openAsk} />}
+              <TsCatalogTemplate spec={tsSpec} families={families} form={tsForm} onChange={editTsForm} onFamily={pickFamily}
+                                 status={result?.outcome?.status} />
+            ) : (
+              <NoModelTemplate families={families} onFamily={pickFamily} />
+            )}
+            {result && (
+              <CatalogResult result={result} notIncluded={notIncluded} onAdd={setAdding} canEditBook={canEditBook}
+                             askSheet={resultSheet} onAsk={openAsk} />
+            )}
           </div>
         )}
       </div>
-
-      {result && !catalogMode && (
-        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)] gap-3.5 items-start">
-          {/* ── 2. ระบบอ่านรหัสนี้ว่าอะไร ──────────────────────────────── */}
-          <TableCard title="ระบบอ่านรหัสนี้ว่าอะไร" hint="ตรวจให้ครบก่อนเชื่อราคา">
-            <div className="px-4 py-3.5">
-              {result.parsed.parts.length === 0 && (
-                <p className="text-xs text-slate-500">อ่านรหัสนี้ไม่ออกเลย — {result.parsed.problems.join(' · ')}</p>
-              )}
-              <ul className="divide-y divide-slate-100">
-                {result.parsed.parts.map((p, i) => (
-                  <li key={`${p.text}-${i}`} className="flex gap-3 items-center py-2.5 flex-wrap">
-                    <span className={`font-mono font-bold text-xs px-2 py-1 rounded-md border shrink-0 ${
-                      notInPrice(p.kind)
-                        ? 'bg-red-50 border-red-200 text-red-700'
-                        : 'bg-card border-slate-200 text-slate-900'
-                    }`}>
-                      {p.text}
-                    </span>
-                    <span className={`text-xs flex-1 min-w-[140px] ${notInPrice(p.kind) ? 'text-red-700 font-semibold' : 'text-slate-700'}`}>
-                      {p.reads}
-                      {p.guess && <span className="block text-[11px] text-slate-400 mt-0.5">ตีความเอาเอง ยังไม่มีใครยืนยัน</span>}
-                    </span>
-                    {isUnknown(p.kind) && canEditBook && (
-                      <Button variant="primary" onClick={() => setAdding(p.text)}>
-                        ＋ เพิ่ม {p.text}
-                      </Button>
-                    )}
-                  </li>
-                ))}
-              </ul>
-
-              {result.parsed.parts.some((p) => isUnknown(p.kind)) && (
-                <div className="flex gap-2.5 rounded-xl px-3.5 py-2.5 mt-3 text-xs leading-relaxed bg-amber-50 border border-amber-200 text-amber-800">
-                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                  <span>
-                    <b>ยังไม่รู้ว่ามันคืออะไร ห้ามเดา</b> — ปล่อยให้ขึ้นแดงไว้แล้วไปถามฝ่ายขาย
-                    ดีกว่าใส่ตัวเลขมั่ว เพราะพอตั้งค่าแล้ว <b>รหัสอื่นทั้งหมดที่มีตัวอักษรนี้จะคิดตามทันที</b>
-                    และราคาที่ผิดจะดูเหมือนราคาที่ถูกทุกประการ
-                    {!canEditBook && <> · ตั้งค่าได้เฉพาะคนที่มีสิทธิ์หน้า <b>สมุดราคา</b></>}
-                  </span>
-                </div>
-              )}
-              {result.parsed.warnings.map((w) => (
-                <p key={w} className="text-[11px] text-slate-500 mt-2">{w}</p>
-              ))}
-            </div>
-          </TableCard>
-
-          {/* ── 3. ราคา ────────────────────────────────────────────────── */}
-          <TableCard title="ราคาต่อหน่วย" hint={result.parsed.model ? `รุ่น ${modelName(result.parsed.model)}` : undefined}>
-            <div className="px-4 py-3">
-              {result.outcome?.status === 'priced' ? (
-                <>
-                  <div className="text-center py-1.5">
-                    {/* ท่อนที่อ่านไม่ออกไม่ได้ทำให้คิดราคาไม่ได้ — คิดเฉพาะส่วนที่คำนวณได้แล้วบอกให้ชัดว่ายังไม่ครบ
-                        (เจ้าของสั่ง 2026-09-25) · ห้ามโชว์เหมือนราคาเต็ม ไม่งั้นคนจะเอาไปเสนอลูกค้าทั้งที่ขาดบางส่วน */}
-                    <div className={`text-[11px] ${notIncluded.length ? 'text-amber-700 font-semibold' : 'text-slate-500'}`}>
-                      {notIncluded.length ? 'ราคาเฉพาะส่วนที่คำนวณได้ (ยังไม่รวมส่วนลด)' : 'ราคาตั้ง (ยังไม่รวมส่วนลด)'}
-                    </div>
-                    <div className="text-3xl font-extrabold text-slate-900 tabular-nums leading-tight">
-                      {result.outcome.unitPrice.toLocaleString()}
-                      <span className="text-sm font-semibold text-slate-500 ml-1.5">บาท</span>
-                    </div>
-                  </div>
-                  <div className="border-t border-slate-100 pt-2.5 mt-2">
-                    {result.outcome.breakdown.map((b, i) => (
-                      <div key={`${b.step}-${i}`} className="flex gap-2.5 justify-between py-1 text-xs">
-                        <span className="text-slate-600 min-w-0">
-                          {/* `label` คือคำที่คนอ่าน · `step` เป็นชื่อชนิดของกฎที่โปรแกรมใช้ ไม่ใช่คำบนจอ */}
-                          {b.label}
-                          {b.detail && <small className="block text-[10.5px] text-slate-400">{b.detail}</small>}
-                        </span>
-                        <span className="tabular-nums font-semibold text-slate-800 whitespace-nowrap">
-                          {b.amount === undefined ? '' : b.amount.toLocaleString()}
-                        </span>
-                      </div>
-                    ))}
-                    <div className="flex justify-between border-t border-slate-100 mt-1.5 pt-2 text-[13px] font-extrabold text-slate-900">
-                      <span>{notIncluded.length ? 'รวมเฉพาะส่วนที่คำนวณได้' : 'รวมต่อหน่วย'}</span>
-                      <span className="tabular-nums">{result.outcome.unitPrice.toLocaleString()} บาท</span>
-                    </div>
-                  </div>
-                  {askSet.map((t) => (
-                    <div key={t} className="mt-3 rounded-lg px-3 py-2 text-xs border bg-sky-50 border-sky-200 text-sky-800">{t}</div>
-                  ))}
-                  {notIncluded.length > 0 && (
-                    <div className="flex gap-2.5 rounded-xl px-3.5 py-2.5 mt-3 text-xs leading-relaxed bg-amber-50 border border-amber-200 text-amber-800">
-                      <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                      <span>
-                        <b>ราคานี้ยังไม่ครบ</b> — ส่วนที่อ่านไม่ออกยังไม่ได้รวม ต้องถามฝ่ายขายก่อนเสนอราคา
-                        <ul className="mt-1 list-disc pl-4">
-                          {notIncluded.map((t) => <li key={t}>{t}</li>)}
-                        </ul>
-                      </span>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <EmptyState
-                  icon={AlertTriangle}
-                  // "รหัสบอกไม่ครบ" ≠ "ไม่รับผลิต" — เดิมขึ้นอย่างหลังกับ TSJ-01 4.8+2M ที่แค่ไม่มีวงเล็บเกลียว (2026-09-24)
-                  title={notPricedTitle(result.outcome)}
-                  hint={
-                    result.outcome?.violations.map((v) => v.message).join(' · ')
-                    || result.parsed.problems.join(' · ')
-                    || 'ตารางราคาเว้นช่องนี้ว่างไว้ — ต้องถามฝ่ายขาย'
-                  }
-                />
-              )}
-              {result.outcome?.status !== 'priced' && (
-                <AskPriceLink outcome={result.outcome} sheet={resultSheet} canEditBook={canEditBook} onOpen={openAsk} />
-              )}
-            </div>
-          </TableCard>
-        </div>
-      )}
 
       {/* ── 4. วิธีคำนวณทีละขั้น — เต็มความกว้าง เพราะบรรทัดสูตรยาว ────────── */}
       {result?.outcome && <CalcTrace outcome={result.outcome} />}
@@ -424,16 +308,26 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
  * ราคาใต้ช่องกรอก (mockup แบบ A) — เงินแต่ละก้อนเป็นชิปต่อกันด้วย "+" แล้วยอดรวมด้านขวา
  * ของที่ไม่มีผลกับราคารวมเป็นบรรทัดจางบรรทัดเดียว · ป้ายเตือนขึ้นเฉพาะตอนมีเรื่องจริง
  * ที่มาละเอียดทุกบาทอยู่ในการ์ด "วิธีคำนวณทีละขั้น" ข้างล่างเหมือนเดิม
+ *
+ * แถบเตือนเรียงตามความหนัก (mockup `pricing-one-form.html`): แดง = คิดไม่ได้ · ส้ม = ต้องขอราคาจากฝ่ายผลิต (+ ปุ่มไปใส่ราคา
+ * ที่หน้าชีต) · เหลือง = ยังไม่รวมในราคา (+ ปุ่ม "＋ เพิ่ม" ของท่อนที่อ่านไม่ออก — เดิมอยู่ในการ์ด "ระบบอ่านรหัสนี้ว่าอะไร") · ฟ้า = แจ้งให้รู้
+ * ต้องขอราคาแต่คิดบางส่วนได้ = โชว์ "ราคาเท่าที่คิดได้" (เจ้าของสั่ง 2026-10-01 ตอนเคาะ mockup)
  */
-const CatalogResult: React.FC<{ result: QuoteResult; notIncluded: string[] }> = ({ result, notIncluded }) => {
+const CatalogResult: React.FC<{
+  result: QuoteResult; notIncluded: Missing[]; onAdd: (subCode: string) => void; canEditBook: boolean;
+  /** ชีตของรุ่น — ปุ่ม "ใส่ราคาที่หน้าชีต" ของค่าที่ต้องขอราคา (ขึ้นเฉพาะคนที่เปิดสมุดราคาได้) */
+  askSheet?: string; onAsk: () => void;
+}> = ({ result, notIncluded, onAdd, canEditBook, askSheet, onAsk }) => {
   const o = result.outcome;
   const priced = o?.status === 'priced';
+  const partialAsk = o?.status === 'quoteOnRequest' && o.breakdown.length > 0;
   const free = result.parsed.parts.filter((p) => p.kind === 'noPrice').map((p) => p.reads.split(' — ')[0]);
-  const warns = [
-    ...(o?.violations ?? []).filter((v) => !v.partial).map((v) => v.message),
-    ...result.parsed.problems,
-    ...result.parsed.warnings,
-  ];
+  const blocks = [...(o?.violations ?? []).filter((v) => v.level === 'block').map((v) => v.message), ...result.parsed.problems];
+  const asks = (o?.violations ?? []).filter((v) => v.level === 'quoteOnRequest');
+  const infos = [...(o?.violations ?? []).filter((v) => v.level === 'warn' && !v.partial).map((v) => v.message), ...result.parsed.warnings];
+  // ปุ่มไปใส่ราคาขึ้นที่แถบส้มแถบแรกที่มาจากค่านอกแคตตาล็อกเท่านั้น (ทุกแถบพาไปหน้าชีตเดียวกัน)
+  const askBtnAt = canEditBook && askSheet ? asks.findIndex((v) => v.askPrice) : -1;
+  const band = 'flex flex-wrap items-start gap-x-2 gap-y-1.5 rounded-lg px-3 py-2 text-xs border';
   return (
     <div className="mt-3 pt-3 border-t border-slate-100">
       <div className="flex items-end justify-between gap-3 flex-wrap">
@@ -453,26 +347,45 @@ const CatalogResult: React.FC<{ result: QuoteResult; notIncluded: string[] }> = 
           )}
         </div>
         <div className="text-right">
-          <div className={`text-[11.5px] ${priced && notIncluded.length ? 'text-amber-700 font-semibold' : 'text-slate-500'}`}>
-            {!priced ? '' : notIncluded.length ? 'ราคาเฉพาะส่วนที่คำนวณได้' : 'ราคาตั้งต่อหน่วย (ยังไม่รวมส่วนลด)'}
+          <div className={`text-[11.5px] ${partialAsk ? 'text-orange-700 font-semibold' : priced && notIncluded.length ? 'text-amber-700 font-semibold' : 'text-slate-500'}`}>
+            {partialAsk ? 'ราคาเท่าที่คิดได้ — ยังไม่รวมส่วนที่ต้องขอราคา'
+              : !priced ? '' : notIncluded.length ? 'ราคาเฉพาะส่วนที่คำนวณได้' : 'ราคาตั้งต่อหน่วย (ยังไม่รวมส่วนลด)'}
           </div>
           <div className="text-[26px] font-extrabold text-slate-900 tabular-nums leading-tight">
-            {priced
+            {priced || partialAsk
               ? <>{o!.unitPrice.toLocaleString()}<span className="text-[13px] font-semibold text-slate-500 ml-1.5">บาท</span></>
               : <span className="text-[17px] text-red-700">{notPricedTitle(o)}</span>}
           </div>
         </div>
       </div>
-      {(notIncluded.length > 0 || warns.length > 0) && (
+      {(blocks.length + asks.length + notIncluded.length + infos.length) > 0 && (
         <div className="mt-2.5 grid gap-1.5">
-          {notIncluded.map((t) => (
-            <div key={t} className="flex gap-2 rounded-lg px-3 py-2 text-xs bg-amber-50 border border-amber-200 text-amber-800">
-              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" /><span><b>ยังไม่รวมในราคา</b> — {t}</span>
+          {blocks.map((t) => (
+            <div key={`b-${t}`} className={`${band} bg-red-50 border-red-200 text-red-700`}>{t}</div>
+          ))}
+          {asks.map((v, i) => {
+            const btn = i === askBtnAt;
+            return (
+              <div key={`a-${v.id}`} className={`${band} items-center bg-orange-50 border-orange-200 text-orange-700`}>
+                <span className="flex-1 min-w-[220px]"><b>{v.message}</b>{btn && ' · ได้ราคาแล้ว ใส่ได้ที่'}</span>
+                {btn && <Button size="sm" icon={BookOpen} onClick={onAsk}>สมุดราคา › {askSheet} › ต้องขอราคา</Button>}
+              </div>
+            );
+          })}
+          {notIncluded.map((m) => (
+            <div key={`n-${m.text}`} className={`${band} items-center bg-amber-50 border-amber-200 text-amber-800`}>
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
+              <span className="flex-1 min-w-[200px]"><b>ยังไม่รวมในราคา</b> — {m.text}</span>
+              {m.add && (
+                <Button variant="primary" onClick={() => onAdd(m.add!)}
+                        title="ยังไม่รู้ว่าแปลว่าอะไร ห้ามเดา — ตั้งค่าแล้วรหัสอื่นทั้งหมดที่มีตัวอักษรนี้จะคิดตามทันที">
+                  ＋ เพิ่ม {m.add}
+                </Button>
+              )}
             </div>
           ))}
-          {warns.map((t) => (
-            <div key={t} className={`rounded-lg px-3 py-2 text-xs border ${
-              priced ? 'bg-sky-50 border-sky-200 text-sky-800' : 'bg-red-50 border-red-200 text-red-700'}`}>{t}</div>
+          {infos.map((t) => (
+            <div key={`i-${t}`} className={`${band} bg-sky-50 border-sky-200 text-sky-800`}>{t}</div>
           ))}
         </div>
       )}

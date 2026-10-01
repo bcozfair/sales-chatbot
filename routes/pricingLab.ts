@@ -650,7 +650,8 @@ function cleanTsForm(raw: unknown): TsForm | undefined {
       values[key] = v;
     } else {
       const want = typeof v === 'string' ? v : '';
-      if (!slotOptions(slot, values).some((o) => o.code === want)) return undefined;
+      // `''` ผ่านเสมอ — ช่องที่ไม่มี None ในแคตตาล็อกแต่รหัสเดิมไม่ได้บอก/บอกค่านอกรายการ (ค่าจริงอยู่ใน `written`)
+      if (want !== '' && !slotOptions(slot, values).some((o) => o.code === want)) return undefined;
       values[key] = want;
     }
   }
@@ -660,6 +661,27 @@ function cleanTsForm(raw: unknown): TsForm | undefined {
   if (Array.isArray(r.extras)) {
     const extras = r.extras.slice(0, 8).filter((x): x is string => typeof x === 'string' && /^[A-Z]{1,4}\d{1,6}$/i.test(x));
     if (extras.length) form.extras = extras;
+  }
+  // ── รหัสนอกรูปแบบ (`readTsFormLoose`) — ค่าตามที่รหัสเดิมเขียน ส่งกลับมาเพื่อให้แก้ช่องหนึ่งแล้วส่วนอื่นคงรูป ──
+  // ข้อความทุกช่องสั้นและไม่มีช่องว่าง ⇒ รหัสที่ประกอบได้ยาวไม่เกินที่ `/quote` รับ (ตรวจซ้ำที่ความยาว 200 ข้างล่าง)
+  // `issues` ไม่รับจากหน้าจอ — ตัวอ่านรหัสคำนวณใหม่ทุกครั้ง
+  if (r.written && typeof r.written === 'object') {
+    const written: Record<string, string> = {};
+    for (const [k, w] of Object.entries(r.written as Record<string, unknown>)) {
+      if (spec.slots[k]?.kind === 'choice' && typeof w === 'string' && /^[A-Z0-9./"\-]{1,16}$/i.test(w)) written[k] = w;
+    }
+    if (Object.keys(written).length) form.written = written;
+  }
+  if (r.clUnit === 'cm') form.clUnit = 'cm';
+  if (r.cableNoDash === true) form.cableNoDash = true;
+  if (typeof r.headJunk === 'string' && /^-?[A-Z]{1,3}$/i.test(r.headJunk)) form.headJunk = r.headJunk;
+  if (Array.isArray(r.tail)) {
+    const tail = r.tail.slice(0, 8).filter((x): x is string => typeof x === 'string' && /^[-+]?[A-Z0-9./()"',×]{0,24}$/i.test(x) && x !== '');
+    if (tail.length) form.tail = tail;
+  }
+  if (Array.isArray(r.omit)) {
+    const omit = r.omit.filter((x): x is string => typeof x === 'string' && ['thread', 'fl', 'd2', 'l1', 'cl'].includes(x) && !!spec.slots[x]);
+    if (omit.length) form.omit = [...new Set(omit)];
   }
   return form;
 }

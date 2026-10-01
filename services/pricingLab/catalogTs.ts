@@ -13,7 +13,11 @@
 //    1. หน้าคำนวณราคาวาดช่องกรอกเรียงตามแคตตาล็อก (ส่งไปทาง `/overview` — ไม่มีราคาสักบาท)
 //    2. `buildTsCode` ประกอบรหัสจากช่อง (รูปแบบที่รหัสจริงเขียนมากที่สุด เช่น `-2-BU` · TS_-11 `+5M-PU`)
 //    3. `readTsForm` อ่านรหัสกลับเป็นช่อง — **ได้ช่องก็ต่อเมื่อประกอบกลับได้รหัสเดิมทุกตัวอักษร**
-//       ไม่งั้นแก้ช่องเดียวแล้วส่วนอื่นของรหัสเปลี่ยนเงียบ ๆ (รหัสนอกรูปแบบได้หน้า "ระบบอ่านรหัสนี้ว่าอะไร" เดิม)
+//       ไม่งั้นแก้ช่องเดียวแล้วส่วนอื่นของรหัสเปลี่ยนเงียบ ๆ
+//    4. `readTsFormLoose` — รหัสที่ข้อ 3 ไม่รับ (ค่านอกแคตตาล็อก · สายเป็น cm · เขียนค่ามาตรฐานออกมา · ท่อนที่อ่านไม่ออก)
+//       **ยังได้ช่องกรอกแบบเดียวกัน** แล้วแจ้งเตือนเป็นรายช่อง (เจ้าของสั่ง 2026-10-01 "ใช้หน้าตา ui เป็นมาตรฐานเดียวกัน
+//       อะไรไม่ตรงก็แค่แจ้งเตือน" · เคาะ mockup `pricing-one-form.html`) — การ์ด "ระบบอ่านรหัสนี้ว่าอะไร" เลิกใช้
+//       ค่าตามที่เขียนเก็บไว้ใน `written` / `clUnit` / `headJunk` / `tail` ⇒ แก้ช่องแล้วรหัส **คงรูปที่เขียนมา**
 //
 //  **ไฟล์นี้ไม่คิดราคาและไม่อ่านราคา** — ตัวอ่านรหัส (`code.ts`) กับตารางรหัสย่อยเป็นคนบอกว่าตัวอักษรไปที่กฎไหน
 //  ที่นี่บอกแค่ "ท่อนไหนอยู่ตรงไหน มีตัวเลือกอะไร" · ตัวเลือกที่ Excel ยังไม่มีราคา **ไม่ติดป้ายในรายการ** โดยตั้งใจ
@@ -37,6 +41,11 @@ export interface TsSlot {
   hint?: string;
   /** ช่องตัวเลขที่เว้นว่างได้ (ไม่เขียนลงรหัส = ค่ามาตรฐาน) */
   optional?: boolean;
+  /**
+   * ค่ามาตรฐานของตัวเลือก `''` ตามที่คนเขียนลงรหัส (`M5` ของ TS_-01-0 · `1/4` ของ TS_-01) — รหัสจริงที่เขียนค่ามาตรฐานออกมา
+   * (`TSP-01-0(M5)+3MTU` · 28 รหัส) ได้ตัวเลือกมาตรฐาน ไม่ใช่ "นอกแคตตาล็อก"
+   */
+  stdCode?: string;
 }
 
 /** `slot` = ช่อง · `sep` = ตัวคั่นที่วาดตามแผนผังแคตตาล็อก (`' '` = เว้นวรรคที่รหัสจริงเขียน) · `fixed` = ตัวอักษรตายตัว */
@@ -84,6 +93,33 @@ export interface TsForm {
   addons?: string[];
   /** ท่อนต่อท้ายที่ไม่อยู่ในแคตตาล็อก (`S000` · `TM000` — ตัวอักษรตามด้วยตัวเลข) ตามลำดับเดิม — ประกอบกลับเป็น `-S000` */
   extras?: string[];
+
+  // ── ของ `readTsFormLoose` เท่านั้น (รหัสที่ประกอบกลับตรง ๆ ไม่ได้) — ไม่มีช่องเหล่านี้ = รหัสตรงแคตตาล็อกทุกตัวอักษร ──
+  /**
+   * ช่อง → ข้อความตามที่รหัสเขียน เมื่อไม่ใช่รหัสของตัวเลือกตรงตัว: ค่านอกแคตตาล็อก (`M12` · แกน `4`) ·
+   * ค่ามาตรฐานที่เขียนออกมา (`M5`) · `5/16"` ที่มีเครื่องหมายนิ้ว — `buildTsCode` ใช้ค่านี้ก่อน `values`
+   * หน้าจอลบช่องนี้ทิ้งเมื่อคนเลือกค่าใหม่ในช่องนั้น
+   */
+  written?: Record<string, string>;
+  /** ความยาวสายเขียนเป็นเซนติเมตร (`+30cm`) — `values.cl` เป็นตัวเลขตามที่เขียน (30) ไม่แปลงเป็นเมตร */
+  clUnit?: 'cm';
+  /** TS_-11 เขียนสายติดกับ M (`+5MPU`) แทน `+5M-PU` ของแคตตาล็อก */
+  cableNoDash?: boolean;
+  /** ท่อนที่อ่านไม่ออกหลังเลขรุ่น (`-L` ของ `TSK-01-L(M6)` · `S` ของ `TSK-01S`) — ประกอบกลับที่ตำแหน่งเดิม */
+  headJunk?: string;
+  /** ท้ายรหัสตามที่เขียนทีละท่อนพร้อมตัวคั่น (`-SP` · `-S000` · `+MP` · `.`) — ใช้แทน `extras` */
+  tail?: string[];
+  /**
+   * ช่องที่รหัส **ไม่ได้เขียนเลย** (ไม่มีวงเล็บเกลียว · ไม่มี `x` · ไม่มีท่อนสาย) — `buildTsCode` ไม่เติมค่ามาตรฐานลงไป
+   * ⇒ ประกอบกลับได้รูปเดิม · หน้าจอเอาช่องออกจากรายการนี้เมื่อคนกรอกช่องนั้น
+   */
+  omit?: string[];
+  /**
+   * ช่องที่ไม่ตรงแคตตาล็อก — **เซิร์ฟเวอร์คำนวณให้ ห้ามรับจากหน้าจอ** · `off` = ค่านอกแคตตาล็อกที่คิดได้ ·
+   * `ask` = ต้องขอราคาจากฝ่ายผลิต (`ProductConfig.askPrice`) · `unread` = ตัวอ่านรหัสอ่านท่อนนี้ไม่ออก ·
+   * `missing` = รหัสไม่ได้บอก (ช่องที่แคตตาล็อกไม่มี None)
+   */
+  issues?: Record<string, 'off' | 'ask' | 'unread' | 'missing'>;
 }
 
 // ── ตัวเลือกของแต่ละท่อน (ตรงกับตาราง "การสั่งซื้อ" ทีละตัว) ─────────────────────────────
@@ -139,8 +175,8 @@ export const TS_CATALOG: TsFamilySpec[] = [
     slots: {
       sensor: ch('ชนิด Sensor', [...TC_KJT, ...RTD]),
       // M8x1.25 · M10x1.5 = ตัวหนังสือแดงใต้ตารางของชีต ("*M8x1.25" ใต้ M8x1.0) — ราคาเดียวกับคอลัมน์ข้างบน (เจ้าของสั่ง 2026-09-29)
-      thread: ch('ขนาดเกลียว', [o('', '1/4 นิ้ว (Standard)'), o('5/16', '5/16 นิ้ว'), o('M6', 'M6 x 1.0'), o('M8', 'M8 x 1.0'),
-        o('M8x1.25', 'M8 x 1.25 — ราคาเดียวกับ M8'), o('M10', 'M10 x 1.25'), o('M10x1.5', 'M10 x 1.5 — ราคาเดียวกับ M10')]),
+      thread: { ...ch('ขนาดเกลียว', [o('', '1/4 นิ้ว (Standard)'), o('5/16', '5/16 นิ้ว'), o('M6', 'M6 x 1.0'), o('M8', 'M8 x 1.0'),
+        o('M8x1.25', 'M8 x 1.25 — ราคาเดียวกับ M8'), o('M10', 'M10 x 1.25'), o('M10x1.5', 'M10 x 1.5 — ราคาเดียวกับ M10')]), stdCode: '1/4' },
       d: ch('ขนาดแกน', [o('4.8', '4.8 mm (1/4”, 5/16”, M6)'), o('6', '6 mm (M8, M10)')]),
       mat: ch('วัสดุ', [o('', 'SUS 304')]),
       l1: { ...L1, placeholder: '5', optional: true, hint: 'None = 5 mm · ระบุความยาวได้ตามต้องการ' },
@@ -157,7 +193,7 @@ export const TS_CATALOG: TsFamilySpec[] = [
     layout: [{ fixed: 'TS' }, { slot: 'sensor' }, { sep: '-01-0(' }, { slot: 'hold' }, { sep: ')' }, { sep: '+' }, { slot: 'cl' }, { sep: 'M' }, { slot: 'cable' }, { slot: 'ground' }],
     slots: {
       sensor: ch('ชนิด Sensor', [...TC_KJT, ...RTD]),
-      hold: ch('ขนาด Hold Size', [o('', 'M5 (Standard)'), o('M4', 'M4'), o('M6', 'M6'), o('M8', 'M8'), o('M10', 'M10')]),
+      hold: { ...ch('ขนาด Hold Size', [o('', 'M5 (Standard)'), o('M4', 'M4'), o('M6', 'M6'), o('M8', 'M8'), o('M10', 'M10')]), stdCode: 'M5' },
       cl: CL,
       // C/TS ไม่อยู่ในภาพ TS_-01-0 แต่ขายจริง — เจ้าของเปิดให้ 2026-09-25 ราคาเดียวกับ TS_-01
       cable: ch('ชนิดสาย', [o('', 'สแตนเลสถัก (Standard)'), o('F', 'ไฟเบอร์กลาส'), o('P', 'พีวีซี'), o('T', 'เทปล่อน'), o('C', 'ซิลิโคน'), o('TS', 'เทปล่อนหุ้มชีลด์')]),
@@ -336,58 +372,66 @@ function headOf(v: Record<string, string>): string {
 export function buildTsCode(form: TsForm): string {
   const spec = tsSpec(form.family);
   if (!spec) return '';
-  const v = form.values;
+  // ค่าตามที่รหัสเขียน (`written`) มาก่อน — รหัสนอกรูปแบบแก้ช่องหนึ่งแล้วช่องอื่นต้องคงรูปเดิม
+  const v = { ...form.values, ...form.written };
   const n = (k: string) => numOf(spec, v, k);
   const s = (k: string) => v[k] ?? '';
   const elem = s('elem') ? `-${s('elem')}` : '';
   const headGround = s('hd') || s('ground') ? `-${s('hd')}${s('ground')}` : '';
-  const cable = `+${n('cl')}M${s('cable')}${s('ground')}`;
+  const M = form.clUnit === 'cm' ? 'cm' : 'M';
+  const hj = form.headJunk ?? '';
+  const omit = new Set(form.omit ?? []);
+  const cable = omit.has('cl') ? `${s('cable')}${s('ground')}` : `+${n('cl')}${M}${s('cable')}${s('ground')}`;
+  /** `x<L1>` — ไม่มีในรหัสเดิม = ไม่เขียน */
+  const xl1 = omit.has('l1') ? '' : `x${n('l1')}`;
+  /** `(<เกลียว>)` ของตารางที่วงเล็บเป็นท่อนบังคับ — ไม่มีในรหัสเดิม = ไม่เขียน */
+  const par = (k: string) => (omit.has(k) ? '' : `(${s(k)})`);
   let code = '';
   switch (spec.family) {
     case 'TS_-01': {
       const l1 = n('l1');
-      code = `TS${s('sensor')}-01${s('thread') ? `(${s('thread')})` : ' '}${s('d')}${s('mat')}${l1 ? `x${l1}` : ''}${cable}`;
+      code = `TS${s('sensor')}-01${hj}${s('thread') ? `(${s('thread')})` : ' '}${s('d')}${s('mat')}${l1 ? `x${l1}` : ''}${cable}`;
       break;
     }
     case 'TS_-01-0':
-      code = `TS${s('sensor')}-01-0${s('hold') ? `(${s('hold')})` : ''}${cable}`;
+      code = `TS${s('sensor')}-01-0${hj}${s('hold') ? `(${s('hold')})` : ''}${cable}`;
       break;
     case 'TS_-04':
-      code = `${headOf(v)}-04(${s('thread')})${s('d')}${s('mat')}x${n('l1')}${elem}${cable}`;
+      code = `${headOf(v)}-04${hj}${par('thread')}${s('d')}${s('mat')}${xl1}${elem}${cable}`;
       break;
     case 'TS_-06':
-      code = `${headOf(v)}-06(${s('thread')})${s('d')}${s('mat')}x${n('l1')}${elem}${headGround}`;
+      code = `${headOf(v)}-06${hj}${par('thread')}${s('d')}${s('mat')}${xl1}${elem}${headGround}`;
       break;
     case 'TS_-08':
-      code = `TS${s('sensor')}-08(${s('thread')})${s('d')}${s('mat')}x${n('l1')}${elem}${headGround}`;
+      code = `TS${s('sensor')}-08${hj}${par('thread')}${s('d')}${s('mat')}${xl1}${elem}${headGround}`;
       break;
     case 'TS_-10':
-      code = `TS${s('sensor')}-10(${s('thread')})${s('d')}${s('mat')}x${n('l1')}${elem}${cable}`;
+      code = `TS${s('sensor')}-10${hj}${par('thread')}${s('d')}${s('mat')}${xl1}${elem}${cable}`;
       break;
     case 'TS_-11': {
-      const tail = s('cable') || s('ground') ? `-${s('cable')}${s('ground')}` : '';
-      code = `${headOf(v)}-11${s('spring')} ${s('d')}${s('mat')}x${n('l1')}${elem}+${n('cl')}M${tail}`;
+      const tail = s('cable') || s('ground') ? `${form.cableNoDash ? '' : '-'}${s('cable')}${s('ground')}` : '';
+      code = `${headOf(v)}-11${s('spring')}${hj} ${s('d')}${s('mat')}${xl1}${elem}${omit.has('cl') ? '' : `+${n('cl')}${M}`}${tail}`;
       break;
     }
     case 'TS_-12':
-      code = `TS${s('sensor')}-12 ${s('d')}x${n('l1')}${cable}`;
+      code = `TS${s('sensor')}-12${hj} ${s('d')}${xl1}${cable}`;
       break;
     case 'TS_-12R':
-      code = `TS${s('sensor')}-12 ${s('d')}${s('mat')}x${n('l1')}${elem}${cable}`;
+      code = `TS${s('sensor')}-12${hj} ${s('d')}${s('mat')}${xl1}${elem}${cable}`;
       break;
     case 'TS_-14': {
       const l2 = n('l2');
       const tail = s('elem') || s('hd') || s('ground') ? `-${s('elem')}${s('hd')}${s('ground')}` : '';
-      code = `TS${s('sensor')}-14${s('thread') ? `(${s('thread')})` : ' '}${s('d')}x${n('l1')}${l2 ? `+${l2}` : ''}${tail}`;
+      code = `TS${s('sensor')}-14${hj}${s('thread') ? `(${s('thread')})` : ' '}${s('d')}${xl1}${l2 ? `+${l2}` : ''}${tail}`;
       break;
     }
     case 'TS_-18': {
       const l2 = n('l2');
-      code = `TS${s('sensor')}-18(${s('fl')})${s('d1')}-${s('d2')}${s('mat')}x${n('l1')}${l2 ? `+${l2}` : ''}${elem}${headGround}`;
+      code = `TS${s('sensor')}-18${hj}${par('fl')}${s('d1')}${omit.has('d2') ? '' : `-${s('d2')}`}${s('mat')}${xl1}${l2 ? `+${l2}` : ''}${elem}${headGround}`;
       break;
     }
   }
-  return code + (form.extras ?? []).map((e) => `-${e}`).join('');
+  return code + (form.tail ? form.tail.join('') : (form.extras ?? []).map((e) => `-${e}`).join(''));
 }
 
 // ── อ่านรหัสกลับเป็นช่อง ─────────────────────────────────────────────────────────
@@ -405,38 +449,62 @@ const NUM = '\\d+(?:\\.\\d+)?';
 /**
  * ไวยากรณ์ของแต่ละตาราง — ตรวจกับรหัสที่ **ตัดช่องว่างและทำเป็นตัวพิมพ์ใหญ่แล้ว** · ผลต้องผ่านการประกอบกลับอีกชั้น
  * ⇒ regex ตรงนี้หลวมได้ (มีไว้แยกท่อน) ความถูกต้องตัดสินที่ "ประกอบกลับได้รหัสเดิม"
+ *
+ * `loose` = ไวยากรณ์ของ `readTsFormLoose`: ทุกช่องเว้นได้ · ช่องเลือกรับค่านอกรายการ (เกลียวในวงเล็บ · ตัวเลขของแกน ·
+ * ตัวอักษรของวัสดุ/หัววัด) · สายเป็น `CM` ได้ · ท่อนที่อ่านไม่ออกหลังเลขรุ่น (`hj`) · ท้ายรหัสอะไรก็ได้ (`tail`)
  */
-function grammar(spec: TsFamilySpec): RegExp {
+const LOOSE: Record<string, string> = {
+  thread: '[^)]{1,16}', hold: '[^)]{1,16}', fl: '[^)]{1,16}',
+  d: '\\d+(?:\\.\\d+)?', d1: '\\d+(?:\\.\\d+)?', d2: '\\d+(?:\\.\\d+)?',
+  // วัสดุต้องไม่กิน `X` ของความยาวแกน (`4x20` → แกน 4 วัสดุ X ไม่ใช่)
+  mat: '[A-WYZ]{1,2}', sensor: '[A-Z]{1,3}',
+};
+/** ช่องตัวเลขของแกน — ตัวเลือกในรายการต้องไม่ตรงแค่ต้นของตัวเลขที่ยาวกว่า (`10` ของ `10.2`) */
+const WHOLE_NUM = new Set(['d', 'd1', 'd2']);
+function grammar(spec: TsFamilySpec, loose = false): RegExp {
   const S = spec.slots;
-  const g = (name: string, slot: string, optional = true) => `(?<${name}>${alt(S[slot]!.options ?? [])})${optional ? '?' : ''}`;
-  const sensorAll = () => alt([...(S.sensor!.optionsByProbe?.TS ?? S.sensor!.options ?? []), ...(S.sensor!.optionsByProbe?.N ?? [])]);
+  const any = (slot: string, a: string) => (loose && LOOSE[slot] ? (a ? `${a}|${LOOSE[slot]}` : LOOSE[slot]!) : a);
+  const g = (name: string, slot: string, optional = true) =>
+    `(?<${name}>(?:${any(slot, alt(S[slot]!.options ?? []))})${loose && WHOLE_NUM.has(slot) ? '(?![\\d.])' : ''})${optional || loose ? '?' : ''}`;
+  const sensorAll = () => any('sensor', alt([...(S.sensor!.optionsByProbe?.TS ?? S.sensor!.options ?? []), ...(S.sensor!.optionsByProbe?.N ?? [])]));
   const head = S.probe ? `(?<probe>${alt(S.probe.options ?? [])})(?<sensor>${sensorAll()})` : `TS(?<sensor>${sensorAll()})`;
   // ท่อนนอกแคตตาล็อกต่อท้าย = รหัสงานสั่งทำ (`S000` · `TM000` — ตัวอักษรตามด้วยตัวเลข) เท่านั้น — ท่อนอื่นอย่าง `-2B`
   // (2 Element + หัว B เขียนติดกัน) ไม่ใช่ "นอกแคตตาล็อก" แต่เป็นรหัสที่เขียนนอกรูปแบบ ⇒ ไม่ได้ช่อง ไม่งั้นช่องว่างแต่ราคามีของ
-  const extras = '(?<extras>(?:-[A-Z]+\\d+)*)';
+  const extras = loose ? '(?<tail>.*)' : '(?<extras>(?:-[A-Z]+\\d+)*)';
+  // ท่อนที่อ่านไม่ออกหลังเลขรุ่น (`TSK-01-L(M6)` · `TSK-01S 15x20`) — เฉพาะไวยากรณ์หลวม
+  const hj = loose ? '(?<hj>-?[A-Z]{1,3}(?=[(+0-9]|$))?' : '';
+  const num = (n: string) => `-${n}${hj}`;
   // ท่อนที่บางตารางไม่มี — ประกอบเมื่อถูกใช้เท่านั้น (ตารางที่ไม่มีช่องสายก็ไม่มีตัวเลือกสายให้อ่าน)
-  const cable = () => `\\+(?<cl>${NUM})M${g('cable', 'cable')}${g('ground', 'ground')}`;
+  const unit = loose ? '(?<clu>CM|M)' : 'M';
+  const cable = () => `(?:\\+(?<cl>${NUM})${unit}${g('cable', 'cable')}${g('ground', 'ground')})${loose ? '?' : ''}`;
   const elem = `(?:-(?<elem>2))?`;
   const hd = () => `(?:-(?=[A-Z])${g('hd', 'hd')}${g('ground', 'ground')})?`;
   const dm = (dSlot = 'd') => `${g(dSlot, dSlot, false)}${S.mat ? g('mat', 'mat') : ''}`;
+  const L1 = loose ? `(?:X(?<l1>${NUM})?)?` : `X(?<l1>${NUM})`;
+  const parenOpt = (name: string) => `(?:\\(${g(name, name, false)}\\))?`;
+  const paren = (name: string) => (loose ? parenOpt(name) : `\\(${g(name, name, false)}\\)`);
   let body = '';
   switch (spec.family) {
-    case 'TS_-01': body = `${head}-01(?:\\(${g('thread', 'thread', false)}\\))?${dm()}(?:X(?<l1>${NUM}))?${cable()}`; break;
-    case 'TS_-01-0': body = `${head}-01-0(?:\\(${g('hold', 'hold', false)}\\))?${cable()}`; break;
-    case 'TS_-04': body = `${head}-04\\(${g('thread', 'thread', false)}\\)${dm()}X(?<l1>${NUM})${elem}${cable()}`; break;
-    case 'TS_-06': body = `${head}-06\\(${g('thread', 'thread', false)}\\)${dm()}X(?<l1>${NUM})${elem}${hd()}`; break;
-    case 'TS_-08': body = `${head}-08\\(${g('thread', 'thread', false)}\\)${dm()}X(?<l1>${NUM})${elem}${hd()}`; break;
-    case 'TS_-10': body = `${head}-10\\(${g('thread', 'thread', false)}\\)${dm()}X(?<l1>${NUM})${elem}${cable()}`; break;
-    case 'TS_-11': body = `${head}-11(?<spring>P)?${dm()}X(?<l1>${NUM})${elem}\\+(?<cl>${NUM})M(?:-(?=[A-Z])${g('cable', 'cable')}${g('ground', 'ground')})?`; break;
-    case 'TS_-12': body = `${head}-12${dm()}X(?<l1>${NUM})${cable()}`; break;
-    case 'TS_-12R': body = `${head}-12${dm()}X(?<l1>${NUM})${elem}${cable()}`; break;
-    case 'TS_-14': body = `${head}-14(?:\\(${g('thread', 'thread', false)}\\))?${dm()}X(?<l1>${NUM})(?:\\+(?<l2>${NUM}))?(?:-(?=[A-Z0-9])(?<elem>2)?${g('hd', 'hd')}${g('ground', 'ground')})?`; break;
-    case 'TS_-18': body = `${head}-18\\(${g('fl', 'fl', false)}\\)${g('d1', 'd1', false)}-${dm('d2')}X(?<l1>${NUM})(?:\\+(?<l2>${NUM}))?${elem}${hd()}`; break;
+    case 'TS_-01': body = `${head}${num('01')}${parenOpt('thread')}${dm()}(?:X(?<l1>${NUM})${loose ? '?' : ''})?${cable()}`; break;
+    case 'TS_-01-0': body = `${head}${num('01-0')}${parenOpt('hold')}${cable()}`; break;
+    case 'TS_-04': body = `${head}${num('04')}${paren('thread')}${dm()}${L1}${elem}${cable()}`; break;
+    case 'TS_-06': body = `${head}${num('06')}${paren('thread')}${dm()}${L1}${elem}${hd()}`; break;
+    case 'TS_-08': body = `${head}${num('08')}${paren('thread')}${dm()}${L1}${elem}${hd()}`; break;
+    case 'TS_-10': body = `${head}${num('10')}${paren('thread')}${dm()}${L1}${elem}${cable()}`; break;
+    case 'TS_-11': body = `${head}-11(?<spring>P)?${hj}${dm()}${L1}${elem}\\+(?<cl>${NUM})${unit}(?:(?<dash>-)?(?=[A-Z])${g('cable', 'cable')}${g('ground', 'ground')})?`;
+      if (loose) body = body.replace(`\\+(?<cl>${NUM})${unit}`, `(?:\\+(?<cl>${NUM})${unit}`) + ')?';
+      else body = body.replace('(?<dash>-)?', '-');
+      break;
+    case 'TS_-12': body = `${head}${num('12')}${dm()}${L1}${cable()}`; break;
+    case 'TS_-12R': body = `${head}${num('12')}${dm()}${L1}${elem}${cable()}`; break;
+    case 'TS_-14': body = `${head}${num('14')}${parenOpt('thread')}${dm()}${L1}(?:\\+(?<l2>${NUM}))?(?:-(?=[A-Z0-9])(?<elem>2)?${g('hd', 'hd')}${g('ground', 'ground')})?`; break;
+    case 'TS_-18': body = `${head}${num('18')}${paren('fl')}${g('d1', 'd1', false)}${loose ? '(?:-' : '-'}${dm('d2')}${loose ? ')?' : ''}${L1}(?:\\+(?<l2>${NUM}))?${elem}${hd()}`; break;
   }
-  return new RegExp(`^${body}${extras}$`);
+  return new RegExp(`^${body}${extras}$`, loose ? 'd' : '');
 }
 
 const GRAMMARS = new Map(TS_CATALOG.map((s) => [s.family, grammar(s)]));
+const LOOSE_GRAMMARS = new Map(TS_CATALOG.map((s) => [s.family, grammar(s, true)]));
 
 /** รหัสสองตัวเป็นรหัสเดียวกันไหม **ตามที่คนอ่าน** — ไม่สนช่องว่างและตัวพิมพ์ (`x` = `X`) */
 export function sameTsCode(a: string, b: string): boolean {
@@ -476,4 +544,98 @@ export function readTsForm(input: string, family: TsFamily): TsForm | undefined 
 /** ตารางของแคตตาล็อกที่รุ่นในสมุดราคานี้ใช้ — TS_-12 แยกตามชนิด Sensor (Thermocouple / RTD คนละหน้า) */
 export function tsFamilyOfModel(modelCode: string): TsFamily | undefined {
   return TS_CATALOG.find((s) => s.model === modelCode)?.family;
+}
+
+/** รหัสตามที่คนอ่าน — แบบเดียวกับ `norm` ของตัวอ่านรหัส (เครื่องหมายนิ้วทุกแบบเป็น `"` · ไม่มีช่องว่าง) **คงตัวพิมพ์เดิม** */
+function normTsCode(s: string): string {
+  return s
+    .replace(/[“”″ ]/g, '"')
+    .replace(/[‘’′]/g, "'")
+    .replace(/\s+/g, '');
+}
+/** `normTsCode` แล้วทำเป็นตัวพิมพ์ใหญ่ — ข้อความที่ไวยากรณ์ใช้เทียบ */
+export function canonTsCode(s: string): string {
+  return normTsCode(s).toUpperCase();
+}
+
+/** ช่องที่แคตตาล็อกไม่มี None และรหัสต้องบอกเสมอ — ไม่มีในรหัส = `missing` (ช่องอื่นที่ว่าง = ค่ามาตรฐาน) */
+const MUST_SAY = new Set(['sensor', 'thread', 'd', 'd1', 'd2', 'fl']);
+
+export interface LooseTsRead {
+  form: TsForm;
+  /** รหัสที่ใช้เทียบ (`canonTsCode`) — ตำแหน่งใน `ranges` นับจากข้อความนี้ */
+  canon: string;
+  /** ช่อง → ช่วงตัวอักษรใน `canon` ที่ช่องนั้นอ่านมา (ไว้เทียบกับท่อนที่ตัวอ่านรหัสอ่านไม่ออก) */
+  ranges: Record<string, [number, number]>;
+}
+
+/**
+ * รหัสที่ `readTsForm` ไม่รับ → ช่องตามแคตตาล็อกพร้อม `issues` รายช่อง (เจ้าของสั่ง 2026-10-01 · mockup `pricing-one-form.html`)
+ *
+ * **ไฟล์นี้ยังไม่คิดราคาและไม่รู้ว่าตัวอ่านรหัสอ่านอะไรออก** — ที่นี่ตัดสินแค่ "ค่าอยู่ในรายการของแคตตาล็อกไหม"
+ * (`off` / `missing`) ส่วน `unread` (ตัวอ่านอ่านไม่ออก) กับ `ask` (ต้องขอราคา) ตัวอ่านรหัสเติมเองจาก `ranges`
+ * ค่าที่เขียนต่างจากรหัสของตัวเลือกเก็บใน `written` ⇒ `buildTsCode` ได้รหัสตามที่เขียนมา (ยกเว้นท่อนที่เรียงต่างจากแคตตาล็อก)
+ */
+export function readTsFormLoose(input: string, family: TsFamily): LooseTsRead | undefined {
+  const spec = tsSpec(family);
+  const re = LOOSE_GRAMMARS.get(family);
+  if (!spec || !re) return undefined;
+  const canon = canonTsCode(input);
+  const m = canon.match(re);
+  if (!m?.groups) return undefined;
+  const at = m.indices?.groups ?? {};
+  // ค่าตามที่เขียน (`written` · ท้ายรหัส) เอาจากรหัสที่ **คงตัวพิมพ์เดิม** ตำแหน่งเดียวกัน — `M6x1` ต้องไม่กลายเป็น `M6X1`
+  // (ข้อความเตือนของราคายกค่านี้ไปพูด) · ตัวพิมพ์ใหญ่เปลี่ยนความยาวข้อความ (อักษรพิเศษ) = ใช้ตัวพิมพ์ใหญ่ไปเลย
+  const orig = normTsCode(input);
+  const asWritten = (key: string): string => {
+    const r = at[key];
+    return r && orig.length === canon.length ? orig.slice(r[0], r[1]) : m.groups![key] ?? '';
+  };
+  const bare = (x: string) => x.toUpperCase().replace(/"/g, '');
+  const values: Record<string, string> = {};
+  const written: Record<string, string> = {};
+  const issues: NonNullable<TsForm['issues']> = {};
+  const ranges: Record<string, [number, number]> = {};
+  for (const key of ['probe', ...Object.keys(spec.slots).filter((k) => k !== 'probe')]) {
+    const slot = spec.slots[key];
+    if (!slot) continue;
+    const raw = m.groups[key] ?? '';
+    const r = at[key];
+    if (r) ranges[key] = r;
+    if (slot.kind === 'number') {
+      values[key] = raw;
+      continue;
+    }
+    const opts = slotOptions(slot, values);
+    values[key] = '';
+    if (raw === '') {
+      if (MUST_SAY.has(key) && !opts.some((o) => o.code === '')) issues[key] = 'missing';
+      continue;
+    }
+    const hit = opts.find((o) => o.code !== '' && bare(o.code) === bare(raw));
+    if (hit) {
+      values[key] = hit.code;
+      if (asWritten(key) !== hit.code) written[key] = asWritten(key);
+    } else if (slot.stdCode && bare(slot.stdCode) === bare(raw)) {
+      written[key] = asWritten(key);
+    } else {
+      written[key] = asWritten(key);
+      issues[key] = 'off';
+    }
+  }
+  if (!spec.slots.probe) delete values.probe;
+  const form: TsForm = { family, values };
+  if (Object.keys(written).length) form.written = written;
+  if (m.groups.clu === 'CM') form.clUnit = 'cm';
+  if (family === 'TS_-11' && (m.groups.cable || m.groups.ground) && !m.groups.dash) form.cableNoDash = true;
+  if (m.groups.hj) form.headJunk = asWritten('hj');
+  // ช่องที่รหัสไม่ได้เขียนเลย — ประกอบกลับแล้วต้องไม่มีค่ามาตรฐานงอกขึ้นมา
+  const omit = ['thread', 'fl', 'd2', 'l1', 'cl'].filter((k) => spec.slots[k] && m.groups![k] === undefined);
+  if (omit.length) form.omit = omit;
+  // TS_-11: ขีดหลัง M ที่ตามด้วยตัวอักษรนอกรายการสาย/Ground (`+2M-CU`) เป็นของท้ายรหัส ไม่ใช่ตัวคั่นของสาย
+  const dashOrphan = family === 'TS_-11' && m.groups.dash && !m.groups.cable && !m.groups.ground;
+  const tail = `${dashOrphan ? '-' : ''}${m.groups.tail !== undefined ? asWritten('tail') : ''}`.match(/[-+]?[^-+]+|[-+]/g);
+  if (tail?.length) form.tail = tail;
+  if (Object.keys(issues).length) form.issues = issues;
+  return { form, canon, ranges };
 }

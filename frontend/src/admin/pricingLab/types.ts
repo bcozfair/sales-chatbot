@@ -121,6 +121,8 @@ export interface BhForm {
   holes?: HoleRow[];
   mat?: string;
   extras?: { text: string; after: string; glue?: boolean }[];
+  /** รหัสนี้ประกอบกลับจากช่องไม่ได้ทุกตัวอักษร — ช่องยังโชว์ตามที่อ่านได้ (เซิร์ฟเวอร์ตั้ง · 2026-10-01) */
+  loose?: boolean;
 }
 
 // ── แคตตาล็อก TS (สำเนาชนิดข้อมูลของ services/pricingLab/catalogTs.ts) ──────────────────────────
@@ -154,6 +156,20 @@ export interface TsForm {
   addons?: string[];
   /** ท่อนต่อท้ายที่ไม่อยู่ในแคตตาล็อก (`S000`) */
   extras?: string[];
+  // ── รหัสนอกรูปแบบ (`readTsFormLoose` ของเซิร์ฟเวอร์ · 2026-10-01) — ค่าตามที่รหัสเดิมเขียน ส่งกลับไปตอนแก้ช่อง ──
+  /** ช่อง → ข้อความตามที่รหัสเขียน (ค่านอกแคตตาล็อก · ค่ามาตรฐานที่เขียนออกมา) — ลบทิ้งเมื่อคนเลือกค่าใหม่ในช่องนั้น */
+  written?: Record<string, string>;
+  /** ความยาวสายเขียนเป็นเซนติเมตร */
+  clUnit?: 'cm';
+  cableNoDash?: boolean;
+  /** ท่อนที่อ่านไม่ออกหลังเลขรุ่น (`-L`) */
+  headJunk?: string;
+  /** ท้ายรหัสตามที่เขียนทีละท่อนพร้อมตัวคั่น (`-SP` · `-S000`) — ใช้แทน `extras` */
+  tail?: string[];
+  /** ช่องที่รหัสไม่ได้เขียนเลย — เอาออกเมื่อคนกรอกช่องนั้น */
+  omit?: string[];
+  /** ช่องที่ไม่ตรงแคตตาล็อก — เซิร์ฟเวอร์คำนวณ หน้าจอไม่ส่งกลับ */
+  issues?: Record<string, 'off' | 'ask' | 'unread' | 'missing'>;
 }
 
 export interface CodePart {
@@ -162,6 +178,8 @@ export interface CodePart {
   /** `choose` = อ่านออกแต่ต้องให้คนเลือกเพิ่มก่อนรวมในราคา (ขนาดเต๋า T ของ BH) — ไม่ใช่ของที่ต้องไปตั้งในตารางรหัสย่อย */
   kind: 'model' | 'axis' | 'dim' | 'option' | 'noPrice' | 'unknown' | 'choose';
   guess?: boolean;
+  /** ท่อนที่อ่านไม่ออก — คำที่ใช้เป็นรหัสย่อยถ้าจะเพิ่มแถวในตารางรหัสย่อย */
+  subCode?: string;
 }
 
 export interface ParsedCode {
