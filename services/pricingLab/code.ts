@@ -36,7 +36,7 @@ import type { PriceBook, PriceModel, Predicate, ProductConfig } from './types.js
 import { resolveModel } from './engine.js';
 import { findSubCode, subCodeOption } from './subcodes.js';
 import { ADDONS, AMP, BH_CATALOG, SHAPE_AXIS, bhSpec, buildBhCode, sameBhCode, type BhFamily, type BhForm, type HoleSpec, type SizeKey } from './catalogBh.js';
-import { MODEL_SUFFIX, NTC_HEADS, NTC_NUMBERS, TS_ADDONS, TS_CATALOG, readTsForm, tsFamilyOfModel, tsSpec, type TsFamilySpec, type TsForm } from './catalogTs.js';
+import { MODEL_SUFFIX, NTC_HEADS, NTC_NUMBERS, TS_ADDONS, TS_CATALOG, readTsForm, readTsFormLoose, tsFamilyOfModel, tsSpec, type TsFamily, type TsFamilySpec, type TsForm } from './catalogTs.js';
 
 /** หนึ่งรหัสย่อยในรหัสสินค้า พร้อมคำอธิบายว่าระบบอ่านมันว่าอะไร — ใช้โชว์ให้คนตรวจก่อนเชื่อราคา */
 export interface CodePart {
@@ -76,10 +76,13 @@ export interface ParsedCode {
   /**
    * ช่องตามแคตตาล็อก "การสั่งซื้อ" — มีเฉพาะรุ่นที่มีแคตตาล็อกแล้ว (วันนี้ BH-01 · BH-01C · BH-02 · BH-03)
    * หน้าคำนวณราคาใช้วาดช่องกรอก และ `buildBhCode(form)` ต้องได้รหัสเดิมกลับมา (ด่าน `diag:pricing-catalog`)
+   * — ยกเว้นช่องที่ติด `loose` (รหัสนอกรูปแบบ · ตั้งแต่ 2026-10-01 ทุกรหัส BH ได้ช่อง)
    */
   form?: BhForm;
   /**
-   * ช่องตามแคตตาล็อกของซีรีส์ TS (`catalogTs.ts` · เจ้าของเคาะ 2026-09-29) — มีเฉพาะรหัสที่ประกอบกลับจากช่องได้รหัสเดิมทุกตัวอักษร
+   * ช่องตามแคตตาล็อกของซีรีส์ TS (`catalogTs.ts` · เจ้าของเคาะ 2026-09-29) — **ทุกรหัสของรุ่น TS ที่มีแคตตาล็อก**
+   * (ตั้งแต่ 2026-10-01) · รหัสที่ประกอบกลับตรงทุกตัวอักษรไม่มี `issues` · ที่เหลือได้ช่องแบบหลวม (`readTsFormLoose`)
+   * พร้อม `issues` รายช่อง ⇒ หน้าจอใช้หน้าตาเดียวกันทุกรหัส อะไรไม่ตรงแค่แจ้งเตือน
    */
   tsForm?: TsForm;
 }
@@ -1089,10 +1092,16 @@ function readBh(c: Ctx, num: string, suffix: string, rest: string, picks: CodePi
   readAddons();
   readHoles();
 
-  // ช่องกรอกต้องประกอบกลับเป็นรหัสเดิมเป๊ะ — ไม่งั้นแก้ช่องเดียวแล้วรหัสส่วนอื่นเปลี่ยนตามเงียบ ๆ
-  // (รหัสที่เขียนนอกรูปแบบ เช่น `BH-02-S` · ไม่มีหน่วย W · `220x800W`) ⇒ ไม่มีช่อง หน้าจอแสดงแบบอ่านทีละท่อนเหมือนเดิม
-  if (!spec || noForm || (form.watt === undefined && form.wattText === undefined)) return undefined;
-  return sameBhCode(buildBhCode(form), c.input) ? form : undefined;
+  // ช่องกรอกที่ประกอบกลับได้รหัสเดิมเป๊ะ = ปกติ · ไม่ได้ (รหัสนอกรูปแบบ เช่น `BH-02-S` · ไม่มีหน่วย W · `220x800W` ·
+  // ตัวอักษรท้ายเลขรุ่นที่แคตตาล็อกไม่มีอย่าง `BH-01S`) **ยังได้ช่องแบบเดียวกัน** ติดธง `loose` (เจ้าของสั่ง 2026-10-01
+  // "ใช้หน้าตา ui เป็นมาตรฐานเดียวกัน อะไรไม่ตรงก็แค่แจ้งเตือน") — ท่อนที่อ่านไม่ออกขึ้นเป็นแถบเตือนของหน้าจอ
+  // หน้าจอไม่เขียนทับรหัสที่พิมพ์จนกว่าคนจะแก้ช่อง ⇒ ที่ประกอบกลับไม่ได้ยังไม่ทำให้รหัสเปลี่ยนเงียบ ๆ
+  if (!spec) {
+    const base = num === '02' ? 'BH-02' : num === '03' ? 'BH-03' : 'BH-01';
+    return { ...form, family: base, loose: true };
+  }
+  const exact = !noForm && (form.watt !== undefined || form.wattText !== undefined) && sameBhCode(buildBhCode(form), c.input);
+  return exact ? form : { ...form, loose: true };
 
   function readBhToken(token: string): void {
     const T = token.toUpperCase();
@@ -1537,7 +1546,7 @@ export function parseProductCode(input: string, book: PriceBook, picks: CodePick
   if (prefix !== 'BH') {
     readTsAddons(c, picks);
     const family = tsFamilyOfModel(model.code);
-    const tsForm = family ? readTsForm(input, family) : undefined;
+    const tsForm = family ? tsFormOf(c, input, family) : undefined;
     if (tsForm) {
       const on = (picks.addons ?? []).filter((a) => TS_ADDONS.some((x) => x.code === a) && hasOptionAdder(model, a));
       out.tsForm = on.length ? { ...tsForm, addons: on } : tsForm;
@@ -1547,6 +1556,48 @@ export function parseProductCode(input: string, book: PriceBook, picks: CodePick
   out.parts = c.parts;
   out.cfg = c.cfg;
   return out;
+}
+
+/**
+ * ช่องกรอกของรหัส TS — ตรงแคตตาล็อกทุกตัวอักษร (`readTsForm`) หรือแบบหลวม (`readTsFormLoose`) แล้วเติมสิ่งที่ตัวอ่านรหัสรู้:
+ * ช่องที่ทับท่อนที่ **อ่านไม่ออก** = `unread` · ค่านอกแคตตาล็อกที่ **ต้องขอราคา** (`cfg.askPrice`) = `ask`
+ * ⇒ ช่องบนจอบอกตรงกับราคาที่คิด ไม่ใช่โชว์ M6 เป็นปกติทั้งที่ราคาไม่ได้อ่าน M6 (เคาะ mockup `pricing-one-form.html` ตัวอย่างที่ 5)
+ * อ่านแบบหลวมยังไม่ได้ (เรียงท่อนนอกรูปแบบทั้งก้อน) = ช่องว่างทุกช่อง + ท้ายรหัสทั้งก้อนเป็นท่อนที่อ่านไม่ออก
+ */
+function tsFormOf(c: Ctx, input: string, family: TsFamily): TsForm {
+  const strict = readTsForm(input, family);
+  const loose = readTsFormLoose(input, family);
+  const spec = tsSpec(family)!;
+  if (!loose) {
+    const values = Object.fromEntries(Object.keys(spec.slots).filter((k) => k !== 'probe' || spec.slots.probe).map((k) => [k, '']));
+    const rest = norm(input).toUpperCase().replace(/^(TS[A-Z]*|[NP]\d{1,2})-?\d{2}(-0)?/, '');
+    return {
+      family, values,
+      issues: Object.fromEntries(Object.keys(values).filter((k) => spec.slots[k]!.kind === 'choice').map((k) => [k, 'unread' as const])),
+      ...(rest ? { tail: [rest] } : {}),
+    };
+  }
+  const issues = { ...loose.form.issues };
+  // ท่อนที่อ่านไม่ออก → ช่วงตัวอักษรในรหัส (ท่อนเดียวกันซ้ำกันได้ — จับทีละตำแหน่ง)
+  const spans: [number, number][] = [];
+  for (const p of c.parts) {
+    if (p.kind !== 'unknown' || !p.text) continue;
+    const t = norm(p.text).toUpperCase();
+    let at = loose.canon.indexOf(t);
+    while (at >= 0 && spans.some(([a]) => a === at)) at = loose.canon.indexOf(t, at + 1);
+    if (at >= 0) spans.push([at, at + t.length]);
+  }
+  for (const [key, [a, b]] of Object.entries(loose.ranges)) {
+    if (b > a && spans.some(([x, y]) => x < b && a < y)) issues[key] = 'unread';
+  }
+  for (const [slot, axis] of Object.entries(spec.askPrice ?? {})) {
+    if (issues[slot] !== 'unread' && loose.form.written?.[slot] && c.cfg.askPrice?.[axis] !== undefined) issues[slot] = 'ask';
+  }
+  const has = Object.keys(issues).length > 0;
+  if (strict) return has ? { ...strict, issues } : strict;
+  const rest: TsForm = { ...loose.form };
+  delete rest.issues;
+  return has ? { ...rest, issues } : rest;
 }
 
 /** จำนวนรหัสย่อยที่อ่านไม่ออก — หน้าจอใช้ตัดสินว่าจะขึ้นธงเตือนไหม */

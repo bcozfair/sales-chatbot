@@ -237,12 +237,45 @@ for (const width of [1280, 390]) {
   ok('กดเอา S000 ออก → รหัสไม่มี -S000', (await codeValue()) === 'TSP-11P 6x50+5M-PU', await codeValue());
   await choose('รุ่น', 'BH-01');
   ok('สลับจาก TS กลับไป BH ได้จากช่องเดียวกัน', (await page.$('select[aria-label="การออกขั้วไฟ"]')) !== null && (await codeValue()).startsWith('BH-01 '), await codeValue());
+  // ── ตั้งแต่ 2026-10-01 ทุกรหัสใช้ช่องกรอกแบบเดียว อะไรไม่ตรงแค่แจ้งเตือน (mockup `pricing-one-form.html`) ──
   await typeCode('TSK-06(S4)12.7x110-2B');
-  ok('รหัส TS ที่เขียนนอกรูปแบบ (-2B ติดกัน) → หน้าเดิม (ไม่เดาช่อง)', (await text()).includes('ระบบอ่านรหัสนี้ว่าอะไร'));
+  body = await text();
+  ok('รหัส TS ที่เขียนนอกรูปแบบ (-2B ติดกัน) → ยังเป็นช่องกรอก ไม่มีการ์ดเดิม · รหัสไม่ถูกเขียนทับ',
+    !body.includes('ระบบอ่านรหัสนี้ว่าอะไร') && (await page.$('select[aria-label="ขนาดเกลียว"]')) !== null && (await codeValue()) === 'TSK-06(S4)12.7x110-2B',
+    await codeValue());
 
   await typeCode('BH-02-S 406x330-220-2500W');
   body = await text();
-  ok('รหัส BH ที่เขียนนอกรูปแบบ → หน้าเดิม (ไม่เดาช่อง)', body.includes('ระบบอ่านรหัสนี้ว่าอะไร'));
+  ok('รหัส BH ที่เขียนนอกรูปแบบ → ยังเป็นช่องกรอก + แถบ "ยังไม่รวมในราคา" · รหัสไม่ถูกเขียนทับ',
+    !body.includes('ระบบอ่านรหัสนี้ว่าอะไร') && (await page.$('select[aria-label="รุ่น"]')) !== null && body.includes('ยังไม่รวมในราคา')
+      && (await codeValue()) === 'BH-02-S 406x330-220-2500W', await codeValue());
+
+  await typeCode('TSP-01-0(M5)+3MTU-S000');
+  body = await text();
+  ok('ตัวอย่าง 1: TSP-01-0(M5)… ได้ช่อง Hold โชว์ M5 ไม่มีป้ายเตือนที่ช่องนั้น',
+    (await val('ขนาด Hold Size')) === '' && !body.includes('ไม่อยู่ในแคตตาล็อก') && body.includes('M5'));
+
+  await typeCode('TSK-01 4.8+30cm');
+  ok('ตัวอย่าง 2: สายเป็น cm → ช่องสายบอกหน่วย cm', (await text()).includes('ความยาวสาย (cm)'));
+  await choose('ชนิดสาย', 'T');
+  ok('แก้ชนิดสายแล้วรหัสคงรูปเดิม (ยังเป็น cm)', /\+30cmT$/i.test(await codeValue()), await codeValue());
+
+  await typeCode('TSK-01(M6)4+1.5M');
+  ok('ตัวอย่าง 3: แกน 4 → ช่องแกนขึ้น "ไม่อยู่ในแคตตาล็อก" แต่ยังมีราคา',
+    (await text()).includes('ไม่อยู่ในแคตตาล็อก') && (await text()).includes('ราคาตั้งต่อหน่วย'));
+
+  await typeCode('TSK-01(M13)4.8x50+2MT');
+  body = await text();
+  ok('ตัวอย่าง 4: ต้องขอราคา → ช่องเกลียว "ขอราคาฝ่ายผลิต" + โชว์ราคาเท่าที่คิดได้',
+    body.includes('ขอราคาฝ่ายผลิต') && body.includes('ราคาเท่าที่คิดได้'));
+
+  await typeCode('TSK-01-L(M6)4.8+1M');
+  body = await text();
+  ok('ตัวอย่าง 5: ท่อนที่อ่านไม่ออก → ชิป L + ช่องเกลียว "อ่านไม่ออก"',
+    (await page.$('button[aria-label="เอา L ออก"]')) !== null && body.includes('อ่านไม่ออก'));
+
+  await typeCode('TSK-02(11.5)5x10+2M');
+  ok('ตัวอย่าง 7: รุ่นที่ไม่มีในสมุดราคา → ช่อง "รุ่น" ว่าง + เหตุผล', (await text()).includes('ไม่พบรุ่นในสมุดราคา'));
 
   await typeCode('BH-02C 210-220-1400W-N-Z');
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);

@@ -62,22 +62,27 @@ async function main(): Promise<void> {
   const { rows } = await pool.query<{ model: string }>(
     `SELECT DISTINCT model FROM products WHERE model ~* '^BH-?0[123]'`
   );
-  let withForm = 0;
+  // ตั้งแต่ 2026-10-01 ทุกรหัสได้ช่อง (เจ้าของ: "ใช้หน้าตา ui เป็นมาตรฐานเดียวกัน อะไรไม่ตรงก็แค่แจ้งเตือน") — รหัสนอกรูปแบบ
+  // ได้ช่องที่ติด `loose` ⇒ "ประกอบกลับได้รหัสเดิม" ยังบังคับเฉพาะช่องที่ไม่ติดธง (ตัวที่หน้าจอถือว่าตรงแคตตาล็อก)
+  let exact = 0;
   const bad: string[] = [];
   const noForm: string[] = [];
+  const loose: string[] = [];
   let spaceFixed = 0;
   for (const { model } of rows) {
     const p = parseProductCode(model, book);
     // ช่องว่างระหว่างตัวเลขต้องเป็นตัวคั่น ไม่ใช่ถูกลบจนขนาดติดกับแรงดัน (`101x150 220` ≠ ความสูง 150220)
     if (/\d\s+\d/.test(model.replace(/^\s*BH-?0\d[A-Z]?\s+/i, '')) && p.parts.some((x) => x.kind === 'noPrice' && /^แรงดัน/.test(x.reads))) spaceFixed++;
-    if (!p.form) { noForm.push(model); continue; }
-    withForm++;
+    if (!p.form) { if (p.model) noForm.push(model); continue; }
+    if (p.form.loose) { loose.push(model); continue; }
+    exact++;
     const back = buildBhCode(p.form);
     if (!sameBhCode(back, model.replace(/(\d)\s+(?=\d)/g, '$1-'))) bad.push(`${model}  →  ${back}`);
   }
-  check(`รหัส BH ในฐาน ${rows.length} ตัว · อ่านเป็นช่องตามแคตตาล็อกได้ ${withForm} ตัว (≥ 95%)`, rows.length > 0 && withForm >= rows.length * 0.95,
-    `ไม่ได้ ${noForm.length} ตัว เช่น ${noForm.slice(0, 4).join(' · ')}`);
-  check('ทุกตัวที่อ่านเป็นช่องได้ ประกอบกลับเป็นรหัสเดิม', bad.length === 0, bad.slice(0, 5).join(' | '));
+  check(`รหัส BH ที่รู้รุ่นได้ช่องกรอกทุกตัว (ไม่มีหน้า "ระบบอ่านรหัสนี้ว่าอะไร" แล้ว)`, noForm.length === 0, noForm.slice(0, 4).join(' · '));
+  check(`รหัส BH ในฐาน ${rows.length} ตัว · ตรงแคตตาล็อกทุกตัวอักษร ${exact} ตัว (≥ 95%) · นอกรูปแบบ ${loose.length} ตัว`,
+    rows.length > 0 && exact >= rows.length * 0.95, `เช่น ${loose.slice(0, 4).join(' · ')}`);
+  check('ทุกตัวที่ตรงแคตตาล็อก ประกอบกลับเป็นรหัสเดิม', bad.length === 0, bad.slice(0, 5).join(' | '));
   check('รหัสที่คั่นท่อนด้วยช่องว่าง อ่านแรงดันแยกจากขนาดได้', spaceFixed > 0, `${spaceFixed} ตัว`);
 
   // ── 2. ช่องทุกแบบ → รหัส → ช่องเดิม ──────────────────────────────────────────
