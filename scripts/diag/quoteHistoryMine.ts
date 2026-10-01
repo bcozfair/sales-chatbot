@@ -6,8 +6,10 @@
      ก. ตัวตัดสินขอบเขต (ในโปรเซสนี้ อ่านอย่างเดียว)
         · role ที่ถูกปิด quote.view_all ขอ "ทั้งหมด" แล้วยังได้เฉพาะใบตัวเอง (สิทธิ์ชนะปุ่ม)
         · role ที่เห็นทั้งหมด: ไม่กด = null (เหมือนเดิมทุกไบต์) · กด = ขอบเขตเดียวกับตอนถูกปิดสิทธิ์
-        · ทั้งสาม endpoint (รายการ · ส่งออก · ตัวนับคิวแก้มือ) ถามตัวเดียวกันด้วย `mine` ตัวเดียวกัน (อ่านซอร์ส)
+        · ทั้งสาม endpoint (รายการ · ส่งออก · ตัวเลขในเมนูส่งออก) ถามตัวเดียวกันด้วย `mine` ตัวเดียวกัน (อ่านซอร์ส)
           — ไม่ยิง export จริงเพราะมันมาร์กใบว่าส่งออกแล้ว
+        · ตัวเลขในเมนูส่งออก (`/export-counts`) = ใบที่ตารางเห็นภายใต้ตัวกรองเดียวกัน คัดตามกติกาของไฟล์
+          · ยอดค้างของคิวแก้มือไม่ขึ้นกับตัวกรอง (2026-10-01)
      ข. API (ต้องมี API ของทรีนี้ที่ QH_PORT)
         · ไม่ส่ง mine = ผลเท่าเดิม (ยอดเท่าการนับสดทั้งตาราง) · mine=1 ยอด = mine_total ของรอบไม่กด = นับสด
         · channel = 'web' ⇔ user_id ขึ้นต้น web: ทุกแถวที่ได้
@@ -60,13 +62,17 @@ console.log('\n── ตัวตัดสินขอบเขต ────
   ok('admin กด "ใบของฉัน" = ขอบเขตของบัญชีตัวเอง', mine.scope?.adminId === 999_999 && mine.viewAll === true);
 
   const src = readFileSync(new URL('../../index.ts', import.meta.url), 'utf8');
+  // รายการถามเองหนึ่งจุด · ส่งออกกับตัวเลขในเมนูถามผ่าน odooExportFilterOf ตัวเดียวกัน (อีกหนึ่งจุด)
   const calls = src.match(/quoteViewScopeOf\(req\.admin, req\.query\.mine === '1'\)/g)?.length ?? 0;
-  ok('รายการ · ส่งออก · ตัวนับคิวแก้มือ ถามขอบเขตด้วยปุ่มเดียวกัน', calls === 3, `${calls} จุด`);
+  const viaFilter = src.match(/await odooExportFilterOf\(req\)/g)?.length ?? 0;
+  ok('รายการ · ส่งออก · ตัวเลขในเมนูส่งออก ถามขอบเขตด้วยปุ่มเดียวกัน', calls === 2 && viaFilter === 2,
+    `ถามตรง ${calls} จุด · ผ่านตัวกรองของไฟล์ ${viaFilter} จุด`);
   ok('ไม่มี endpoint ไหนถามสิทธิ์ตรง ๆ แล้วลืมปุ่ม', !/quoteScopeOf\(req\.admin\)/.test(src));
   const fe = readFileSync(new URL('../../frontend/src/admin/Quotations.tsx', import.meta.url), 'utf8');
   const feMine = fe.match(/if \(mineOnly\) params\.set\('mine', '1'\)/g)?.length ?? 0;
-  ok('หน้าจอส่ง mine=1 ทั้งตอนโหลดตารางและตอนส่งออก', feMine === 2, `${feMine} จุด`);
-  ok('หน้าจอส่ง mine=1 ตอนนับคิวแก้มือ', fe.includes("manual-review-counts${mineOnly ? '?mine=1' : ''}"));
+  const feUses = fe.match(/= filterParams\(\)|\$\{filterParams\(\)\.toString\(\)\}/g)?.length ?? 0;
+  ok('หน้าจอส่ง mine=1 จากตัวประกอบตัวกรองตัวเดียว · ตาราง ส่งออก ตัวเลขในเมนู ใช้ตัวนั้นครบ',
+    feMine === 1 && feUses === 3, `mine ${feMine} จุด · ใช้ตัวประกอบ ${feUses} จุด`);
 }
 
 const { rows: admins } = await pool.query(`SELECT id, username, name, role FROM admin_users WHERE role = 'admin' ORDER BY id LIMIT 1`);
@@ -117,14 +123,53 @@ const admin = admins[0];
   ok('ใบร่าง: ไม่ห้อย (PM)/(THT) เพราะยังไม่รู้บริษัท', drafts.every((q: any) => !/\((PM|THT)\)$/.test(q.issuer_display ?? '')),
     `${drafts.length} ใบ`);
 }
+
+// ตัวเลขในเมนูส่งออก = จำนวนใบที่ตารางเห็นภายใต้ตัวกรองเดียวกัน แล้วคัดตามกติกาของไฟล์
+// (มีเลขที่ · มีรายการ · อักษรนำ QP/QT · ไฟล์ปกติไม่มีใบแก้มือ) — นับเองจากรายการ ไม่ใช่ถามตัวนับซ้ำ
+// เกิดจริง 2026-10-01: เมนูขึ้น "ต้องแก้มือ 1 ใบ" ตอนกรอง "รอนำเข้า" ทั้งที่ตารางว่าง
+{
+  const listAll = async (qs: string) => {
+    const out: any[] = [];
+    for (let off = 0; ; off += 200) {
+      const r = await api(admin, `/api/admin/quotations?${qs}&limit=200&offset=${off}`);
+      out.push(...r.data);
+      if (out.length >= r.total || r.data.length === 0) return out;
+    }
+  };
+  const KINDS = ['new_contact', 'custom_product', 'payment_terms_override'];
+  const bucketOf = (q: any) => {
+    const kinds = (q.odoo_manual_review?.reasons ?? []).map((r: any) => r.kind);
+    return KINDS.find((k) => kinds.includes(k)) ?? 'other';
+  };
+  for (const qs of ['exported=no', 'exported=pending', 'exported=imported', 'exported=all', 'exported=all&flag=manual', 'exported=yes&flag=clean']) {
+    const rows = (await listAll(qs)).filter((q: any) =>
+      String(q.quotation_no ?? '').trim() !== '' && Array.isArray(q.item_details) && q.item_details.length > 0);
+    const want = (p: string) => rows.filter((q: any) => String(q.quotation_no).toUpperCase().startsWith(p));
+    const wantNormal = { QP: want('QP').filter((q: any) => !q.odoo_manual_review).length, QT: want('QT').filter((q: any) => !q.odoo_manual_review).length };
+    const wantManual = rows.filter((q: any) => q.odoo_manual_review && KINDS.includes(bucketOf(q))
+      && /^(QP|QT)/i.test(String(q.quotation_no))).length;
+    const c = await api(admin, `/api/admin/quotations/export-counts?${qs}`);
+    ok(`ตัวเลขในเมนูตรงกับตาราง · ${qs}`,
+      c.normal.QP === wantNormal.QP && c.normal.QT === wantNormal.QT && c.manual.total === wantManual,
+      `PM ${c.normal.QP}/${wantNormal.QP} · THT ${c.normal.QT}/${wantNormal.QT} · แก้มือ ${c.manual.total}/${wantManual}`);
+  }
+  // ยอดค้างไม่ฟังตัวกรอง — ตัวกรองไหนก็ได้ยอดเดียวกัน · และ "นอกตัวกรอง" ของตัวกรองตั้งต้นต้องเป็น 0
+  // ถ้าไม่มีใบค้างที่ไม่มีรายการ/อักษรนำแปลก ๆ (ตัวกรองตั้งต้น = นิยามของคิวพอดี)
+  const q1 = await api(admin, '/api/admin/quotations/export-counts?exported=no');
+  const q2 = await api(admin, '/api/admin/quotations/export-counts?exported=imported');
+  ok('ยอดค้างของคิวแก้มือไม่ขึ้นกับตัวกรอง', q1.queue.total === q2.queue.total, `${q1.queue.total} = ${q2.queue.total}`);
+  ok('ตัวกรองตั้งต้น ("ยังไม่ส่งออก") เห็นคิวแก้มือครบ', q1.queue.outside === 0, `นอกตัวกรอง ${q1.queue.outside}`);
+  ok('ตัวกรอง "นำเข้า Odoo แล้ว" มองไม่เห็นใบค้างเลย ⇒ นอกตัวกรอง = ยอดค้างทั้งหมด', q2.queue.outside === q2.queue.total,
+    `${q2.queue.outside} = ${q2.queue.total}`);
+}
 for (const s of [subWith, subNone].filter(Boolean)) {
   const r = await api(s, '/api/admin/quotations?exported=all&limit=1');
   const m = await api(s, '/api/admin/quotations?exported=all&mine=1&limit=200');
   ok(`subadmin #${s.id} "ใบของฉัน" = ใบที่ออกจากบัญชีตัวเอง`, m.total === s.own && r.mine_total === s.own, `${m.total} ใบ · นับสด ${s.own}`);
   ok(`subadmin #${s.id} ทุกแถวใน "ใบของฉัน" เป็นของบัญชีนี้`, m.data.every((q: any) => String(q.user_id).startsWith(`web:${s.id}:`)));
-  const ca = await api(s, '/api/admin/quotations/manual-review-counts');
-  const cm = await api(s, '/api/admin/quotations/manual-review-counts?mine=1');
-  ok(`subadmin #${s.id} ตัวนับคิวแก้มือของ "ใบของฉัน" ไม่เกินทั้งหมด`, cm.total <= ca.total, `${cm.total} ≤ ${ca.total}`);
+  const ca = await api(s, '/api/admin/quotations/export-counts?exported=all');
+  const cm = await api(s, '/api/admin/quotations/export-counts?exported=all&mine=1');
+  ok(`subadmin #${s.id} ตัวนับคิวแก้มือของ "ใบของฉัน" ไม่เกินทั้งหมด`, cm.queue.total <= ca.queue.total, `${cm.queue.total} ≤ ${ca.queue.total}`);
 }
 
 /* ── ค. หน้าจอ ─────────────────────────────────────────────────────────── */

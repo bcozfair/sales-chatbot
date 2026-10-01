@@ -145,10 +145,15 @@ const MANUAL_REASON_LABELS: { kind: string; label: string }[] = [
   { kind: 'payment_terms_override', label: '💳 เครดิตตั้งเอง' },
 ];
 
-/** ยอดใบที่ยังค้างในคิวแก้มือ แยกตามเหตุ × บริษัท (GET /api/admin/quotations/manual-review-counts) */
-interface ManualReviewCounts {
-  total: number;
-  groups: { bucket: string; company: 'PM' | 'THT'; count: number }[];
+/**
+ * ตัวเลขข้างทุกปุ่มในเมนูส่งออก (GET /api/admin/quotations/export-counts) — นับด้วยตัวกรองชุดเดียวกับไฟล์
+ * ⇒ ตัวเลข = จำนวนใบที่กดแล้วได้ในไฟล์ · `queue` = ยอดค้างของคิวแก้มือทั้งหมดที่ไม่ฟังตัวกรอง
+ */
+interface ExportCounts {
+  normal: Record<ExportCompany, number>;
+  manual: { total: number; groups: { bucket: string; company: 'PM' | 'THT'; count: number }[] };
+  /** outside = ใบค้างที่ตัวกรองตอนนี้มองไม่เห็น — บอกไว้ไม่ให้ตัวกรองบังคิวแก้มือจนถูกลืม */
+  queue: { total: number; outside: number };
 }
 
 /**
@@ -303,10 +308,13 @@ export const Quotations: React.FC = () => {
   const [isExporting, setIsExporting] = useState(false);
   const exportMenuRef = React.useRef<HTMLDivElement>(null);
   /**
-   * ยอดค้างของคิวแก้มือ — **ตัวเลขนี้คือของสำคัญที่สุดของเมนู** เพราะใบกลุ่มนี้ไม่อยู่ในไฟล์ปกติแล้ว
+   * ตัวเลขในเมนู — `null` = กำลังนับ (หรือนับไม่สำเร็จ) ⇒ ปุ่มยังกดได้ตามเดิม แค่ไม่มีตัวเลข
+   * ยอดค้างของคิวแก้มือ (`queue`) คือของสำคัญที่สุดของเมนู เพราะใบกลุ่มนี้ไม่อยู่ในไฟล์ปกติ
    * ถ้าไม่มีใครเห็นยอดค้าง มันจะไม่ไปถึง Odoo เลยโดยไม่มีอะไรฟ้อง
    */
-  const [manualCounts, setManualCounts] = useState<ManualReviewCounts>({ total: 0, groups: [] });
+  const [exportCounts, setExportCounts] = useState<ExportCounts | null>(null);
+  /** กันคำตอบของรอบเก่ามาทับรอบใหม่ เวลาเปลี่ยนตัวกรองเร็ว ๆ ขณะเมนูเปิดอยู่ */
+  const countsReqRef = React.useRef(0);
   /** กางกลุ่ม "ต้องแก้มือก่อน" ค้างไว้ไหม — จำไว้ระหว่างเปิด/ปิดเมนูในเซสชันเดียวกัน */
   const [manualOpen, setManualOpen] = useState(true);
 
@@ -352,7 +360,6 @@ export const Quotations: React.FC = () => {
       showToast(deletedLabel);
       // ยอดรวมและจำนวนหน้าเปลี่ยนไปด้วย ⇒ โหลดใหม่ ไม่ตัดแถวออกจาก state เอง
       fetchQuotations();
-      void fetchManualCounts();
     } catch (err: unknown) {
       setDeleteError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการลบใบเสนอราคา');
     } finally {
@@ -382,6 +389,22 @@ export const Quotations: React.FC = () => {
   // Expanded row (show items detail)
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
+  /**
+   * ตัวกรองบนจอเป็น query string — ตาราง · ไฟล์ส่งออก · ตัวเลขในเมนูส่งออก ใช้ตัวนี้ตัวเดียว
+   * (เดิมประกอบแยกกันคนละที่ ไฟล์ส่งออกจึงไม่เคยได้ตัวกรองป้ายไปด้วย)
+   */
+  const filterParams = useCallback(() => {
+    const params = new URLSearchParams();
+    if (searchQuery.trim()) params.set('search', searchQuery.trim());
+    if (statusFilter) params.set('status', statusFilter);
+    if (dateFrom) params.set('dateFrom', dateFrom);
+    if (dateTo) params.set('dateTo', dateTo);
+    params.set('exported', exportedFilter);
+    params.set('flag', flagFilter);
+    if (mineOnly) params.set('mine', '1');
+    return params;
+  }, [searchQuery, statusFilter, dateFrom, dateTo, exportedFilter, flagFilter, mineOnly]);
+
   const fetchQuotations = useCallback(async (resetPage = false) => {
     setIsLoading(true);
     setError(null);
@@ -390,14 +413,7 @@ export const Quotations: React.FC = () => {
     if (resetPage) setCurrentPage(1);
 
     try {
-      const params = new URLSearchParams();
-      if (searchQuery.trim()) params.set('search', searchQuery.trim());
-      if (statusFilter) params.set('status', statusFilter);
-      if (dateFrom) params.set('dateFrom', dateFrom);
-      if (dateTo) params.set('dateTo', dateTo);
-      params.set('exported', exportedFilter);
-      params.set('flag', flagFilter);
-      if (mineOnly) params.set('mine', '1');
+      const params = filterParams();
       params.set('sortBy', sortBy);
       params.set('sortOrder', sortOrder);
       params.set('limit', String(pageSize));
@@ -421,7 +437,7 @@ export const Quotations: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [token, searchQuery, statusFilter, dateFrom, dateTo, exportedFilter, flagFilter, mineOnly, currentPage, pageSize, sortBy, sortOrder]);
+  }, [token, filterParams, currentPage, pageSize, sortBy, sortOrder]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -430,26 +446,30 @@ export const Quotations: React.FC = () => {
     return () => clearTimeout(timer);
   }, [fetchQuotations]);
 
-  // ยอดค้างของคิวแก้มือ — โหลดพร้อมตาราง เพราะการส่งออกครั้งหนึ่งทำให้ยอดนี้เปลี่ยนทันที
-  const fetchManualCounts = useCallback(async () => {
+  // ตัวเลขในเมนูส่งออก — นับเฉพาะตอนเมนูเปิด (ตัวเลขไม่ได้โชว์ที่อื่น) และนับใหม่ทุกครั้งที่เปิด/ตัวกรองเปลี่ยน
+  // ⇒ หลังส่งออก (เมนูปิดเอง) เปิดครั้งถัดไปได้ยอดที่ลดลงแล้วเสมอ ไม่ต้องสั่งโหลดซ้ำเอง
+  const fetchExportCounts = useCallback(async () => {
+    const reqId = ++countsReqRef.current;
+    setExportCounts(null);           // ไม่โชว์ตัวเลขของตัวกรองชุดก่อนค้างไว้ระหว่างรอ
     try {
-      // ตามปุ่ม "ใบของฉัน" — ตัวเลขข้างปุ่มส่งออกต้องเท่ากับจำนวนใบที่จะลงไฟล์
-      const res = await fetch(`/api/admin/quotations/manual-review-counts${mineOnly ? '?mine=1' : ''}`, {
+      const res = await fetch(`/api/admin/quotations/export-counts?${filterParams().toString()}`, {
         headers: { 'Authorization': `Bearer ${token}` },
       });
-      if (!res.ok) return;           // ยอดค้างอ่านไม่ได้ ไม่ใช่เหตุให้ทั้งหน้าพัง — เมนูจะขึ้น "ไม่มีใบค้าง"
-      setManualCounts(await res.json());
+      if (!res.ok || reqId !== countsReqRef.current) return;   // นับไม่ได้ไม่ใช่เหตุให้เมนูพัง — ปุ่มยังกดได้
+      const body: ExportCounts = await res.json();
+      if (reqId === countsReqRef.current) setExportCounts(body);
     } catch {
       // เงียบด้วยเหตุผลเดียวกัน — ตารางหลักยังใช้งานได้ตามปกติ
     }
-  }, [token, mineOnly]);
+  }, [token, filterParams]);
 
   // setTimeout(0) ด้วยเหตุผลเดียวกับ effect ของ fetchQuotations ข้างบน — กติกา
   // `react-hooks/set-state-in-effect` ห้าม setState ตรง ๆ ใน effect body
   useEffect(() => {
-    const timer = setTimeout(() => { void fetchManualCounts(); }, 0);
+    if (!exportMenuOpen) return;
+    const timer = setTimeout(() => { void fetchExportCounts(); }, 0);
     return () => clearTimeout(timer);
-  }, [fetchManualCounts]);
+  }, [exportMenuOpen, fetchExportCounts]);
 
   // ปิดเมนูส่งออกเมื่อคลิกนอกกล่อง
   useEffect(() => {
@@ -473,14 +493,8 @@ export const Quotations: React.FC = () => {
     setExportMenuOpen(false);
     setIsExporting(true);
     try {
-      const params = new URLSearchParams();
+      const params = filterParams();
       params.set('company', company);
-      if (searchQuery.trim()) params.set('search', searchQuery.trim());
-      if (statusFilter) params.set('status', statusFilter);
-      if (dateFrom) params.set('dateFrom', dateFrom);
-      if (dateTo) params.set('dateTo', dateTo);
-      params.set('exported', exportedFilter);
-      if (mineOnly) params.set('mine', '1');
       params.set('sortBy', sortBy);
       params.set('sortOrder', sortOrder);
       params.set('format', format);
@@ -517,7 +531,6 @@ export const Quotations: React.FC = () => {
 
       // ใบที่เพิ่งดาวน์โหลดถูกมาร์กไปแล้ว ถ้าไม่โหลดใหม่หน้าจอจะแสดงสถานะเก่าที่ไม่จริง
       fetchQuotations();
-      void fetchManualCounts();      // ยอดค้างลดลงทันทีที่ไฟล์ของกลุ่มนั้นถูกสร้างสำเร็จ
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการส่งออกข้อมูล';
       setError(errorMessage);
@@ -555,6 +568,13 @@ export const Quotations: React.FC = () => {
     setSuccessMsg(msg);
     setTimeout(() => setSuccessMsg(null), 3000);
   };
+
+  // ตัวเลขของกลุ่มแก้มือในเมนูส่งออก — ยังนับไม่เสร็จ = 0 ทั้งหมด (ป้ายหัวข้อขึ้น "…" แยกเอง)
+  const manualTotal = exportCounts?.manual.total ?? 0;
+  const queueTotal = exportCounts?.queue.total ?? 0;
+  const queueOutside = exportCounts?.queue.outside ?? 0;
+  /** หัวข้อเป็นสีเตือนเมื่อมีใบค้างที่ไหนก็ตาม แม้ตัวกรองตอนนี้จะมองไม่เห็นมัน */
+  const manualAlert = manualTotal > 0 || queueTotal > 0;
 
   // Pagination derived values
   const totalItems = total;
@@ -641,24 +661,33 @@ export const Quotations: React.FC = () => {
           {exportMenuOpen && (
             <div className="absolute right-0 top-full mt-2 z-30 w-[17rem] bg-card border border-slate-200 rounded-xl shadow-xl overflow-hidden">
               {/* 1 ครั้ง = 1 บริษัท — Odoo ของ PM กับ THT เป็นคนละระบบ ไฟล์จึงรวมกันไม่ได้ */}
-              {EXPORT_COMPANIES.map(({ value, company }) => (
-                <div key={value} className="flex items-center gap-2 px-3 py-2 border-b border-slate-100">
-                  <div className="flex items-baseline gap-1.5 flex-1 min-w-0">
-                    <span className="px-1.5 py-0.5 rounded-md bg-[var(--brand)]/10 text-[var(--brand-fg)] text-xs font-extrabold tracking-wide">
-                      {value}
+              {/* ตัวเลขหน้าปุ่ม = จำนวนใบที่กดแล้วได้ในไฟล์ ตามตัวกรองบนจอ (เจ้าของเลือก 2026-10-01)
+                  0 = ปุ่มกดไม่ได้ · ยังนับไม่เสร็จ = "…" และปุ่มยังกดได้ตามเดิม */}
+              {EXPORT_COMPANIES.map(({ value, company }) => {
+                const n = exportCounts?.normal[value];
+                return (
+                  <div key={value} className="flex items-center gap-2 px-3 py-2 border-b border-slate-100">
+                    <div className="flex items-baseline gap-1.5 flex-1 min-w-0">
+                      <span className="px-1.5 py-0.5 rounded-md bg-[var(--brand)]/10 text-[var(--brand-fg)] text-xs font-extrabold tracking-wide">
+                        {value}
+                      </span>
+                      <span className="text-sm font-bold text-slate-800 truncate">{company}</span>
+                    </div>
+                    <span className={`text-xs font-extrabold tabular-nums ${n === 0 ? 'text-slate-300' : 'text-slate-700'}`}>
+                      {n === undefined ? '…' : n.toLocaleString('en-US')}
                     </span>
-                    <span className="text-sm font-bold text-slate-800 truncate">{company}</span>
+                    <button
+                      onClick={() => handleExportOdoo('xlsx', value)}
+                      disabled={n === 0}
+                      title={n === 0 ? `ไม่มีใบ ${value} (${company}) ตามตัวกรองนี้` : `ส่งออก ${value} (${company}) เป็น Excel`}
+                      className={`${EXPORT_BTN} disabled:opacity-40 disabled:pointer-events-none`}
+                    >
+                      <FileSpreadsheet className="w-3.5 h-3.5" />
+                      Excel
+                    </button>
                   </div>
-                  <button
-                    onClick={() => handleExportOdoo('xlsx', value)}
-                    title={`ส่งออก ${value} (${company}) เป็น Excel`}
-                    className={EXPORT_BTN}
-                  >
-                    <FileSpreadsheet className="w-3.5 h-3.5" />
-                    Excel
-                  </button>
-                </div>
-              ))}
+                );
+              })}
 
               {/* ── คิวแก้มือ — กลุ่มตามเหตุ แถวข้างในตามบริษัท (เจ้าของเคาะแบบ ข-1 · 2026-09-15) ──
                   **แถวหัวข้ออยู่ตำแหน่งเดิมเสมอ** แม้วันที่ไม่มีใบค้าง ไม่งั้นเมนูจะสูงไม่เท่ากันในแต่ละวัน
@@ -669,32 +698,37 @@ export const Quotations: React.FC = () => {
                 onClick={() => setManualOpen((v) => !v)}
                 aria-expanded={manualOpen}
                 className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs font-bold border-b border-slate-100 transition-colors ${
-                  manualCounts.total > 0
+                  manualAlert
                     ? 'bg-amber-50 text-amber-800 hover:bg-amber-100'
                     : 'bg-slate-50 text-slate-500 hover:bg-slate-100'
                 }`}
               >
-                <AlertTriangle className={`w-3.5 h-3.5 shrink-0 ${manualCounts.total > 0 ? '' : 'opacity-50'}`} />
+                <AlertTriangle className={`w-3.5 h-3.5 shrink-0 ${manualAlert ? '' : 'opacity-50'}`} />
                 <span className="flex-1 min-w-0 truncate">ต้องแก้มือก่อน</span>
                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${
-                  manualCounts.total > 0
+                  manualAlert
                     ? 'bg-amber-100 border-amber-300 text-amber-800'
                     : 'bg-slate-100 border-slate-200 text-slate-400'
                 }`}>
-                  {manualCounts.total > 0 ? `${manualCounts.total} ใบ` : 'ไม่มีใบค้าง'}
+                  {/* ตัวเลขตามตัวกรอง · ยอดค้างนอกตัวกรองบอกเป็นบรรทัดข้างใน (หัวข้อยังเป็นสีเตือนถ้ามีค้าง) */}
+                  {!exportCounts ? '…' : manualTotal > 0 || queueTotal > 0 ? `${manualTotal} ใบ` : 'ไม่มีใบค้าง'}
                 </span>
                 <ChevronDown className={`w-3 h-3 shrink-0 transition-transform ${manualOpen ? 'rotate-180' : ''}`} />
               </button>
 
               {manualOpen && (
-                <div className={`border-b border-slate-100 ${manualCounts.total > 0 ? 'bg-amber-50' : 'bg-slate-50'}`}>
-                  {manualCounts.total === 0 ? (
+                <div className={`border-b border-slate-100 ${manualAlert ? 'bg-amber-50' : 'bg-slate-50'}`}>
+                  {!exportCounts ? (
+                    <p className="px-3 py-2.5 pl-6 text-[11px] leading-snug text-slate-500">กำลังนับ…</p>
+                  ) : manualTotal === 0 ? (
                     <p className="px-3 py-2.5 pl-6 text-[11px] leading-snug text-slate-500">
-                      ทุกใบข้อมูลตรงกับฐาน Odoo แล้ว — ใช้สองบรรทัดบนได้ตามปกติ
+                      {queueTotal === 0
+                        ? 'ทุกใบข้อมูลตรงกับฐาน Odoo แล้ว — ใช้สองบรรทัดบนได้ตามปกติ'
+                        : 'ไม่มีใบที่ต้องแก้มือในตัวกรองนี้'}
                     </p>
                   ) : (
                     MANUAL_REASON_LABELS.map(({ kind, label }) => {
-                      const rows = manualCounts.groups.filter((g) => g.bucket === kind && g.count > 0);
+                      const rows = exportCounts.manual.groups.filter((g) => g.bucket === kind && g.count > 0);
                       if (rows.length === 0) return null;
                       const sum = rows.reduce((n, g) => n + g.count, 0);
                       return (
@@ -722,6 +756,13 @@ export const Quotations: React.FC = () => {
                       );
                     })
                   )}
+                  {/* ตัวกรองบังใบค้างได้ (เช่น เลือก "รอนำเข้า") — บอกไว้ ไม่งั้นใบกลุ่มนี้ถูกลืมเงียบ ๆ */}
+                  {queueOutside > 0 && (
+                    <p className="px-3 pt-1.5 pl-6 text-[11px] leading-snug text-amber-800">
+                      ค้างทั้งหมด <b>{queueTotal.toLocaleString('en-US')} ใบ</b>
+                      {' '}· {queueOutside.toLocaleString('en-US')} ใบอยู่นอกตัวกรองนี้
+                    </p>
+                  )}
                   <div className="h-2" />
                 </div>
               )}
@@ -734,7 +775,8 @@ export const Quotations: React.FC = () => {
                 ประวัติการส่งออก
               </button>
               <p className="px-3 py-2 text-[11px] leading-snug text-slate-500 border-t border-slate-100 bg-slate-50">
-                ส่งออกตามตัวกรองบนหน้าจอ (ตั้งต้น: เฉพาะใบที่ยังไม่เคยส่ง) ใบที่อยู่ในไฟล์จะถูกทำเครื่องหมายว่าส่งแล้วทันที
+                ส่งออกตามตัวกรองบนหน้าจอ (ตั้งต้น: เฉพาะใบที่ยังไม่เคยส่ง) — ตัวเลขหน้าปุ่มคือจำนวนใบในไฟล์
+                · ใบที่อยู่ในไฟล์จะถูกทำเครื่องหมายว่าส่งแล้วทันที
                 · เลขที่ที่ไม่ขึ้นต้นด้วย QP/QT จะไม่อยู่ในไฟล์
                 · <b>สองบรรทัดบนไม่มีใบที่ต้องแก้มือ</b> — ใบพวกนั้นนำเข้า Odoo ตรง ๆ ไม่ได้
                 {/* ปุ่ม "ใบของฉัน" ก็เป็นตัวกรองบนจอ ⇒ ไฟล์ตามปุ่มด้วย (เจ้าของเคาะ 2026-10-01)

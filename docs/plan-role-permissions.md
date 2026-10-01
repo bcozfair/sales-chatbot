@@ -410,7 +410,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS admin_users_employee_quotation_id_key
 | `quote.revise` | `POST /webquote/revise` |
 | `quote.export_odoo` | `GET /quotations/export` |
 | `quote.unmark_export` | `POST /quotations/:id/unmark-export` · `…/export-batches/:id/unmark` |
-| `quote.view_all` | **ไม่ใช่ 403** — เป็นตัวกรอง: `GET /quotations` (ทั้งรายการและตัวนับ) · `/quotations/export` · `/quotations/manual-review-counts` |
+| `quote.view_all` | **ไม่ใช่ 403** — เป็นตัวกรอง: `GET /quotations` (ทั้งรายการและตัวนับ) · `/quotations/export` · `/quotations/export-counts` (ตัวเลขในเมนูส่งออก · แทน `manual-review-counts` ตั้งแต่ 2026-10-01) |
 | `quote.payment_terms_override` | `webQuoteService` — `createDraft()` และ `previewDraft()` |
 | `quote.act_as_any_salesperson` | `webQuoteService.createDraft()` (`assertMayActAs`) |
 | `approval.decide` | `canDecideApproval()` — เป็น `async` แล้ว |
