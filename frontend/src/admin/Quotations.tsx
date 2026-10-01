@@ -175,9 +175,24 @@ const EXPORT_COMPANIES: { value: ExportCompany; company: string }[] = [
  * (ครั้งแรก 2026-08-05 · ล่าสุด 2026-09-04) ⇒ ปุ่มนั้นกินที่ครึ่งหนึ่งของทุกแถวเพื่อสิ่งที่ยังไม่เคยถูกกด
  * และเป็นตัวที่ทำให้เมนูใส่กลุ่ม "ต้องแก้มือก่อน" เพิ่มไม่ได้โดยไม่บาน
  * · **หลังบ้านยังรับ `?format=csv` เหมือนเดิม** วันไหนอยากได้กลับมา เติมปุ่มอย่างเดียวจบ
+ *
+ * **มีพื้น + ขอบเข้ม + เงา** (เจ้าของสั่ง 2026-10-01 "มันกลืนเกินไป") — เดิมเป็นขอบบางบนพื้นเมนู
+ * แยกไม่ออกว่าเป็นปุ่ม · เงาใช้ `--shadow-btn*` ของธีม ไม่ใช่ `shadow-sm` ที่มองไม่เห็นบนธีมมืด (index.css)
  */
 const EXPORT_BTN =
-  'flex items-center gap-1 px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-bold text-slate-600 hover:border-[var(--brand-fg)] hover:text-[var(--brand-fg)] hover:bg-[var(--brand)]/5 transition-colors';
+  'flex items-center gap-1 px-2 py-1.5 rounded-lg border border-slate-300 bg-card text-xs font-bold text-slate-700 shadow-[var(--shadow-btn)] hover:border-[var(--brand-fg)] hover:text-[var(--brand-fg)] hover:shadow-[var(--shadow-btn-hover)] active:shadow-[var(--shadow-btn-press)] transition-[color,border-color,box-shadow]';
+
+/** ป้ายบริษัทในเมนูส่งออก — ทรงเดียวทั้งแถวใบปกติและแถวในคิวแก้มือ (เจ้าของสั่ง 2026-10-01) */
+const ExportCompanyLabel: React.FC<{ code: ExportCompany }> = ({ code }) => (
+  <div className="flex items-baseline gap-1.5 flex-1 min-w-0">
+    <span className="px-1.5 py-0.5 rounded-md bg-[var(--brand)]/10 text-[var(--brand-fg)] text-xs font-extrabold tracking-wide">
+      {code}
+    </span>
+    <span className="text-sm font-bold text-slate-800 truncate">
+      {EXPORT_COMPANIES.find((c) => c.value === code)?.company}
+    </span>
+  </div>
+);
 
 // Status color mapping
 const STATUS_STYLES: Record<string, { bg: string; text: string; label: string }> = {
@@ -667,20 +682,15 @@ export const Quotations: React.FC = () => {
                 const n = exportCounts?.normal[value];
                 return (
                   <div key={value} className="flex items-center gap-2 px-3 py-2 border-b border-slate-100">
-                    <div className="flex items-baseline gap-1.5 flex-1 min-w-0">
-                      <span className="px-1.5 py-0.5 rounded-md bg-[var(--brand)]/10 text-[var(--brand-fg)] text-xs font-extrabold tracking-wide">
-                        {value}
-                      </span>
-                      <span className="text-sm font-bold text-slate-800 truncate">{company}</span>
-                    </div>
-                    <span className={`text-xs font-extrabold tabular-nums ${n === 0 ? 'text-slate-300' : 'text-slate-700'}`}>
-                      {n === undefined ? '…' : n.toLocaleString('en-US')}
+                    <ExportCompanyLabel code={value} />
+                    <span className={`text-xs font-extrabold tabular-nums whitespace-nowrap ${n === 0 ? 'text-slate-400' : 'text-[var(--brand-fg)]'}`}>
+                      {n === undefined ? '…' : `${n.toLocaleString('en-US')} ใบ`}
                     </span>
                     <button
                       onClick={() => handleExportOdoo('xlsx', value)}
                       disabled={n === 0}
                       title={n === 0 ? `ไม่มีใบ ${value} (${company}) ตามตัวกรองนี้` : `ส่งออก ${value} (${company}) เป็น Excel`}
-                      className={`${EXPORT_BTN} disabled:opacity-40 disabled:pointer-events-none`}
+                      className={`${EXPORT_BTN} disabled:opacity-40 disabled:shadow-none disabled:pointer-events-none`}
                     >
                       <FileSpreadsheet className="w-3.5 h-3.5" />
                       Excel
@@ -737,11 +747,9 @@ export const Quotations: React.FC = () => {
                             {label} <span className="font-normal text-slate-500">{sum} ใบ</span>
                           </p>
                           {rows.map((g) => (
-                            <div key={`${kind}-${g.company}`} className="flex items-center gap-1.5 pl-6 pr-3 py-1">
-                              <span className="flex-1 min-w-0 truncate text-xs font-bold text-slate-800">
-                                {g.company === 'THT' ? 'QT · THT' : 'QP · PM'}
-                              </span>
-                              <span className="text-[11px] font-extrabold text-amber-800">{g.count}</span>
+                            <div key={`${kind}-${g.company}`} className="flex items-center gap-2 pl-6 pr-3 py-1">
+                              <ExportCompanyLabel code={g.company === 'THT' ? 'QT' : 'QP'} />
+                              <span className="text-xs font-extrabold tabular-nums whitespace-nowrap text-amber-800">{g.count.toLocaleString('en-US')} ใบ</span>
                               <button
                                 onClick={() => handleExportOdoo('xlsx', g.company === 'THT' ? 'QT' : 'QP', kind)}
                                 title={`ส่งออกใบที่ต้องแก้มือ (${label}) ของ ${g.company} เป็น Excel`}
