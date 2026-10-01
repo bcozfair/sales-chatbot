@@ -11,7 +11,7 @@
  *   ไม่งั้นโมดูลคิดราคาถอดออกทั้งก้อนไม่ได้อีก
  */
 import {
-  markMatchedByProductSync, markMatchedByImportedOrder, countPendingLocalProducts,
+  markMatchedFromProducts, deleteMatchedLocalProductRows, countPendingLocalProducts,
 } from '../db/localProductsRepo.js';
 import { pool } from '../config/db.js';
 import { slog, swarn } from '../scripts/sync/syncLog.js';
@@ -19,12 +19,14 @@ import { slog, swarn } from '../scripts/sync/syncLog.js';
 /**
  * "เข้า Odoo แล้วหรือยัง" — ตอบด้วยของที่ Odoo ส่งกลับมาจริง
  *
+ * **ยืนยันจากตาราง `products` อย่างเดียว** (เจ้าของเคาะ 2026-10-01): แถวของ Odoo ที่
+ * `internal_reference` หรือ `model` ตรงกัน · ไม่ใช้ "ใบที่นำเข้าแล้ว" เป็นสัญญาณ (ต่างจากผู้ติดต่อ)
+ * ⇒ ต้องรันหลังรอบ sync สินค้า ซึ่งเป็นตัวเขียน `products`
+ *
  * **ห้าม throw** — ถูกเรียกท้ายรอบ sync โยนออกไปจะกลืนบรรทัดสรุปรอบทั้งที่ sync สำเร็จแล้ว
- * · **ต้องรันหลัง `reconcileQuotationOdooLinks()`** เพราะสัญญาณ B อ่าน `odoo_imported_at` ที่ตัวนั้นเขียน
- * · รัน A ก่อน B ⇒ แถวที่ทั้งสองยืนยันได้ ได้ id ฝั่ง Odoo ติดมาด้วย
  */
 export async function reconcileLocalProductOdooLinks(): Promise<
-  { product_sync: number; imported_order: number; pending: number } | null
+  { reference: number; model: number; removed: number; pending: number } | null
 > {
   try {
     const { rows } = await pool.query(
@@ -36,15 +38,15 @@ export async function reconcileLocalProductOdooLinks(): Promise<
       return null;
     }
 
-    const bySync = await markMatchedByProductSync();
-    const byOrder = await markMatchedByImportedOrder();
+    const matched = await markMatchedFromProducts();
+    const removed = await deleteMatchedLocalProductRows();
     const pending = await countPendingLocalProducts();
 
-    if (bySync || byOrder) {
-      slog(`สินค้าเพิ่มเองเข้า Odoo แล้ว ${bySync + byOrder} รายการ ` +
-           `(จากรอบ sync ${bySync} · จากใบที่นำเข้า ${byOrder}) · ยังค้าง ${pending}`);
+    if (matched.reference || matched.model) {
+      slog(`สินค้าเพิ่มเองเข้า Odoo แล้ว ${matched.reference + matched.model} รายการ ` +
+           `(รหัสตรง ${matched.reference} · model ตรง ${matched.model}) · ยังค้าง ${pending}`);
     }
-    return { product_sync: bySync, imported_order: byOrder, pending };
+    return { ...matched, removed, pending };
   } catch (err) {
     swarn(`จับคู่สินค้าเพิ่มเองกับ Odoo ไม่สำเร็จ: ${err instanceof Error ? err.message : String(err)}`);
     return null;

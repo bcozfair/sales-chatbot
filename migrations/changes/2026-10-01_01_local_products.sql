@@ -64,10 +64,14 @@ CREATE TABLE IF NOT EXISTS public.local_products (
 
   exported_at         timestamptz,            -- ดาวน์โหลดไฟล์ไปคีย์ Odoo ครั้งล่าสุด
 
-  -- ── สามคอลัมน์นี้ "ระบบเขียน" เท่านั้น ไม่มี endpoint ให้คนกด (แผน §7) ──
+  -- ── สี่คอลัมน์นี้ "ระบบเขียน" เท่านั้น ไม่มี endpoint ให้คนกด (แผน §7) ──
+  -- ยืนยันจากตาราง products อย่างเดียว (เจ้าของ 2026-10-01): แถวของ Odoo ที่ internal_reference
+  -- หรือ model ตรงกัน
   odoo_matched_at          timestamptz,
-  odoo_matched_template_id integer,           -- NULL ได้เมื่อยืนยันด้วยใบที่นำเข้า (ไม่รู้ id ฝั่ง Odoo)
-  odoo_matched_by          text,
+  odoo_matched_template_id integer,           -- product_template_id ของแถว Odoo ที่จับคู่ได้
+  -- รหัสฝั่ง Odoo — ต่างจาก internal_reference ได้เมื่อจับคู่ด้วย model (แอดมินคีย์ด้วยรหัสอื่น)
+  odoo_matched_reference   text,
+  odoo_matched_by          text,               -- reference | model
 
   -- วัด 2026-09-21: ทั้ง 51,648 รหัสยาว 14 ตัว [A-Z0-9] เท่ากันหมด ⇒ เป็น CHECK ได้ ไม่ใช่การเดา
   CONSTRAINT local_products_ref_shape CHECK (internal_reference ~ '^[A-Z0-9]{14}$'),
@@ -79,7 +83,7 @@ CREATE TABLE IF NOT EXISTS public.local_products (
   -- ช่วงเลขเป็นข้อตกลงที่ตัวกวาดตอน sync พึ่งพา ⇒ บังคับที่ฐาน ไม่ใช่แค่ที่ sequence
   CONSTRAINT local_products_id_range CHECK (product_template_id >= 900000000),
   CONSTRAINT local_products_matched_by_check CHECK (
-    odoo_matched_by IS NULL OR odoo_matched_by IN ('product_sync', 'imported_order'))
+    odoo_matched_by IS NULL OR odoo_matched_by IN ('reference', 'model'))
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_local_products_ref
