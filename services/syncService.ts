@@ -5,6 +5,7 @@ import { clockNow, fmtDur, serr, slog, swarn, vlog } from '../scripts/sync/syncL
 import { clearCustomerSearchCache, reloadCustomerSearchCache } from './customerService.js';
 import { reconcileQuotationOdooLinks } from './quotationOdooLink.js';
 import { reconcileLocalContactOdooLinks } from './localContacts.js';
+import { reconcileLocalProductOdooLinks } from './localProducts.js';
 import { thaiDateParts } from '../utils/thaiTime.js';
 
 // ============================================================
@@ -314,6 +315,9 @@ export function startSync(
       // และสัญญาณ B อ่าน odoo_imported_at ที่ reconcileQuotationOdooLinks() เพิ่งเขียน
       // (ตารางว่าง = no-op · ห้าม throw เหมือนกัน — docs/plan-local-contacts.md §6.1)
       await reconcileLocalContactOdooLinks();
+      // "สินค้าที่แอดมินเพิ่มเอง เข้า Odoo แล้วหรือยัง" — กติกาเดียวกับบรรทัดบน · ต้องอยู่หลัง
+      // reconcileQuotationOdooLinks() เพราะสัญญาณ B อ่าน odoo_imported_at (docs/plan-local-products.md §6.3)
+      await reconcileLocalProductOdooLinks();
 
       // บรรทัดปิดรอบ: อ่านบรรทัดเดียวต้องรู้ว่าครบไหม พังตัวไหน และข้อมูลลูกค้าใช้ได้ไหม
       const parts = [`สำเร็จ ${okCount}/${list.length}`];

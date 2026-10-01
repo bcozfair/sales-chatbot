@@ -83,6 +83,7 @@
     "pricebook:calc": "tsx scripts/pricebook/cli.ts",
     "diag:web-decision": "tsx scripts/diag/webDecisionParity.ts",
     "diag:local-contacts": "tsx scripts/diag/localContactsSmoke.ts",
+    "diag:local-products": "tsx scripts/diag/localProductsSmoke.ts",
     "diag:sp-dedupe": "tsx scripts/diag/salespersonDedupeSmoke.ts",
     "diag:web-sales-owner": "tsx scripts/diag/webSalesOwnerSmoke.ts",
     "diag:customer-cache-memo": "tsx scripts/diag/customerCacheMemo.ts",
