@@ -4237,17 +4237,13 @@ const ISSUER_NAME_SQL = `COALESCE(NULLIF(q.employee_details->>'issuer_name', '')
 const ISSUER_SORT_SQL = `regexp_replace(${ISSUER_NAME_SQL}, '^คุณ\\s*', '')`;
 
 /**
- * ชื่อผู้เสนอราคาตามที่ใบ PDF พิมพ์ (เจ้าของสั่ง 2026-10-01 "เหมือน PDF ทุกตัวอักษร")
- * ใช้ `formatPersonNameWithSuffix` ตัวเดียวกับ pdfGenerator — ตัด "คุณ" นำหน้า + ห้อย (PM)/(THT)
- * ⇒ ห้ามเขียนกติกาตัด/ห้อยชื่อซ้ำที่นี่หรือบนจอ วันที่ใบเปลี่ยน จอต้องเปลี่ยนตามเอง
- * · ใบที่ออกเลขแล้ว: PDF ตัดสินบริษัทจากอักษรนำของเลขที่ (QT = THT) ⇒ ตรงกับ PDF ทุกตัวอักษร
- * · ใบร่าง: PDF ถามบริษัทจากสินค้าบรรทัดแรก (resolveQuoteCompany · ยิงฐานต่อใบ) ซึ่งแพงเกินจะทำทั้งหน้า
- *   และใบร่างยังไม่มีปุ่ม PDF ⇒ ตัดแค่ "คุณ" ไม่ห้อยวงเล็บ (ไม่เดาบริษัท)
+ * ชื่อในคอลัมน์ "ผู้เสนอราคา" — ชื่อเดียวกับที่ PDF พิมพ์ **แต่ไม่ห้อย (PM)/(THT)**
+ * (เจ้าของสั่ง 2026-10-01 รอบสอง — รอบแรกให้ตรง PDF ทุกตัวอักษร แล้วเปลี่ยนเป็นไม่ต้องระบุบริษัท)
+ * ⇒ ได้จาก `formatPersonNameWithSuffix` ของ PDF แล้วถอดวงเล็บท้ายออก ไม่เขียนกติกาตัด "คุณ" ซ้ำเอง
+ * วันที่ PDF เปลี่ยนวิธีจัดชื่อ จอเปลี่ยนตามเอง · ไม่ต้องรู้บริษัทของใบแล้ว ⇒ ใบร่างกับใบที่ออกเลขใช้ทางเดียวกัน
  */
-function issuerDisplayOf(name: string | null | undefined, quotationNo: string | null | undefined): string {
-  const no = String(quotationNo ?? '').trim();
-  if (no === '') return String(name ?? '').trim().replace(/^(คุณ)\s*/, '');
-  return formatPersonNameWithSuffix(name, no.toUpperCase().startsWith('QT'));
+function issuerDisplayOf(name: string | null | undefined): string {
+  return formatPersonNameWithSuffix(name, false).replace(/ \(PM\)$/, '');
 }
 // ที่มาของใบ (บรรทัดเล็กใต้ชื่อผู้เสนอราคา) — เกณฑ์เดียวกับทั้งระบบ: ใบจากหน้าเว็บถือ user_id พร็อกซี
 // `web:<admin>:<sales>` (services/webIdentity.ts) · ห้ามใช้ `source_id` ซึ่งคือช่อง "Source" ของ Odoo
@@ -4372,8 +4368,8 @@ app.get('/api/admin/quotations', adminAuthMiddleware, requireCapability('page.qu
       salesperson_name: q.salesperson_name || '',
       salesperson_phone: q.salesperson_phone || '',
       salesperson_employee_code: q.salesperson_employee_code || null,
-      // ชื่อผู้เสนอราคาตามที่ใบ PDF พิมพ์ — ช่องขวาของใบ: มี issuer_name (ใบเว็บ) ใช้ตัวนั้น ไม่มีใช้ชื่อเซลส์
-      issuer_display: issuerDisplayOf(q.issuer_name || q.salesperson_name, q.quotation_no),
+      // ชื่อผู้เสนอราคาตามที่ใบ PDF พิมพ์ (ไม่ห้อยบริษัท) — ช่องขวาของใบ: มี issuer_name (ใบเว็บ) ใช้ตัวนั้น ไม่มีใช้ชื่อเซลส์
+      issuer_display: issuerDisplayOf(q.issuer_name || q.salesperson_name),
     }));
 
     // scope = ขอบเขตที่ใช้จริงรอบนี้ · view_all = กดดูทั้งหมดได้ไหม (หน้าจอใช้ซ่อนปุ่ม ไม่ต้องเดาจาก role)

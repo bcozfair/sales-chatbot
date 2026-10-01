@@ -114,14 +114,16 @@ const admin = admins[0];
   // ชื่อผู้เสนอราคา = ที่ใบ PDF พิมพ์ทุกตัวอักษร (เจ้าของสั่ง 2026-10-01) — เทียบกับฟังก์ชันของ PDF ตรง ๆ
   // ไม่ใช่สำเนากติกา ⇒ วันที่ PDF เปลี่ยนวิธีจัดชื่อ ข้อนี้ตามไปเอง
   const issued = r.data.filter((q: any) => q.quotation_no);
-  const pdfName = (q: any) => formatPersonNameWithSuffix(q.issuer_name || q.salesperson_name, String(q.quotation_no).toUpperCase().startsWith('QT'));
+  // ไม่ห้อย (PM)/(THT) บนจอ (เจ้าของสั่ง 2026-10-01 รอบสอง) ⇒ เทียบกับชื่อของ PDF ที่ถอดวงเล็บท้ายออก
+  const pdfName = (q: any) => formatPersonNameWithSuffix(q.issuer_name || q.salesperson_name, String(q.quotation_no).toUpperCase().startsWith('QT'))
+    .replace(/ \((PM|THT)\)$/, '');
   const wrong = issued.filter((q: any) => q.issuer_display !== pdfName(q));
-  ok('ใบที่มีเลขที่: ชื่อผู้เสนอราคาตรงกับ PDF ทุกตัวอักษร', issued.length > 0 && wrong.length === 0,
+  ok('ใบที่มีเลขที่: ชื่อผู้เสนอราคาตรงกับ PDF (ไม่นับวงเล็บบริษัท)', issued.length > 0 && wrong.length === 0,
     `${issued.length} ใบ · ผิด ${wrong.length}${wrong[0] ? ` เช่น "${wrong[0].issuer_display}" ≠ "${pdfName(wrong[0])}"` : ''}`);
   ok('ไม่มีชื่อผู้เสนอราคาขึ้นต้นด้วย "คุณ"', r.data.every((q: any) => !String(q.issuer_display ?? '').startsWith('คุณ')));
-  const drafts = r.data.filter((q: any) => !q.quotation_no);
-  ok('ใบร่าง: ไม่ห้อย (PM)/(THT) เพราะยังไม่รู้บริษัท', drafts.every((q: any) => !/\((PM|THT)\)$/.test(q.issuer_display ?? '')),
-    `${drafts.length} ใบ`);
+  const suffixed = r.data.filter((q: any) => /\((PM|THT)\)\s*$/i.test(q.issuer_display ?? ''));
+  ok('ไม่มีชื่อผู้เสนอราคาห้อย (PM)/(THT) ทั้งใบร่างและใบที่ออกเลข', suffixed.length === 0,
+    `${r.data.length} ใบ · ห้อย ${suffixed.length}`);
 }
 
 // ตัวเลขในเมนูส่งออก = จำนวนใบที่ตารางเห็นภายใต้ตัวกรองเดียวกัน แล้วคัดตามกติกาของไฟล์
