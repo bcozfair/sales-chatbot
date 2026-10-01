@@ -316,7 +316,7 @@ export function startSync(
       // (ตารางว่าง = no-op · ห้าม throw เหมือนกัน — docs/plan-local-contacts.md §6.1)
       await reconcileLocalContactOdooLinks();
       // "สินค้าที่แอดมินเพิ่มเอง เข้า Odoo แล้วหรือยัง" — ตอบจากตาราง products ที่รอบนี้เพิ่ง sync
-      // (internal_reference หรือ model ตรงกัน · ห้าม throw · docs/plan-local-products.md §6.3)
+      // (internal_reference หรือ model ตรงกัน ⇒ ทับรหัสตาม Odoo ทั้งทะเบียนและใบ · ห้าม throw · plan §6.3/§8.4)
       await reconcileLocalProductOdooLinks();
 
       // บรรทัดปิดรอบ: อ่านบรรทัดเดียวต้องรู้ว่าครบไหม พังตัวไหน และข้อมูลลูกค้าใช้ได้ไหม

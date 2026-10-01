@@ -62,63 +62,142 @@ export async function sweepShadowedLocalProducts(
   return res.rowCount ?? 0;
 }
 
+/** คู่ที่เพิ่งจับได้ในรอบนี้ — `oldRef`/`localId` มีชีวิตแค่ในทรานแซกชันนี้ (หลังจากนั้นไม่เก็บที่ไหน) */
+export interface LocalProductMatch {
+  localId: number;
+  oldRef: string;
+  odooId: number;
+  odooRef: string;
+  by: 'reference' | 'model';
+}
+
 /**
  * "เข้า Odoo แล้วหรือยัง" — ยืนยันจากตาราง `products` อย่างเดียว (เจ้าของเคาะ 2026-10-01):
  * มีแถวของ Odoo (`source = 'odoo'`) ที่ **`internal_reference` หรือ `model` ตรงกัน**
+ * แล้ว **เขียนรหัสของ Odoo ทับรหัสในทะเบียน** (เจ้าของเคาะ 2026-10-01 · แผน §8.4)
  *
  * - ตรงทั้งสองแบบ ⇒ ถือแถวที่รหัสตรงก่อน (`by = 'reference'`) · model ตรงหลายแถว ⇒ แถวที่ id ใหม่สุด
- * - จับคู่ด้วย model ได้ แปลว่าแอดมินคีย์เข้า Odoo ด้วย **รหัสอื่น** ⇒ เก็บรหัสฝั่ง Odoo ไว้ที่
- *   `odoo_matched_reference` ให้คนแก้ใบที่ออกไปแล้วรู้ว่าต้องใช้รหัสไหน
+ * - แถว Odoo ที่รหัสว่างไม่นับ — ทับแล้วจะได้รหัสว่าง ⇒ ค้างให้เห็นในรายการดีกว่า
  * - model เทียบแบบ `btrim` ทั้งสองฝั่ง — แค่ใช้เทียบ ไม่ได้เขียนค่าที่ trim แล้วกลับไปที่ไหน
  * - ไม่มีทางจับคู่ผิดตัวตั้งแต่วันสร้าง: `POST /` ปฏิเสธ model ที่ซ้ำกับ `products` ทั้งตาราง (§5)
  *   ⇒ แถว Odoo ที่ model ตรงกันโผล่มาทีหลังได้ทางเดียวคือมีคนคีย์มันเข้า Odoo
  *
- * เขียนเฉพาะแถวที่ยังว่าง ⇒ สถานะเดินหน้าทางเดียว รันซ้ำกี่รอบก็ไม่เปลี่ยนค่าเดิม
+ * ⚠️ **ต้องเรียกในทรานแซกชันเดียวกับ `rewriteQuotationItemsForMatches()`** — รหัสเดิมไม่ถูกเก็บไว้ที่ไหน
+ *    (เจ้าของเลือก) ⇒ ถ้าทะเบียนถูกทับแล้วแต่ใบยังไม่ถูกทับ จะไม่มีอะไรเหลือให้รอบหน้าตามแก้
+ *    ทำพร้อมกัน ⇒ ล้มก็ ROLLBACK ทั้งคู่ แล้วรอบหน้าจับคู่ใหม่ตั้งแต่ต้น
+ *
+ * เขียนเฉพาะแถวที่ยังไม่จับคู่ ⇒ สถานะเดินหน้าทางเดียว รันซ้ำกี่รอบก็ไม่เปลี่ยนค่าเดิม
  * `UNION ALL` สองขา (ไม่ใช่ `JOIN … OR …`) ให้แต่ละขาใช้ hash join ได้ — ไม่ไล่ทั้งตารางต่อแถว
  */
-export async function markMatchedFromProducts(
-  executor: DbExecutor = pool,
-): Promise<{ reference: number; model: number }> {
-  const { rows } = await executor.query<{ by: string }>(
+export async function markMatchedFromProducts(executor: DbExecutor = pool): Promise<LocalProductMatch[]> {
+  const { rows } = await executor.query<{
+    local_id: number; old_ref: string; odoo_id: number; odoo_ref: string; by: 'reference' | 'model';
+  }>(
     `WITH cand AS (
-       SELECT l.product_template_id AS local_id, p.product_template_id AS odoo_id,
-              p.internal_reference AS odoo_ref, 'reference' AS by, 0 AS rank
+       SELECT l.product_template_id AS local_id, l.internal_reference AS old_ref,
+              p.product_template_id AS odoo_id, p.internal_reference AS odoo_ref,
+              'reference' AS by, 0 AS rank
          FROM local_products l
          JOIN products p ON p.internal_reference = l.internal_reference
         WHERE l.odoo_matched_at IS NULL AND p.source = 'odoo'
        UNION ALL
-       SELECT l.product_template_id, p.product_template_id,
-              p.internal_reference, 'model', 1
+       SELECT l.product_template_id, l.internal_reference,
+              p.product_template_id, p.internal_reference, 'model', 1
          FROM local_products l
          JOIN products p ON btrim(p.model) = btrim(l.model)
         WHERE l.odoo_matched_at IS NULL AND p.source = 'odoo'
+          AND btrim(coalesce(p.internal_reference, '')) <> ''
      ),
      pick AS (
-       SELECT DISTINCT ON (local_id) local_id, odoo_id, odoo_ref, by
+       SELECT DISTINCT ON (local_id) local_id, old_ref, odoo_id, odoo_ref, by
          FROM cand
         ORDER BY local_id, rank, odoo_id DESC
      )
      UPDATE local_products l
         SET odoo_matched_at = NOW(),
             odoo_matched_template_id = pick.odoo_id,
-            odoo_matched_reference = pick.odoo_ref,
-            odoo_matched_by = pick.by
+            odoo_matched_by = pick.by,
+            internal_reference = pick.odoo_ref,
+            updated_at = NOW()
        FROM pick
       WHERE l.product_template_id = pick.local_id
-      RETURNING pick.by`
+      RETURNING pick.local_id, pick.old_ref, pick.odoo_id, pick.odoo_ref, pick.by`
   );
-  return {
-    reference: rows.filter((r) => r.by === 'reference').length,
-    model: rows.filter((r) => r.by === 'model').length,
-  };
+  return rows.map((r) => ({
+    localId: Number(r.local_id), oldRef: r.old_ref, odooId: Number(r.odoo_id), odooRef: r.odoo_ref, by: r.by,
+  }));
 }
 
 /**
- * แถว local ที่เข้า Odoo แล้ว ⇒ ลบออกจาก `products` (ทะเบียนใน `local_products` อยู่ต่อเป็นหลักฐาน)
+ * ทับรหัสในใบเสนอราคาทุกใบให้ตรงกับ Odoo (เจ้าของเคาะ 2026-10-01 · ทุกสถานะ รวมใบที่ส่งออกแล้ว/ยกเลิก)
+ *
+ * แตะเฉพาะ `item_details` และเฉพาะสามช่องของบรรทัดที่อ้างสินค้าที่เพิ่งจับคู่:
+ * `internal_reference` → รหัส Odoo · `product_id` → id ของ Odoo · `linked_to_product_id` ของสินค้าเสริม
+ * ที่ผูกกับบรรทัดนั้น → id ของ Odoo (ไม่ทับช่องนี้ = ป้าย/การผูกสินค้าเสริมขาดเงียบ ๆ)
+ * - **ชนิดของค่าคงเดิม** (เลข → เลข · สตริง → สตริง) — ฝั่งอ่านหลายจุดเทียบด้วย `===`
+ * - ชื่อ · ราคา · model ไม่แตะ — เป็นข้อเท็จจริงของใบ และ PDF พิมพ์ model ไม่ใช่รหัส
+ * - **ไม่แตะ `updated_at`** — `getRecentConfirmedQuotations` ใช้มันหา "ใบที่เพิ่งยืนยัน" ของ LIFF
+ *   (ท่าเดียวกับสคริปต์ backfill) · แลกกับ: ระบบภายนอกที่ดึงใบแบบ incremental จะไม่เห็นการเปลี่ยนนี้
+ *   จนกว่าใบจะถูกแก้ครั้งถัดไป
+ */
+export async function rewriteQuotationItemsForMatches(
+  executor: DbExecutor,
+  matches: readonly LocalProductMatch[],
+): Promise<number> {
+  if (matches.length === 0) return 0;
+  // ค่าใหม่ในชนิดเดียวกับของเดิม — ไม่มีช่องเดิม/เป็น null ⇒ เป็นเลข
+  const typed = (field: string, val: string) =>
+    `CASE WHEN jsonb_typeof(t.e->'${field}') = 'string' THEN to_jsonb(${val}::text) ELSE to_jsonb(${val}) END`;
+  const res = await executor.query(
+    `WITH m AS (
+       SELECT * FROM unnest($1::text[], $2::text[], $3::int[], $4::int[]) AS m(old_ref, new_ref, old_id, new_id)
+     ),
+     hit AS (
+       SELECT q.id
+         FROM quotations q
+        WHERE jsonb_typeof(q.item_details) = 'array'
+          AND EXISTS (
+            SELECT 1
+              FROM jsonb_array_elements(CASE WHEN jsonb_typeof(q.item_details) = 'array'
+                                             THEN q.item_details ELSE '[]'::jsonb END) AS x(e)
+              JOIN m ON m.old_ref = x.e->>'internal_reference'
+                     OR m.old_id::text = x.e->>'product_id'
+                     OR m.old_id::text = x.e->>'linked_to_product_id')
+     )
+     UPDATE quotations q
+        SET item_details = (
+          SELECT jsonb_agg(
+                   t.e
+                   || CASE WHEN own.new_id IS NULL THEN '{}'::jsonb
+                           ELSE jsonb_build_object('internal_reference', own.new_ref,
+                                                   'product_id', ${typed('product_id', 'own.new_id')}) END
+                   || CASE WHEN lnk.new_id IS NULL THEN '{}'::jsonb
+                           ELSE jsonb_build_object('linked_to_product_id', ${typed('linked_to_product_id', 'lnk.new_id')}) END
+                   ORDER BY t.ord)
+            FROM jsonb_array_elements(q.item_details) WITH ORDINALITY AS t(e, ord)
+            LEFT JOIN LATERAL (
+              SELECT m.new_ref, m.new_id FROM m
+               WHERE m.old_ref = t.e->>'internal_reference' OR m.old_id::text = t.e->>'product_id'
+               LIMIT 1) own ON true
+            LEFT JOIN LATERAL (
+              SELECT m.new_id FROM m WHERE m.old_id::text = t.e->>'linked_to_product_id' LIMIT 1) lnk ON true
+        )
+       FROM hit
+      WHERE q.id = hit.id`,
+    [
+      matches.map((x) => x.oldRef), matches.map((x) => x.odooRef),
+      matches.map((x) => x.localId), matches.map((x) => x.odooId),
+    ]
+  );
+  return res.rowCount ?? 0;
+}
+
+/**
+ * แถว local ที่เข้า Odoo แล้ว ⇒ ลบออกจาก `products` (ทะเบียนใน `local_products` อยู่ต่อ)
  *
  * จำเป็นเพราะการจับคู่ด้วย model: รหัสต่างกัน ⇒ ตัวกวาดตอน sync (เทียบรหัส) ไม่เห็นมัน แล้ว
  * `products` จะมี model ซ้ำสองแถว — ผลค้นหาซ้ำ และ `buildItemSnapshots()` (หาด้วย model
- * เรียงตามสต็อก) อาจหยิบรหัส local ไปใส่ใบใหม่แทนรหัสจริงของ Odoo · ใบเก่าไม่กระทบ (แผน §6.4)
+ * เรียงตามสต็อก) อาจหยิบรหัส local ไปใส่ใบใหม่แทนรหัสจริงของ Odoo · ใบเก่าถูกทับรหัสแล้ว (§8.4)
  * ลบทุกแถวที่จับคู่แล้ว ไม่ใช่เฉพาะรอบนี้ ⇒ รอบที่ล้มกลางทาง รอบหน้าเก็บต่อให้เอง
  */
 export async function deleteMatchedLocalProductRows(executor: DbExecutor = pool): Promise<number> {
