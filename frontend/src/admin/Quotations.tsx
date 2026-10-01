@@ -21,7 +21,11 @@ import {
   RotateCcw,
   AlertTriangle,
   Ban,
-  Trash2
+  Trash2,
+  User,
+  Users,
+  Globe,
+  MessageCircle
 } from 'lucide-react';
 import { DeleteQuotationModal } from './DeleteQuotationModal';
 import { ExportHistoryModal } from './ExportHistoryModal';
@@ -56,6 +60,8 @@ interface Quotation {
   salesperson_employee_code: string | null;
   /** ชื่อผู้เสนอราคา — มีเฉพาะใบจากเว็บ · null = ใบ LINE/ใบเก่า ซึ่งช่องผู้เสนอราคาบนใบคือชื่อเซลส์ */
   issuer_name?: string | null;
+  /** ที่มาของใบ — คำนวณจาก user_id ที่เซิร์ฟเวอร์ (`web:` = หน้าเว็บ) ไม่ใช่ช่อง Source ของ Odoo */
+  channel?: 'web' | 'line';
   total_sum: number;
   items: QuotationItem[];
   user_id: string;
@@ -95,7 +101,19 @@ interface Quotation {
 interface QuotationListResponse {
   data: Quotation[];
   total: number;
+  /** ขอบเขตที่ใช้จริงรอบนี้ — 'own' ได้ทั้งจากปุ่ม "ใบของฉัน" และจากการถูกปิด quote.view_all */
+  scope?: 'own' | 'all';
+  /** บัญชีนี้กดดูทั้งหมดได้ไหม — false = ถูกปิด quote.view_all ⇒ ไม่มีปุ่มสลับให้กด */
+  view_all?: boolean;
+  /** จำนวน "ใบของฉัน" ภายใต้ตัวกรองชุดเดียวกัน — ตัวเลขบนปุ่ม */
+  mine_total?: number;
 }
+
+/**
+ * role ที่เปิดหน้ามาเจอ "ใบของฉัน" — ที่เหลือเปิดมาเจอ "ทั้งหมด" (เจ้าของเคาะ 2026-10-01)
+ * ทุก role มีปุ่มสลับเหมือนกัน ต่างกันแค่ค่าตอนเปิดหน้า · ปุ่มนี้เป็นตัวกรองการดู ไม่ใช่สิทธิ์
+ */
+const MINE_FIRST_ROLES: readonly string[] = ['subadmin'];
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
@@ -263,6 +281,14 @@ export const Quotations: React.FC = () => {
   const [exportedFilter, setExportedFilter] = useState<ExportedFilter>('no');
   /** ตั้งต้น 'all' — ป้ายสองอันนี้เป็นของที่ "ดูย้อนหลัง" ไม่ใช่คิวงานประจำวันเหมือนสถานะ Odoo */
   const [flagFilter, setFlagFilter] = useState<QuoteFlagFilter>('all');
+  /**
+   * ปุ่ม "ใบของฉัน / ทั้งหมด" — มีผลกับตาราง · ไฟล์ส่งออก · ตัวนับคิวแก้มือ พร้อมกัน
+   * (ส่งออกตามปุ่มที่เลือก เหมือนตัวกรองอื่นบนจอ — เจ้าของเคาะ 2026-10-01)
+   */
+  const [mineOnly, setMineOnly] = useState(() => MINE_FIRST_ROLES.includes(user?.role ?? ''));
+  /** ค่าจากเซิร์ฟเวอร์ — false = ถูกปิด quote.view_all เห็นได้เฉพาะใบตัวเองอยู่แล้ว */
+  const [viewAll, setViewAll] = useState(true);
+  const [mineTotal, setMineTotal] = useState<number | null>(null);
   const [sortBy, setSortBy] = useState('created_at');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
@@ -369,6 +395,7 @@ export const Quotations: React.FC = () => {
       if (dateTo) params.set('dateTo', dateTo);
       params.set('exported', exportedFilter);
       params.set('flag', flagFilter);
+      if (mineOnly) params.set('mine', '1');
       params.set('sortBy', sortBy);
       params.set('sortOrder', sortOrder);
       params.set('limit', String(pageSize));
@@ -383,6 +410,8 @@ export const Quotations: React.FC = () => {
       const result: QuotationListResponse = await response.json();
       setQuotations(result.data);
       setTotal(result.total);
+      setViewAll(result.view_all !== false);
+      setMineTotal(typeof result.mine_total === 'number' ? result.mine_total : null);
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการโหลดข้อมูล';
       console.error(err);
@@ -390,7 +419,7 @@ export const Quotations: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [token, searchQuery, statusFilter, dateFrom, dateTo, exportedFilter, flagFilter, currentPage, pageSize, sortBy, sortOrder]);
+  }, [token, searchQuery, statusFilter, dateFrom, dateTo, exportedFilter, flagFilter, mineOnly, currentPage, pageSize, sortBy, sortOrder]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -402,7 +431,8 @@ export const Quotations: React.FC = () => {
   // ยอดค้างของคิวแก้มือ — โหลดพร้อมตาราง เพราะการส่งออกครั้งหนึ่งทำให้ยอดนี้เปลี่ยนทันที
   const fetchManualCounts = useCallback(async () => {
     try {
-      const res = await fetch('/api/admin/quotations/manual-review-counts', {
+      // ตามปุ่ม "ใบของฉัน" — ตัวเลขข้างปุ่มส่งออกต้องเท่ากับจำนวนใบที่จะลงไฟล์
+      const res = await fetch(`/api/admin/quotations/manual-review-counts${mineOnly ? '?mine=1' : ''}`, {
         headers: { 'Authorization': `Bearer ${token}` },
       });
       if (!res.ok) return;           // ยอดค้างอ่านไม่ได้ ไม่ใช่เหตุให้ทั้งหน้าพัง — เมนูจะขึ้น "ไม่มีใบค้าง"
@@ -410,7 +440,7 @@ export const Quotations: React.FC = () => {
     } catch {
       // เงียบด้วยเหตุผลเดียวกัน — ตารางหลักยังใช้งานได้ตามปกติ
     }
-  }, [token]);
+  }, [token, mineOnly]);
 
   // setTimeout(0) ด้วยเหตุผลเดียวกับ effect ของ fetchQuotations ข้างบน — กติกา
   // `react-hooks/set-state-in-effect` ห้าม setState ตรง ๆ ใน effect body
@@ -448,6 +478,7 @@ export const Quotations: React.FC = () => {
       if (dateFrom) params.set('dateFrom', dateFrom);
       if (dateTo) params.set('dateTo', dateTo);
       params.set('exported', exportedFilter);
+      if (mineOnly) params.set('mine', '1');
       params.set('sortBy', sortBy);
       params.set('sortOrder', sortOrder);
       params.set('format', format);
@@ -560,8 +591,38 @@ export const Quotations: React.FC = () => {
       <PageHeader
         icon={FileText}
         title="ประวัติใบเสนอราคา"
-        description="ค้นหา ดูข้อมูล และส่งออกใบเสนอราคาทั้งหมดในระบบ"
+        description={mineOnly || !viewAll
+          ? 'แสดงเฉพาะใบที่คุณเสนอราคา'
+          : 'ค้นหา ดูข้อมูล และส่งออกใบเสนอราคาทั้งหมดในระบบ'}
       >
+        {/* ใบของฉัน / ทั้งหมด — ทรงเดียวกับ "มองเป็นบริษัท | มองเป็นผู้ติดต่อ" ของหน้าข้อมูลลูกค้า
+            ซ่อนทั้งก้อนเมื่อถูกปิด quote.view_all (เห็นเฉพาะใบตัวเองอยู่แล้ว ปุ่ม "ทั้งหมด" กดไม่ได้)
+            ตัวเลขบนปุ่มนับด้วยตัวกรองชุดเดียวกับตาราง = จำนวนที่จะเห็นถ้ากด */}
+        {viewAll && (
+          <div className="inline-flex bg-slate-100 border border-slate-200 rounded-xl p-0.5 gap-0.5">
+            {([[true, 'ใบของฉัน', User], [false, 'ทั้งหมด', Users]] as const).map(([mine, label, Icon]) => (
+              <button
+                key={label}
+                type="button"
+                onClick={() => { setMineOnly(mine); setCurrentPage(1); }}
+                aria-pressed={mineOnly === mine}
+                title={mine ? 'แสดงเฉพาะใบที่คุณเสนอราคา — ส่งออก Odoo ก็ได้เฉพาะใบเหล่านี้' : 'แสดงใบของทุกคน'}
+                className={`h-8 px-3 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all
+                  ${mineOnly === mine ? 'bg-card text-[var(--brand-fg)] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">{label}</span>
+                {mine && mineTotal !== null && (
+                  <span className={`px-1.5 rounded-full text-[10px] font-extrabold ${
+                    mineOnly ? 'bg-[var(--brand)]/10 text-[var(--brand-fg)]' : 'bg-slate-200 text-slate-500'
+                  }`}>
+                    {mineTotal.toLocaleString('en-US')}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="relative" ref={exportMenuRef}>
           <button
             onClick={() => setExportMenuOpen(open => !open)}
@@ -674,6 +735,13 @@ export const Quotations: React.FC = () => {
                 ส่งออกตามตัวกรองบนหน้าจอ (ตั้งต้น: เฉพาะใบที่ยังไม่เคยส่ง) ใบที่อยู่ในไฟล์จะถูกทำเครื่องหมายว่าส่งแล้วทันที
                 · เลขที่ที่ไม่ขึ้นต้นด้วย QP/QT จะไม่อยู่ในไฟล์
                 · <b>สองบรรทัดบนไม่มีใบที่ต้องแก้มือ</b> — ใบพวกนั้นนำเข้า Odoo ตรง ๆ ไม่ได้
+                {/* ปุ่ม "ใบของฉัน" ก็เป็นตัวกรองบนจอ ⇒ ไฟล์ตามปุ่มด้วย (เจ้าของเคาะ 2026-10-01)
+                    แจ้งเฉพาะตอนเลือกอยู่ เพราะคนที่ชินกับการส่งออกทุกใบจะได้ไฟล์ที่เล็กกว่าที่คิด */}
+                {mineOnly && viewAll && (
+                  <span className="block mt-1.5 px-2 py-1.5 rounded-lg bg-sky-50 border border-sky-200 text-sky-700">
+                    ตอนนี้เลือก <b>ใบของฉัน</b> — ไฟล์จะมีเฉพาะใบที่คุณเสนอราคา กด “ทั้งหมด” ก่อนถ้าจะส่งออกใบของทุกคน
+                  </span>
+                )}
               </p>
             </div>
           )}
@@ -787,8 +855,31 @@ export const Quotations: React.FC = () => {
       {!isLoading && !error && quotations.length === 0 && (
         <div className="bg-card border border-slate-200 rounded-2xl p-10 text-center shadow-sm text-slate-500 flex flex-col items-center justify-center gap-2">
           <FileText className="w-9 h-9 text-slate-300" />
-          <p className="font-bold">ไม่พบรายการใบเสนอราคา</p>
-          <p className="text-xs">ลองปรับเปลี่ยนตัวกรองหรือค้นหาด้วยคำอื่น</p>
+          {/* ดูเฉพาะใบตัวเองอยู่ ⇒ บอกเหตุผลที่ว่าง ไม่ใช่แค่ "ไม่พบ" — subadmin ส่วนใหญ่ยังไม่มีใบของตัวเอง
+              (วัด 2026-10-01: 8 จาก 11 บัญชี) จะเปิดหน้ามาเจอตารางว่างแล้วนึกว่าระบบพัง */}
+          {mineOnly || !viewAll ? (
+            <>
+              <p className="font-bold">ไม่พบใบเสนอราคาของคุณ</p>
+              <p className="text-xs max-w-md">
+                “ใบของฉัน” แสดงเฉพาะใบที่คุณเสนอราคา{viewAll ? ' · ใบของคนอื่นอยู่ใน “ทั้งหมด”' : ''} — หรือลองปรับตัวกรองด้านบน
+              </p>
+              {viewAll && (
+                <button
+                  type="button"
+                  onClick={() => { setMineOnly(false); setCurrentPage(1); }}
+                  className="mt-1.5 flex items-center gap-1.5 px-3.5 btn-h bg-card border border-slate-200 hover:bg-slate-50 text-slate-700 text-sm font-bold rounded-xl shadow-sm transition-all active:scale-95"
+                >
+                  <Users className="w-4 h-4" />
+                  ดูใบทั้งหมด
+                </button>
+              )}
+            </>
+          ) : (
+            <>
+              <p className="font-bold">ไม่พบรายการใบเสนอราคา</p>
+              <p className="text-xs">ลองปรับเปลี่ยนตัวกรองหรือค้นหาด้วยคำอื่น</p>
+            </>
+          )}
         </div>
       )}
 
@@ -870,16 +961,19 @@ export const Quotations: React.FC = () => {
                             <span className="font-semibold text-slate-800 text-sm">
                               {quote.company_name || (quote.customer_name || '')}
                             </span>
-                            {quote.contact_name && quote.contact_name !== '-' && (
-                              <span className="text-xs text-slate-500">
-                                ติดต่อ: {quote.contact_name}
-                              </span>
-                            )}
-                            {/* ป้ายสองแกน — มี **คำ** ไม่ใช่สีอย่างเดียว (docs/design.md ข้อ 8)
+                            {/* บรรทัดที่สอง = ผู้ติดต่อ + ป้ายต่อท้ายในแถวเดียวกัน (เจ้าของสั่ง 2026-10-01
+                                "ลดความสูงของแต่ละแถว") ⇒ แถวสูงไม่เกินสองบรรทัดเท่าคอลัมน์เลขที่/วันที่
+                                ใบที่ไม่มีผู้ติดต่อ ป้ายขึ้นบรรทัดนี้เอง · จอแคบป้ายตัดลงบรรทัดถัดไปได้ (flex-wrap)
+                                ป้ายสองแกน — มี **คำ** ไม่ใช่สีอย่างเดียว (docs/design.md ข้อ 8)
                                 🚩 ทะลุกฎ = ยังอยู่ในไฟล์ export ปกติ · 🔧 แก้มือ = ถูกกันออกจากไฟล์
                                 ใบเดียวขึ้นได้ทั้งสองป้าย เพราะเป็นคนละเรื่องกันจริง ๆ */}
-                            {(quote.rule_overrides || quote.odoo_manual_review) && (
-                              <div className="flex flex-wrap items-center gap-1 mt-1">
+                            {((quote.contact_name && quote.contact_name !== '-') || quote.rule_overrides || quote.odoo_manual_review) && (
+                              <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+                                {quote.contact_name && quote.contact_name !== '-' && (
+                                  <span className="text-xs text-slate-500">
+                                    ติดต่อ: {quote.contact_name}
+                                  </span>
+                                )}
                                 {quote.rule_overrides && (
                                   <span
                                     title={ruleOverrideHint(quote)}
@@ -903,11 +997,23 @@ export const Quotations: React.FC = () => {
                           </div>
                         </td>
 
-                        {/* ผู้เสนอราคา — กติกาเดียวกับช่องขวาของใบ PDF: ไม่มี issuer_name ⇒ ชื่อเซลส์ */}
+                        {/* ผู้เสนอราคา — กติกาเดียวกับช่องขวาของใบ PDF: ไม่มี issuer_name ⇒ ชื่อเซลส์
+                            **แสดงตรงตามใบทุกตัวอักษร ไม่เติม "คุณ"** (เจ้าของเลือกแบบ ข · 2026-10-01) — ใบ LINE
+                            ได้ "คุณX" จากตาราง salesperson ส่วนใบเว็บได้ชื่อ-นามสกุลของบัญชีแอดมิน บรรทัดที่มา
+                            ข้างล่างเป็นตัวอธิบายความต่างนี้ · เป็นข้อความจาง ไม่ใช่ป้ายสี เพราะแถวมีป้ายอยู่แล้ว */}
                         <td className="px-4 py-2.5 whitespace-nowrap">
-                          <span className="text-slate-700 text-sm">
-                            {quote.issuer_name || quote.salesperson_name || '-'}
-                          </span>
+                          <div className="flex flex-col">
+                            <span className="text-slate-700 text-sm">
+                              {quote.issuer_name || quote.salesperson_name || '-'}
+                            </span>
+                            {quote.channel && (
+                              <span className="inline-flex items-center gap-1 text-xs text-slate-500">
+                                {quote.channel === 'web'
+                                  ? <><Globe className="w-3 h-3" />หน้าเว็บ</>
+                                  : <><MessageCircle className="w-3 h-3" />LINE</>}
+                              </span>
+                            )}
+                          </div>
                         </td>
 
                         {/* Total */}

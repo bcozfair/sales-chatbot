@@ -58,7 +58,7 @@ import {
   replaceAdminSalespersonIds,
 } from './db/repositories.js';
 import {
-  quoteScopeOf, capsOf, capabilityDef, invalidateCapabilityCache,
+  quoteViewScopeOf, ownQuoteScopeOf, capsOf, capabilityDef, invalidateCapabilityCache,
   CAPABILITIES, ROLES, type Capability, type PermissionMode,
 } from './config/capabilities.js';
 import {
@@ -4230,6 +4230,10 @@ const SP_CODE_SQL = `COALESCE(s.salesperson_id, q.employee_details->>'salesperso
 // ชื่อในช่อง "ผู้เสนอราคา" ของใบ — กติกาเดียวกับ pdfGenerator: ใบจากเว็บมี snapshot `issuer_name`
 // ส่วนใบ LINE/ใบเก่าไม่มีคีย์นี้ ⇒ ช่องขวาของใบพิมพ์ชื่อเซลส์ จึงถอยไปใช้ชื่อเซลส์เหมือนกัน
 const ISSUER_NAME_SQL = `COALESCE(NULLIF(q.employee_details->>'issuer_name', ''), ${SP_NAME_SQL})`;
+// ที่มาของใบ (บรรทัดเล็กใต้ชื่อผู้เสนอราคา) — เกณฑ์เดียวกับทั้งระบบ: ใบจากหน้าเว็บถือ user_id พร็อกซี
+// `web:<admin>:<sales>` (services/webIdentity.ts) · ห้ามใช้ `source_id` ซึ่งคือช่อง "Source" ของ Odoo
+// · user_id เป็น NULL ได้เมื่อเซลส์ถูกลบ (FK ON DELETE SET NULL) — มีแต่ใบ LINE เพราะแถวพร็อกซีไม่ถูกลบ
+const QUOTE_CHANNEL_SQL = `CASE WHEN q.user_id LIKE 'web:%' THEN 'web' ELSE 'line' END`;
 
 // กัน path param ที่ไม่ใช่ uuid ยิงเข้า query แล้วได้ error 500 จาก Postgres แทน 400 ที่อ่านรู้เรื่อง
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -4300,10 +4304,14 @@ app.get('/api/admin/quotations', adminAuthMiddleware, requireCapability('page.qu
     if (flagCondition) conditions.push(flagCondition);
 
     // ── เห็นเฉพาะใบของตัวเองไหม ────────────────────────────────────────────────
-    //  `null` = เห็นทุกใบ ซึ่งเป็นคำตอบของทุก role ที่ออกใบได้ในวันนี้ ⇒ ไม่มีอะไรเปลี่ยน
+    //  สองทางเข้า: ถูกปิด `quote.view_all` (บังคับ) หรือกดปุ่ม "ใบของฉัน" (`mine=1` · เลือกเอง)
     //  เงื่อนไขตัวจริงอยู่ที่ ownQuotesCondition() ใน db/repositories.ts ที่เดียว และ
     //  **ตัวนับข้างล่างใช้ whereClause ก้อนเดียวกัน** — ตัวเลขกับรายการจึงตรงกันเสมอ
-    const ownScope = await quoteScopeOf(req.admin);
+    const { scope: ownScope, viewAll } = await quoteViewScopeOf(req.admin, req.query.mine === '1');
+    // ตัวเลขบนปุ่ม "ใบของฉัน" ต้องเป็นจำนวนที่จะเห็นถ้ากด ⇒ นับด้วยตัวกรองชุดเดียวกันก่อนต่อขอบเขต
+    const baseConditions = [...conditions];
+    const baseParams = [...params];
+    const baseIndex = paramIndex;
     if (ownScope) {
       const own = ownQuotesCondition(ownScope, paramIndex);
       conditions.push(own.sql);
@@ -4317,9 +4325,20 @@ app.get('/api/admin/quotations', adminAuthMiddleware, requireCapability('page.qu
     const countResult = await pool.query(`SELECT COUNT(*) FROM quotations q LEFT JOIN salesperson s ON q.user_id = s.user_id ${whereClause}`, params);
     const total = parseInt(countResult.rows[0].count);
 
+    // ดูทั้งหมดอยู่ ⇒ นับใบของฉันแยกอีกครั้ง · ดูเฉพาะของฉันอยู่แล้ว ⇒ ก็คือ total
+    let mineTotal = total;
+    if (!ownScope) {
+      const own = ownQuotesCondition(await ownQuoteScopeOf(req.admin), baseIndex);
+      const mineResult = await pool.query(
+        `SELECT COUNT(*) FROM quotations q LEFT JOIN salesperson s ON q.user_id = s.user_id WHERE ${[...baseConditions, own.sql].join(' AND ')}`,
+        [...baseParams, ...own.params]
+      );
+      mineTotal = parseInt(mineResult.rows[0].count);
+    }
+
     // Fetch data with LEFT JOIN to get salesperson info directly
     const dataResult = await pool.query(
-      `SELECT q.*, ${SP_NAME_SQL} AS salesperson_name, ${SP_PHONE_SQL} AS salesperson_phone, ${SP_CODE_SQL} AS salesperson_employee_code FROM quotations q LEFT JOIN salesperson s ON q.user_id = s.user_id ${whereClause} ORDER BY ${sortBy} ${sortOrderParam} LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+      `SELECT q.*, ${SP_NAME_SQL} AS salesperson_name, ${SP_PHONE_SQL} AS salesperson_phone, ${SP_CODE_SQL} AS salesperson_employee_code, ${QUOTE_CHANNEL_SQL} AS channel FROM quotations q LEFT JOIN salesperson s ON q.user_id = s.user_id ${whereClause} ORDER BY ${sortBy} ${sortOrderParam} LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
       [...params, limit, offset]
     );
 
@@ -4336,7 +4355,8 @@ app.get('/api/admin/quotations', adminAuthMiddleware, requireCapability('page.qu
       salesperson_employee_code: q.salesperson_employee_code || null,
     }));
 
-    res.json({ data: dataWithSalesperson, total });
+    // scope = ขอบเขตที่ใช้จริงรอบนี้ · view_all = กดดูทั้งหมดได้ไหม (หน้าจอใช้ซ่อนปุ่ม ไม่ต้องเดาจาก role)
+    res.json({ data: dataWithSalesperson, total, scope: ownScope ? 'own' : 'all', view_all: viewAll, mine_total: mineTotal });
   } catch (err: any) {
     console.error("GET /api/admin/quotations error:", err);
     res.status(500).json({ error: 'Internal Server Error' });
@@ -4441,8 +4461,8 @@ app.get('/api/admin/quotations/export', adminAuthMiddleware, requireCapability('
 
     // ไฟล์ export ต้องกรองด้วยขอบเขตเดียวกับหน้าประวัติ — ไม่งั้น "เห็นเฉพาะใบของตัวเอง"
     // กลายเป็นของประดับ: กดส่งออกครั้งเดียวก็ได้ใบของทุกคนติดมาทั้งไฟล์ (§9 ข้อ 7)
-    // วันนี้ไม่มี role ไหนที่ส่งออกได้แต่เห็นไม่ครบ ⇒ ownScope เป็น null ทุกครั้ง
-    const ownScope = await quoteScopeOf(req.admin);
+    // และ **ตามปุ่ม "ใบของฉัน / ทั้งหมด"** เหมือนตัวกรองอื่นบนจอ (เจ้าของเคาะ 2026-10-01)
+    const { scope: ownScope } = await quoteViewScopeOf(req.admin, req.query.mine === '1');
     if (ownScope) {
       const own = ownQuotesCondition(ownScope, paramIndex);
       conditions.push(own.sql);
@@ -4640,7 +4660,9 @@ app.delete('/api/admin/quotations/:id', adminAuthMiddleware, requireCapability('
  */
 app.get('/api/admin/quotations/manual-review-counts', adminAuthMiddleware, requireCapability('page.quotations'), async (req: any, res: any) => {
   try {
-    const groups = await getOdooManualReviewCounts(pool, await quoteScopeOf(req.admin));
+    // ตามปุ่ม "ใบของฉัน" ด้วย — ตัวเลขข้างปุ่มส่งออกต้องเท่ากับจำนวนใบที่จะลงไฟล์
+    const { scope } = await quoteViewScopeOf(req.admin, req.query.mine === '1');
+    const groups = await getOdooManualReviewCounts(pool, scope);
     res.json({ total: groups.reduce((s, g) => s + g.count, 0), groups });
   } catch (err) {
     console.error('GET /api/admin/quotations/manual-review-counts error:', err);

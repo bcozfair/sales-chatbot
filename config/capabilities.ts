@@ -677,5 +677,28 @@ export async function ruleModesOf(role: Role): Promise<RuleModeMap> {
  */
 export async function quoteScopeOf(admin: { id: number; role: Role }): Promise<OwnQuotesScope | null> {
   if (await can(admin.role, 'quote.view_all')) return null;
+  return ownQuoteScopeOf(admin);
+}
+
+/** "ใบของบัญชีนี้" โดยไม่ถามสิทธิ์ — นิยามเดียวกับที่ใช้ตอนถูกปิด `quote.view_all` */
+export async function ownQuoteScopeOf(admin: { id: number }): Promise<OwnQuotesScope> {
   return { adminId: admin.id, salespersonIds: await getAdminSalespersonIds(admin.id) };
+}
+
+/**
+ * ขอบเขตของหน้าประวัติเมื่อมีปุ่ม "ใบของฉัน / ทั้งหมด" (เจ้าของเคาะ 2026-10-01)
+ *
+ * ปุ่มนี้เป็น **ตัวกรองการดู ไม่ใช่สิทธิ์** — คนที่เห็นทุกใบเลือกดูเฉพาะใบตัวเองได้ แต่คนที่ถูกปิด
+ * `quote.view_all` กดขอดูทั้งหมดไม่ได้ ⇒ ขอบเขตจากสิทธิ์ชนะเสมอ
+ * · ส่งออก Odoo และตัวนับคิวแก้มือ **ตามปุ่มที่เลือกอยู่** เหมือนตัวกรองอื่นบนจอ (เจ้าของเคาะ)
+ *   ⇒ ทั้งสาม endpoint ต้องเรียกตัวนี้ด้วย `mine` ค่าเดียวกัน
+ * · `viewAll` = บัญชีนี้มีสิทธิ์ดูทั้งหมดไหม — หน้าจอใช้ซ่อนปุ่ม "ทั้งหมด" ไม่ใช่ตัดสินเอง
+ */
+export async function quoteViewScopeOf(
+  admin: { id: number; role: Role },
+  mine: boolean
+): Promise<{ scope: OwnQuotesScope | null; viewAll: boolean }> {
+  const forced = await quoteScopeOf(admin);
+  if (forced) return { scope: forced, viewAll: false };
+  return { scope: mine ? await ownQuoteScopeOf(admin) : null, viewAll: true };
 }
