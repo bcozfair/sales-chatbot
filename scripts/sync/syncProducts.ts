@@ -3,6 +3,7 @@ import { pool } from '../../config/db.js';
 import { createGatewayGet, sleep } from './gatewayClient.js';
 import { decidePageTransition, MAX_STALL_RETRIES } from './syncPagination.js';
 import { createPageTicker, logResourceDone, serr, setSyncCtx, slog, vlog } from './syncLog.js';
+import { hasLocalProductSource, sweepShadowedLocalProducts } from '../../db/localProductsRepo.js';
 
 const INITIAL_SINCE = '1970-01-01T00:00:00.000Z';
 const PAGE_LIMIT = 500;
@@ -108,7 +109,22 @@ async function saveSyncState(dbClient: any, nextState: any) {
   ]);
 }
 
-async function upsertProductRows(dbClient: any, rows: any[]) {
+/** export ให้ด่าน `diag:local-products` เรียกตัวจริงบนตารางชั่วคราว — ห้ามเรียกจากที่อื่น */
+export async function upsertProductRows(dbClient: any, rows: any[], sweepLocal: boolean) {
+  // สินค้าที่แอดมินเพิ่มเอง (source='local') แล้วคีย์เข้า Odoo สำเร็จ จะกลับมาในหน้านี้ด้วย id ใหม่แต่รหัสเดิม
+  // ⇒ ต้องลบแถว local ก่อน upsert ในทรานแซกชันเดียวกัน ไม่งั้นชน unique index ของ internal_reference
+  // แล้ว sync สินค้าค้างทั้งระบบ (docs/plan-local-products.md §6) · ฐานที่ยังไม่มีคอลัมน์ source = ข้าม
+  if (sweepLocal) {
+    const refs = rows
+      .map((r) => r["Internal Reference"])
+      .filter((v): v is string => typeof v === 'string' && v.trim() !== '');
+    const ids = rows
+      .map((r) => Number(r["Product Template ID"]))
+      .filter((n) => Number.isInteger(n));
+    const swept = await sweepShadowedLocalProducts(dbClient, refs, ids);
+    if (swept > 0) slog(`products: แทนที่สินค้าเพิ่มเอง ${swept} รายการด้วยแถวจริงจาก Odoo`);
+  }
+
   let batchIndex = 0;
   for (const row of rows) {
     batchIndex++;
@@ -246,6 +262,8 @@ export async function syncProducts(opts?: { forceFull?: boolean }) {
     `);
 
     await ensureSyncState(dbClient);
+    // ถามครั้งเดียวต่อรอบ — ฐานที่ยังไม่รัน migration 2026-10-01_01 ไม่มีแถว local ให้กวาด
+    const sweepLocal = await hasLocalProductSource(dbClient);
 
     // force-full: reset cursor เพื่อกวาดใหม่ทั้งหมดจาก since=1970 (npm run sync:products -- --full)
     if (opts?.forceFull) {
@@ -321,7 +339,7 @@ export async function syncProducts(opts?: { forceFull?: boolean }) {
             }
           }
 
-          await upsertProductRows(dbClient, validData);
+          await upsertProductRows(dbClient, validData, sweepLocal);
           totalSynced += validData.length;
 
           // Progress log
