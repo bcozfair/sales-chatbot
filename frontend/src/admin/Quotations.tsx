@@ -1006,11 +1006,17 @@ export const Quotations: React.FC = () => {
                           </div>
                         </td>
 
-                        {/* Customer — คอลัมน์เดียวที่ยอมให้ตัดบรรทัด ชื่อบริษัทไทยยาวเกินกว่าจะบังคับบรรทัดเดียว
-                            w-full ทำให้มันดูดพื้นที่ที่เหลือทั้งหมด คอลัมน์อื่นจึงไม่ถูกบีบจนข้อความตกบรรทัด */}
-                        <td className="px-4 py-2.5 w-full min-w-[16rem]">
+                        {/* Customer — ชื่อบริษัทบรรทัดเดียว ยาวเกินตัดเป็น "…" (เจ้าของสั่ง 2026-10-01)
+                            ชี้ค้างเห็นชื่อเต็มจาก title · กดแถวกางรายละเอียดได้เหมือนเดิม
+                            w-full ทำให้มันดูดพื้นที่ที่เหลือทั้งหมด คอลัมน์อื่นจึงไม่ถูกบีบจนข้อความตกบรรทัด
+                            **`max-w-0` คู่กับ w-full คือตัวที่ทำให้ truncate ทำงานในตาราง** — ไม่มีมัน คอลัมน์จะยืด
+                            ตามชื่อที่ยาวที่สุดจนตารางล้นแนวนอนแทนการตัดคำ · min-w ยังชนะ max-w จอแคบจึงได้ 16rem เท่าเดิม */}
+                        <td className="px-4 py-2.5 w-full max-w-0 min-w-[16rem]">
                           <div className="flex flex-col">
-                            <span className="font-semibold text-slate-800 text-sm">
+                            <span
+                              className="font-semibold text-slate-800 text-sm truncate"
+                              title={quote.company_name || (quote.customer_name || '')}
+                            >
                               {quote.company_name || (quote.customer_name || '')}
                             </span>
                             {/* บรรทัดที่สอง = ผู้ติดต่อ + ป้ายต่อท้ายในแถวเดียวกัน (เจ้าของสั่ง 2026-10-01
