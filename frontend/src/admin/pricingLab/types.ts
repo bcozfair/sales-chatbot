@@ -313,17 +313,34 @@ export interface DiffModel {
   changed: number;
   added: number;
   removed: number;
+  /** จำนวนแถวที่เปลี่ยนนอกช่องราคา (`ruleRows`) — เซิร์ฟเวอร์ก่อน 2026-09-28 ไม่ส่ง ⇒ อ่านด้วย `?? 0` */
+  rules?: number;
+}
+
+/**
+ * หนึ่งแถวของ "กฎที่เปลี่ยน" — ตัวเลขราคาเท่าเดิมแต่ **ราคาที่คิดออกมาเปลี่ยนได้**
+ * (วิธีปัด · ค่ามาตรฐาน · ใช้กับรหัส …) · ค่าเป็นข้อความพร้อมแสดง ไม่มีส่วนต่างเป็นเงิน
+ * รูปเดียวกับ `BookDiffRuleRow` ใน `services/pricingLab/bookUpdate.ts`
+ */
+export interface DiffRuleRow {
+  model: string;
+  what: string;
+  was: string;
+  now: string;
 }
 
 export interface ImportPreview {
   ok: boolean;
   issues: ImportIssue[];
   fingerprint: string;
-  summary?: { changed: number; added: number; removed: number; same: number };
+  summary?: { changed: number; added: number; removed: number; same: number; rules?: number };
   models?: DiffModel[];
   untouched?: string[];
   rows?: DiffRow[];
   totalRows?: number;
+  /** ตัดที่โควตาเดียวกับ `rows` แต่นับแยกกัน — ยอดจริงอยู่ที่ `totalRuleRows` */
+  ruleRows?: DiffRuleRow[];
+  totalRuleRows?: number;
 }
 
 /** คำไทยของ "ผลกับราคา" — ต้องตรงกับ VOCAB.EFFECT_TH ฝั่ง backend (ชีต .xlsx ใช้คำชุดเดียวกัน) */
