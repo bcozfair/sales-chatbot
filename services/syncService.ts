@@ -315,8 +315,8 @@ export function startSync(
       // และสัญญาณ B อ่าน odoo_imported_at ที่ reconcileQuotationOdooLinks() เพิ่งเขียน
       // (ตารางว่าง = no-op · ห้าม throw เหมือนกัน — docs/plan-local-contacts.md §6.1)
       await reconcileLocalContactOdooLinks();
-      // "สินค้าที่แอดมินเพิ่มเอง เข้า Odoo แล้วหรือยัง" — กติกาเดียวกับบรรทัดบน · ต้องอยู่หลัง
-      // reconcileQuotationOdooLinks() เพราะสัญญาณ B อ่าน odoo_imported_at (docs/plan-local-products.md §6.3)
+      // "สินค้าที่แอดมินเพิ่มเอง เข้า Odoo แล้วหรือยัง" — ตอบจากตาราง products ที่รอบนี้เพิ่ง sync
+      // (internal_reference หรือ model ตรงกัน · ห้าม throw · docs/plan-local-products.md §6.3)
       await reconcileLocalProductOdooLinks();
 
       // บรรทัดปิดรอบ: อ่านบรรทัดเดียวต้องรู้ว่าครบไหม พังตัวไหน และข้อมูลลูกค้าใช้ได้ไหม

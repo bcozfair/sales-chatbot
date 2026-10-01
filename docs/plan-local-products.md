@@ -352,7 +352,8 @@ CREATE TABLE IF NOT EXISTS public.local_products (
   -- ── สามคอลัมน์นี้ "ระบบเขียน" เท่านั้น ไม่มี endpoint ให้คนกด (§7) ──
   odoo_matched_at          timestamptz,
   odoo_matched_template_id integer,
-  odoo_matched_by          text,
+  odoo_matched_reference   text,                -- รหัสฝั่ง Odoo · ต่างจากของเราได้เมื่อจับคู่ด้วย model (§6.3)
+  odoo_matched_by          text,                -- reference | model
 
   CONSTRAINT local_products_ref_shape CHECK (internal_reference ~ '^[A-Z0-9]{14}$'),
   CONSTRAINT local_products_ref_tier_check CHECK (
@@ -362,7 +363,7 @@ CREATE TABLE IF NOT EXISTS public.local_products (
   CONSTRAINT local_products_name_not_blank CHECK (btrim(name) <> ''),
   CONSTRAINT local_products_id_range CHECK (product_template_id >= 900000000),
   CONSTRAINT local_products_matched_by_check CHECK (
-    odoo_matched_by IS NULL OR odoo_matched_by IN ('product_sync', 'imported_order'))
+    odoo_matched_by IS NULL OR odoo_matched_by IN ('reference', 'model'))
 );
 
 -- รหัสต้องไม่ซ้ำกันเองในทะเบียน (ส่วนการไม่ซ้ำกับ products ทั้งตาราง ตรวจฝั่ง server §5)
@@ -587,23 +588,33 @@ DELETE FROM products
 ### 6.3 `reconcileLocalProductOdooLinks()` ท้ายรอบ sync
 
 ต่อท้ายรอบเหมือน `reconcileLocalContactOdooLinks()` ทุกข้อ รวมถึง**การข้ามเงียบ ๆ เมื่อยังไม่มีตาราง**
-(`information_schema.tables` ก่อน แล้ว `swarn` + `return null` — **ห้าม `CREATE TABLE` ให้เอง**
+(`information_schema.tables` ก่อน แล้ว `return null` **เงียบ ๆ ไม่ `swarn`** — ไม่งั้นทุกรอบ sync เตือนจนกว่าจะรัน migration · **ห้าม `CREATE TABLE` ให้เอง**
 เหตุผลอยู่ใน [localContacts.ts:376](../services/localContacts.ts#L376)) และ **ห้าม throw** เพราะเป็น
 guard ท้าย sync
 
-หน้าที่:
-1. แถวใน `local_products` ที่ `odoo_matched_at IS NULL` แต่ `internal_reference` มีอยู่ใน `products`
-   โดยที่แถวนั้น `source = 'odoo'` แล้ว ⇒ ประทับ `odoo_matched_at` · `odoo_matched_template_id`
-   · `odoo_matched_by = 'product_sync'`
-2. นับที่ยังค้าง แล้ว `slog` เหมือนฝั่งผู้ติดต่อ
+**เจ้าของเคาะ 2026-10-01: ยืนยันจากตาราง `products` อย่างเดียว — แถวของ Odoo ที่ `internal_reference`
+หรือ `model` ตรงกัน** (แทนแบบเดิมที่มีสองสัญญาณ "รหัสตรง" + "ใบที่นำเข้าแล้ว" เหมือนผู้ติดต่อ ⇒
+**ไม่ใช้ใบที่นำเข้าแล้วเป็นสัญญาณ**)
 
-**`imported_order` เป็นทางที่สองเหมือนฝั่งผู้ติดต่อ** — ใบเสนอราคาที่มี `internal_reference` นี้ใน
-`item_details` และถูกนำเข้า Odoo แล้ว (`odoo_imported_at` ที่ `reconcileQuotationOdooLinks()` เขียน)
-แปลว่า Odoo มีสินค้ารหัสนี้แล้ว แม้รอบ sync สินค้ายังไม่เห็น (gateway ตัด `active=false` · หรือ
-`Production` ว่างจนตัวกรองของ sync ทิ้ง) · นับเฉพาะใบที่ `created_at` ไม่เก่ากว่าตัวสินค้า
-(รัน `product_sync` ก่อน `imported_order` ในรอบเดียวกัน)
-⚠️ **แก้ตอนลงโค้ด J1 (2026-10-01):** แบบเดิมเขียนว่าอ่าน `sale_orders.model` — ใช้ไม่ได้ เพราะ
-`sale_orders` เป็น 1 แถว = 1 ใบ ไม่ใช่ระดับบรรทัด (CLAUDE.md) ⇒ สินค้าบรรทัดที่สองขึ้นไปของใบมองไม่เห็น
+หน้าที่ (`markMatchedFromProducts()` + `deleteMatchedLocalProductRows()` ใน `db/localProductsRepo.ts`):
+1. แถวใน `local_products` ที่ `odoo_matched_at IS NULL` และมีแถว `source = 'odoo'` ใน `products` ที่
+   `internal_reference` ตรง **หรือ** `btrim(model)` ตรง ⇒ ประทับ `odoo_matched_at` ·
+   `odoo_matched_template_id` · `odoo_matched_reference` · `odoo_matched_by` (`reference` | `model`)
+   - ตรงทั้งสองแบบกับคนละแถว ⇒ **รหัสตรงชนะ** · model ตรงหลายแถว ⇒ แถวที่ id ใหม่สุด
+   - เทียบ model แบบ `btrim` เพื่อเทียบเท่านั้น ไม่เขียนค่าที่ trim กลับไปไหน
+2. **ลบแถว local ที่จับคู่แล้วออกจาก `products`** (ทะเบียนอยู่ต่อ) — จำเป็นเพราะการจับคู่ด้วย model:
+   แอดมินคีย์เข้า Odoo ด้วยรหัสอื่น ⇒ ตัวกวาด §6.2 (เทียบรหัส) ไม่เห็น ⇒ `products` มี model ซ้ำสองแถว
+   ⇒ ผลค้นหาซ้ำ และ `buildItemSnapshots()` (หาด้วย model เรียงตามสต็อก) อาจหยิบรหัส local ใส่ใบใหม่
+   แทนรหัสจริง · ลบ "ทุกแถวที่จับคู่แล้ว" ไม่ใช่เฉพาะรอบนี้ ⇒ รอบที่ล้มกลางทาง รอบหน้าเก็บต่อเอง
+3. นับที่ยังค้าง แล้ว `slog` เหมือนฝั่งผู้ติดต่อ
+
+**ทำไม model ตรงจึงเชื่อได้** — `POST /` ปฏิเสธ model ที่ซ้ำกับ `products` ทั้งตาราง (§5) ⇒ วันสร้างไม่มี
+แถว Odoo ที่ model เดียวกันอยู่เลย แถวที่โผล่มาทีหลังมาได้ทางเดียวคือมีคนคีย์มันเข้า Odoo
+**จับคู่ด้วย model ⇒ ใบที่ออกไปแล้วยังถือรหัส local** (snapshot) ⇒ จอ J4 ต้องแสดง
+`odoo_matched_reference` คู่กับรหัสของเรา ให้คนแก้ใบในคิว "ต้องแก้มือก่อน" รู้ว่าต้องเปลี่ยนเป็นรหัสไหน
+
+**จุดบอดที่ยอมรับ:** สินค้าที่ gateway ไม่ส่งมา (`active=false`) หรือ `Production` ว่าง (ตัวกรองของ sync
+ทิ้ง) จะไม่เคยถูกประทับ ⇒ ค้างเป็น 🔵 ในรายการ ซึ่งเป็นสิ่งที่มองเห็นได้ ไม่ใช่ผิดเงียบ ๆ
 
 ### 6.4 ผลข้างเคียงที่ต้องเขียนไว้ ไม่ใช่ปล่อยให้คนรุ่นหลังไปเจอเอง
 
@@ -631,7 +642,7 @@ guard ท้าย sync
 | --- | --- |
 | 🟡 รอส่งออก | `exported_at IS NULL` |
 | 🔵 ส่งออกแล้ว รอคีย์ Odoo | `exported_at IS NOT NULL AND odoo_matched_at IS NULL` |
-| 🟢 เข้า Odoo แล้ว | `odoo_matched_at IS NOT NULL` |
+| 🟢 เข้า Odoo แล้ว | `odoo_matched_at IS NOT NULL` (`odoo_matched_by = 'model'` ⇒ แสดงรหัสฝั่ง Odoo คู่กันด้วย) |
 | 🔴 รหัสถูกปฏิเสธ | `array_length(rejected_refs, 1) > 0 AND odoo_matched_at IS NULL` |
 
 **`ref_tier` เป็นคอลัมน์แยกจากสถานะ ไม่ใช่ป้ายในชุดเดียวกัน** — สถานะตอบว่า "ไปถึงไหนแล้ว"
@@ -719,7 +730,7 @@ guard ท้าย sync
 | 4c | **พรีวิวไม่ใช่การจอง** — ขอ `/next-ref` ค้างไว้ แล้วมีคนสร้างแทรก ⇒ `POST /` ตอบ 409 พร้อมรหัสใหม่ **ไม่ใช่บันทึกทับ** (§1.4 ท้ายหัวข้อ) |
 | 5 | **`model` ซ้ำกับ `products` ทั้งตาราง → 409** (§5) |
 | 6 | **ตัวกวาดใน §6.2 ทำงาน** — ยัดแถว local + แถว Odoo ที่มี ref เดียวกันแต่ id ต่างกัน แล้วพิสูจน์ว่า upsert ผ่านไม่ชน unique index |
-| 7 | `reconcileLocalProductOdooLinks()` ประทับ `odoo_matched_*` ถูกตัว และ **ไม่ throw เมื่อไม่มีตาราง** |
+| 7 | จับคู่จาก `products` เท่านั้น: รหัสตรง ⇒ `reference` · model ตรง (btrim) ⇒ `model` + รหัสฝั่ง Odoo · รหัสตรงชนะ model ตรง · model ตรงหลายแถว ⇒ id ใหม่สุด · รันซ้ำไม่ทับ · ลบแถว local ที่จับคู่แล้วออกจาก `products` (model เหลือแถวเดียว) · แถวที่ยังไม่เข้าไม่ถูกแตะ · **ไม่ throw เมื่อไม่มีตาราง** |
 | 8 | แถว local **ค้นเจอ** ใน `/api/products/search` (`is_system_item = false` ทำงาน) |
 | 9 | ธง `is_local_product` **รอด round-trip** — snapshot → `enrichQuotationData` → อ่านกลับได้ (กันกับดัก whitelist §8.1) |
 | 10 | `buildOdooManualReview()` คืนเหตุ `custom_product` ให้ใบที่มีสินค้า local และ **ไม่คืน** ให้ใบปกติ |
@@ -739,7 +750,8 @@ guard ท้าย sync
 ไม่งั้นด่านเขียนตารางจริง · ข้อ 0 ของด่านหยุดทั้งหมดก่อนเขียนถ้าตารางที่เห็นไม่ใช่ของชั่วคราว ·
 ข้อดี: **พิสูจน์ J1 ได้ก่อนรัน migration กับฐานจริง** · ข้อ 6 มีชุดควบคุม (ไม่กวาด ⇒ ต้องชน 23505)
 
-ผลรอบแรก 2026-10-01 (J1 · ฐานจริงยังไม่รัน migration): **ผ่าน 13 · ล้ม 0** · migration รันบน
+ผลรอบแรก 2026-10-01 (J1 · ฐานจริงยังไม่รัน migration): **ผ่าน 13 · ล้ม 0** · หลังเปลี่ยนกติกาการจับคู่
+เป็น "จาก products เท่านั้น" ในวันเดียวกัน: **ผ่าน 19 · ล้ม 0** · migration รันบน
 Postgres 18 ชั่วคราว (`schema.sql` + audit 2026-09-03_04) ได้ทั้งสองรอบ (รันซ้ำได้) · trigger audit
 เขียน `local_product.insert` ถูก · CHECK รูปรหัสปฏิเสธ `'bad'`
 
