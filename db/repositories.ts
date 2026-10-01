@@ -1817,6 +1817,12 @@ export async function getSalespersonCodesByIssuerName(): Promise<Map<string, str
  * SET NULL) แต่ snapshot ณ ตอนออกใบยังอยู่ · แถวพร็อกซีของหน้าเว็บก๊อป salesperson_id ของ
  * เซลส์ตัวจริงมาแล้ว ⇒ ใบที่แอดมินออกให้ในนามเขา ตกอยู่ใต้รหัสของเขาเองโดยอัตโนมัติ
  */
+/**
+ * ชื่อเซลส์ของใบในภาษา SQL — เงื่อนไข join เดียวกับรหัสข้างล่าง · พนักงานที่ถูกลบ join ไม่เจอ
+ * จึงถอยไปอ่านชื่อ ณ ตอนออกใบใน snapshot · `index.ts` (`SP_NAME_SQL`) อ้างค่านี้ ไม่เขียนซ้ำ
+ */
+export const QUOTE_SALESPERSON_NAME_SQL = `COALESCE(s.name, q.employee_details->>'saleperson')`;
+
 export const QUOTE_SALESPERSON_CODE_SQL =
   `COALESCE(s.salesperson_id, q.employee_details->>'salesperson_id', q.salesperson_id)`;
 
@@ -1844,6 +1850,105 @@ export function ownQuotesCondition(scope: OwnQuotesScope, paramIndex: number): {
     return { sql: `${QUOTE_SALESPERSON_CODE_SQL} = ANY($${paramIndex})`, params: [scope.salespersonIds] };
   }
   return { sql: `q.user_id LIKE $${paramIndex}`, params: [`web:${scope.adminId}:%`] };
+}
+
+/** ใบหนึ่งแถวในรายการ "เลือกใบที่จะแก้ไข" ของหน้าขอใบเสนอราคา — ข้อมูลพอให้คนจำใบได้ ไม่ใช่ทั้งใบ */
+export interface RevisableQuotation {
+  id: string;
+  quotation_no: string;
+  /** เลข revision ท้ายเลขที่ (`-01` → 1) · ใบตั้งต้น = 0 */
+  revision: number;
+  created_at: string;
+  total_sum: number;
+  customer_name: string;
+  contact_name: string;
+  salesperson_name: string;
+  channel: 'web' | 'line';
+  odoo_exported_at: string | null;
+  odoo_imported_at: string | null;
+  /** รุ่น × จำนวน ตามที่ใบเก็บไว้ — ไม่มีเงินรายบรรทัดโดยตั้งใจ (สูตรเงินมีที่เดียวคือ utils/pricing) */
+  lines: { label: string; quantity: number }[];
+}
+
+/**
+ * รายการใบที่ "แก้แบบ revision ได้" สำหรับช่องเลือกใบในหน้าขอใบเสนอราคา (เจ้าของเคาะแบบ A 2026-10-01)
+ *
+ * **หนึ่งเลขฐาน = หนึ่งแถว และเป็นฉบับล่าสุดที่ยังไม่ถูกยกเลิก** — กติกาเดียวกับ
+ * `loadActiveQuotation()` (services/quotationAgent.ts) ที่ revise หยิบใบจริง ⇒ ถ้ารายการโชว์ฉบับเก่า
+ * คนจะกดฉบับ `-01` แล้วระบบไปแก้ `-02` ให้โดยไม่มีอะไรบอก · ใบร่าง (ไม่มีเลขที่) ไม่อยู่ในรายการ
+ * เพราะ revise ปฏิเสธมันอยู่แล้ว
+ *
+ * ขอบเขตการมองเห็นมาจากผู้เรียก (`quoteViewScopeOf` + `ownQuotesCondition`) เหมือนหน้าประวัติ
+ * — ที่นี่ไม่ถามสิทธิ์เอง · คำค้นกรอง **หลัง** เลือกฉบับล่าสุดแล้ว ⇒ พิมพ์เลขฉบับเก่าก็เจอฉบับที่ใช้งานอยู่
+ *
+ * `total` = จำนวนที่ตรงคำค้นทั้งหมดก่อนตัดด้วย `limit` (หน้าจอใช้บอกว่า "พิมพ์เพิ่มเพื่อกรอง")
+ */
+export async function searchRevisableQuotations(params: {
+  query: string;
+  scope: OwnQuotesScope | null;
+  limit: number;
+}): Promise<{ rows: RevisableQuotation[]; total: number }> {
+  const where: string[] = [`q.quotation_no IS NOT NULL`, `q.status <> 'cancelled'`];
+  const args: any[] = [];
+  if (params.scope) {
+    const own = ownQuotesCondition(params.scope, args.length + 1);
+    where.push(own.sql);
+    args.push(...own.params);
+  }
+  const q = params.query.trim();
+  let search = '';
+  if (q) {
+    args.push(`%${q}%`);
+    const p = `$${args.length}`;
+    search = `WHERE (quotation_no ILIKE ${p} OR customer_name ILIKE ${p} OR contact_name ILIKE ${p}
+                  OR customer_code ILIKE ${p} OR salesperson_name ILIKE ${p})`;
+  }
+  args.push(params.limit);
+
+  const { rows } = await pool.query(
+    `WITH active AS (
+       SELECT DISTINCT ON (substring(q.quotation_no from '^[A-Za-z]+-[0-9]+'))
+              q.id, q.quotation_no, q.created_at, q.total_sum, q.item_details,
+              q.odoo_exported_at, q.odoo_imported_at,
+              COALESCE(substring(q.quotation_no from '^[A-Za-z]+-[0-9]+-([0-9]+)$')::int, 0) AS revision,
+              COALESCE(q.customer_details->>'customer_name', '') AS customer_name,
+              COALESCE(q.customer_details->>'contact_name', '')  AS contact_name,
+              COALESCE(q.customer_details->>'customer_code', '') AS customer_code,
+              COALESCE(${QUOTE_SALESPERSON_NAME_SQL}, '')         AS salesperson_name,
+              CASE WHEN q.user_id LIKE 'web:%' THEN 'web' ELSE 'line' END AS channel
+         FROM quotations q
+         LEFT JOIN salesperson s ON q.user_id = s.user_id
+        WHERE ${where.join(' AND ')}
+        ORDER BY substring(q.quotation_no from '^[A-Za-z]+-[0-9]+'), revision DESC
+     )
+     SELECT *, COUNT(*) OVER () AS total
+       FROM active
+       ${search}
+      ORDER BY created_at DESC
+      LIMIT $${args.length}`,
+    args
+  );
+
+  return {
+    total: rows.length > 0 ? Number(rows[0].total) : 0,
+    rows: rows.map((r: any) => ({
+      id: r.id,
+      quotation_no: r.quotation_no,
+      revision: Number(r.revision) || 0,
+      created_at: r.created_at,
+      total_sum: Number(r.total_sum) || 0,
+      customer_name: r.customer_name,
+      contact_name: r.contact_name,
+      salesperson_name: r.salesperson_name,
+      channel: r.channel,
+      odoo_exported_at: r.odoo_exported_at,
+      odoo_imported_at: r.odoo_imported_at,
+      lines: (Array.isArray(r.item_details) ? r.item_details : []).map((it: any) => ({
+        label: String(it?.model || it?.name || ''),
+        quantity: Number(it?.quantity) || 0,
+      })),
+    })),
+  };
 }
 
 /**
