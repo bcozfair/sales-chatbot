@@ -410,7 +410,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS admin_users_employee_quotation_id_key
 | `quote.revise` | `POST /webquote/revise` |
 | `quote.export_odoo` | `GET /quotations/export` |
 | `quote.unmark_export` | `POST /quotations/:id/unmark-export` · `…/export-batches/:id/unmark` |
-| `quote.view_all` | **ไม่ใช่ 403** — เป็นตัวกรอง: `GET /quotations` (ทั้งรายการและตัวนับ) · `/quotations/export` · `/quotations/manual-review-counts` |
+| `quote.view_all` | **ไม่ใช่ 403** — เป็นตัวกรอง: `GET /quotations` (ทั้งรายการและตัวนับ) · `/quotations/export` · `/quotations/export-counts` (ตัวเลขในเมนูส่งออก · แทน `manual-review-counts` ตั้งแต่ 2026-10-01) |
 | `quote.payment_terms_override` | `webQuoteService` — `createDraft()` และ `previewDraft()` |
 | `quote.act_as_any_salesperson` | `webQuoteService.createDraft()` (`assertMayActAs`) |
 | `approval.decide` | `canDecideApproval()` — เป็น `async` แล้ว |
@@ -671,6 +671,16 @@ Odoo จะว่าง ซึ่งเป็นพฤติกรรมเด�
 "ใบที่ออกจากบัญชีนี้" (`user_id LIKE 'web:<adminId>:%'`)
 · เงื่อนไขนี้อยู่ที่ `db/repositories.ts` **ที่เดียว** และต้องถูกใช้โดยหน้าประวัติ · ไฟล์ export ·
 ตัวนับ · คิวอนุมัติ พร้อมกัน
+
+**ปุ่ม "ใบของฉัน / ทั้งหมด" (2026-10-01) — ใช้นิยามเดียวกันนี้ แต่เป็นตัวกรองการดู ไม่ใช่สิทธิ์**
+เจ้าของต้องการให้ subadmin เปิดหน้ามาเจอใบของตัวเอง **โดยยังส่งออกทุกใบได้เหมือนเดิม** ⇒ ไม่ปิด
+`quote.view_all` แต่เพิ่มปุ่มให้ทุก role (subadmin เปิดมาเจอ "ใบของฉัน" · role อื่นเจอ "ทั้งหมด")
+· `quoteViewScopeOf(admin, mine)` ใน `config/capabilities.ts` ตัดสิน — **สิทธิ์ชนะปุ่มเสมอ**
+(ถูกปิด `quote.view_all` แล้วส่ง `mine=0` ก็ยังได้เฉพาะใบตัวเอง) · ทั้งสามเส้นข้างบนรับ `mine=1`
+และ **ไฟล์ส่งออกตามปุ่มที่เลือกอยู่** เหมือนตัวกรองอื่นบนจอ (เจ้าของเคาะ — เมนูส่งออกมีข้อความเตือน)
+· รายการใบตอบ `scope` · `view_all` (ซ่อนปุ่มเมื่อถูกปิดสิทธิ์) · `mine_total` (ตัวเลขบนปุ่ม)
+· ประวัติชุดการส่งออกและการถอยเครื่องหมาย **ไม่ตามปุ่ม** (เป็นของระดับชุด ไม่ใช่รายการใบ)
+· gate: `npm run diag:quote-history-mine`
 
 ---
 

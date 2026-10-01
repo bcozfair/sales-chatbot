@@ -28,10 +28,12 @@ import {
   getOdooSalespersonNameVocabulary,
   ODOO_EXPORT_RAW_NAME_COLS,
   parseExportedFilter,
+  type ExportedFilter,
   exportedFilterCondition,
   parseQuoteFlagFilter,
   quoteFlagFilterCondition,
   odooManualBucketCondition,
+  ODOO_MANUAL_BUCKET_SQL,
   getOdooManualReviewCounts,
   getAcknowledgedViolationKeys,
   getPriceApproval,
@@ -58,7 +60,7 @@ import {
   replaceAdminSalespersonIds,
 } from './db/repositories.js';
 import {
-  quoteScopeOf, capsOf, capabilityDef, invalidateCapabilityCache,
+  quoteViewScopeOf, ownQuoteScopeOf, capsOf, capabilityDef, invalidateCapabilityCache,
   CAPABILITIES, ROLES, type Capability, type PermissionMode,
 } from './config/capabilities.js';
 import {
@@ -121,7 +123,7 @@ import {
 import { handleEvent } from './handlers/lineHandler.js';
 import { buildAddressParts, buildThaiAddress } from './utils/address.js';
 import { buildPdfLink, buildPdfPath } from './utils/quotationLink.js';
-import { generateQuotationPDF, closePdfBrowser } from './pdfGenerator.js';
+import { generateQuotationPDF, closePdfBrowser, formatPersonNameWithSuffix } from './pdfGenerator.js';
 import { Parser } from 'json2csv';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -4230,6 +4232,23 @@ const SP_CODE_SQL = `COALESCE(s.salesperson_id, q.employee_details->>'salesperso
 // ชื่อในช่อง "ผู้เสนอราคา" ของใบ — กติกาเดียวกับ pdfGenerator: ใบจากเว็บมี snapshot `issuer_name`
 // ส่วนใบ LINE/ใบเก่าไม่มีคีย์นี้ ⇒ ช่องขวาของใบพิมพ์ชื่อเซลส์ จึงถอยไปใช้ชื่อเซลส์เหมือนกัน
 const ISSUER_NAME_SQL = `COALESCE(NULLIF(q.employee_details->>'issuer_name', ''), ${SP_NAME_SQL})`;
+// เรียงตามชื่อที่ "เห็นบนจอ" — จอตัด "คุณ" ออกตาม PDF (issuerDisplayOf) ถ้าเรียงด้วยค่าดิบ ชื่อจาก LINE
+// ("คุณX") จะไปกองอยู่หมวด ค. ทั้งหมดแทนที่จะเรียงปนกับชื่อจากเว็บตามตัวอักษรแรกจริง
+const ISSUER_SORT_SQL = `regexp_replace(${ISSUER_NAME_SQL}, '^คุณ\\s*', '')`;
+
+/**
+ * ชื่อในคอลัมน์ "ผู้เสนอราคา" — ชื่อเดียวกับที่ PDF พิมพ์ **แต่ไม่ห้อย (PM)/(THT)**
+ * (เจ้าของสั่ง 2026-10-01 รอบสอง — รอบแรกให้ตรง PDF ทุกตัวอักษร แล้วเปลี่ยนเป็นไม่ต้องระบุบริษัท)
+ * ⇒ ได้จาก `formatPersonNameWithSuffix` ของ PDF แล้วถอดวงเล็บท้ายออก ไม่เขียนกติกาตัด "คุณ" ซ้ำเอง
+ * วันที่ PDF เปลี่ยนวิธีจัดชื่อ จอเปลี่ยนตามเอง · ไม่ต้องรู้บริษัทของใบแล้ว ⇒ ใบร่างกับใบที่ออกเลขใช้ทางเดียวกัน
+ */
+function issuerDisplayOf(name: string | null | undefined): string {
+  return formatPersonNameWithSuffix(name, false).replace(/ \(PM\)$/, '');
+}
+// ที่มาของใบ (บรรทัดเล็กใต้ชื่อผู้เสนอราคา) — เกณฑ์เดียวกับทั้งระบบ: ใบจากหน้าเว็บถือ user_id พร็อกซี
+// `web:<admin>:<sales>` (services/webIdentity.ts) · ห้ามใช้ `source_id` ซึ่งคือช่อง "Source" ของ Odoo
+// · user_id เป็น NULL ได้เมื่อเซลส์ถูกลบ (FK ON DELETE SET NULL) — มีแต่ใบ LINE เพราะแถวพร็อกซีไม่ถูกลบ
+const QUOTE_CHANNEL_SQL = `CASE WHEN q.user_id LIKE 'web:%' THEN 'web' ELSE 'line' END`;
 
 // กัน path param ที่ไม่ใช่ uuid ยิงเข้า query แล้วได้ error 500 จาก Postgres แทน 400 ที่อ่านรู้เรื่อง
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -4254,7 +4273,7 @@ app.get('/api/admin/quotations', adminAuthMiddleware, requireCapability('page.qu
       created_at: 'q.created_at',
       customer_name: "(q.customer_details->>'customer_name')",
       salesperson_name: SP_NAME_SQL,
-      issuer_name: ISSUER_NAME_SQL,
+      issuer_name: ISSUER_SORT_SQL,
       total_sum: 'q.total_sum',
       status: 'q.status',
       odoo_exported_at: 'q.odoo_exported_at'
@@ -4300,10 +4319,14 @@ app.get('/api/admin/quotations', adminAuthMiddleware, requireCapability('page.qu
     if (flagCondition) conditions.push(flagCondition);
 
     // ── เห็นเฉพาะใบของตัวเองไหม ────────────────────────────────────────────────
-    //  `null` = เห็นทุกใบ ซึ่งเป็นคำตอบของทุก role ที่ออกใบได้ในวันนี้ ⇒ ไม่มีอะไรเปลี่ยน
+    //  สองทางเข้า: ถูกปิด `quote.view_all` (บังคับ) หรือกดปุ่ม "ใบของฉัน" (`mine=1` · เลือกเอง)
     //  เงื่อนไขตัวจริงอยู่ที่ ownQuotesCondition() ใน db/repositories.ts ที่เดียว และ
     //  **ตัวนับข้างล่างใช้ whereClause ก้อนเดียวกัน** — ตัวเลขกับรายการจึงตรงกันเสมอ
-    const ownScope = await quoteScopeOf(req.admin);
+    const { scope: ownScope, viewAll } = await quoteViewScopeOf(req.admin, req.query.mine === '1');
+    // ตัวเลขบนปุ่ม "ใบของฉัน" ต้องเป็นจำนวนที่จะเห็นถ้ากด ⇒ นับด้วยตัวกรองชุดเดียวกันก่อนต่อขอบเขต
+    const baseConditions = [...conditions];
+    const baseParams = [...params];
+    const baseIndex = paramIndex;
     if (ownScope) {
       const own = ownQuotesCondition(ownScope, paramIndex);
       conditions.push(own.sql);
@@ -4317,9 +4340,20 @@ app.get('/api/admin/quotations', adminAuthMiddleware, requireCapability('page.qu
     const countResult = await pool.query(`SELECT COUNT(*) FROM quotations q LEFT JOIN salesperson s ON q.user_id = s.user_id ${whereClause}`, params);
     const total = parseInt(countResult.rows[0].count);
 
+    // ดูทั้งหมดอยู่ ⇒ นับใบของฉันแยกอีกครั้ง · ดูเฉพาะของฉันอยู่แล้ว ⇒ ก็คือ total
+    let mineTotal = total;
+    if (!ownScope) {
+      const own = ownQuotesCondition(await ownQuoteScopeOf(req.admin), baseIndex);
+      const mineResult = await pool.query(
+        `SELECT COUNT(*) FROM quotations q LEFT JOIN salesperson s ON q.user_id = s.user_id WHERE ${[...baseConditions, own.sql].join(' AND ')}`,
+        [...baseParams, ...own.params]
+      );
+      mineTotal = parseInt(mineResult.rows[0].count);
+    }
+
     // Fetch data with LEFT JOIN to get salesperson info directly
     const dataResult = await pool.query(
-      `SELECT q.*, ${SP_NAME_SQL} AS salesperson_name, ${SP_PHONE_SQL} AS salesperson_phone, ${SP_CODE_SQL} AS salesperson_employee_code FROM quotations q LEFT JOIN salesperson s ON q.user_id = s.user_id ${whereClause} ORDER BY ${sortBy} ${sortOrderParam} LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+      `SELECT q.*, ${SP_NAME_SQL} AS salesperson_name, ${SP_PHONE_SQL} AS salesperson_phone, ${SP_CODE_SQL} AS salesperson_employee_code, ${QUOTE_CHANNEL_SQL} AS channel FROM quotations q LEFT JOIN salesperson s ON q.user_id = s.user_id ${whereClause} ORDER BY ${sortBy} ${sortOrderParam} LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
       [...params, limit, offset]
     );
 
@@ -4334,14 +4368,95 @@ app.get('/api/admin/quotations', adminAuthMiddleware, requireCapability('page.qu
       salesperson_name: q.salesperson_name || '',
       salesperson_phone: q.salesperson_phone || '',
       salesperson_employee_code: q.salesperson_employee_code || null,
+      // ชื่อผู้เสนอราคาตามที่ใบ PDF พิมพ์ (ไม่ห้อยบริษัท) — ช่องขวาของใบ: มี issuer_name (ใบเว็บ) ใช้ตัวนั้น ไม่มีใช้ชื่อเซลส์
+      issuer_display: issuerDisplayOf(q.issuer_name || q.salesperson_name),
     }));
 
-    res.json({ data: dataWithSalesperson, total });
+    // scope = ขอบเขตที่ใช้จริงรอบนี้ · view_all = กดดูทั้งหมดได้ไหม (หน้าจอใช้ซ่อนปุ่ม ไม่ต้องเดาจาก role)
+    res.json({ data: dataWithSalesperson, total, scope: ownScope ? 'own' : 'all', view_all: viewAll, mine_total: mineTotal });
   } catch (err: any) {
     console.error("GET /api/admin/quotations error:", err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
+
+/**
+ * ตัวกรองของ "ไฟล์ส่งออก Odoo" — ตัวส่งออกกับตัวเลขข้างปุ่มในเมนู (`/export-counts`) อ่านก้อนนี้ก้อนเดียว
+ *
+ * ทำไมต้องรวม: เดิมตัวเลขในเมนูนับคิวแก้มือแบบตายตัว ไม่ฟังตัวกรองบนจอ ส่วนตัวส่งออกฟัง ⇒ เมนูขึ้น
+ * "1 ใบ" แต่กดแล้วได้ 0 (เกิดจริง 2026-10-01 ตอนกรอง "รอนำเข้า") · และตัวกรองป้าย (`flag`) ไม่เคย
+ * ถูกส่งมาที่ไฟล์เลย ทั้งที่เมนูเขียนว่า "ส่งออกตามตัวกรองบนหน้าจอ" ⇒ ใครเพิ่มตัวกรองใหม่ เพิ่มที่นี่ที่เดียว
+ *
+ * ไม่รวมสองอย่างที่เป็นของแต่ละปุ่ม: บริษัท (ตัดสินใน `selectExportableQuotes` เท่านั้น) และกลุ่มแก้มือ
+ * · `logged` = ค่าที่บันทึกลงประวัติชุดการส่งออก
+ */
+async function odooExportFilterOf(req: any): Promise<{
+  conditions: string[]; params: any[]; exported: ExportedFilter; logged: Record<string, string>;
+  ownScope: Awaited<ReturnType<typeof quoteViewScopeOf>>['scope'];
+}> {
+  const search = String(req.query.search || '');
+  // ค่าตั้งต้น: ส่งออกทุกใบที่มีเลขที่ใบเสนอราคาแล้ว (ไม่จำกัดเฉพาะ confirmed)
+  // ใบร่างที่ยังไม่มีเลข (draft/pending) ยังไม่ใช่เอกสารจริง จึงคัดออกด้วยเงื่อนไข quotation_no
+  // แอดมินเจาะจงสถานะเดียวได้ด้วยตัวกรองสถานะบนหน้าจอ (ส่ง status มาตรง ๆ)
+  const status = String(req.query.status || '');
+  const dateFrom = String(req.query.dateFrom || '');
+  const dateTo = String(req.query.dateTo || '');
+  // ตั้งต้น 'no' (ไม่ใช่ 'all' เหมือน endpoint list) — ผู้เรียกที่ไม่รู้จัก param นี้จะได้ค่าที่ปลอดภัย
+  // คือไม่ส่งใบเดิมซ้ำ ซึ่งเป็นเหตุผลทั้งหมดที่ฟีเจอร์นี้มีอยู่
+  const exported = parseExportedFilter(req.query.exported, 'no');
+  // ป้ายของใบ — ไม่ส่งมา = 'all' ⇒ ผู้เรียกเดิมได้ไฟล์เหมือนเดิมทุกประการ
+  const flag = parseQuoteFlagFilter(req.query.flag, 'all');
+
+  const conditions: string[] = [];
+  const params: any[] = [];
+
+  if (search.trim()) {
+    params.push(`%${search.trim()}%`);
+    const p = `$${params.length}`;
+    conditions.push(`(q.quotation_no ILIKE ${p} OR (q.customer_details->>'customer_name') ILIKE ${p} OR ${SP_NAME_SQL} ILIKE ${p} OR ${ISSUER_NAME_SQL} ILIKE ${p})`);
+  }
+
+  if (status.trim()) {
+    params.push(status.trim());
+    conditions.push(`q.status = $${params.length}`);
+  } else {
+    // ไม่ได้เจาะจงสถานะ = ส่งออกทุกใบที่ "มีเลขที่ใบเสนอราคาแล้ว" (ออกเอกสารจริงแล้ว)
+    // ตัดใบร่าง/รอเลือกบริษัท-ผู้ติดต่อที่ quotation_no ยังว่างออก
+    conditions.push(`q.quotation_no IS NOT NULL AND TRIM(q.quotation_no) <> ''`);
+  }
+
+  // ตัวกรองวันที่ตีความตามเวลาไทย (created_at เป็น timestamptz) และรวมทั้งวันของ dateTo:
+  //   from = 00:00 ของ dateFrom ตามโซนไทย
+  //   to   = 00:00 ของวันถัดจาก dateTo → ใช้ '<' เพื่อครอบทั้งวัน (กัน bug ตัดใบหลังเที่ยงคืนทิ้ง)
+  // ใช้ helper ตัวเดียวกับ endpoint list — ห้ามเขียน SQL ซ้ำที่นี่ ไม่งั้นสองหน้าจอกรองไม่ตรงกัน
+  if (dateFrom.trim()) {
+    params.push(dateFrom.trim());
+    conditions.push(createdAtFromThaiDayCondition(params.length));
+  }
+
+  if (dateTo.trim()) {
+    params.push(dateTo.trim());
+    conditions.push(createdAtToThaiDayCondition(params.length));
+  }
+
+  const exportedCondition = exportedFilterCondition(exported);
+  if (exportedCondition) conditions.push(exportedCondition);
+
+  const flagCondition = quoteFlagFilterCondition(flag);
+  if (flagCondition) conditions.push(flagCondition);
+
+  // ไฟล์ export ต้องกรองด้วยขอบเขตเดียวกับหน้าประวัติ — ไม่งั้น "เห็นเฉพาะใบของตัวเอง"
+  // กลายเป็นของประดับ: กดส่งออกครั้งเดียวก็ได้ใบของทุกคนติดมาทั้งไฟล์ (§9 ข้อ 7)
+  // และ **ตามปุ่ม "ใบของฉัน / ทั้งหมด"** เหมือนตัวกรองอื่นบนจอ (เจ้าของเคาะ 2026-10-01)
+  const { scope: ownScope } = await quoteViewScopeOf(req.admin, req.query.mine === '1');
+  if (ownScope) {
+    const own = ownQuotesCondition(ownScope, params.length + 1);
+    conditions.push(own.sql);
+    params.push(...own.params);
+  }
+
+  return { conditions, params, exported, logged: { search, status, dateFrom, dateTo, exported, flag }, ownScope };
+}
 
 // --- API Endpoint: Admin Quotations Export (format นำเข้า Sale Order ของ Odoo) ---
 //
@@ -4362,16 +4477,6 @@ app.get('/api/admin/quotations/export', adminAuthMiddleware, requireCapability('
       return;
     }
 
-    const search = req.query.search || '';
-    // ค่าตั้งต้น: ส่งออกทุกใบที่มีเลขที่ใบเสนอราคาแล้ว (ไม่จำกัดเฉพาะ confirmed)
-    // ใบร่างที่ยังไม่มีเลข (draft/pending) ยังไม่ใช่เอกสารจริง จึงคัดออกด้วยเงื่อนไข quotation_no
-    // แอดมินเจาะจงสถานะเดียวได้ด้วยตัวกรองสถานะบนหน้าจอ (ส่ง status มาตรง ๆ)
-    const status = req.query.status || '';
-    const dateFrom = req.query.dateFrom || '';
-    const dateTo = req.query.dateTo || '';
-    // ตั้งต้น 'no' (ไม่ใช่ 'all' เหมือน endpoint list) — ผู้เรียกที่ไม่รู้จัก param นี้จะได้ค่าที่ปลอดภัย
-    // คือไม่ส่งใบเดิมซ้ำ ซึ่งเป็นเหตุผลทั้งหมดที่ฟีเจอร์นี้มีอยู่
-    const exported = parseExportedFilter(req.query.exported, 'no');
     const format: OdooExportFormat = req.query.format === 'csv' ? 'csv' : 'xlsx';
     // ไฟล์ไหน — ไม่ส่งมา = ไฟล์ปกติ ซึ่งตั้งแต่ 2026-09-15 **ตัดใบที่ต้องแก้มือใน Odoo ออก**
     // (ค่าในไฟล์ไม่มีอยู่ในฐาน Odoo ⇒ นำเข้าแล้วตกทั้งใบ) ส่วนใบที่แค่ทะลุกฎยังอยู่ในไฟล์ปกติ
@@ -4385,7 +4490,7 @@ app.get('/api/admin/quotations/export', adminAuthMiddleware, requireCapability('
       created_at: 'q.created_at',
       customer_name: "(q.customer_details->>'customer_name')",
       salesperson_name: SP_NAME_SQL,
-      issuer_name: ISSUER_NAME_SQL,
+      issuer_name: ISSUER_SORT_SQL,
       total_sum: 'q.total_sum',
       status: 'q.status',
       odoo_exported_at: 'q.odoo_exported_at'
@@ -4395,60 +4500,15 @@ app.get('/api/admin/quotations/export', adminAuthMiddleware, requireCapability('
     const sortOrderParam = String(req.query.sortOrder).toLowerCase() === 'asc' ? 'ASC' : 'DESC';
     const sortBy = allowedSortFields[sortByParam] || 'q.created_at';
 
-    const conditions: string[] = [];
-    const params: any[] = [];
-    let paramIndex = 1;
-
-    if (search.trim()) {
-      conditions.push(`(q.quotation_no ILIKE $${paramIndex} OR (q.customer_details->>'customer_name') ILIKE $${paramIndex} OR ${SP_NAME_SQL} ILIKE $${paramIndex} OR ${ISSUER_NAME_SQL} ILIKE $${paramIndex})`);
-      params.push(`%${search.trim()}%`);
-      paramIndex++;
-    }
-
-    if (status.trim()) {
-      conditions.push(`q.status = $${paramIndex}`);
-      params.push(status.trim());
-      paramIndex++;
-    } else {
-      // ไม่ได้เจาะจงสถานะ = ส่งออกทุกใบที่ "มีเลขที่ใบเสนอราคาแล้ว" (ออกเอกสารจริงแล้ว)
-      // ตัดใบร่าง/รอเลือกบริษัท-ผู้ติดต่อที่ quotation_no ยังว่างออก
-      conditions.push(`q.quotation_no IS NOT NULL AND TRIM(q.quotation_no) <> ''`);
-    }
-
-    // ตัวกรองวันที่ตีความตามเวลาไทย (created_at เป็น timestamptz) และรวมทั้งวันของ dateTo:
-    //   from = 00:00 ของ dateFrom ตามโซนไทย
-    //   to   = 00:00 ของวันถัดจาก dateTo → ใช้ '<' เพื่อครอบทั้งวัน (กัน bug ตัดใบหลังเที่ยงคืนทิ้ง)
-    // ใช้ helper ตัวเดียวกับ endpoint list — ห้ามเขียน SQL ซ้ำที่นี่ ไม่งั้นสองหน้าจอกรองไม่ตรงกัน
-    if (dateFrom.trim()) {
-      conditions.push(createdAtFromThaiDayCondition(paramIndex));
-      params.push(dateFrom.trim());
-      paramIndex++;
-    }
-
-    if (dateTo.trim()) {
-      conditions.push(createdAtToThaiDayCondition(paramIndex));
-      params.push(dateTo.trim());
-      paramIndex++;
-    }
-
-    const exportedCondition = exportedFilterCondition(exported);
-    if (exportedCondition) conditions.push(exportedCondition);
+    const filter = await odooExportFilterOf(req);
+    const { exported } = filter;
+    const conditions = [...filter.conditions];
+    const params = [...filter.params];
 
     // แยกไฟล์ปกติออกจากไฟล์ "ต้องแก้มือก่อน" — เงื่อนไขอยู่ใน db/repositories.ts ที่เดียว
     // ใบหนึ่งอยู่ได้กลุ่มเดียวเสมอ (ดู ODOO_MANUAL_BUCKET_SQL) ⇒ ไม่มีใบไหนโผล่สองไฟล์
-    conditions.push(odooManualBucketCondition(manualBucket, paramIndex));
-    if (manualBucket) { params.push(manualBucket); paramIndex++; }
-
-    // ไฟล์ export ต้องกรองด้วยขอบเขตเดียวกับหน้าประวัติ — ไม่งั้น "เห็นเฉพาะใบของตัวเอง"
-    // กลายเป็นของประดับ: กดส่งออกครั้งเดียวก็ได้ใบของทุกคนติดมาทั้งไฟล์ (§9 ข้อ 7)
-    // วันนี้ไม่มี role ไหนที่ส่งออกได้แต่เห็นไม่ครบ ⇒ ownScope เป็น null ทุกครั้ง
-    const ownScope = await quoteScopeOf(req.admin);
-    if (ownScope) {
-      const own = ownQuotesCondition(ownScope, paramIndex);
-      conditions.push(own.sql);
-      params.push(...own.params);
-      paramIndex += own.params.length;
-    }
+    conditions.push(odooManualBucketCondition(manualBucket, params.length + 1));
+    if (manualBucket) params.push(manualBucket);
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
@@ -4506,7 +4566,7 @@ app.get('/api/admin/quotations/export', adminAuthMiddleware, requireCapability('
           format,
           quotationCount: emitted.length,
           rowCount: rows.length,
-          filters: { company, search, status, dateFrom, dateTo, exported, manual: manualBucket, sortBy: sortByParam, sortOrder: sortOrderParam },
+          filters: { company, ...filter.logged, manual: manualBucket, sortBy: sortByParam, sortOrder: sortOrderParam },
         });
         await insertExportLogRows(client, batchId, emitted.map((q: any) => ({
           id: String(q.id), quotation_no: q.quotation_no ?? null,
@@ -4633,17 +4693,62 @@ app.delete('/api/admin/quotations/:id', adminAuthMiddleware, requireCapability('
 });
 
 /**
- * --- API Endpoint: จำนวนใบที่ค้างในคิว "ต้องแก้มือใน Odoo" แยกตามเหตุ × บริษัท ---
+ * --- API Endpoint: ตัวเลขข้างทุกปุ่มในเมนูส่งออก Odoo = จำนวนใบที่กดแล้วจะได้ในไฟล์ ---
  *
- * ตัวเลขนี้คือของสำคัญที่สุดของทั้งฟีเจอร์ — ใบกลุ่มนี้ **ไม่อยู่ในไฟล์ส่งออกปกติแล้ว**
- * ถ้าไม่มีใครเห็นยอดค้าง มันจะไม่ไปถึง Odoo เลยโดยไม่มีอะไรฟ้อง
+ * รับตัวกรองชุดเดียวกับ `/export` แล้วนับด้วย `odooExportFilterOf` + `selectExportableQuotes`
+ * ตัวเดียวกับที่ไฟล์ใช้ตัดสิน ⇒ ตัวเลขกับไฟล์ไม่มีทางนับคนละแบบ (ไม่ใช่การนับซ้ำด้วย SQL อีกชุด)
+ *
+ * `queue` = ยอดค้างของคิวแก้มือทั้งหมด **ไม่ฟังตัวกรอง** — ตัวเลขนี้คือของสำคัญที่สุดของทั้งฟีเจอร์
+ * เพราะใบกลุ่มนี้ไม่อยู่ในไฟล์ปกติ ถ้าตัวกรองบนจอบังมันไว้ มันจะไม่ไปถึง Odoo เลยโดยไม่มีอะไรฟ้อง
+ * ⇒ เมนูบอก `outside` = ใบค้างที่ตัวกรองตอนนี้มองไม่เห็น (เจ้าของเลือก "ตามตัวกรอง + บอกยอดค้าง" 2026-10-01)
+ * · ขอบเขต "ใบของฉัน" ใช้กับ `queue` ด้วย — ใบที่เปิดดูไม่ได้ไม่ควรถูกนับให้เห็น
  */
-app.get('/api/admin/quotations/manual-review-counts', adminAuthMiddleware, requireCapability('page.quotations'), async (req: any, res: any) => {
+app.get('/api/admin/quotations/export-counts', adminAuthMiddleware, requireCapability('page.quotations'), async (req: any, res: any) => {
   try {
-    const groups = await getOdooManualReviewCounts(pool, await quoteScopeOf(req.admin));
-    res.json({ total: groups.reduce((s, g) => s + g.count, 0), groups });
+    const filter = await odooExportFilterOf(req);
+    // ไม่ดึง item_details ทั้งก้อน (ตัวกรอง "สถานะทั้งหมด" = ทุกใบในระบบ) — `selectExportableQuotes`
+    // ถามแค่ว่า "มีรายการไหม" จึงส่งอาร์เรย์แทนที่ยาวเท่าเดิมไปแทน กติกาจริงยังอยู่ที่ฟังก์ชันนั้นที่เดียว
+    const { rows } = await pool.query(
+      `SELECT q.quotation_no,
+              CASE WHEN jsonb_typeof(q.item_details) = 'array' THEN jsonb_array_length(q.item_details) ELSE 0 END AS item_count,
+              q.odoo_exported_at IS NULL AS unexported,
+              CASE WHEN q.odoo_manual_review IS NULL THEN NULL ELSE (${ODOO_MANUAL_BUCKET_SQL}) END AS bucket
+         FROM quotations q
+         LEFT JOIN salesperson s ON q.user_id = s.user_id
+        WHERE ${filter.conditions.join(' AND ')}`,
+      filter.params
+    );
+    const quotes = rows.map((r: any) => ({
+      quotation_no: r.quotation_no, item_details: new Array(Number(r.item_count)).fill(null),
+      bucket: r.bucket as string | null, unexported: r.unexported === true,
+    }));
+
+    const normal = { QP: 0, QT: 0 };
+    const manual = new Map<string, number>();
+    for (const company of ['QP', 'QT'] as const) {
+      for (const q of selectExportableQuotes(quotes, company)) {
+        if (q.bucket === null) normal[company]++;
+        // กลุ่มที่ไม่มีปุ่มส่งออก ('other') ไม่นับ — ตัวเลขต้องเป็นของที่กดได้จริงเท่านั้น
+        else if ((ODOO_MANUAL_REASON_KINDS as readonly string[]).includes(q.bucket)) manual.set(`${q.bucket}|${company}`, (manual.get(`${q.bucket}|${company}`) ?? 0) + 1);
+      }
+    }
+    const groups = [...manual].map(([key, count]) => {
+      const [bucket, company] = key.split('|');
+      return { bucket, company: company === 'QT' ? 'THT' : 'PM', count };
+    });
+
+    // ใบค้างที่ตัวกรองนี้เห็น — เกณฑ์ "ค้าง" เดียวกับ getOdooManualReviewCounts (ไม่ดูรายการ/บริษัท)
+    const queueGroups = await getOdooManualReviewCounts(pool, filter.ownScope);
+    const queueTotal = queueGroups.reduce((s, g) => s + g.count, 0);
+    const queueSeen = quotes.filter((q) => q.bucket !== null && q.unexported && String(q.quotation_no ?? '').trim() !== '').length;
+
+    res.json({
+      normal,
+      manual: { total: groups.reduce((s, g) => s + g.count, 0), groups },
+      queue: { total: queueTotal, outside: Math.max(0, queueTotal - queueSeen) },
+    });
   } catch (err) {
-    console.error('GET /api/admin/quotations/manual-review-counts error:', err);
+    console.error('GET /api/admin/quotations/export-counts error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

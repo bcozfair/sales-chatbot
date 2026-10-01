@@ -104,7 +104,8 @@
     "diag:lc-ui": "tsx scripts/diag/lcUiProbe.ts",
     "diag:oc-ui": "tsx scripts/diag/odooContactsUiProbe.ts",
     "diag:dead-classes": "tsx scripts/diag/deadClasses.ts",
-    "diag:export-history-ui": "tsx scripts/diag/exportHistoryUi.ts"
+    "diag:export-history-ui": "tsx scripts/diag/exportHistoryUi.ts",
+    "diag:quote-history-mine": "tsx scripts/diag/quoteHistoryMine.ts"
   },
   "dependencies": {
     "@line/bot-sdk": "^11.0.0",

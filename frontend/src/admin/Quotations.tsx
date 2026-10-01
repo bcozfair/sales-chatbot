@@ -21,7 +21,11 @@ import {
   RotateCcw,
   AlertTriangle,
   Ban,
-  Trash2
+  Trash2,
+  User,
+  Users,
+  Globe,
+  MessageCircle
 } from 'lucide-react';
 import { DeleteQuotationModal } from './DeleteQuotationModal';
 import { ExportHistoryModal } from './ExportHistoryModal';
@@ -56,6 +60,10 @@ interface Quotation {
   salesperson_employee_code: string | null;
   /** ชื่อผู้เสนอราคา — มีเฉพาะใบจากเว็บ · null = ใบ LINE/ใบเก่า ซึ่งช่องผู้เสนอราคาบนใบคือชื่อเซลส์ */
   issuer_name?: string | null;
+  /** ชื่อผู้เสนอราคาตามที่ใบ PDF พิมพ์ (ตัด "คุณ" · ไม่ห้อย PM/THT) — เซิร์ฟเวอร์จัดรูปด้วยฟังก์ชันเดียวกับ PDF */
+  issuer_display?: string;
+  /** ที่มาของใบ — คำนวณจาก user_id ที่เซิร์ฟเวอร์ (`web:` = หน้าเว็บ) ไม่ใช่ช่อง Source ของ Odoo */
+  channel?: 'web' | 'line';
   total_sum: number;
   items: QuotationItem[];
   user_id: string;
@@ -95,7 +103,19 @@ interface Quotation {
 interface QuotationListResponse {
   data: Quotation[];
   total: number;
+  /** ขอบเขตที่ใช้จริงรอบนี้ — 'own' ได้ทั้งจากปุ่ม "ใบของฉัน" และจากการถูกปิด quote.view_all */
+  scope?: 'own' | 'all';
+  /** บัญชีนี้กดดูทั้งหมดได้ไหม — false = ถูกปิด quote.view_all ⇒ ไม่มีปุ่มสลับให้กด */
+  view_all?: boolean;
+  /** จำนวน "ใบของฉัน" ภายใต้ตัวกรองชุดเดียวกัน — ตัวเลขบนปุ่ม */
+  mine_total?: number;
 }
+
+/**
+ * role ที่เปิดหน้ามาเจอ "ใบของฉัน" — ที่เหลือเปิดมาเจอ "ทั้งหมด" (เจ้าของเคาะ 2026-10-01)
+ * ทุก role มีปุ่มสลับเหมือนกัน ต่างกันแค่ค่าตอนเปิดหน้า · ปุ่มนี้เป็นตัวกรองการดู ไม่ใช่สิทธิ์
+ */
+const MINE_FIRST_ROLES: readonly string[] = ['subadmin'];
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
@@ -125,10 +145,15 @@ const MANUAL_REASON_LABELS: { kind: string; label: string }[] = [
   { kind: 'payment_terms_override', label: '💳 เครดิตตั้งเอง' },
 ];
 
-/** ยอดใบที่ยังค้างในคิวแก้มือ แยกตามเหตุ × บริษัท (GET /api/admin/quotations/manual-review-counts) */
-interface ManualReviewCounts {
-  total: number;
-  groups: { bucket: string; company: 'PM' | 'THT'; count: number }[];
+/**
+ * ตัวเลขข้างทุกปุ่มในเมนูส่งออก (GET /api/admin/quotations/export-counts) — นับด้วยตัวกรองชุดเดียวกับไฟล์
+ * ⇒ ตัวเลข = จำนวนใบที่กดแล้วได้ในไฟล์ · `queue` = ยอดค้างของคิวแก้มือทั้งหมดที่ไม่ฟังตัวกรอง
+ */
+interface ExportCounts {
+  normal: Record<ExportCompany, number>;
+  manual: { total: number; groups: { bucket: string; company: 'PM' | 'THT'; count: number }[] };
+  /** outside = ใบค้างที่ตัวกรองตอนนี้มองไม่เห็น — บอกไว้ไม่ให้ตัวกรองบังคิวแก้มือจนถูกลืม */
+  queue: { total: number; outside: number };
 }
 
 /**
@@ -150,9 +175,24 @@ const EXPORT_COMPANIES: { value: ExportCompany; company: string }[] = [
  * (ครั้งแรก 2026-08-05 · ล่าสุด 2026-09-04) ⇒ ปุ่มนั้นกินที่ครึ่งหนึ่งของทุกแถวเพื่อสิ่งที่ยังไม่เคยถูกกด
  * และเป็นตัวที่ทำให้เมนูใส่กลุ่ม "ต้องแก้มือก่อน" เพิ่มไม่ได้โดยไม่บาน
  * · **หลังบ้านยังรับ `?format=csv` เหมือนเดิม** วันไหนอยากได้กลับมา เติมปุ่มอย่างเดียวจบ
+ *
+ * **มีพื้น + ขอบเข้ม + เงา** (เจ้าของสั่ง 2026-10-01 "มันกลืนเกินไป") — เดิมเป็นขอบบางบนพื้นเมนู
+ * แยกไม่ออกว่าเป็นปุ่ม · เงาใช้ `--shadow-btn*` ของธีม ไม่ใช่ `shadow-sm` ที่มองไม่เห็นบนธีมมืด (index.css)
  */
 const EXPORT_BTN =
-  'flex items-center gap-1 px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-bold text-slate-600 hover:border-[var(--brand-fg)] hover:text-[var(--brand-fg)] hover:bg-[var(--brand)]/5 transition-colors';
+  'flex items-center gap-1 px-2 py-1.5 rounded-lg border border-slate-300 bg-card text-xs font-bold text-slate-700 shadow-[var(--shadow-btn)] hover:border-[var(--brand-fg)] hover:text-[var(--brand-fg)] hover:shadow-[var(--shadow-btn-hover)] active:shadow-[var(--shadow-btn-press)] transition-[color,border-color,box-shadow]';
+
+/** ป้ายบริษัทในเมนูส่งออก — ทรงเดียวทั้งแถวใบปกติและแถวในคิวแก้มือ (เจ้าของสั่ง 2026-10-01) */
+const ExportCompanyLabel: React.FC<{ code: ExportCompany }> = ({ code }) => (
+  <div className="flex items-baseline gap-1.5 flex-1 min-w-0">
+    <span className="px-1.5 py-0.5 rounded-md bg-[var(--brand)]/10 text-[var(--brand-fg)] text-xs font-extrabold tracking-wide">
+      {code}
+    </span>
+    <span className="text-sm font-bold text-slate-800 truncate">
+      {EXPORT_COMPANIES.find((c) => c.value === code)?.company}
+    </span>
+  </div>
+);
 
 // Status color mapping
 const STATUS_STYLES: Record<string, { bg: string; text: string; label: string }> = {
@@ -169,7 +209,7 @@ function getStatusStyle(status: string) {
 
 /**
  * สถานะ Odoo ของใบเสนอราคา — 3 ขั้นเรียงตามลำดับที่เกิดจริง และเดินหน้าทางเดียว
- *   ยังไม่ส่งออก → รอนำเข้า (ส่งออกไฟล์แล้วแต่ยังไม่เห็นใน Odoo) → นำเข้า Odoo แล้ว
+ *   ยังไม่ส่งออก → รอนำเข้า (ส่งออกไฟล์แล้วแต่ยังไม่เห็นใน Odoo) → นำเข้าแล้ว
  * อ่านจาก snapshot ในตาราง quotations ไม่ใช่ join สดกับ sale_orders — Odoo เปลี่ยนชื่อเอกสาร
  * ตอนยืนยัน/ออกบิล เลข Q* จึงหายไปจากฝั่งนั้นได้ ถ้า join สดสถานะจะเด้งกลับเองทั้งที่สำเร็จแล้ว
  */
@@ -178,7 +218,7 @@ type OdooStage = 'imported' | 'pending' | 'not_exported';
 const ODOO_STAGE_STYLES: Record<OdooStage, { bg: string; text: string; dot: string; label: string; hint: string }> = {
   imported: {
     bg: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700', dot: 'bg-emerald-500',
-    label: 'นำเข้า Odoo แล้ว', hint: 'พบใบนี้เป็นเอกสารในระบบ Odoo แล้ว',
+    label: 'นำเข้าแล้ว', hint: 'พบใบนี้เป็นเอกสารในระบบ Odoo แล้ว',
   },
   pending: {
     bg: 'bg-amber-50 border-amber-200', text: 'text-amber-700', dot: 'bg-amber-400',
@@ -263,6 +303,14 @@ export const Quotations: React.FC = () => {
   const [exportedFilter, setExportedFilter] = useState<ExportedFilter>('no');
   /** ตั้งต้น 'all' — ป้ายสองอันนี้เป็นของที่ "ดูย้อนหลัง" ไม่ใช่คิวงานประจำวันเหมือนสถานะ Odoo */
   const [flagFilter, setFlagFilter] = useState<QuoteFlagFilter>('all');
+  /**
+   * ปุ่ม "ใบของฉัน / ทั้งหมด" — มีผลกับตาราง · ไฟล์ส่งออก · ตัวนับคิวแก้มือ พร้อมกัน
+   * (ส่งออกตามปุ่มที่เลือก เหมือนตัวกรองอื่นบนจอ — เจ้าของเคาะ 2026-10-01)
+   */
+  const [mineOnly, setMineOnly] = useState(() => MINE_FIRST_ROLES.includes(user?.role ?? ''));
+  /** ค่าจากเซิร์ฟเวอร์ — false = ถูกปิด quote.view_all เห็นได้เฉพาะใบตัวเองอยู่แล้ว */
+  const [viewAll, setViewAll] = useState(true);
+  const [mineTotal, setMineTotal] = useState<number | null>(null);
   const [sortBy, setSortBy] = useState('created_at');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
@@ -275,10 +323,13 @@ export const Quotations: React.FC = () => {
   const [isExporting, setIsExporting] = useState(false);
   const exportMenuRef = React.useRef<HTMLDivElement>(null);
   /**
-   * ยอดค้างของคิวแก้มือ — **ตัวเลขนี้คือของสำคัญที่สุดของเมนู** เพราะใบกลุ่มนี้ไม่อยู่ในไฟล์ปกติแล้ว
+   * ตัวเลขในเมนู — `null` = กำลังนับ (หรือนับไม่สำเร็จ) ⇒ ปุ่มยังกดได้ตามเดิม แค่ไม่มีตัวเลข
+   * ยอดค้างของคิวแก้มือ (`queue`) คือของสำคัญที่สุดของเมนู เพราะใบกลุ่มนี้ไม่อยู่ในไฟล์ปกติ
    * ถ้าไม่มีใครเห็นยอดค้าง มันจะไม่ไปถึง Odoo เลยโดยไม่มีอะไรฟ้อง
    */
-  const [manualCounts, setManualCounts] = useState<ManualReviewCounts>({ total: 0, groups: [] });
+  const [exportCounts, setExportCounts] = useState<ExportCounts | null>(null);
+  /** กันคำตอบของรอบเก่ามาทับรอบใหม่ เวลาเปลี่ยนตัวกรองเร็ว ๆ ขณะเมนูเปิดอยู่ */
+  const countsReqRef = React.useRef(0);
   /** กางกลุ่ม "ต้องแก้มือก่อน" ค้างไว้ไหม — จำไว้ระหว่างเปิด/ปิดเมนูในเซสชันเดียวกัน */
   const [manualOpen, setManualOpen] = useState(true);
 
@@ -324,7 +375,6 @@ export const Quotations: React.FC = () => {
       showToast(deletedLabel);
       // ยอดรวมและจำนวนหน้าเปลี่ยนไปด้วย ⇒ โหลดใหม่ ไม่ตัดแถวออกจาก state เอง
       fetchQuotations();
-      void fetchManualCounts();
     } catch (err: unknown) {
       setDeleteError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการลบใบเสนอราคา');
     } finally {
@@ -354,6 +404,22 @@ export const Quotations: React.FC = () => {
   // Expanded row (show items detail)
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
+  /**
+   * ตัวกรองบนจอเป็น query string — ตาราง · ไฟล์ส่งออก · ตัวเลขในเมนูส่งออก ใช้ตัวนี้ตัวเดียว
+   * (เดิมประกอบแยกกันคนละที่ ไฟล์ส่งออกจึงไม่เคยได้ตัวกรองป้ายไปด้วย)
+   */
+  const filterParams = useCallback(() => {
+    const params = new URLSearchParams();
+    if (searchQuery.trim()) params.set('search', searchQuery.trim());
+    if (statusFilter) params.set('status', statusFilter);
+    if (dateFrom) params.set('dateFrom', dateFrom);
+    if (dateTo) params.set('dateTo', dateTo);
+    params.set('exported', exportedFilter);
+    params.set('flag', flagFilter);
+    if (mineOnly) params.set('mine', '1');
+    return params;
+  }, [searchQuery, statusFilter, dateFrom, dateTo, exportedFilter, flagFilter, mineOnly]);
+
   const fetchQuotations = useCallback(async (resetPage = false) => {
     setIsLoading(true);
     setError(null);
@@ -362,13 +428,7 @@ export const Quotations: React.FC = () => {
     if (resetPage) setCurrentPage(1);
 
     try {
-      const params = new URLSearchParams();
-      if (searchQuery.trim()) params.set('search', searchQuery.trim());
-      if (statusFilter) params.set('status', statusFilter);
-      if (dateFrom) params.set('dateFrom', dateFrom);
-      if (dateTo) params.set('dateTo', dateTo);
-      params.set('exported', exportedFilter);
-      params.set('flag', flagFilter);
+      const params = filterParams();
       params.set('sortBy', sortBy);
       params.set('sortOrder', sortOrder);
       params.set('limit', String(pageSize));
@@ -383,6 +443,8 @@ export const Quotations: React.FC = () => {
       const result: QuotationListResponse = await response.json();
       setQuotations(result.data);
       setTotal(result.total);
+      setViewAll(result.view_all !== false);
+      setMineTotal(typeof result.mine_total === 'number' ? result.mine_total : null);
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการโหลดข้อมูล';
       console.error(err);
@@ -390,7 +452,7 @@ export const Quotations: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [token, searchQuery, statusFilter, dateFrom, dateTo, exportedFilter, flagFilter, currentPage, pageSize, sortBy, sortOrder]);
+  }, [token, filterParams, currentPage, pageSize, sortBy, sortOrder]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -399,25 +461,30 @@ export const Quotations: React.FC = () => {
     return () => clearTimeout(timer);
   }, [fetchQuotations]);
 
-  // ยอดค้างของคิวแก้มือ — โหลดพร้อมตาราง เพราะการส่งออกครั้งหนึ่งทำให้ยอดนี้เปลี่ยนทันที
-  const fetchManualCounts = useCallback(async () => {
+  // ตัวเลขในเมนูส่งออก — นับเฉพาะตอนเมนูเปิด (ตัวเลขไม่ได้โชว์ที่อื่น) และนับใหม่ทุกครั้งที่เปิด/ตัวกรองเปลี่ยน
+  // ⇒ หลังส่งออก (เมนูปิดเอง) เปิดครั้งถัดไปได้ยอดที่ลดลงแล้วเสมอ ไม่ต้องสั่งโหลดซ้ำเอง
+  const fetchExportCounts = useCallback(async () => {
+    const reqId = ++countsReqRef.current;
+    setExportCounts(null);           // ไม่โชว์ตัวเลขของตัวกรองชุดก่อนค้างไว้ระหว่างรอ
     try {
-      const res = await fetch('/api/admin/quotations/manual-review-counts', {
+      const res = await fetch(`/api/admin/quotations/export-counts?${filterParams().toString()}`, {
         headers: { 'Authorization': `Bearer ${token}` },
       });
-      if (!res.ok) return;           // ยอดค้างอ่านไม่ได้ ไม่ใช่เหตุให้ทั้งหน้าพัง — เมนูจะขึ้น "ไม่มีใบค้าง"
-      setManualCounts(await res.json());
+      if (!res.ok || reqId !== countsReqRef.current) return;   // นับไม่ได้ไม่ใช่เหตุให้เมนูพัง — ปุ่มยังกดได้
+      const body: ExportCounts = await res.json();
+      if (reqId === countsReqRef.current) setExportCounts(body);
     } catch {
       // เงียบด้วยเหตุผลเดียวกัน — ตารางหลักยังใช้งานได้ตามปกติ
     }
-  }, [token]);
+  }, [token, filterParams]);
 
   // setTimeout(0) ด้วยเหตุผลเดียวกับ effect ของ fetchQuotations ข้างบน — กติกา
   // `react-hooks/set-state-in-effect` ห้าม setState ตรง ๆ ใน effect body
   useEffect(() => {
-    const timer = setTimeout(() => { void fetchManualCounts(); }, 0);
+    if (!exportMenuOpen) return;
+    const timer = setTimeout(() => { void fetchExportCounts(); }, 0);
     return () => clearTimeout(timer);
-  }, [fetchManualCounts]);
+  }, [exportMenuOpen, fetchExportCounts]);
 
   // ปิดเมนูส่งออกเมื่อคลิกนอกกล่อง
   useEffect(() => {
@@ -441,13 +508,8 @@ export const Quotations: React.FC = () => {
     setExportMenuOpen(false);
     setIsExporting(true);
     try {
-      const params = new URLSearchParams();
+      const params = filterParams();
       params.set('company', company);
-      if (searchQuery.trim()) params.set('search', searchQuery.trim());
-      if (statusFilter) params.set('status', statusFilter);
-      if (dateFrom) params.set('dateFrom', dateFrom);
-      if (dateTo) params.set('dateTo', dateTo);
-      params.set('exported', exportedFilter);
       params.set('sortBy', sortBy);
       params.set('sortOrder', sortOrder);
       params.set('format', format);
@@ -484,7 +546,6 @@ export const Quotations: React.FC = () => {
 
       // ใบที่เพิ่งดาวน์โหลดถูกมาร์กไปแล้ว ถ้าไม่โหลดใหม่หน้าจอจะแสดงสถานะเก่าที่ไม่จริง
       fetchQuotations();
-      void fetchManualCounts();      // ยอดค้างลดลงทันทีที่ไฟล์ของกลุ่มนั้นถูกสร้างสำเร็จ
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการส่งออกข้อมูล';
       setError(errorMessage);
@@ -523,6 +584,13 @@ export const Quotations: React.FC = () => {
     setTimeout(() => setSuccessMsg(null), 3000);
   };
 
+  // ตัวเลขของกลุ่มแก้มือในเมนูส่งออก — ยังนับไม่เสร็จ = 0 ทั้งหมด (ป้ายหัวข้อขึ้น "…" แยกเอง)
+  const manualTotal = exportCounts?.manual.total ?? 0;
+  const queueTotal = exportCounts?.queue.total ?? 0;
+  const queueOutside = exportCounts?.queue.outside ?? 0;
+  /** หัวข้อเป็นสีเตือนเมื่อมีใบค้างที่ไหนก็ตาม แม้ตัวกรองตอนนี้จะมองไม่เห็นมัน */
+  const manualAlert = manualTotal > 0 || queueTotal > 0;
+
   // Pagination derived values
   const totalItems = total;
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
@@ -560,8 +628,38 @@ export const Quotations: React.FC = () => {
       <PageHeader
         icon={FileText}
         title="ประวัติใบเสนอราคา"
-        description="ค้นหา ดูข้อมูล และส่งออกใบเสนอราคาทั้งหมดในระบบ"
+        description={mineOnly || !viewAll
+          ? 'แสดงเฉพาะใบที่คุณเสนอราคา'
+          : 'ค้นหา ดูข้อมูล และส่งออกใบเสนอราคาทั้งหมดในระบบ'}
       >
+        {/* ใบของฉัน / ทั้งหมด — ทรงเดียวกับ "มองเป็นบริษัท | มองเป็นผู้ติดต่อ" ของหน้าข้อมูลลูกค้า
+            ซ่อนทั้งก้อนเมื่อถูกปิด quote.view_all (เห็นเฉพาะใบตัวเองอยู่แล้ว ปุ่ม "ทั้งหมด" กดไม่ได้)
+            ตัวเลขบนปุ่มนับด้วยตัวกรองชุดเดียวกับตาราง = จำนวนที่จะเห็นถ้ากด */}
+        {viewAll && (
+          <div className="inline-flex bg-slate-100 border border-slate-200 rounded-xl p-0.5 gap-0.5">
+            {([[true, 'ใบของฉัน', User], [false, 'ทั้งหมด', Users]] as const).map(([mine, label, Icon]) => (
+              <button
+                key={label}
+                type="button"
+                onClick={() => { setMineOnly(mine); setCurrentPage(1); }}
+                aria-pressed={mineOnly === mine}
+                title={mine ? 'แสดงเฉพาะใบที่คุณเสนอราคา — ส่งออก Odoo ก็ได้เฉพาะใบเหล่านี้' : 'แสดงใบของทุกคน'}
+                className={`h-8 px-3 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all
+                  ${mineOnly === mine ? 'bg-card text-[var(--brand-fg)] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">{label}</span>
+                {mine && mineTotal !== null && (
+                  <span className={`px-1.5 rounded-full text-[10px] font-extrabold ${
+                    mineOnly ? 'bg-[var(--brand)]/10 text-[var(--brand-fg)]' : 'bg-slate-200 text-slate-500'
+                  }`}>
+                    {mineTotal.toLocaleString('en-US')}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="relative" ref={exportMenuRef}>
           <button
             onClick={() => setExportMenuOpen(open => !open)}
@@ -578,24 +676,28 @@ export const Quotations: React.FC = () => {
           {exportMenuOpen && (
             <div className="absolute right-0 top-full mt-2 z-30 w-[17rem] bg-card border border-slate-200 rounded-xl shadow-xl overflow-hidden">
               {/* 1 ครั้ง = 1 บริษัท — Odoo ของ PM กับ THT เป็นคนละระบบ ไฟล์จึงรวมกันไม่ได้ */}
-              {EXPORT_COMPANIES.map(({ value, company }) => (
-                <div key={value} className="flex items-center gap-2 px-3 py-2 border-b border-slate-100">
-                  <div className="flex items-baseline gap-1.5 flex-1 min-w-0">
-                    <span className="px-1.5 py-0.5 rounded-md bg-[var(--brand)]/10 text-[var(--brand-fg)] text-xs font-extrabold tracking-wide">
-                      {value}
+              {/* ตัวเลขหน้าปุ่ม = จำนวนใบที่กดแล้วได้ในไฟล์ ตามตัวกรองบนจอ (เจ้าของเลือก 2026-10-01)
+                  0 = ปุ่มกดไม่ได้ · ยังนับไม่เสร็จ = "…" และปุ่มยังกดได้ตามเดิม */}
+              {EXPORT_COMPANIES.map(({ value, company }) => {
+                const n = exportCounts?.normal[value];
+                return (
+                  <div key={value} className="flex items-center gap-2 px-3 py-2 border-b border-slate-100">
+                    <ExportCompanyLabel code={value} />
+                    <span className={`text-xs font-extrabold tabular-nums whitespace-nowrap ${n === 0 ? 'text-slate-400' : 'text-[var(--brand-fg)]'}`}>
+                      {n === undefined ? '…' : `${n.toLocaleString('en-US')} ใบ`}
                     </span>
-                    <span className="text-sm font-bold text-slate-800 truncate">{company}</span>
+                    <button
+                      onClick={() => handleExportOdoo('xlsx', value)}
+                      disabled={n === 0}
+                      title={n === 0 ? `ไม่มีใบ ${value} (${company}) ตามตัวกรองนี้` : `ส่งออก ${value} (${company}) เป็น Excel`}
+                      className={`${EXPORT_BTN} disabled:opacity-40 disabled:shadow-none disabled:pointer-events-none`}
+                    >
+                      <FileSpreadsheet className="w-3.5 h-3.5" />
+                      Excel
+                    </button>
                   </div>
-                  <button
-                    onClick={() => handleExportOdoo('xlsx', value)}
-                    title={`ส่งออก ${value} (${company}) เป็น Excel`}
-                    className={EXPORT_BTN}
-                  >
-                    <FileSpreadsheet className="w-3.5 h-3.5" />
-                    Excel
-                  </button>
-                </div>
-              ))}
+                );
+              })}
 
               {/* ── คิวแก้มือ — กลุ่มตามเหตุ แถวข้างในตามบริษัท (เจ้าของเคาะแบบ ข-1 · 2026-09-15) ──
                   **แถวหัวข้ออยู่ตำแหน่งเดิมเสมอ** แม้วันที่ไม่มีใบค้าง ไม่งั้นเมนูจะสูงไม่เท่ากันในแต่ละวัน
@@ -606,32 +708,37 @@ export const Quotations: React.FC = () => {
                 onClick={() => setManualOpen((v) => !v)}
                 aria-expanded={manualOpen}
                 className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs font-bold border-b border-slate-100 transition-colors ${
-                  manualCounts.total > 0
+                  manualAlert
                     ? 'bg-amber-50 text-amber-800 hover:bg-amber-100'
                     : 'bg-slate-50 text-slate-500 hover:bg-slate-100'
                 }`}
               >
-                <AlertTriangle className={`w-3.5 h-3.5 shrink-0 ${manualCounts.total > 0 ? '' : 'opacity-50'}`} />
+                <AlertTriangle className={`w-3.5 h-3.5 shrink-0 ${manualAlert ? '' : 'opacity-50'}`} />
                 <span className="flex-1 min-w-0 truncate">ต้องแก้มือก่อน</span>
                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${
-                  manualCounts.total > 0
+                  manualAlert
                     ? 'bg-amber-100 border-amber-300 text-amber-800'
                     : 'bg-slate-100 border-slate-200 text-slate-400'
                 }`}>
-                  {manualCounts.total > 0 ? `${manualCounts.total} ใบ` : 'ไม่มีใบค้าง'}
+                  {/* ตัวเลขตามตัวกรอง · ยอดค้างนอกตัวกรองบอกเป็นบรรทัดข้างใน (หัวข้อยังเป็นสีเตือนถ้ามีค้าง) */}
+                  {!exportCounts ? '…' : manualTotal > 0 || queueTotal > 0 ? `${manualTotal} ใบ` : 'ไม่มีใบค้าง'}
                 </span>
                 <ChevronDown className={`w-3 h-3 shrink-0 transition-transform ${manualOpen ? 'rotate-180' : ''}`} />
               </button>
 
               {manualOpen && (
-                <div className={`border-b border-slate-100 ${manualCounts.total > 0 ? 'bg-amber-50' : 'bg-slate-50'}`}>
-                  {manualCounts.total === 0 ? (
+                <div className={`border-b border-slate-100 ${manualAlert ? 'bg-amber-50' : 'bg-slate-50'}`}>
+                  {!exportCounts ? (
+                    <p className="px-3 py-2.5 pl-6 text-[11px] leading-snug text-slate-500">กำลังนับ…</p>
+                  ) : manualTotal === 0 ? (
                     <p className="px-3 py-2.5 pl-6 text-[11px] leading-snug text-slate-500">
-                      ทุกใบข้อมูลตรงกับฐาน Odoo แล้ว — ใช้สองบรรทัดบนได้ตามปกติ
+                      {queueTotal === 0
+                        ? 'ทุกใบข้อมูลตรงกับฐาน Odoo แล้ว — ใช้สองบรรทัดบนได้ตามปกติ'
+                        : 'ไม่มีใบที่ต้องแก้มือในตัวกรองนี้'}
                     </p>
                   ) : (
                     MANUAL_REASON_LABELS.map(({ kind, label }) => {
-                      const rows = manualCounts.groups.filter((g) => g.bucket === kind && g.count > 0);
+                      const rows = exportCounts.manual.groups.filter((g) => g.bucket === kind && g.count > 0);
                       if (rows.length === 0) return null;
                       const sum = rows.reduce((n, g) => n + g.count, 0);
                       return (
@@ -640,11 +747,9 @@ export const Quotations: React.FC = () => {
                             {label} <span className="font-normal text-slate-500">{sum} ใบ</span>
                           </p>
                           {rows.map((g) => (
-                            <div key={`${kind}-${g.company}`} className="flex items-center gap-1.5 pl-6 pr-3 py-1">
-                              <span className="flex-1 min-w-0 truncate text-xs font-bold text-slate-800">
-                                {g.company === 'THT' ? 'QT · THT' : 'QP · PM'}
-                              </span>
-                              <span className="text-[11px] font-extrabold text-amber-800">{g.count}</span>
+                            <div key={`${kind}-${g.company}`} className="flex items-center gap-2 pl-6 pr-3 py-1">
+                              <ExportCompanyLabel code={g.company === 'THT' ? 'QT' : 'QP'} />
+                              <span className="text-xs font-extrabold tabular-nums whitespace-nowrap text-amber-800">{g.count.toLocaleString('en-US')} ใบ</span>
                               <button
                                 onClick={() => handleExportOdoo('xlsx', g.company === 'THT' ? 'QT' : 'QP', kind)}
                                 title={`ส่งออกใบที่ต้องแก้มือ (${label}) ของ ${g.company} เป็น Excel`}
@@ -659,6 +764,13 @@ export const Quotations: React.FC = () => {
                       );
                     })
                   )}
+                  {/* ตัวกรองบังใบค้างได้ (เช่น เลือก "รอนำเข้า") — บอกไว้ ไม่งั้นใบกลุ่มนี้ถูกลืมเงียบ ๆ */}
+                  {queueOutside > 0 && (
+                    <p className="px-3 pt-1.5 pl-6 text-[11px] leading-snug text-amber-800">
+                      ค้างทั้งหมด <b>{queueTotal.toLocaleString('en-US')} ใบ</b>
+                      {' '}· {queueOutside.toLocaleString('en-US')} ใบอยู่นอกตัวกรองนี้
+                    </p>
+                  )}
                   <div className="h-2" />
                 </div>
               )}
@@ -671,9 +783,17 @@ export const Quotations: React.FC = () => {
                 ประวัติการส่งออก
               </button>
               <p className="px-3 py-2 text-[11px] leading-snug text-slate-500 border-t border-slate-100 bg-slate-50">
-                ส่งออกตามตัวกรองบนหน้าจอ (ตั้งต้น: เฉพาะใบที่ยังไม่เคยส่ง) ใบที่อยู่ในไฟล์จะถูกทำเครื่องหมายว่าส่งแล้วทันที
+                ส่งออกตามตัวกรองบนหน้าจอ (ตั้งต้น: เฉพาะใบที่ยังไม่เคยส่ง) — ตัวเลขหน้าปุ่มคือจำนวนใบในไฟล์
+                · ใบที่อยู่ในไฟล์จะถูกทำเครื่องหมายว่าส่งแล้วทันที
                 · เลขที่ที่ไม่ขึ้นต้นด้วย QP/QT จะไม่อยู่ในไฟล์
                 · <b>สองบรรทัดบนไม่มีใบที่ต้องแก้มือ</b> — ใบพวกนั้นนำเข้า Odoo ตรง ๆ ไม่ได้
+                {/* ปุ่ม "ใบของฉัน" ก็เป็นตัวกรองบนจอ ⇒ ไฟล์ตามปุ่มด้วย (เจ้าของเคาะ 2026-10-01)
+                    แจ้งเฉพาะตอนเลือกอยู่ เพราะคนที่ชินกับการส่งออกทุกใบจะได้ไฟล์ที่เล็กกว่าที่คิด */}
+                {mineOnly && viewAll && (
+                  <span className="block mt-1.5 px-2 py-1.5 rounded-lg bg-sky-50 border border-sky-200 text-sky-700">
+                    ตอนนี้เลือก <b>ใบของฉัน</b> — ไฟล์จะมีเฉพาะใบที่คุณเสนอราคา กด “ทั้งหมด” ก่อนถ้าจะส่งออกใบของทุกคน
+                  </span>
+                )}
               </p>
             </div>
           )}
@@ -736,9 +856,9 @@ export const Quotations: React.FC = () => {
         >
           <option value="no">ยังไม่ส่งออก</option>
           <option value="pending" title="ส่งออกไฟล์แล้วแต่ยังไม่พบใบนี้ใน Odoo">รอนำเข้า</option>
-          <option value="imported">นำเข้า Odoo แล้ว</option>
-          <option value="yes" title="รอนำเข้า + นำเข้า Odoo แล้ว">ส่งออกแล้ว</option>
-          <option value="all">Odoo ทั้งหมด</option>
+          <option value="imported">นำเข้าแล้ว</option>
+          <option value="yes" title="รอนำเข้า + นำเข้าแล้ว">ส่งออกแล้ว</option>
+          <option value="all">สถานะทั้งหมด</option>
         </FilterSelect>
 
         {/* ป้ายของใบ — กรองร่วมกับตัวกรองเดิมได้ทุกตัว
@@ -787,8 +907,31 @@ export const Quotations: React.FC = () => {
       {!isLoading && !error && quotations.length === 0 && (
         <div className="bg-card border border-slate-200 rounded-2xl p-10 text-center shadow-sm text-slate-500 flex flex-col items-center justify-center gap-2">
           <FileText className="w-9 h-9 text-slate-300" />
-          <p className="font-bold">ไม่พบรายการใบเสนอราคา</p>
-          <p className="text-xs">ลองปรับเปลี่ยนตัวกรองหรือค้นหาด้วยคำอื่น</p>
+          {/* ดูเฉพาะใบตัวเองอยู่ ⇒ บอกเหตุผลที่ว่าง ไม่ใช่แค่ "ไม่พบ" — subadmin ส่วนใหญ่ยังไม่มีใบของตัวเอง
+              (วัด 2026-10-01: 8 จาก 11 บัญชี) จะเปิดหน้ามาเจอตารางว่างแล้วนึกว่าระบบพัง */}
+          {mineOnly || !viewAll ? (
+            <>
+              <p className="font-bold">ไม่พบใบเสนอราคาของคุณ</p>
+              <p className="text-xs max-w-md">
+                “ใบของฉัน” แสดงเฉพาะใบที่คุณเสนอราคา{viewAll ? ' · ใบของคนอื่นอยู่ใน “ทั้งหมด”' : ''} — หรือลองปรับตัวกรองด้านบน
+              </p>
+              {viewAll && (
+                <button
+                  type="button"
+                  onClick={() => { setMineOnly(false); setCurrentPage(1); }}
+                  className="mt-1.5 flex items-center gap-1.5 px-3.5 btn-h bg-card border border-slate-200 hover:bg-slate-50 text-slate-700 text-sm font-bold rounded-xl shadow-sm transition-all active:scale-95"
+                >
+                  <Users className="w-4 h-4" />
+                  ดูใบทั้งหมด
+                </button>
+              )}
+            </>
+          ) : (
+            <>
+              <p className="font-bold">ไม่พบรายการใบเสนอราคา</p>
+              <p className="text-xs">ลองปรับเปลี่ยนตัวกรองหรือค้นหาด้วยคำอื่น</p>
+            </>
+          )}
         </div>
       )}
 
@@ -863,23 +1006,32 @@ export const Quotations: React.FC = () => {
                           </div>
                         </td>
 
-                        {/* Customer — คอลัมน์เดียวที่ยอมให้ตัดบรรทัด ชื่อบริษัทไทยยาวเกินกว่าจะบังคับบรรทัดเดียว
-                            w-full ทำให้มันดูดพื้นที่ที่เหลือทั้งหมด คอลัมน์อื่นจึงไม่ถูกบีบจนข้อความตกบรรทัด */}
-                        <td className="px-4 py-2.5 w-full min-w-[16rem]">
+                        {/* Customer — ชื่อบริษัทบรรทัดเดียว ยาวเกินตัดเป็น "…" (เจ้าของสั่ง 2026-10-01)
+                            ชี้ค้างเห็นชื่อเต็มจาก title · กดแถวกางรายละเอียดได้เหมือนเดิม
+                            w-full ทำให้มันดูดพื้นที่ที่เหลือทั้งหมด คอลัมน์อื่นจึงไม่ถูกบีบจนข้อความตกบรรทัด
+                            **`max-w-0` คู่กับ w-full คือตัวที่ทำให้ truncate ทำงานในตาราง** — ไม่มีมัน คอลัมน์จะยืด
+                            ตามชื่อที่ยาวที่สุดจนตารางล้นแนวนอนแทนการตัดคำ · min-w ยังชนะ max-w จอแคบจึงได้ 16rem เท่าเดิม */}
+                        <td className="px-4 py-2.5 w-full max-w-0 min-w-[16rem]">
                           <div className="flex flex-col">
-                            <span className="font-semibold text-slate-800 text-sm">
+                            <span
+                              className="font-semibold text-slate-800 text-sm truncate"
+                              title={quote.company_name || (quote.customer_name || '')}
+                            >
                               {quote.company_name || (quote.customer_name || '')}
                             </span>
-                            {quote.contact_name && quote.contact_name !== '-' && (
-                              <span className="text-xs text-slate-500">
-                                ติดต่อ: {quote.contact_name}
-                              </span>
-                            )}
-                            {/* ป้ายสองแกน — มี **คำ** ไม่ใช่สีอย่างเดียว (docs/design.md ข้อ 8)
+                            {/* บรรทัดที่สอง = ผู้ติดต่อ + ป้ายต่อท้ายในแถวเดียวกัน (เจ้าของสั่ง 2026-10-01
+                                "ลดความสูงของแต่ละแถว") ⇒ แถวสูงไม่เกินสองบรรทัดเท่าคอลัมน์เลขที่/วันที่
+                                ใบที่ไม่มีผู้ติดต่อ ป้ายขึ้นบรรทัดนี้เอง · จอแคบป้ายตัดลงบรรทัดถัดไปได้ (flex-wrap)
+                                ป้ายสองแกน — มี **คำ** ไม่ใช่สีอย่างเดียว (docs/design.md ข้อ 8)
                                 🚩 ทะลุกฎ = ยังอยู่ในไฟล์ export ปกติ · 🔧 แก้มือ = ถูกกันออกจากไฟล์
                                 ใบเดียวขึ้นได้ทั้งสองป้าย เพราะเป็นคนละเรื่องกันจริง ๆ */}
-                            {(quote.rule_overrides || quote.odoo_manual_review) && (
-                              <div className="flex flex-wrap items-center gap-1 mt-1">
+                            {((quote.contact_name && quote.contact_name !== '-') || quote.rule_overrides || quote.odoo_manual_review) && (
+                              <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+                                {quote.contact_name && quote.contact_name !== '-' && (
+                                  <span className="text-xs text-slate-500">
+                                    ติดต่อ: {quote.contact_name}
+                                  </span>
+                                )}
                                 {quote.rule_overrides && (
                                   <span
                                     title={ruleOverrideHint(quote)}
@@ -903,11 +1055,23 @@ export const Quotations: React.FC = () => {
                           </div>
                         </td>
 
-                        {/* ผู้เสนอราคา — กติกาเดียวกับช่องขวาของใบ PDF: ไม่มี issuer_name ⇒ ชื่อเซลส์ */}
+                        {/* ผู้เสนอราคา — ชื่อเดียวกับช่องขวาของใบ PDF แต่ **ไม่ห้อย (PM)/(THT)** (เจ้าของสั่ง 2026-10-01)
+                            ค่าดิบในฐานไม่ใช่สิ่งที่ใบพิมพ์: ใบ LINE เก็บ "คุณX" แต่ PDF ตัด "คุณ" ออก
+                            ⇒ ใช้ issuer_display ที่เซิร์ฟเวอร์จัดรูปด้วยฟังก์ชันเดียวกับ pdfGenerator ห้ามจัดรูปเองบนจอ
+                            · บรรทัดที่มาเป็นข้อความจาง ไม่ใช่ป้ายสี เพราะแถวมีป้ายอยู่แล้ว */}
                         <td className="px-4 py-2.5 whitespace-nowrap">
-                          <span className="text-slate-700 text-sm">
-                            {quote.issuer_name || quote.salesperson_name || '-'}
-                          </span>
+                          <div className="flex flex-col">
+                            <span className="text-slate-700 text-sm">
+                              {quote.issuer_display || '-'}
+                            </span>
+                            {quote.channel && (
+                              <span className="inline-flex items-center gap-1 text-xs text-slate-500">
+                                {quote.channel === 'web'
+                                  ? <><Globe className="w-3 h-3" />หน้าเว็บ</>
+                                  : <><MessageCircle className="w-3 h-3" />LINE</>}
+                              </span>
+                            )}
+                          </div>
                         </td>
 
                         {/* Total */}
@@ -924,7 +1088,7 @@ export const Quotations: React.FC = () => {
                           </span>
                         </td>
 
-                        {/* Odoo status: ยังไม่ส่งออก → รอนำเข้า → นำเข้า Odoo แล้ว */}
+                        {/* Odoo status: ยังไม่ส่งออก → รอนำเข้า → นำเข้าแล้ว */}
                         <td className="px-4 py-2.5 text-center whitespace-nowrap">
                           {(() => {
                             const stage = getOdooStage(quote);
