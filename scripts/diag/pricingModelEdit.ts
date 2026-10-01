@@ -23,6 +23,7 @@ import { applyModels } from '../../services/pricingLab/bookUpdate.js';
 import { checkPriceModel } from '../../services/pricingLab/modelShape.js';
 import { loadCatalogSubcodes } from '../pricebook/seedCatalogSubcodes.js';
 import { clean } from '../../db/pricingLabRepo.js';
+import { withSubCodes } from '../../services/pricingLab/bookStore.js';
 
 let pass = 0;
 const fails: string[] = [];
@@ -984,8 +985,16 @@ console.log('\n── 12. เกลียวที่อ่านไม่ออ
     }
   }
   if (Object.keys(book.models).some((k) => /^TS.-04$/.test(k))) {
-    const f = run('TSK-04(S2)5x100+1.2MF');
-    check('TSK-04(S2)5x100+1.2MF — สายเกินไม่ถึงเมตร ⇒ ไม่มีเตือน "ยังไม่รวม" ค่าสาย', !f.r.violations.some((v) => /ยังไม่รวม/.test(v.message)), why(f));
+    // ค่าสายปัดขึ้น (เจ้าของ 2026-10-01) ⇒ เกินไม่ถึงเมตรก็ต้องรู้ชนิดสาย — F อยู่ในตารางรหัสย่อยจากแคตตาล็อก (ไฟล์ในรีโป ไม่พึ่งฐาน)
+    const b04 = withSubCodes(book, loadCatalogSubcodes());
+    const run04 = (code: string) => { const p = parseProductCode(code, b04); return { p, r: computePrice(p.cfg!, b04) }; };
+    const f = run04('TSK-04(S2)5x100+1.2MF');
+    const f1 = run04('TSK-04(S2)5x100+1MF');
+    const m04 = Object.entries(b04.models).find(([k]) => /^TS.-04$/.test(k))![1];
+    const fiber = m04.adders.find((a) => a.id === 'cable_over_1m')?.rates?.['สายไฟเบอร์กลาส'];
+    check('TSK-04(S2)5x100+1.2MF — สายเกินไม่ถึงเมตร ⇒ ปัดขึ้น คิดสายไฟเบอร์กลาส 1 เมตร ไม่มีเตือน "ยังไม่รวม"',
+      f.r.status === 'priced' && !f.r.violations.some((v) => /ยังไม่รวม/.test(v.message)) && fiber !== undefined && f.r.unitPrice === f1.r.unitPrice + fiber,
+      `${why(f)} vs ${why(f1)} · ${fiber}`);
   }
 }
 // BH ใช้กติกาเดิมของชีต: "Standard ออกสายยาว 30 CM · ถ้าความยาวสายเกิน 30 CM บวกเพิ่มเมตรละ 60 บาท (คูณ 2 เพราะใช้ 2 เส้น)"

@@ -889,6 +889,8 @@ npx tsx scripts/pricebook/importer.ts --data <โฟลเดอร์ Excel> --
 npx tsx scripts/pricebook/importer.ts --data <โฟลเดอร์ Excel> --rounding --apply --by admin
 ```
 ตรวจ: `npm run diag:pricing` (ข้อสาย TS-11 ข้ามจนกว่าจะเขียนฐาน) · หน้าคำนวณราคา `TSK-01 4.8+1.5MT` = 340 (ไม่ใช่ 160)
+**ฐานของ PMSV เขียนแล้ว 2026-10-01** (เจ้าของสั่ง "เขียนฐานเลย" · การบันทึกครั้งที่ 16 ทั้ง 7 รุ่น · สำรองที่
+`backup/pricing-before-cable-ceil-2026-10-01-0923.dump`) ⇒ deploy ถัดไปไม่ต้องทำซ้ำ (รันซ้ำได้ "ไม่มีอะไรต้องเขียน")
 
 **ถอยกลับ** (หลัง dump): `TRUNCATE pricing_model_history, pricing_models, pricing_book_revisions;` — หน้าจอกลับไปขึ้น
 "ยังไม่มีสมุดราคาในระบบ" เท่ากับก่อนนำเข้า · ⚠️ `db:restore` / `pg_restore` ของ dump เก่าก็พาราคาย้อนไปตามวันของ dump ด้วย
