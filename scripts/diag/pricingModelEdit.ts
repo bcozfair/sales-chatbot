@@ -802,13 +802,13 @@ if (!ts08 || !ts10) {
   const same = (x: { subCode: string; scope: string }, y: { subCode: string; scope: string }) =>
     x.subCode.toUpperCase() === y.subCode.toUpperCase() && x.scope === y.scope;
   // เล่มในฐานก่อนเขียนยังไม่มีค่ามาตรฐานสาย PVC ของ TS-10 (แมป 16 มีแล้ว) · ราคาสาย TS 160 ของ TS-10 (เจ้าของสั่ง
-  // 2026-09-25 "ใช้ 160 เท่า TS_-01 ไปก่อน" — อยู่ในฐานเท่านั้น เล่มจาก --data ไม่มี) · ค่าสายปัดลง (แมปมีแล้ว ฐานก่อน
-  // `--rounding` ยังปัดขึ้น) — เติมให้เหมือนกันทั้งสองทาง ด่านจึงให้ผลเดียวกัน
+  // 2026-09-25 "ใช้ 160 เท่า TS_-01 ไปก่อน" — อยู่ในฐานเท่านั้น เล่มจาก --data ไม่มี) · ค่าสายปัดขึ้น (แมปมีแล้ว ฐานก่อน
+  // `--rounding` ยังปัดลง) — เติมให้เหมือนกันทั้งสองทาง ด่านจึงให้ผลเดียวกัน
   const b11: PriceBook = {
     ...book,
     models: { ...book.models, 'TSP-10': { ...ts10, axisDefaults: { ...ts10.axisDefaults, cable: 'สายพีวีซี' },
       adders: ts10.adders.map((a) => (a.id === 'cable_over_1m'
-        ? { ...a, round: 'floor' as const, rates: { ...a.rates, 'สายเทปล่อนหุ้มชีลด์': a.rates?.['สายเทปล่อนหุ้มชีลด์'] ?? 160 } } : a)) } },
+        ? { ...a, round: 'ceil' as const, rates: { ...a.rates, 'สายเทปล่อนหุ้มชีลด์': a.rates?.['สายเทปล่อนหุ้มชีลด์'] ?? 160 } } : a)) } },
     subCodes: [...(book.subCodes ?? []).filter((x) => !cat.some((c) => same(c, x))), ...cat],
   };
   const run = (code: string, b: PriceBook = b11) => { const p = parseProductCode(code, b); return { p, r: computePrice(p.cfg!, b) }; };
@@ -867,15 +867,15 @@ if (!ts08 || !ts10) {
     cu.r.status !== 'priced' && cu.r.violations.some((v) => v.noRate && /ซิลิโคน/.test(v.message)),
     `${cu.r.status} ${cu.r.violations.map((v) => v.message).join('|')}`);
 
-  // ค่าสายเกินมาตรฐาน **นับเฉพาะเมตรเต็ม** — เจ้าของสั่ง 2026-09-25: "สายยาวกว่า 1 M บวกเพิ่มตามราคาสาย" หมายถึง
-  // "ยาวกว่าสาย std เพิ่มขึ้นตั้งแต่ 1 M ขึ้นไป" (std 1.5 เริ่มคิดที่ 2.5) และแบบนี้ทุกรุ่น ⇒ `round: 'floor'`
-  price('TSP-10(S2)6x100+1.5MPU', 1535, 'สาย 1.5 M เกินมาตรฐาน 0.5 M (ไม่ถึง 1 M) ⇒ ไม่คิดค่าสาย');
-  price('TSP-10(S2)6x100+2.5MPU', 1635, 'สาย 2.5 M เกิน 1.5 M ⇒ คิด 1 เมตร (พีวีซี 100) ไม่ใช่ 2');
+  // ค่าสายเกินมาตรฐาน **เศษปัดขึ้นเป็นเมตรเต็ม** ทุกตระกูล — เจ้าของสั่ง 2026-10-01: "ถ้าเกินมาตรฐานไม่เต็มเมตรก็ปัดเป็นเมตรเต็มเลย
+  // ใช้กับทุกตระกูล" (แทนคำสั่ง 2026-09-25 ที่นับเฉพาะเมตรเต็ม) ⇒ `round: 'ceil'` เหมือน BH
+  price('TSP-10(S2)6x100+1.5MPU', 1635, 'สาย 1.5 M เกินมาตรฐาน 0.5 M ⇒ ปัดขึ้นเป็น 1 เมตร (พีวีซี 100)');
+  price('TSP-10(S2)6x100+2.5MPU', 1735, 'สาย 2.5 M เกิน 1.5 M ⇒ ปัดขึ้นเป็น 2 เมตร');
   price('TSP-10(S2)6x100+2MPU', 1635, 'สาย 2 M เกินพอดี 1 M ⇒ คิด 1 เมตร');
   for (const f of readdirSync(new URL('../pricebook/maps/', import.meta.url))) {
     const spec = JSON.parse(readFileSync(new URL(`../pricebook/maps/${f}`, import.meta.url), 'utf8')) as { code: string; adders?: Adder[] };
     const cab = spec.adders?.find((a) => a.id === 'cable_over_1m');
-    if (cab) check(`แมป ${f}: ค่าสายเกินมาตรฐานปัดลง (นับเมตรเต็ม)`, cab.round === 'floor', String(cab.round));
+    if (cab) check(`แมป ${f}: ค่าสายเกินมาตรฐานปัดขึ้น (เศษคิดเต็มเมตร)`, (cab.round ?? 'ceil') === 'ceil', String(cab.round));
   }
 
   // เกลียวมิลของ TS_-08/10 — ชีตมีแต่เกลียวนิ้ว · เจ้าของสั่ง 2026-09-25 ใส่ค่าว่างไว้ก่อน ⇒ อ่านออก "ยังไม่มีราคา"
@@ -961,25 +961,26 @@ console.log('\n── 12. เกลียวที่อ่านไม่ออ
       both.r.violations.some((v) => v.message.includes('"(20G)"') && /ไม่ได้บอกขนาดแกน/.test(v.message)), why(both));
   }
   if (Object.keys(book.models).some((k) => /^TS.-11$/.test(k))) {
-    // ค่าสายนับเมตรเต็ม ⇒ เกินไม่ถึงเมตรไม่ต้องคิดเงินสาย จึงไม่ต้องรู้ชนิดสาย (เดิมบล็อก 135 รหัสจริง)
+    // ค่าสายปัดขึ้น (เจ้าของ 2026-10-01) ⇒ เกินไม่ถึงเมตรก็คิด 1 เมตร · ไม่บอกชนิดสาย = ใช้ค่ามาตรฐานของเล่ม (ข้างล่าง)
     const x15 = run('TSJ-11 6x30+1.5M');
     const x1 = run('TSJ-11 6x30+1M');
-    check('TSJ-11 6x30+1.5M — สายเกินไม่ถึงเมตร ไม่บอกชนิดสาย ⇒ คิดได้ ราคาเท่าสาย 1 M', x15.r.status === 'priced' && x15.r.unitPrice === x1.r.unitPrice,
-      `${why(x15)} vs ${why(x1)}`);
-    check('  การ์ดวิธีคำนวณบอกเหตุผลที่ไม่คิดค่าสาย (เกินไม่ถึงช่วงเต็ม)', /นับเฉพาะช่วงเต็ม/.test(JSON.stringify(x15.r.trace ?? '')),
-      JSON.stringify(x15.r.trace ?? null).slice(0, 200));
     const x25 = run('TSJ-11 6x30+2.5M');
     // เล่มที่มีค่ามาตรฐานสาย (แคตตาล็อก TS ข้อ 5: TS-11 ไม่ระบุ = สแตนเลสถัก · เข้าเล่มด้วย --extras-only) คิดตามค่านั้น
     // เล่มที่ยังไม่มีต้องบล็อก — ด่านนี้รันกับเล่มในฐานจริง จึงต้องเช็กตามเล่ม ไม่ใช่สมมติว่าเล่มยังเก่า
     const m11 = Object.entries(book.models).find(([k]) => /^TS.-11$/.test(k))![1];
     const std11 = m11.axisDefaults?.cable;
-    if (std11) {
-      const perM = m11.adders.find((a) => a.id === 'cable_over_1m')?.rates?.[std11];
-      check(`  TSJ-11 6x30+2.5M — เกินเต็มเมตร ไม่บอกชนิดสาย ⇒ คิดค่าสายตามค่ามาตรฐานของเล่ม (${std11}) 1 เมตร`,
-        x25.r.status === 'priced' && perM !== undefined && x25.r.unitPrice === x1.r.unitPrice + perM, `${why(x25)} vs ${why(x1)} · ${perM}`);
+    const cab11 = m11.adders.find((a) => a.id === 'cable_over_1m');
+    if ((cab11?.round ?? 'ceil') !== 'ceil') {
+      console.log('  (ข้ามข้อสาย TS-11 — เล่มในฐานยังนับเฉพาะเมตรเต็ม · รัน importer.ts --rounding ก่อน)');
+    } else if (std11) {
+      const perM = cab11?.rates?.[std11];
+      check(`TSJ-11 6x30+1.5M — เกินไม่ถึงเมตร ไม่บอกชนิดสาย ⇒ ปัดขึ้น คิดสาย ${std11} 1 เมตร`,
+        x15.r.status === 'priced' && perM !== undefined && x15.r.unitPrice === x1.r.unitPrice + perM, `${why(x15)} vs ${why(x1)} · ${perM}`);
+      check(`  TSJ-11 6x30+2.5M — เกิน 1.5 M ⇒ ปัดขึ้น คิด 2 เมตร`,
+        x25.r.status === 'priced' && perM !== undefined && x25.r.unitPrice === x1.r.unitPrice + 2 * perM, `${why(x25)} vs ${why(x1)} · ${perM}`);
     } else {
-      check('  TSJ-11 6x30+2.5M — เกินเต็มเมตรแล้วต้องรู้ชนิดสาย ⇒ ยังไม่ได้ราคา (ไม่ใช่ข้ามค่าสายไปเงียบ ๆ)',
-        x25.r.status !== 'priced' && x25.r.violations.some((v) => /ชนิดสาย/.test(v.message)), why(x25));
+      check('  TSJ-11 6x30+1.5M — เกินแล้วต้องรู้ชนิดสาย ⇒ ยังไม่ได้ราคา (ไม่ใช่ข้ามค่าสายไปเงียบ ๆ)',
+        x15.r.status !== 'priced' && x15.r.violations.some((v) => /ชนิดสาย/.test(v.message)), why(x15));
     }
   }
   if (Object.keys(book.models).some((k) => /^TS.-04$/.test(k))) {

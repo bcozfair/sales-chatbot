@@ -62,13 +62,14 @@ check('ส่งออกแล้วอัปกลับทันที = ไ�
   clean.ruleRows.slice(0, 5).map((r) => `${r.model} ${r.what}: ${r.was} → ${r.now}`).join(' · ') || '(ไม่มี)');
 
 // ── 1ข. เปลี่ยนนอกช่องราคา — ตัวเลขเท่าเดิมแต่ราคาที่คิดออกมาเปลี่ยน (รีวิว 2026-09-25) ────────────
-// จำลองแม่แบบที่ดาวน์โหลดก่อน r9: สายยังปัดขึ้น · TS-01 ยังไม่มีเกลียวมาตรฐาน ⇒ ต้องเห็นบนจอ ไม่ใช่ "เปลี่ยน 0"
+// จำลองแม่แบบเก่าที่วิธีปัดค่าสายต่างจากเล่ม (ช่วง r9–2026-10-01 สายปัดลง) · TS-01 ยังไม่มีเกลียวมาตรฐาน ⇒ ต้องเห็นบนจอ ไม่ใช่ "เปลี่ยน 0"
 {
   const old = JSON.parse(JSON.stringify(back)) as PriceBook;
   let touched = '';
+  let flipped: 'ceil' | 'floor' = 'floor';
   for (const m of Object.values(old.models)) {
-    const cab = m.adders.find((a) => a.round === 'floor');
-    if (cab && !touched) { cab.round = 'ceil'; touched = `${m.code} [${cab.id}]`; }
+    const cab = m.adders.find((a) => a.id === 'cable_over_1m');
+    if (cab && !touched) { flipped = (cab.round ?? 'ceil') === 'floor' ? 'ceil' : 'floor'; cab.round = flipped; touched = `${m.code} [${cab.id}]`; }
   }
   const withThread = Object.values(old.models).find((m) => m.axisDefaults?.thread);
   if (withThread) delete withThread.axisDefaults!.thread;
@@ -76,10 +77,10 @@ check('ส่งออกแล้วอัปกลับทันที = ไ�
   if (rateAdder) rateAdder.a.rate = rateAdder.a.rate! + 7;
   const dr = diffBooks(real, old);
   check('แม่แบบเก่าที่ต่างแค่วิธีปัด/ค่ามาตรฐานของแกน ⇒ ขึ้นใน "เปลี่ยนนอกช่องราคา"',
-    (!touched || dr.ruleRows.some((r) => /วิธีปัด/.test(r.what) && r.now === 'ปัดขึ้น'))
+    (!touched || dr.ruleRows.some((r) => /วิธีปัด/.test(r.what) && r.now === (flipped === 'ceil' ? 'ปัดขึ้น' : 'ปัดลง (นับเฉพาะหน่วยเต็ม)')))
       && (!withThread || dr.ruleRows.some((r) => r.model === withThread.code && /ค่ามาตรฐานของแกน thread/.test(r.what) && r.now === '—'))
       && dr.summary.rules === dr.ruleRows.length && dr.summary.rules > 0,
-    `${touched || '(ไม่มีกฎปัดลง)'} · ${withThread?.code ?? '(ไม่มีเกลียวมาตรฐาน)'} · ${dr.ruleRows.map((r) => `${r.model} ${r.what}: ${r.was} → ${r.now}`).join(' | ')}`);
+    `${touched || '(ไม่มีกฎค่าสาย TS)'} · ${withThread?.code ?? '(ไม่มีเกลียวมาตรฐาน)'} · ${dr.ruleRows.map((r) => `${r.model} ${r.what}: ${r.was} → ${r.now}`).join(' | ')}`);
   check('  สรุปรายรุ่นนับแถวนอกช่องราคาด้วย (ชิปรุ่นไม่ขึ้นว่าไม่มีอะไรเปลี่ยน)',
     !withThread || (dr.models.find((m) => m.model === withThread.code)?.rules ?? 0) > 0);
   check('อัตราเดียวของกฎต่อหน่วย (`rate` เช่นสาย BH 60/ม.) ⇒ ขึ้นเป็นราคาเปลี่ยน',

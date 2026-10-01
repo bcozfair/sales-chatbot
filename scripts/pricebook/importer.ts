@@ -739,6 +739,7 @@ async function applyNewRules(fromFile: PriceBook, opts: { apply: boolean; by: st
  * ครั้งแรกที่ใช้: ค่าสายส่วนที่เกินมาตรฐาน ปัดขึ้น → **ปัดลง** ทุกรุ่น (เจ้าของสั่ง 2026-09-25 —
  * *"สายยาวกว่า 1 M บวกเพิ่มตามราคาสาย" หมายถึง "ยาวกว่าสาย std เพิ่มขึ้นตั้งแต่ 1 M ขึ้นไป" · ความหมายแบบนี้ทุกรุ่น*)
  * ⇒ std 1 M: `+1.5M` ไม่คิด · `+2M`/`+2.5M` คิด 1 เมตร · std 1.5 M เริ่มคิดที่ 2.5 M
+ * ครั้งที่สอง: กลับเป็น **ปัดขึ้น** ทุกตระกูล (เจ้าของสั่ง 2026-10-01 — *"ถ้าเกินมาตรฐานไม่เต็มเมตรก็ปัดเป็นเมตรเต็มเลย"*) ⇒ `+1.5M` คิด 1 เมตร
  * แยกจาก `--extras-only` เพราะวิธีปัดเปลี่ยนราคาของรหัสที่ยาวเป็นเศษเมตร (คนละคำสัญญากับ "ไม่แตะราคา")
  */
 async function applyRounding(fromFile: PriceBook, opts: { apply: boolean; by: string | null }): Promise<number> {
@@ -781,7 +782,7 @@ async function applyRounding(fromFile: PriceBook, opts: { apply: boolean; by: st
   const revision = await commitBookChange({
     parent: state.revision,
     kind: 'model',
-    next: { ...state.book, models, edited: { at, by: opts.by ?? undefined, note: 'ปรับวิธีปัดเศษของกฎเดิมตามแมป (ค่าสายเกินมาตรฐานนับเฉพาะเมตรเต็ม — เจ้าของสั่ง 2026-09-25) — ไม่แตะตัวเลขราคา' } },
+    next: { ...state.book, models, edited: { at, by: opts.by ?? undefined, note: 'ปรับวิธีปัดเศษของกฎเดิมตามแมป (ค่าสายเกินมาตรฐาน เศษปัดขึ้นเป็นเมตรเต็มทุกตระกูล — เจ้าของสั่ง 2026-10-01) — ไม่แตะตัวเลขราคา' } },
     changed,
     by: opts.by,
   });

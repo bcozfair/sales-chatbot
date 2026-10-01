@@ -61,11 +61,11 @@ export function predText(p: Predicate | null | undefined, vocab: EditorView['voc
   return `${dimNice(p.dim, vocab)} ${parts.join(' และ ')}`.trim();
 }
 
-/** วิธีปัดของช่วง — ต้องบอกบนจอ เพราะสาย TS นับเฉพาะเมตรเต็ม ส่วนแกนคิดเศษเต็มช่วง (เจ้าของ 2026-09-25) */
+/** วิธีปัดของช่วง — ต้องบอกบนจอ · สาย TS เศษปัดขึ้นเป็นเมตรเต็ม (เจ้าของ 2026-10-01 · เดิมนับเฉพาะเมตรเต็ม) ส่วนแกนคิดเศษเต็มช่วง */
 export function roundTh(round: EditorAdder['round'], unit: string): string {
   if (round === 'floor') return unit.trim() === 'm' ? 'นับเฉพาะเมตรเต็ม' : 'นับเฉพาะช่วงเต็ม';
   if (round === 'exact') return 'คิดตามจริง ไม่ปัด';
-  return 'เศษคิดเต็มช่วง';
+  return unit.trim() === 'm' ? 'เศษปัดขึ้นเป็นเมตรเต็ม' : 'เศษคิดเต็มช่วง';
 }
 
 export function applyRound(n: number, round: EditorAdder['round']): number {
