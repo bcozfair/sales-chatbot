@@ -686,7 +686,13 @@ function cleanTsForm(raw: unknown): TsForm | undefined {
   return form;
 }
 
-pricingLabRouter.post('/quote', async (req: AdminRequest, res: Response) => {
+/**
+ * ตัวจัดการ "คิดราคาจากรหัส" — **export ออกไปให้ index.ts mount ซ้ำเป็น `POST /api/admin/webquote/products/price`**
+ * (ปุ่มคิดราคาของ "เพิ่มสินค้าใหม่" · docs/plan-local-products.md §13.5) ⇒ ตัวคิดราคามีตัวเดียว ราคาสองหน้าตรงกันเสมอ
+ * และโมดูลสินค้าเพิ่มเองไม่ต้อง import โฟลเดอร์นี้ (ถอด pricingLab = ลบบรรทัด mount นั้นอีก 1 บรรทัด)
+ * ⚠️ เส้นนั้นมี body parser ของตัวเองที่ index.ts — ตัวจัดการนี้ไม่ได้ parse เอง
+ */
+export async function pricingQuoteHandler(req: AdminRequest, res: Response) {
   // สองทางเข้า: พิมพ์รหัสมา (`code`) หรือกรอกช่องตามแคตตาล็อก (`form`) — ทางหลัง **เซิร์ฟเวอร์ประกอบรหัสเอง**
   // แล้วเดินทางเดียวกับรหัสที่พิมพ์ทุกขั้น ⇒ ราคาจากช่องกับราคาจากรหัสเดียวกันเป็นเลขเดียวกันเสมอ
   const form = req.body?.form !== undefined ? cleanForm(req.body.form) : undefined;
@@ -705,8 +711,10 @@ pricingLabRouter.post('/quote', async (req: AdminRequest, res: Response) => {
   if (!code) return res.status(400).json({ error: 'ยังไม่ได้ใส่รหัสสินค้า' });
   if (code.length > 200) return res.status(400).json({ error: 'รหัสยาวเกินไป' });
 
-  let book = await bookWithDb();
-  if (!book) return noBook(res);
+  // อ่านสถานะเล่มครั้งเดียว — ราคาที่คิดกับเลขเล่มที่ส่งกลับต้องมาจากเล่มเดียวกัน (ตัวเดียวกับ bookWithDb)
+  const state = await loadBookState();
+  if (!state) return noBook(res);
+  let book = withSubCodes(state.book, await listSubCodes());
 
   if (req.body?.draft) {
     const draft = clean(req.body.draft);
@@ -716,8 +724,11 @@ pricingLabRouter.post('/quote', async (req: AdminRequest, res: Response) => {
 
   const parsed = parseProductCode(code, book, picks);
   const outcome = parsed.cfg ? computePrice(parsed.cfg, book) : null;
-  res.json({ code, parsed, outcome });
-});
+  // `revision` = เล่มที่คิด — สินค้าเพิ่มเองเก็บไว้เป็นที่มาของราคา (price_book_revision)
+  res.json({ code, parsed, outcome, revision: state.revision });
+}
+
+pricingLabRouter.post('/quote', pricingQuoteHandler);
 
 /**
  * "ยังอ่านไม่ออก" ต่อชีต — นับสดจากรหัสสินค้าจริง (แทนรายการ census ที่นับครั้งเดียว · เจ้าของเคาะ 2026-09-29 ข้อ 3)
