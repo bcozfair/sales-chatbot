@@ -74,6 +74,11 @@ const GROUPS: { v: Group; t: string; cls: string }[] = [
   { v: 'matched', t: 'นำเข้าแล้ว', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
 ];
 
+/** ตัวกรอง = สี่กลุ่ม + "ทั้งหมด" เป็นตัวเลือกสุดท้าย (เจ้าของสั่ง 2026-10-02 รอบ 6 · ไว้ค้นข้ามกลุ่ม)
+ *  `all` ไม่ใช่กลุ่มของแถว จึงไม่อยู่ใน `GROUPS` — ป้ายสถานะยังเลือกจากสี่กลุ่มเสมอ */
+type Filter = Group | 'all';
+const FILTER_OPTIONS: { v: Filter; t: string }[] = [...GROUPS, { v: 'all', t: 'ทั้งหมด' }];
+
 const TAG = 'inline-block px-1.5 py-0.5 rounded-md border text-[10px] font-semibold whitespace-nowrap';
 
 /** ป้ายรหัส — สองแบบตามที่เจ้าของสั่ง + ป้ายเหลืองเมื่อ Odoo เคยไม่รับรหัสเดิม (คนละเรื่องกับความมั่นใจ) */
@@ -141,7 +146,7 @@ export const OdooProducts: React.FC<{ canManage?: boolean }> = ({ canManage = fa
   const [exporting, setExporting] = useState(false);
 
   const [q, setQ] = useState('');
-  const [filter, setFilter] = useState<Group>('pending');
+  const [filter, setFilter] = useState<Filter>('pending');
   const [page, setPage] = useState(1);
   const [size, setSize] = useState(50);
 
@@ -305,10 +310,10 @@ export const OdooProducts: React.FC<{ canManage?: boolean }> = ({ canManage = fa
           <select
             aria-label="สถานะ"
             value={filter}
-            onChange={(e) => { setFilter(e.target.value as Group); setPage(1); }}
+            onChange={(e) => { setFilter(e.target.value as Filter); setPage(1); }}
             className={inputCls}
           >
-            {GROUPS.map((o) => <option key={o.v} value={o.v}>{o.t}</option>)}
+            {FILTER_OPTIONS.map((o) => <option key={o.v} value={o.v}>{o.t}</option>)}
           </select>
         </div>
       </div>
@@ -331,8 +336,14 @@ export const OdooProducts: React.FC<{ canManage?: boolean }> = ({ canManage = fa
         ) : rows.length === 0 ? (
           <EmptyState
             icon={CheckCircle2}
-            title={q ? 'ไม่มีรายการที่ตรงกับคำค้นในกลุ่มนี้' : `ไม่มีสินค้าในกลุ่ม “${GROUPS.find((g) => g.v === filter)!.t}”`}
-            hint={q ? 'คำค้นหาเฉพาะในกลุ่มที่เลือก — ลองเปลี่ยนกลุ่ม หรือค้นด้วยรหัสสินค้าแทน model' : 'ลองเปลี่ยนกลุ่มที่ตัวกรองด้านบน'}
+            title={q ? 'ไม่มีรายการที่ตรงกับคำค้นในกลุ่มนี้'
+              : filter === 'all' ? 'ยังไม่มีสินค้าที่เพิ่มเอง'
+              : `ไม่มีสินค้าในกลุ่ม “${GROUPS.find((g) => g.v === filter)!.t}”`}
+            hint={q
+              ? (filter === 'all' ? 'ลองค้นด้วยรหัสสินค้าแทน model' : 'คำค้นหาเฉพาะในกลุ่มที่เลือก — เลือก “ทั้งหมด” เพื่อค้นทุกกลุ่ม')
+              : filter === 'all'
+                ? (canManage ? 'กด “เพิ่มสินค้าใหม่” ด้านบนเพื่อเริ่ม' : 'สินค้าที่เพิ่มจากหน้าขอใบเสนอราคาจะมาอยู่ที่นี่')
+                : 'ลองเปลี่ยนกลุ่มที่ตัวกรองด้านบน'}
           />
         ) : (
           <>
