@@ -111,6 +111,10 @@ user_id, message_id, type, content, reply_token, reply_content, meta (jsonb), cr
 `user_id` ขึ้นต้น `web:` = มาจากหน้าเว็บ · `type` ของเว็บขึ้นต้น `web_` เสมอ (`web_propose` ·
 `web_draft` · `web_confirm` · `web_revise`) และ `meta` เป็น NULL เฉพาะแถวของ LINE
 — รายละเอียดใน `docs/plan-web-quote-logging.md`
+`type` ขึ้นต้น `wh_` (`wh_postback` · `wh_text` · `wh_<ชนิด>`) = **แถวเติมของตัวบันทึก webhook ใน
+`index.ts`** (`services/webhookRecorder.ts` · ตั้งแต่ 2026-10-02) สำหรับ event ที่บอทตอบแล้วแต่
+`handleEvent` ไม่ได้เขียนแถวเอง · `meta` NULL · **ไม่เข้าประวัติที่ป้อน LLM** (`getRecentMessages`
+กรองด้วย `excludeWebhookFillSql()` ใน `db/messageKinds.ts`) — แผน: `docs/plan-message-log-merge.md`
 
 #### ตาราง Sync จาก Odoo
 

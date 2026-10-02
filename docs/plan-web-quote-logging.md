@@ -33,7 +33,7 @@
 | คำถาม | คำตอบ |
 | --- | --- |
 | ตารางเดียวหรือสองตาราง | **ตารางเดียว** — `messages` + คอลัมน์ `meta jsonb` ตัวเดียว |
-| `traffic_daily.messages` | **นับรวมแถวเว็บ** — ไม่แก้ `trafficDailyJob.ts` เลย |
+| `traffic_daily.messages` | **นับรวมแถวเว็บ** — ไม่แก้ `trafficDailyJob.ts` เลย · ตั้งแต่วัน deploy ตัวบันทึก webhook (2026-10-02 เป็นต้นไป) **รวมแถว `wh_*` ด้วย** (~+17% · ~21.6 แถว/วัน วัด 2026-10-02 · `docs/plan-message-log-merge.md`) |
 | ประวัติเว็บป้อน LLM | **ปิดไว้ก่อน** — เขียน log แต่ยังไม่ให้ `historyContext` ใช้ |
 
 ---
@@ -65,7 +65,9 @@ SELECT คอลัมน์นี้ ⇒ เส้นทางเดิม **�
 ### ความสมมาตรที่ทำให้ "1 แถว = 1 เหตุการณ์" ยังอยู่ครบ
 
 บน LINE ตอนเซลส์กดปุ่มเลือกบริษัทใน Flex picker → เป็น postback → **แถวใหม่ใน `messages`**
-(`handlers/lineHandler.ts`) การที่แอดมินเลือก dropdown แล้วกด "สร้างร่าง" คือการกระทำเดียวกันเป๊ะ
+(⚠️ ประโยคนี้ไม่จริงตอนเขียน — วัด 2026-10-02: handleEvent ไม่เขียนแถวให้การกดเลือกบริษัทเลย 0/22 ·
+เริ่มมีแถวจริงชนิด `wh_postback` ตั้งแต่วัน deploy ตัวบันทึก webhook ซึ่ง `index.ts` เขียนหลังงานจบ
+ไม่ใช่ lineHandler) การที่แอดมินเลือก dropdown แล้วกด "สร้างร่าง" คือการกระทำเดียวกันเป๊ะ
 ⇒ **เป็นแถวใหม่เหมือนกัน ไม่ต้อง UPDATE แถวเดิม** ตารางนี้จึงยังเป็น append-only
 ไม่มีเส้นทางไหนแก้แถวที่เขียนไปแล้ว
 
@@ -93,7 +95,7 @@ SELECT คอลัมน์นี้ ⇒ เส้นทางเดิม **�
 | --- | --- | --- |
 | `user_id` | `U` + hex 32 | `web:<admin_id>:<sp_user_id>` ← **สวิตช์ช่องทางที่มีอยู่แล้ว ห้ามเพิ่มคอลัมน์ซ้ำ** |
 | `message_id` | LINE messageId | `web_<step>_<epoch_ms>` — ธรรมเนียมเดียวกับ postback ที่ `lineHandler.ts` ใช้อยู่ |
-| `type` | `text` / `postback` / … | `web_propose` · `web_draft` · `web_confirm` · `web_revise` |
+| `type` | `text` / `postback` / … · แถวเติมของตัวบันทึก webhook `wh_postback` / `wh_text` / `wh_<ชนิด>` (ไม่เข้าประวัติ LLM) | `web_propose` · `web_draft` · `web_confirm` · `web_revise` |
 | `reply_token` | token | **NULL** — ไม่ใช่ "ยังไม่ได้ใส่" แต่คือ "ไม่มีและจะไม่มีวันมี" |
 
 | `type` | `content` | `reply_content` | `meta` |
@@ -208,8 +210,8 @@ retention ในเฟสนี้
 
 | จุด | ผล | ทำอะไรไป |
 | --- | --- | --- |
-| `scripts/logworker/trafficDailyJob.ts` `count(*) FROM messages` | ตัวเลขจะรวมแถวเว็บ | **ไม่แก้** ตามที่เจ้าของเคาะ — **ตั้งแต่ 2026-09-14 `traffic_daily.messages` หมายถึง "ทุกช่องทาง" ไม่ใช่ LINE อย่างเดียว** กราฟที่ดูเหมือนกระโดดตรงวันนั้นคือสาเหตุนี้ ไม่ใช่ทราฟฟิกเพิ่ม |
-| `services/salespersonPicker.ts` `max(m.created_at)` | **ไม่กระทบ** — join กับ `salesperson.user_id` ของคนจริง ไม่ใช่ `web:%` | ไม่ต้องทำ · **ข้อนี้พังทันทีถ้าเผลอ log ด้วย `sp_user_id` ตัวจริงแทนพร็อกซี** เซลส์จะดูเหมือนเพิ่งคุยใน LINE ทั้งที่ไม่ได้คุย |
+| `scripts/logworker/trafficDailyJob.ts` `count(*) FROM messages` | ตัวเลขจะรวมแถวเว็บ | **ไม่แก้** ตามที่เจ้าของเคาะ — **ตั้งแต่ 2026-09-14 `traffic_daily.messages` หมายถึง "ทุกช่องทาง" ไม่ใช่ LINE อย่างเดียว** กราฟที่ดูเหมือนกระโดดตรงวันนั้นคือสาเหตุนี้ ไม่ใช่ทราฟฟิกเพิ่ม · **กระโดดอีกรอบ (~+17%) วัน deploy ตัวบันทึก webhook** เพราะแถว `wh_*` (เจ้าของเคาะให้นับทุกแถว 2026-10-02) |
+| `services/salespersonPicker.ts` `max(m.created_at)` | **ไม่กระทบ** — join กับ `salesperson.user_id` ของคนจริง ไม่ใช่ `web:%` | ไม่ต้องทำ · **ข้อนี้พังทันทีถ้าเผลอ log ด้วย `sp_user_id` ตัวจริงแทนพร็อกซี** เซลส์จะดูเหมือนเพิ่งคุยใน LINE ทั้งที่ไม่ได้คุย · แถว `wh_*` (2026-10-02) เป็น user จริงและนับเป็น "ใช้งานล่าสุด" โดยตั้งใจ (กดปุ่ม = ใช้งาน · จำลองย้อน 9 วัน ตัวเลือกสลับ 0/5) |
 | eval 6 ตัวที่กรอง `type='text'` | **ไม่กระทบ** เพราะ prefix `web_` | ยืนยันด้วย `evalCustomerSearch` = 53/56 เท่าเดิม |
 | `scripts/diag/webQuoteSmoke.ts` · `lineFlexParity.ts` | ลบ `messages` ของ user ทดสอบอยู่แล้ว | teardown รองรับล่วงหน้าพอดี |
 | `npm run db:dump` | โตขึ้นตามขนาด jsonb | ไม่ต้องทำ |

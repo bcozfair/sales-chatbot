@@ -449,6 +449,8 @@ docker compose exec -T db psql -U "$PG_USER" -d "$PG_DATABASE" -c "SELECT …"  
 วัดรายตัวด้วย grep ข้างบนเมื่อ 2026-09-15 ได้ 0 ทั้งสี่ตัว ⇒ รันบน PMSV ได้ (`backupHealth.mjs` ไม่แตะ DB เลย):
 `webDecisionParity.ts` · `salespersonDedupeSmoke.ts` · `migrationsAudit.mjs` · `backupHealth.mjs`
 · `customerCacheMemo.ts` (2026-09-28 · grep ได้ 0 · SELECT อย่างเดียว แต่เขียนไฟล์สำเนา `services/__cacheMemo*.gen.ts` แล้วลบเอง)
+· `webhookRecorder.ts` (2026-10-02 · **ตารางชั่วคราว + ROLLBACK** แบบ `pricingDbRoundtrip` — เขียนแต่ `webhook_events`/`messages`
+  ชั่วคราวที่บังของจริง ข้อ 0 ยืนยันก่อนเขียน · ส่วนที่อ่านฐานจริงเป็น SELECT อย่างเดียว ⇒ รันบน PMSV ได้ · **ห้ามแก้เป็น `COMMIT`**)
 
 **`scripts/dev/` คือของที่ห้ามรันบน PMSV ทั้งโฟลเดอร์** — ต่างจาก `scripts/diag/` ตรงที่มันตั้งใจ
 เขียนข้อมูลปลอมลงฐานและ commit เพื่อ **จำลองสถานการณ์** (`seedPhaseH.ts` เพิ่ม/ลบแถวใน
@@ -593,6 +595,7 @@ TS ไต่ `node_modules` ขึ้นไปตามลำดับ ⇒ `<ท
 | ชั้นตัดสินใจ "ต้องให้คนเลือกไหม" | `npm run diag:web-decision` (`--ai` = pipeline เต็ม) — กฎ auto-select มี **สองสำเนาโดยตั้งใจ** (`quotationService.ts` ของ LINE ห้ามแตะ · `decideCustomerSelection()` ของเว็บ) ด่านนี้อ่านซอร์สมาเทียบให้ว่ายังตรงกัน |
 | สินค้าพ่วง / กฎบล็อก | `npm run diag:optional-pair` · `diag:block-rule` · `diag:block-parity` |
 | คิว / งบเวลาตอบ | `npm run diag:queue-sim` · `diag:load-probe` · `diag:abort-check` · `diag:shutdown-check` |
+| ตัวบันทึก webhook (`services/webhookRecorder.ts` · `createRecordingClient`) · แถวเติม `wh_*` ใน `messages` · `getRecentMessages` / `excludeWebhookFillSql` · คอลัมน์บันทึกผลของ `webhook_events` | `npm run diag:webhook-recorder` (ตารางชั่วคราว + ROLLBACK · ข้อที่ห้ามล้ม: **ประวัติที่ป้อน LLM เท่าเดิมทุกแถว** และตัวจดคืนค่า/โยน error ตัวเดิม `===`) **บวก `diag:redelivery`** · `handlers/lineHandler.ts` ต้องไม่มีบรรทัดโค้ดเปลี่ยน (`-- --frozen-handler`) |
 | PDF | `npm run diag:pdf-render` · `diag:pdf-cache` |
 | ค่าขนส่ง · api_logs · sync API · `APP_URL` | `diag:shipping-fee` · `diag:api-log` · `diag:sync-api` · `diag:app-url` |
 | ระบบสำรองฐานข้อมูลอัตโนมัติ | `npm run diag:backup` (`-- --deep` = เปิด TOC ของไฟล์ล่าสุดจริง) — **รันบน host ไม่ใช่ในกล่อง** (crontab/`backup/`/ดิสก์ที่ต้องตรวจอยู่บน host ทั้งหมด) |

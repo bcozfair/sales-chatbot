@@ -29,6 +29,7 @@ import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { pool } from '../../config/db.js';
+import { excludeWebhookFillSql } from '../../db/messageKinds.js';
 
 const ARGV = process.argv.slice(2);
 function argNum(name: string, fallback: number): number {
@@ -132,7 +133,7 @@ export function normModel(s: string): string {
 async function fetchHistory(userId: string, before: string): Promise<CorpusHistoryRow[]> {
   const { rows } = await pool.query(
     `SELECT content, reply_content, created_at FROM messages
-      WHERE user_id = $1 AND created_at < $2
+      WHERE user_id = $1 AND created_at < $2 AND ${excludeWebhookFillSql()}
       ORDER BY created_at DESC LIMIT 10`, [userId, before]);
   const baseMs = new Date(before).getTime();
   return rows.map((r: any) => ({

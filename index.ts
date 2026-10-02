@@ -136,6 +136,10 @@ import {
   type IncomingEvent,
 } from './db/webhookEventsRepo.js';
 import { decideRedelivery, lostCommandMessage } from './services/redeliveryPolicy.js';
+import { createRecordingClient, type RecordingClient } from './services/chatChannel.js';
+import {
+  noteEventText, finishEventRecord, noteRedeliveryReply, flushWebhookRecords,
+} from './services/webhookRecorder.js';
 import { getJwtSecret } from './config/jwt.js';
 import { getAppUrl } from './config/appUrl.js';
 import { adminAuthMiddleware, requireRole, requireCapability, type Role, type AdminIdentity } from './config/auth.js';
@@ -370,6 +374,9 @@ function toIncomingEvent(event: any, receivedAtMs: number, requestId: string | n
     receivedAtMs,
     replyToken: event?.replyToken ?? null,
     requestId,
+    // ห้ามเรียกตัวช่วยใด ๆ ตรงนี้ — ฟังก์ชันนี้รันใน forEach นอก try ของ /callback
+    messageText: event?.type === 'message' && event?.message?.type === 'text'
+      && typeof event?.message?.text === 'string' ? event.message.text : null,
   };
 }
 
@@ -411,6 +418,8 @@ async function handleRedelivery(
     ? await recordIncomingEvent(receipt)
     : { known: false, isFirstSight: false, previousOutcome: null, deliveryCount: 0 };
   const decision = decideRedelivery(seen);
+  // ข้อความดิบลงใบรับ (เขียนครั้งเดียว — ถ้ารอบแรกเคยมาถึงจะมีค่าอยู่แล้ว) · ไม่ await
+  if (receipt?.messageText && seen.known) noteEventText(receipt.webhookEventId, receipt.messageText);
 
   if (decision.action === 'skip') {
     if (decision.reason === 'already_replied') {
@@ -430,11 +439,14 @@ async function handleRedelivery(
     : `รอบแรกจบแบบ ${seen.previousOutcome ?? 'ไม่ทราบผล'}`;
 
   // ไม่ทำงานให้ แค่แจ้งเซลส์ให้สั่งใหม่ · พิมพ์บรรทัดเดียว "หลัง" รู้ผลการแจ้ง
+  let sentText: string | null = null;   // ข้อความที่แจ้งสำเร็จ — ไปเป็นคำตอบของแถวเติมใน messages
   try {
+    const text = lostCommandMessage(event);
     await lineClient.replyMessage({
       replyToken: event.replyToken,
-      messages: [{ type: 'text', text: lostCommandMessage(event) }],
+      messages: [{ type: 'text', text }],
     });
+    sentText = text;
     console.warn(`[queue] ⚠️ LINE ส่งซ้ำ ${reason} แจ้งเซลส์ให้ส่งใหม่แล้ว · ${short}`);
     if (receipt) await markRedeliveryAction(receipt.webhookEventId, 'warned');
   } catch (err: any) {
@@ -445,6 +457,8 @@ async function handleRedelivery(
       `ส่งเมื่อ ${age} วิก่อน${receipt?.postbackData ? ` data=${receipt.postbackData}` : ''} — ${msg}`);
     if (receipt) await markRedeliveryAction(receipt.webhookEventId, 'warn_failed', msg);
   }
+  // กลุ่ม B แท้เท่านั้น — did_not_finish รอบแรกเคยเข้าคิว แถวเติมเขียนเองหลังงานรอบนั้นจบ
+  if (decision.reason === 'never_arrived') noteRedeliveryReply({ event, receivedAt, sentText });
 }
 
 // --- Webhook สำหรับรับข้อความและเหตุการณ์จาก LINE ---
@@ -489,6 +503,8 @@ app.post('/callback', line.middleware(lineConfig), (req: any, res: any) => {
       // ใบรับของ event ปกติ — ไม่ await ตรงนี้เพื่อไม่ให้ DB ถ่วงการเข้าคิว แต่เก็บ promise ไว้
       // เพราะตอนจบงานต้องรอให้ INSERT ลงก่อนจึงจะ UPDATE ผลทับได้ (งานที่จบใน ~200ms ชนะ INSERT ได้จริง)
       const receiptWritten = receipt ? recordIncomingEvent(receipt) : null;
+      // ข้อความดิบลงใบรับ — รอ INSERT ข้างบนก่อน UPDATE · วิ่งข้างหลัง ไม่ถ่วงการเข้าคิว
+      if (receipt?.messageText && receiptWritten) noteEventText(receipt.webhookEventId, receipt.messageText, receiptWritten);
 
       webhookQueue.push(queueKey, async () => {
         const { waited, remaining, expired } = replyBudget(receivedAt, Date.now());
@@ -518,6 +534,11 @@ app.post('/callback', line.middleware(lineConfig), (req: any, res: any) => {
         }
         if (waited > 5_000) console.warn(`[queue] รอคิวนาน ${waited}ms ${who}`);
 
+        // ตัวจดคำตอบ (services/chatChannel.ts) — ส่งผ่าน lineClient ตัวเดิมทุกบิต แค่จดว่าส่งอะไร/สำเร็จไหม
+        // สร้างไม่ได้ = null ⇒ handleEvent ได้ client undefined = lineClient ตัวเดิม (ทางถอย)
+        let rec: RecordingClient | null = null;
+        try { rec = createRecordingClient(lineClient); } catch { rec = null; }
+
         const startedAt = Date.now();
         // ผลลัพธ์ที่ finally ต้องใช้บันทึกลง api_logs — ตั้งต้นเป็น failed เพื่อให้กรณีที่
         // runWithDeadline โยน error ออกมาเองโดยไม่คืน outcome ถูกนับเป็นล้มเหลว ไม่ใช่หายเงียบ
@@ -534,12 +555,17 @@ app.post('/callback', line.middleware(lineConfig), (req: any, res: any) => {
             remaining,
             // signal = ธงยกเลิกของ C.3: Promise.race ตัดได้แค่ "การรอ" ไม่ได้หยุดงานที่รันอยู่
             // ธงนี้คือช่องทางเดียวที่จะบอก handler ว่าอย่าเริ่มขั้นตอนหนักขั้นถัดไป
-            (signal) => handleEvent(event, {
-              // ส่งเส้นตายให้ handler ถามงบเองได้ (C.2 ใช้ตัดสินใจว่าจะ retry extraction อีกรอบไหม)
-              // ใช้ receivedAt เป็นฐานเหมือนกัน ⇒ handler กับคิวมองงบก้อนเดียวกัน ไม่เพี้ยนจากกัน
-              deadlineAt: receivedAt + BUDGET_MS,
-              signal
-            }),
+            (signal) => {
+              const p = handleEvent(event, {
+                // ส่งเส้นตายให้ handler ถามงบเองได้ (C.2 ใช้ตัดสินใจว่าจะ retry extraction อีกรอบไหม)
+                // ใช้ receivedAt เป็นฐานเหมือนกัน ⇒ handler กับคิวมองงบก้อนเดียวกัน ไม่เพี้ยนจากกัน
+                deadlineAt: receivedAt + BUDGET_MS,
+                signal,
+                client: rec?.client,
+              });
+              // watch คืน p ตัวเดิม (===) ⇒ race ใน runWithDeadline เหมือนเดิมทุกประการ
+              return rec ? rec.watch(p) : p;
+            },
             (e: any) => console.error(`[queue] งานที่ถูก abort พังหลังหมดเวลา ${who}:`, e?.message || e)
           ));
 
@@ -597,6 +623,8 @@ app.post('/callback', line.middleware(lineConfig), (req: any, res: any) => {
             await receiptWritten.catch(() => {});
             await markEventOutcome(receipt.webhookEventId, outcome);
           }
+          // ผลการตอบ + แถวเติมใน messages — ไม่ await: รองานผีได้ถึง 120 วิ ต้องไม่ถือสล็อตคิว
+          finishEventRecord({ event, webhookEventId: receipt?.webhookEventId ?? null, rec, receivedAt });
         }
       });
     });
@@ -5715,6 +5743,10 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     await flushApiLogs().catch((e: any) =>
       console.error('[api-log] flush ตอนปิดล้มเหลว:', e?.message || e)
     );
+    // 3.6 บันทึกผลการตอบ/แถวเติมที่ยังวิ่งอยู่ (services/webhookRecorder.ts) — ไม่เกิน 3 วิ
+    //     และต้องเหลือเวลาก่อน hardExit 55 วิ · ที่เหลือหายตอนปิด (งานผีที่รอนานกว่านั้นอยู่แล้ว)
+    const recLeft = await flushWebhookRecords(Math.max(0, Math.min(3_000, 53_000 - (Date.now() - t0))));
+    if (recLeft > 0) console.warn(`[shutdown] บันทึกผลการตอบค้าง ${recLeft} รายการ — ไม่ได้เขียนลงฐาน`);
 
     // 4. ปิด Chrome ที่ pdfGenerator ใช้ร่วมกัน ไม่งั้นจะค้างเป็น process กำพร้าทุกครั้งที่ restart
     //    (ต้องทำ "หลัง" drain — งานที่กำลังออก PDF อยู่ยังต้องใช้ browser ตัวนี้)

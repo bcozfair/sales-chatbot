@@ -22,6 +22,8 @@
 -- ถ้าต่างมากกว่านั้น แปลว่ามี migration ที่ยังไม่ถูกยุบเข้าไฟล์นี้
 -- 2026-10-02: ยุบ 2026-10-01_01 (local_products + products.source) — ตรวจเฉพาะ products / local_products / sequence
 --   ด้วย pg_dump -t เทียบฐานจริง ตรงทุกบรรทัด (ไม่ได้รัน diff ทั้งไฟล์ — รอบเต็มล่าสุดยังเป็นของ 2026-08-25)
+-- 2026-10-02: ยุบ 2026-10-02_01 (webhook_events + 4 คอลัมน์ + webhook_events_reply_status_check)
+--   เขียนตามรูปที่ pg_dump พ่น ยังไม่ได้เทียบฐานจริง (migration ยังไม่ได้รัน ณ วันที่ยุบ)
 -- ตรวจล่าสุด 2026-08-25 (ผ่าน — ยุบ 2026-08-25_01 นิยาม last_order_at ใหม่ + 2026-08-25_02 ปลดโหมด warn เข้าไปแล้ว)
 -- ก่อนหน้า 2026-08-21 (รอบนั้นพบว่าขาด quotation_counters, sync_settings, index 6 ตัว
 -- และ role 'subadmin' — ยุบเข้าครบแล้ว)
@@ -2115,7 +2117,8 @@ CREATE INDEX pricing_model_history_code_rev_idx ON public.pricing_model_history 
 -- Name: webhook_events; Type: TABLE; Schema: public; Owner: -
 --
 -- ใบรับของ webhook ทุก event ที่ LINE ยิงเข้ามา — ตัวกันซ้ำ + หลักฐานสอบกลับ
--- ที่มา: migrations/changes/2026-09-23_02_webhook_events.sql · docs/line-webhook-redelivery.md
+-- ที่มา: migrations/changes/2026-09-23_02_webhook_events.sql · 2026-10-02_01_webhook_events_reply.sql
+--   · docs/line-webhook-redelivery.md
 
 CREATE TABLE public.webhook_events (
     webhook_event_id text NOT NULL,
@@ -2136,8 +2139,13 @@ CREATE TABLE public.webhook_events (
     outcome text,
     redelivery_action text,
     note text,
+    message_text text,
+    reply_status text,
+    reply_error text,
+    reply_preview text,
     CONSTRAINT webhook_events_outcome_check CHECK ((outcome = ANY (ARRAY['replied'::text, 'timeout'::text, 'dropped'::text, 'failed'::text]))),
-    CONSTRAINT webhook_events_redelivery_action_check CHECK ((redelivery_action = ANY (ARRAY['skipped_duplicate'::text, 'warned'::text, 'warn_failed'::text])))
+    CONSTRAINT webhook_events_redelivery_action_check CHECK ((redelivery_action = ANY (ARRAY['skipped_duplicate'::text, 'warned'::text, 'warn_failed'::text]))),
+    CONSTRAINT webhook_events_reply_status_check CHECK ((reply_status = ANY (ARRAY['sent'::text, 'failed'::text, 'pending'::text, 'none'::text])))
 );
 
 

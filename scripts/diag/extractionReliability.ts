@@ -16,6 +16,7 @@
 //     เล็กน้อย ⇒ latency ที่วัดได้เป็น "ขอบล่าง" ของจริงจะช้ากว่านี้นิดหน่อยเมื่อมีประวัติยาว
 // ─────────────────────────────────────────────────────────────────────────────
 import { pool } from '../../config/db.js';
+import { excludeWebhookFillSql } from '../../db/messageKinds.js';
 import { createChatCompletion, LLM_MODEL } from '../../config/clients.js';
 import { buildExtractionPrompt, parseAiJson } from './extractionCore.js';
 
@@ -116,7 +117,7 @@ async function main() {
     `SELECT id, content, created_at
        FROM messages m
       WHERE m.type = 'text' AND m.content IS NOT NULL AND btrim(m.content) <> ''
-        AND NOT EXISTS (SELECT 1 FROM messages b WHERE b.reply_content = m.content)
+        AND NOT EXISTS (SELECT 1 FROM messages b WHERE b.reply_content = m.content AND ${excludeWebhookFillSql('b')})
       ORDER BY m.created_at DESC
       LIMIT $1`,
     [MSG_LIMIT]

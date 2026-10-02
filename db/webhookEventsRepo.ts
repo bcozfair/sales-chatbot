@@ -17,7 +17,7 @@
  * DB ล่มหรือยังไม่ได้รัน migration ต้องแปลว่า "ไม่รู้" แล้วให้ผู้เรียกตกกลับไปพฤติกรรมเดิม
  * ไม่ใช่ทำให้ webhook ทั้งเส้นพัง
  */
-import { pool } from '../config/db.js';
+import { pool, type DbExecutor } from '../config/db.js';
 
 function logErr(fn: string, err: any): void {
   console.error(`[webhookEvents.${fn}]`, err?.message || err);
@@ -40,6 +40,12 @@ export interface IncomingEvent {
   receivedAtMs: number;
   replyToken?: string | null;
   requestId?: string | null;
+  /**
+   * ข้อความดิบของ event ชนิด text — **`recordIncomingEvent` ไม่อ่านช่องนี้โดยตั้งใจ**
+   * ถ้าใส่ใน INSERT ใบรับ แล้วฐานยังไม่ได้รัน migration 2026-10-02_01 ใบรับจะล้มทั้งแถว
+   * ⇒ การตัดสินการส่งซ้ำเปลี่ยนไป · เขียนแยกด้วย `recordEventText` ซึ่งพักเองเมื่อล้ม
+   */
+  messageText?: string | null;
 }
 
 export interface ReceiptResult {
@@ -141,5 +147,79 @@ export async function markRedeliveryAction(
     );
   } catch (err) {
     logErr('markRedeliveryAction', err);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  คอลัมน์บันทึกผล (migration 2026-10-02_01 · docs/plan-message-log-merge.md เฟส 1)
+//
+//  ข้อมูลประกอบการสอบกลับ ไม่ใช่ตัวตัดสินอะไร — `reply_status` **ไม่ใช่** `outcome`
+//  และห้ามใช้ตัดสินการส่งซ้ำ · ทั้งสองฟังก์ชันเขียนครั้งเดียวต่อแถว (`IS NULL` ใน WHERE)
+//
+//  ตัวพักร่วม: error ใด ๆ (ส่วนใหญ่คือฐานยังไม่ได้รัน migration) ⇒ หยุดเขียนสองคอลัมน์ชุดนี้
+//  10 นาที พิมพ์บรรทัดเดียว — ไม่ให้ log ท่วมด้วย error เดิมทุก event และไม่ถ่วง pool
+//  ตัวพักไม่แตะสามฟังก์ชันข้างบน (ใบรับ/ผล/การส่งซ้ำ ยังทำงานตามเดิมทุกกรณี)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type ReplyStatus = 'sent' | 'failed' | 'pending' | 'none';
+
+const REPLY_COLUMNS_PAUSE_MS = 10 * 60_000;
+let replyColumnsPausedUntil = 0;
+
+function pauseReplyColumns(fn: string, err: unknown): void {
+  replyColumnsPausedUntil = Date.now() + REPLY_COLUMNS_PAUSE_MS;
+  const msg = err instanceof Error ? err.message : String(err);
+  console.error(`[webhookEvents.${fn}] พักเขียนคอลัมน์บันทึกผล 10 นาที — ${msg}`);
+}
+
+/** Postgres เก็บ NUL ใน text ไม่ได้ (ทั้งแถวตก) · ตัดความยาวโดยไม่ทิ้งครึ่งตัวของ surrogate pair */
+function clipText(s: string | null | undefined, max: number): string | null {
+  if (typeof s !== 'string') return null;
+  let out = s.replace(/\u0000/g, '');
+  if (out.length > max) {
+    out = out.slice(0, max);
+    if (/[\uD800-\uDBFF]$/.test(out)) out = out.slice(0, -1);
+  }
+  return out;
+}
+
+const MESSAGE_TEXT_MAX = 5000;
+const REPLY_ERROR_MAX = 1000;
+export const REPLY_PREVIEW_MAX = 1000;
+
+/** ข้อความดิบของ event text — ผู้เรียกต้องรอให้ใบรับ INSERT เสร็จก่อน ไม่งั้น UPDATE ไม่โดนแถว */
+export async function recordEventText(
+  webhookEventId: string,
+  text: string | null | undefined,
+  db: DbExecutor = pool
+): Promise<void> {
+  try {
+    if (Date.now() < replyColumnsPausedUntil) return;
+    const v = clipText(text, MESSAGE_TEXT_MAX);
+    if (v === null) return;
+    await db.query(
+      `UPDATE webhook_events SET message_text = $2 WHERE webhook_event_id = $1 AND message_text IS NULL`,
+      [webhookEventId, v]
+    );
+  } catch (err) {
+    pauseReplyColumns('recordEventText', err);
+  }
+}
+
+/** ผลของการตอบกลับ — เรียกหลังงานจบ (หรือครบเพดานรอ) ครั้งเดียวต่อ event */
+export async function recordReplyOutcome(
+  webhookEventId: string,
+  r: { status: ReplyStatus; error?: string | null; preview?: string | null },
+  db: DbExecutor = pool
+): Promise<void> {
+  try {
+    if (Date.now() < replyColumnsPausedUntil) return;
+    await db.query(
+      `UPDATE webhook_events SET reply_status = $2, reply_error = $3, reply_preview = $4
+        WHERE webhook_event_id = $1 AND reply_status IS NULL`,
+      [webhookEventId, r.status, clipText(r.error, REPLY_ERROR_MAX), clipText(r.preview, REPLY_PREVIEW_MAX)]
+    );
+  } catch (err) {
+    pauseReplyColumns('recordReplyOutcome', err);
   }
 }

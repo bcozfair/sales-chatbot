@@ -8,6 +8,7 @@
  *
  * ⚠️ ด่านนี้ **ไม่เขียนฐานข้อมูลเลย** รันบน prod ได้ · ข้อ 1–3 เป็นฟังก์ชันบริสุทธิ์
  *    ข้อ 4–6 อ่านซอร์สมาเทียบ · ข้อ 7 เป็น SELECT อย่างเดียว และข้ามเองถ้าต่อฐานไม่ได้
+ *    (คอลัมน์บันทึกผลของ 2026-10-02_01 ยังไม่ได้รัน = ⏭️ ไม่นับล้ม — โค้ดพักเขียนเอง)
  *
  * ที่มา: docs/line-webhook-redelivery.md
  */
@@ -105,9 +106,16 @@ console.log('\n🔁 ด่านตรวจ: event ที่ LINE ส่งซ�
     'last_delay_ms', 'reply_token', 'request_id', 'handled_at', 'outcome', 'redelivery_action', 'note'];
   const missingInSql  = needed.filter(c => !sql.includes(c));
   const usedButNotDeclared = needed.filter(c => repo.includes(c) && !sql.includes(c));
-  check(6, missingInSql.length === 0 && usedButNotDeclared.length === 0,
-    `คอลัมน์ที่โค้ดใช้มีครบใน migration ทั้ง ${needed.length} ช่อง`,
-    `คอลัมน์หายจาก migration: ${[...new Set([...missingInSql, ...usedButNotDeclared])].join(', ')}`);
+  // คอลัมน์บันทึกผล (2026-10-02_01) — ต้องอยู่ทั้งไฟล์ migration ใหม่และ schema.sql
+  const replySql = fs.readFileSync(path.join(ROOT, 'migrations/changes/2026-10-02_01_webhook_events_reply.sql'), 'utf8');
+  const schema = fs.readFileSync(path.join(ROOT, 'migrations/schema.sql'), 'utf8');
+  const schemaWe = schema.slice(schema.indexOf('CREATE TABLE public.webhook_events'));
+  const schemaWeBody = schemaWe.slice(0, schemaWe.indexOf(');'));
+  const replyCols = ['message_text', 'reply_status', 'reply_error', 'reply_preview'];
+  const replyMissing = replyCols.filter(c => !replySql.includes(c) || !schemaWeBody.includes(c) || !repo.includes(c));
+  check(6, missingInSql.length === 0 && usedButNotDeclared.length === 0 && replyMissing.length === 0,
+    `คอลัมน์ที่โค้ดใช้มีครบใน migration ทั้ง ${needed.length + replyCols.length} ช่อง (รวมคอลัมน์บันทึกผลใน schema.sql)`,
+    `คอลัมน์หายจาก migration: ${[...new Set([...missingInSql, ...usedButNotDeclared, ...replyMissing])].join(', ')}`);
 }
 
 // ── 7. ตารางจริง (SELECT อย่างเดียว · ข้ามเองถ้าต่อฐานไม่ได้) ────────────────
@@ -127,6 +135,10 @@ console.log('\n🔁 ด่านตรวจ: event ที่ LINE ส่งซ�
       check(n, miss.length === 0,
         `ตาราง webhook_events บนฐานจริงมีครบ (${have.size} คอลัมน์)`,
         `ตารางจริงขาดคอลัมน์: ${miss.join(', ')}`);
+      const replyMiss = ['message_text', 'reply_status', 'reply_error', 'reply_preview'].filter(c => !have.has(c));
+      if (replyMiss.length > 0) {
+        console.log(`  ⏭️  ${n}. ยังไม่ได้รัน 2026-10-02_01 — โค้ดพักเขียนเอง (ขาด ${replyMiss.join(', ')})`);
+      }
     }
     await pool.end();
   } catch (e: any) {

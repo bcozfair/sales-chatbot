@@ -10,6 +10,7 @@
  */
 import { pool, withTransaction, type DbExecutor } from '../config/db.js';
 import { companyKeysSql, matchesKeysSql } from './companyIdentity.js';
+import { excludeWebhookFillSql, isWebhookFillType } from './messageKinds.js';
 
 function logErr(fn: string, err: any): void {
   console.error(`[repo.${fn}]`, err?.message || err);
@@ -480,6 +481,46 @@ export async function insertMessage(msg: {
   } catch (err) { logErr('insertMessage', err); return null; }
 }
 
+/**
+ * แถวเติมของตัวบันทึก webhook (services/webhookRecorder.ts) — event ที่ handleEvent ตอบไปแล้ว
+ * แต่ไม่ได้เขียนแถวเอง · type ต้องขึ้นต้นด้วย prefix ของ db/messageKinds.ts (ไม่ใช่ = ปฏิเสธ)
+ * เพราะ prefix นั้นคือสิ่งเดียวที่กันแถวพวกนี้ออกจากประวัติที่ป้อน LLM
+ *
+ * กันซ้ำด้วย NOT EXISTS คำสั่งเดียว: ผู้เรียกเขียน **หลัง** handleEvent จบแล้วเท่านั้น และทุกจุดที่
+ * handleEvent เรียก insertMessage ถูก await ก่อนจบ ⇒ ถ้ามีแถวของ handler มันลงฐานไปก่อนแล้วเสมอ
+ * (ไม่ทำ UNIQUE บน reply_token เพราะปุ่มยืนยันชุด PM+THT เขียนสองแถวต่อ token โดยชอบ)
+ *
+ * ไม่มี meta (แถวจาก LINE ต้อง NULL — ตัวแยกช่องทางของด่าน web-quote) · created_at = เวลารับ webhook
+ * คืน id ของแถวใหม่ · null = ไม่เขียน (มีแถวอยู่แล้ว / ถูกปฏิเสธ / ล้ม) — **ห้าม throw**
+ * ตัด NUL ด้วยตัวช่วยของตัวเอง ไม่ใช้ของ insertMessage (ของเดิมห้ามแตะ)
+ */
+export interface WebhookFillRow {
+  /** เวลารับ webhook (ms) → created_at */
+  created_at_ms: number; user_id: string; message_id: string; type: string;
+  content: string; reply_token: string; reply_content: string;
+}
+
+export async function insertWebhookFillMessage(row: WebhookFillRow, db: DbExecutor = pool): Promise<number | null> {
+  const stripNul = (s: string) => s.replace(/\u0000/g, '');
+  try {
+    if (!isWebhookFillType(row.type)) {
+      logErr('insertWebhookFillMessage', `ปฏิเสธ type="${row.type}" — แถวเติมต้องขึ้นต้นด้วย prefix ของ messageKinds`);
+      return null;
+    }
+    const { rows } = await db.query(
+      `INSERT INTO messages (created_at, user_id, message_id, type, content, reply_token, reply_content)
+       SELECT to_timestamp($7::double precision / 1000), $1::text, $2::text, $3::text, $4::text, $5::text, $6::text
+        WHERE NOT EXISTS (SELECT 1 FROM messages
+                           WHERE user_id = $1::text
+                             AND created_at >= to_timestamp($7::double precision / 1000) - interval '10 minutes'
+                             AND reply_token = $5::text)
+       RETURNING id`,
+      [row.user_id, row.message_id, row.type, stripNul(row.content), row.reply_token,
+       stripNul(row.reply_content), row.created_at_ms]);
+    return rows[0]?.id != null ? Number(rows[0].id) : null;
+  } catch (err) { logErr('insertWebhookFillMessage', err); return null; }
+}
+
 /** meta ของแถวเดียวตาม id — ใช้ตอนคำนวณ chosen_rank ของ web_draft (§5) */
 export async function getMessageMetaById(id: number): Promise<any | null> {
   try {
@@ -488,12 +529,16 @@ export async function getMessageMetaById(id: number): Promise<any | null> {
   } catch (err) { logErr('getMessageMetaById', err); return null; }
 }
 
-/** ประวัติแชทล่าสุดของ user (ใหม่→เก่า) สำหรับ AI context */
-export async function getRecentMessages(userId: string, limit = 10): Promise<any[]> {
+/**
+ * ประวัติแชทล่าสุดของ user (ใหม่→เก่า) สำหรับ AI context
+ * ไม่รวมแถวเติมของตัวบันทึก webhook (db/messageKinds.ts) — บอทต้องเห็นประวัติชุดเดิม 100%
+ * (เจ้าของสั่ง 2026-10-02) · `db` มีไว้ให้ด่านส่งตารางชั่วคราวเข้ามา
+ */
+export async function getRecentMessages(userId: string, limit = 10, db: DbExecutor = pool): Promise<any[]> {
   try {
-    const { rows } = await pool.query(
+    const { rows } = await db.query(
       `SELECT content, reply_content, created_at FROM messages
-       WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2`, [userId, limit]);
+       WHERE user_id = $1 AND ${excludeWebhookFillSql()} ORDER BY created_at DESC LIMIT $2`, [userId, limit]);
     return rows;
   } catch (err) { logErr('getRecentMessages', err); return []; }
 }

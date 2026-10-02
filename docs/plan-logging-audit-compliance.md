@@ -412,7 +412,11 @@ app.use('/api/admin/logs', adminAuthMiddleware, requireRole('admin'), logsRouter
 * ไม่เปลี่ยน logging driver ของ docker — ต้อง recreate คอนเทนเนอร์ = downtime
 * ไม่ mount docker socket เข้าคอนเทนเนอร์ — เท่ากับให้สิทธิ์ root
 * ไม่เก็บ request/response body ทั้งก้อน (คงการตัดสินใจเดิมของ `api_logs`)
-* ไม่เก็บเนื้อหาแชท LINE เพิ่ม — `messages` มีอยู่แล้ว
+* ~~ไม่เก็บเนื้อหาแชท LINE เพิ่ม — `messages` มีอยู่แล้ว~~ **เปลี่ยนตามคำสั่งเจ้าของ 2026-10-02:** เก็บเพิ่ม
+  (`webhook_events.message_text` / `reply_preview` + แถว `wh_*` ใน `messages`) · เนื้อแชทดูได้เฉพาะ admin ·
+  คำขอลบข้อมูลของเซลส์รายใดต้องลบ **ทั้งสองตาราง** (`messages` ตาม `user_id` · `webhook_events` ตาม `line_user_id`) ·
+  `messages` ถูกส่งออกทาง Sync API ด้วย (`services/externalSync.ts` — ตัดแค่ `reply_token`) ⇒ ผู้ถือกุญแจ Sync เห็นแถว `wh_*`
+  · แผน: `docs/plan-message-log-merge.md`
 * ไม่ทำ hash chain รายแถว — digest รายวันให้ผลใกล้เคียงด้วยต้นทุนเสี้ยวเดียว
 * ไม่ partition ตาราง log — เกินราว 5M แถว หรือ 3 GB ค่อยคิด
 
