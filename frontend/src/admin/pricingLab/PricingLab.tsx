@@ -1,21 +1,25 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Calculator, CircleDollarSign, AlertTriangle, BookOpen } from 'lucide-react';
+import { Calculator, CircleDollarSign, AlertTriangle, BookOpen, Plus, Check } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { PageHeader } from '../PageHeader';
 import { Button } from '../Button';
 import { ErrorBox } from '../logs/ui';
 import { errMsg, formatDateTime } from '../logs/format';
+import { LocalProductModal, type FromPricing } from '../LocalProductModal';
 import { SubCodeModal } from './SubCodeModal';
 import { CalcTrace } from './CalcTrace';
 import { CatalogTemplate, NoModelTemplate, TsCatalogTemplate, type FamilyChoice } from './CatalogTemplate';
 import { formForFamily, tsFormForFamily } from './catalogForm';
-import { type BhForm, type HoleRow, type QuoteOverview, type ParsedCode, type PriceOutcome, type TsForm } from './types';
+import {
+  type BhForm, type CatalogFamilySpec, type HoleRow, type QuoteOverview, type ParsedCode, type PriceOutcome, type TsFamilySpec, type TsForm,
+} from './types';
 
 /**
  * หน้า "คิดราคาสินค้า" — โมดูลทดลองที่ถอดออกได้ทั้งก้อน
  *
  * เจ้าของสั่ง 2026-09-18 · เคาะหน้าตาจาก mockup/pl-pricing.html วันเดียวกัน
- * **เฟสแรกยังไม่ต่อกับใบเสนอราคา — คิดราคาให้ดูอย่างเดียว**
+ * เฟสแรกคิดราคาให้ดูอย่างเดียว · **ตั้งแต่ 2026-10-02 รหัสที่คิดได้ "เพิ่มเป็นสินค้าใหม่" ได้** (`ProductAddRow` ข้างล่าง)
+ * แล้วใช้ในใบเสนอราคาได้ทันที — คำว่า "ยังไม่ต่อกับใบเสนอราคา" บนหัวหน้าจึงเอาออก
  *
  * **ตั้งแต่ 2026-09-23 หน้านี้คิดราคาอย่างเดียว** (เจ้าของสั่ง) — ของที่แก้ราคาทั้งหมด (เล่มที่ใช้อยู่ ·
  * แม่แบบ Excel · รายชื่อรุ่น + แก้ทีละรุ่น · ตารางรหัสย่อย) ย้ายไปหน้า "สมุดราคา" (`PriceBook.tsx`)
@@ -59,6 +63,8 @@ interface QuoteResult {
   code?: string;
   parsed: ParsedCode;
   outcome: PriceOutcome | null;
+  /** เล่มที่คิด — สินค้าที่เพิ่มจากหน้านี้เก็บเป็นที่มาของราคา (`price_book_revision`) */
+  revision?: number | null;
 }
 
 /** ท่อนที่ยังไม่มีใครบอกว่าแปลว่าอะไร — ตัวเดียวที่ได้ปุ่ม "＋ เพิ่ม" */
@@ -83,9 +89,38 @@ interface Props {
   canEditBook: boolean;
   /** `at` = เปิดชีตของรุ่นนี้ตรงกล่อง "ต้องขอราคา" (ปุ่มของผลที่ต้องขอราคา) · ไม่ส่ง = หน้าแรกของสมุด */
   onOpenBook: (at?: { sheet: string; model: string }) => void;
+  /** ช่อง `quote.manage_products` (ช่องเดียวกับปุ่มเพิ่มสินค้าในหน้าขอใบ) — ไม่มี = ไม่เห็นปุ่ม "เพิ่มเป็นสินค้าใหม่" */
+  canAddProduct?: boolean;
+  /** เปิดหน้า "สินค้าเพิ่มเอง" ได้ไหม (`page.odooproducts`) — ไม่ได้ = ไม่มีลิงก์ไปหน้านั้น */
+  canOpenLocalProducts?: boolean;
+  onOpenLocalProducts?: () => void;
 }
 
-export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
+/** แถวที่ model ชน — รูปของ `duplicate[]` ใน `GET /webquote/products/suggest` เท่าที่ใช้ */
+interface DupRow { internal_reference: string; name: string; source?: string }
+
+/**
+ * ตัวเลือกนอกรหัส (ขนาดเต๋า · สาย/ท่อที่ติ๊ก · เจาะรู) → ข้อความลงช่อง Description ของสินค้าที่เพิ่ม
+ * อยู่ในราคาแต่ไม่อยู่ใน model ⇒ ไม่เขียนไว้ = สินค้ามีราคารวมของที่ไม่มีใครรู้ว่าคืออะไร (mockup ข้อ 4)
+ * คำมาจากแคตตาล็อกชุดเดียวกับช่องกรอก ไม่ได้แต่งเอง · รูที่กรอกไม่ครบไม่นับ (เซิร์ฟเวอร์ก็ทิ้งเหมือนกัน)
+ */
+function offCodeText(form: BhForm | null, tsForm: TsForm | null, catalog: CatalogFamilySpec[], catalogTs: TsFamilySpec[]): string {
+  const out: string[] = [];
+  if (form) {
+    const spec = catalog.find((c) => c.family === form.family);
+    if (form.amp) out.push(`ขนาดเต๋า ${spec?.slots.amp?.options?.find((o) => o.code === form.amp)?.label ?? form.amp}`);
+    for (const a of form.addons ?? []) out.push(spec?.addons?.find((o) => o.code === a)?.label ?? a);
+    for (const h of form.holes ?? []) if (h.count > 0 && h.mm > 0) out.push(`เจาะรู ${h.count} รู Ø${h.mm} mm`);
+  } else if (tsForm) {
+    const spec = catalogTs.find((c) => c.family === tsForm.family);
+    for (const a of tsForm.addons ?? []) out.push(spec?.addons?.find((o) => o.code === a)?.label ?? a);
+  }
+  return out.length ? `ตัวเลือกนอกรหัส (จากหน้าคำนวณราคา): ${out.join(' · ')}` : '';
+}
+
+export const PricingLab: React.FC<Props> = ({
+  canEditBook, onOpenBook, canAddProduct = false, canOpenLocalProducts = false, onOpenLocalProducts,
+}) => {
   const { token } = useAuth();
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const jsonHeaders = useMemo(
@@ -99,6 +134,12 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [adding, setAdding] = useState<string | null>(null);
+  /** หน้าต่าง "เพิ่มสินค้าใหม่" เปิดอยู่ */
+  const [addOpen, setAddOpen] = useState(false);
+  /** ผลตรวจ "รหัสนี้มีในระบบแล้วหรือยัง" ของรหัสล่าสุด — รหัสไม่ตรงกับผลปัจจุบัน = ยังตรวจไม่เสร็จ */
+  const [dup, setDup] = useState<{ code: string; rows: DupRow[] } | null>(null);
+  /** เพิ่มสำเร็จแล้วจากหน้านี้ — แถบเขียวขึ้นแทนปุ่มจนกว่ารหัสจะเปลี่ยน */
+  const [saved, setSaved] = useState<{ code: string; ref: string } | null>(null);
   /** ช่องตามแคตตาล็อก — null = รหัสนี้ไม่มีแคตตาล็อก (หรือเขียนนอกรูปแบบ) ⇒ หน้าเดิม */
   const [form, setForm] = useState<BhForm | null>(null);
   /** ช่องตามแคตตาล็อกของซีรีส์ TS — null = รหัสนี้ไม่ใช่ TS หรือเขียนนอกรูปแบบ */
@@ -151,11 +192,16 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
   const amp = form?.amp;
   const addons = form?.addons ?? tsForm?.addons;
   const holes = form?.holes;
+  /** ตัวเลือกนอกรหัสที่ส่งไปคิดคู่กับรหัส — ชุดเดียวกันส่งต่อให้ปุ่มคิดราคาในหน้าต่างเพิ่มสินค้า */
+  const picks = useMemo(
+    () => ({ ...(amp ? { amp } : {}), ...(addons?.length ? { addons } : {}), ...(holes?.length ? { holes } : {}) }),
+    [amp, addons, holes],
+  );
   const quote = useCallback((input: string) => {
     if (!input.trim()) return;
     if (typing.current) clearTimeout(typing.current);
-    void send({ code: input, picks: { ...(amp ? { amp } : {}), ...(addons?.length ? { addons } : {}), ...(holes?.length ? { holes } : {}) } });
-  }, [send, amp, addons, holes]);
+    void send({ code: input, picks });
+  }, [send, picks]);
 
   /** แก้ช่องกรอก — ช่องเลือกส่งทันที · ช่องพิมพ์หน่วงไว้ให้พิมพ์จบก่อน */
   const editForm = useCallback((next: BhForm, now?: boolean) => {
@@ -205,6 +251,42 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
     ...(overview?.catalogTs ?? []).map((c) => ({ value: c.family, code: c.head, text: c.name, group: 'TS — Temperature Sensor' })),
     ...(overview?.catalog ?? []).map((c) => ({ value: c.family, code: c.head, text: c.name, group: 'BH — Heater' })),
   ], [overview]);
+  // ── เพิ่มเป็นสินค้าใหม่ (mockup `pricing-add-product` รอบ 3 · เจ้าของยืนยัน 2026-10-02) ─────────────
+  const o = result?.outcome ?? null;
+  const addCode = result?.code?.trim() ?? '';
+  /** ราคาครบ = เติมราคาให้ · คิดได้บางส่วน = เปิดได้แต่ไม่เติมราคา (ราคาครึ่งเดียวห้ามหลุดเข้าใบ) · คิดไม่ได้เลย = ปุ่มปิด */
+  const addPriced: 'full' | 'partial' | 'none' = !o || !(o.unitPrice > 0) ? 'none'
+    : o.status === 'priced'
+      ? (notIncluded.length === 0 && !o.violations.some((v) => v.level === 'block') && result!.parsed.problems.length === 0 ? 'full' : 'partial')
+      : o.status === 'quoteOnRequest' && o.breakdown.length > 0 ? 'partial' : 'none';
+  const canCheckDup = canAddProduct && addPriced !== 'none' && addCode !== '';
+  // รหัสที่มีในระบบแล้ว ⇒ เตือนตั้งแต่ยังไม่กด (เจ้าของสั่งตอนเคาะ mockup) — ถาม `/suggest` ตัวเดียวกับหน้าต่างเพิ่มสินค้า
+  // จึงใช้เกณฑ์เดียวกับด่านตอนบันทึก (`findProductsByModel`) · ตรวจไม่สำเร็จ = ไม่บล็อก เพราะหน้าต่างกับ server ตรวจซ้ำ
+  useEffect(() => {
+    if (!canCheckDup) return;
+    let cancelled = false;
+    (async () => {
+      let rows: DupRow[] = [];
+      try {
+        const res = await fetch(`/api/admin/webquote/products/suggest?${new URLSearchParams({ model: addCode })}`, { headers: authHeaders });
+        const body = await res.json().catch(() => ({}));
+        if (res.ok && Array.isArray(body?.duplicate)) rows = body.duplicate;
+      } catch {
+        // ปล่อยว่าง — ดูเหตุผลข้างบน
+      }
+      if (!cancelled) setDup({ code: addCode, rows });
+    })();
+    return () => { cancelled = true; };
+  }, [canCheckDup, addCode, authHeaders]);
+  const dupRows = dup && dup.code === addCode ? dup.rows : [];
+  // แถวที่ model ชนมีได้หลายแถว (สินค้าเพิ่มเองที่ Odoo ส่งกลับมาแล้ว) — บอกตัวของ Odoo ก่อน
+  const dupRow = dupRows.find((r) => r.source !== 'local') ?? dupRows[0] ?? null;
+  const fromPricing: FromPricing = {
+    price: addPriced === 'full' && o ? { price: o.unitPrice, revision: result?.revision ?? null } : null,
+    description: offCodeText(form, tsForm, catalog, catalogTs),
+    picks,
+  };
+
   const pickFamily = (f: string) => {
     const bh = catalog.find((c) => c.family === f);
     if (bh) { setTsForm(null); editForm(formForFamily(bh, form ?? undefined), true); return; }
@@ -219,7 +301,7 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
         title="คำนวณราคา"
         description={
           overview?.book.ok
-            ? `สมุดราคา ${overview.book.models} รุ่น · ${overview.edited ? `แก้ล่าสุด ${formatDateTime(overview.edited.at)}` : (overview.version ?? '')} · ยังไม่ต่อกับใบเสนอราคา`
+            ? `สมุดราคา ${overview.book.models} รุ่น · ${overview.edited ? `แก้ล่าสุด ${formatDateTime(overview.edited.at)}` : (overview.version ?? '')}`
             : 'พิมพ์รหัสสินค้าแล้วได้ราคาพร้อมที่มาของทุกบาท'
         }
       >
@@ -279,6 +361,17 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
               <CatalogResult result={result} notIncluded={notIncluded} onAdd={setAdding} canEditBook={canEditBook}
                              askSheet={resultSheet} onAsk={openAsk} />
             )}
+            {result && canAddProduct && (
+              <ProductAddRow
+                code={addCode}
+                priced={addPriced}
+                dup={dupRow}
+                savedRef={saved && saved.code === addCode ? saved.ref : null}
+                canOpenLocalProducts={canOpenLocalProducts}
+                onOpenLocalProducts={onOpenLocalProducts}
+                onAdd={() => setAddOpen(true)}
+              />
+            )}
           </div>
         )}
       </div>
@@ -300,7 +393,89 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
           }}
         />
       )}
+
+      {addOpen && (
+        <LocalProductModal
+          initialModel={addCode}
+          fromPricing={fromPricing}
+          saveLabel="เพิ่มสินค้า"
+          authHeaders={authHeaders}
+          onClose={() => setAddOpen(false)}
+          onSaved={(p, ref) => {
+            setAddOpen(false);
+            // คนแก้ model ในหน้าต่างได้ — แถบเขียวผูกกับรหัสที่หน้านี้คิด เฉพาะเมื่อเพิ่มด้วย model เดียวกัน
+            if (p.model.trim() === addCode) setSaved({ code: addCode, ref });
+          }}
+        />
+      )}
     </div>
+  );
+};
+
+const BAND = 'flex flex-wrap items-start gap-x-2 gap-y-1.5 rounded-lg px-3 py-2 text-xs border';
+const TAG = 'inline-block px-1.5 py-0.5 rounded-md border text-[10px] font-semibold whitespace-nowrap align-middle';
+const LINK = 'font-semibold text-[11.5px] text-[var(--brand-fg)] hover:underline';
+
+/**
+ * ปุ่ม "เพิ่มเป็นสินค้าใหม่" ใต้ราคา (mockup `pricing-add-product` รอบ 3 · เจ้าของยืนยัน 2026-10-02)
+ * โผล่เฉพาะคนที่มี `quote.manage_products` (ผู้เรียกกันไว้) · ปุ่มรองสีน้ำเงิน + ไอคอนบวก เหมือน "เพิ่มค่าบริการ"
+ *
+ * ปุ่มกดไม่ได้สองกรณี และบอกเหตุผลข้างปุ่มเสมอ (ปุ่มจางที่ไม่บอกเหตุผล = คนสรุปว่าระบบพัง):
+ *   · คิดราคาไม่ได้เลย / ไม่รับผลิต
+ *   · **รหัสนี้มีในระบบแล้ว** — แถบเหลืองเตือนตั้งแต่ยังไม่กด และไม่เปิดหน้าต่าง (เจ้าของ: "ไม่ต้องมี modal")
+ * ระหว่างที่ยังตรวจรหัสซ้ำไม่เสร็จ ปุ่มยังกดได้ — ไม่ให้ปุ่มกะพริบเทาทุกครั้งที่แก้ช่อง · กดทันก่อนตรวจเสร็จ
+ * หน้าต่างก็ตรวจเองและ server ปฏิเสธ model ซ้ำอีกชั้น
+ */
+const ProductAddRow: React.FC<{
+  code: string;
+  priced: 'full' | 'partial' | 'none';
+  dup: DupRow | null;
+  /** รหัสของสินค้าที่เพิ่งเพิ่มจากรหัสนี้ — มี = แถบเขียวแทนปุ่ม */
+  savedRef: string | null;
+  canOpenLocalProducts: boolean;
+  onOpenLocalProducts?: () => void;
+  onAdd: () => void;
+}> = ({ code, priced, dup, savedRef, canOpenLocalProducts, onOpenLocalProducts, onAdd }) => {
+  const toLocal = canOpenLocalProducts && onOpenLocalProducts
+    ? <button type="button" className={LINK} onClick={onOpenLocalProducts}>ไปหน้าสินค้าเพิ่มเอง ›</button>
+    : null;
+  if (savedRef !== null) {
+    return (
+      <div className={`${BAND} mt-2.5 items-center bg-emerald-50 border-emerald-200 text-emerald-800`}>
+        <Check className="w-3.5 h-3.5 shrink-0 mt-px" />
+        <span className="flex-1 min-w-[200px]">
+          <b>เพิ่มสินค้าแล้ว</b> · <span className="font-mono">{savedRef}</span> {code} — ใช้ในใบเสนอราคาได้ทันที
+        </span>
+        {toLocal}
+      </div>
+    );
+  }
+  const why = priced === 'none' ? 'คิดราคาไม่ได้ — แก้รหัสให้คิดราคาได้ก่อน'
+    : dup ? 'มีในระบบแล้ว — เพิ่มซ้ำไม่ได้'
+      : priced === 'partial' ? 'ราคายังไม่ครบ — ในหน้าต่างจะให้กรอกราคาเอง' : '';
+  const local = dup?.source === 'local';
+  return (
+    <>
+      {dup && (
+        <div className={`${BAND} mt-2.5 items-center bg-amber-50 border-amber-200 text-amber-800`}>
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
+          <span className="flex-1 min-w-[200px]">
+            <b>รหัสนี้มีในระบบแล้ว</b> — <span className="font-mono">{dup.internal_reference}</span> {dup.name}{' '}
+            {local
+              ? <span className={`${TAG} bg-amber-100 text-amber-800 border-amber-300`}>สินค้าเพิ่มเอง · ยังไม่เข้า Odoo</span>
+              : <span className={`${TAG} bg-emerald-50 text-emerald-700 border-emerald-200`}>Odoo</span>}
+            {' '}· ใช้สินค้าตัวนี้ในใบได้เลย ไม่ต้องเพิ่มซ้ำ
+          </span>
+          {local && toLocal}
+        </div>
+      )}
+      <div className="mt-2.5 flex flex-wrap items-center justify-end gap-2">
+        {why && <span className="text-[11px] text-slate-400">{why}</span>}
+        <Button variant="secondary" icon={Plus} disabled={priced === 'none' || !!dup} onClick={onAdd}>
+          เพิ่มเป็นสินค้าใหม่
+        </Button>
+      </div>
+    </>
   );
 };
 
@@ -327,7 +502,7 @@ const CatalogResult: React.FC<{
   const infos = [...(o?.violations ?? []).filter((v) => v.level === 'warn' && !v.partial).map((v) => v.message), ...result.parsed.warnings];
   // ปุ่มไปใส่ราคาขึ้นที่แถบส้มแถบแรกที่มาจากค่านอกแคตตาล็อกเท่านั้น (ทุกแถบพาไปหน้าชีตเดียวกัน)
   const askBtnAt = canEditBook && askSheet ? asks.findIndex((v) => v.askPrice) : -1;
-  const band = 'flex flex-wrap items-start gap-x-2 gap-y-1.5 rounded-lg px-3 py-2 text-xs border';
+  const band = BAND;
   return (
     <div className="mt-3 pt-3 border-t border-slate-100">
       <div className="flex items-end justify-between gap-3 flex-wrap">

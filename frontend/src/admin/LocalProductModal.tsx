@@ -1,9 +1,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  หน้าต่าง "เพิ่มสินค้าใหม่" / "แก้ไขสินค้าเพิ่มเอง" — เฟส J6 ของ docs/plan-local-products.md (§13)
 //
-//  **หน้าต่างเดียว สองทางเข้า** (ไม่มีฟอร์มสองชุด):
+//  **หน้าต่างเดียว สามทางเข้า** (ไม่มีฟอร์มชุดที่สอง):
 //    1. หน้าขอใบเสนอราคา — แถว "+ เพิ่มสินค้าใหม่" ท้ายรายการผลค้นสินค้า ⇒ เพิ่มเสร็จ = ใส่ลงแถวนั้นทันที
 //    2. หน้า "สินค้าเพิ่มเอง" — ปุ่ม "เพิ่มสินค้าใหม่" + ไอคอนแก้ไขในแถว
+//    3. หน้าคำนวณราคา — ปุ่ม "เพิ่มเป็นสินค้าใหม่" ใต้ราคา (`fromPricing` · mockup `pricing-add-product` รอบ 3
+//       ที่เจ้าของยืนยัน 2026-10-02) ⇒ model = รหัสที่คิด · ราคาครบ = เติมราคาให้ · ตัวเลือกนอกรหัส = เติม Description
+//       · รหัสที่มีในระบบแล้ว **หน้าคำนวณราคาเตือนและปิดปุ่มเองก่อนเปิดหน้าต่าง** — กล่อง "model นี้มีอยู่แล้ว"
+//         ข้างล่างยังอยู่เป็นตาข่าย (มีคนเพิ่มแทรกระหว่างนั้น) และ server ตัดสินซ้ำด้วย 409 เหมือนเดิม
 //  หน้าตาตาม mockup `local-product-add` ที่เจ้าของยืนยัน 2026-10-02 (+ ช่อง % ราคาขั้นต่ำ รอบเดียวกัน)
 //
 //  ── กรอกจริงสองช่อง: model + ราคาขาย ───────────────────────────────────────
@@ -100,17 +104,29 @@ type PriceResult =
   | { kind: 'none'; why: string }
   | { kind: 'error'; message: string };
 
+/** ของที่หน้าคำนวณราคาส่งมาให้เติม (ทางเข้าที่ 3) — คนแก้ได้ทุกช่องเหมือนพิมพ์เอง */
+export interface FromPricing {
+  /** ราคาครบ = ราคาที่คิดได้ + เล่มที่คิด · `null` = ราคาไม่ครบ ⇒ ไม่เติม ให้กรอกเอง (ราคาครึ่งเดียวห้ามหลุดเข้าใบ) */
+  price: { price: number; revision: number | null } | null;
+  /** ตัวเลือกนอกรหัสที่อยู่ในราคาแต่ไม่อยู่ใน model — ว่าง = ไม่มี */
+  description: string;
+  /** ตัวเลือกนอกรหัสชุดเดียวกับที่หน้าคำนวณราคาส่งไปคิด — ปุ่มคิดราคาในหน้าต่างส่งไปด้วย ไม่งั้นได้ราคาที่ไม่รวมของเหล่านี้ */
+  picks?: Record<string, unknown>;
+}
+
 interface Props {
   /** `null` = เพิ่มใหม่ · มีค่า = แก้ไข (product_template_id ของแถว local) */
   editId?: number | null;
   /** คำที่พิมพ์ค้างในช่องค้น — เป็น model ตั้งต้น (โหมดเพิ่ม) */
   initialModel?: string;
+  /** เปิดจากหน้าคำนวณราคา — ดูหัวไฟล์ ทางเข้าที่ 3 */
+  fromPricing?: FromPricing;
   /** คำบนปุ่มบันทึกของโหมดเพิ่ม — ในใบ = "เพิ่มและใส่ลงใบ" · หน้ารายการ = "เพิ่มสินค้า" */
   saveLabel?: string;
   authHeaders: Record<string, string>;
   onClose: () => void;
-  /** บันทึกสำเร็จ — ในใบ: ใส่ลงแถว · หน้ารายการ: โหลดใหม่ */
-  onSaved: (p: PickedProduct) => void;
+  /** บันทึกสำเร็จ — ในใบ: ใส่ลงแถว · หน้ารายการ: โหลดใหม่ · หน้าคำนวณราคา: แถบ "เพิ่มแล้ว" พร้อมรหัส (`ref`) */
+  onSaved: (p: PickedProduct, ref: string) => void;
   /** model ซ้ำกับสินค้าที่มีอยู่ ⇒ "ใช้สินค้านี้ในใบ" (มีเฉพาะทางเข้าจากใบ) */
   onUseExisting?: (p: PickedProduct) => void;
 }
@@ -175,7 +191,7 @@ function toPriceResult(body: {
 }
 
 export const LocalProductModal: React.FC<Props> = ({
-  editId = null, initialModel = '', saveLabel = 'เพิ่มสินค้า', authHeaders, onClose, onSaved, onUseExisting,
+  editId = null, initialModel = '', fromPricing, saveLabel = 'เพิ่มสินค้า', authHeaders, onClose, onSaved, onUseExisting,
 }) => {
   const editing = editId !== null;
 
@@ -200,7 +216,7 @@ export const LocalProductModal: React.FC<Props> = ({
   const [nameEdited, setNameEdited] = useState(false);
   const [name, setName] = useState('');
 
-  const [price, setPrice] = useState('');
+  const [price, setPrice] = useState(!editing && fromPricing?.price ? String(fromPricing.price.price) : '');
   const [pct, setPct] = useState(String(DEFAULT_MIN_PCT));
   /** คนแก้ % เอง (หรือพิมพ์บาทเอง) แล้ว — คำตอบของ /suggest ที่มาทีหลังต้องไม่ทับ */
   //  เป็น ref ไม่ใช่ state — เปลี่ยนแล้วต้องไม่ทำให้ effect ของ /suggest ยิงใหม่
@@ -210,11 +226,12 @@ export const LocalProductModal: React.FC<Props> = ({
   const [quote, setQuote] = useState<PriceResult | null>(null);
   const [quoting, setQuoting] = useState(false);
   /** ราคาจากสมุดที่ได้ล่าสุด — ส่งให้ server ตัดสินที่มาของราคา · `undefined` (โหมดแก้ไข) = ไม่แตะของเดิม */
+  //  เปิดจากหน้าคำนวณราคาพร้อมราคาครบ = ราคาจากสมุดราคาเหมือนกดปุ่มคิดราคาเองแล้ว (server ตัดสินที่มาจากค่านี้)
   const [bookPrice, setBookPrice] = useState<{ price: number; revision: number | null } | null | undefined>(
-    editing ? undefined : null,
+    editing ? undefined : fromPricing?.price ?? null,
   );
 
-  const [desc, setDesc] = useState('');
+  const [desc, setDesc] = useState(editing ? '' : fromPricing?.description ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -403,7 +420,11 @@ export const LocalProductModal: React.FC<Props> = ({
       const res = await fetch('/api/admin/webquote/products/price', {
         method: 'POST',
         headers: { ...authHeaders, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: model.trim() }),
+        // model ยังเป็นรหัสที่หน้าคำนวณราคาคิด ⇒ ส่งตัวเลือกนอกรหัสชุดเดิมไปด้วย ราคาจึงตรงกับที่เติมให้
+        body: JSON.stringify({
+          code: model.trim(),
+          ...(fromPricing?.picks && model.trim() === initialModel.trim() ? { picks: fromPricing.picks } : {}),
+        }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -493,7 +514,10 @@ export const LocalProductModal: React.FC<Props> = ({
         return;
       }
       const p = body.product;
-      onSaved({ product_id: Number(p.product_template_id), model: String(p.model), name: String(p.name), price: Number(p.sales_price), stock: 0 });
+      onSaved(
+        { product_id: Number(p.product_template_id), model: String(p.model), name: String(p.name), price: Number(p.sales_price), stock: 0 },
+        String(p.internal_reference ?? ''),
+      );
     } catch {
       setError('ติดต่อเซิร์ฟเวอร์ไม่ได้ — ลองใหม่อีกครั้ง');
     } finally {
@@ -712,6 +736,9 @@ export const LocalProductModal: React.FC<Props> = ({
                 Model <span className="text-red-500">*</span>
                 {modelLocked && <span className="ml-auto flex items-center gap-1 font-normal text-slate-400"><Lock className="w-3 h-3" /> มีใบอ้างแล้ว</span>}
                 {!editing && sugLoading && <Loader2 className="ml-auto w-3.5 h-3.5 animate-spin text-slate-400" />}
+                {!editing && !sugLoading && fromPricing && model.trim() === initialModel.trim() && (
+                  <span className="ml-auto font-normal text-[11px] text-slate-400">จากรหัสที่คิดราคา</span>
+                )}
               </label>
               <input id="lp-model" autoFocus={!editing} value={model} maxLength={MAX.model}
                      onChange={(e) => onModelChange(e.target.value)} disabled={modelLocked || lockedByOdoo}
@@ -761,6 +788,9 @@ export const LocalProductModal: React.FC<Props> = ({
                         คิดราคา
                       </Button>
                     </div>
+                    {fromPricing && !fromPricing.price && (
+                      <p className="text-[11px] text-amber-700 mt-1">ราคาจากหน้าคำนวณยังไม่ครบ — ไม่ได้เติมให้</p>
+                    )}
                   </div>
                   <div>
                     <label className={LABEL_CLS} htmlFor="lp-min">
@@ -787,7 +817,11 @@ export const LocalProductModal: React.FC<Props> = ({
                     <Plus className="w-3.5 h-3.5 shrink-0" />
                     {/* ชื่อช่องตามที่เจ้าของสั่ง 2026-10-02 · บรรทัดเดียวเสมอ — จอแคบตัดคำอธิบายด้านขวาแทน */}
                     <span className="whitespace-nowrap">รายละเอียดสินค้า (Description)</span>
-                    <span className="ml-auto min-w-0 truncate text-[11px] text-slate-400" title="ไม่บังคับ · ไม่ลอกจากต้นแบบ">ไม่บังคับ · ไม่ลอกจากต้นแบบ</span>
+                    {fromPricing?.description ? (
+                      <span className="ml-auto min-w-0 truncate text-[11px] text-slate-400" title="ตัวเลือกนอกรหัสอยู่ในราคาแต่ไม่อยู่ใน model">เติมตัวเลือกนอกรหัสให้แล้ว · แก้ได้</span>
+                    ) : (
+                      <span className="ml-auto min-w-0 truncate text-[11px] text-slate-400" title="ไม่บังคับ · ไม่ลอกจากต้นแบบ">ไม่บังคับ · ไม่ลอกจากต้นแบบ</span>
+                    )}
                   </summary>
                   <div className="px-3 pb-3">
                     <textarea value={desc} onChange={(e) => setDesc(e.target.value)} maxLength={MAX.sales_description} rows={3}
