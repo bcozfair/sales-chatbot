@@ -20,6 +20,9 @@
    + J6 (2026-10-02 · mockup `local-product-add`): หน้าต่างเพิ่ม/แก้สินค้าทุกกรณี (ปกติ · ไม่แน่ใจรหัส ⇒ ต้องติ๊ก ·
    ออกรหัสไม่ได้ ⇒ พิมพ์เอง · หาต้นแบบไม่ได้ ⇒ ค้นเอง · model ซ้ำ · แก้ไข) · ปุ่มคิดราคา + ใช้ราคานี้ · % ราคาขั้นต่ำ ·
    ทางเข้าจากหน้าขอใบเสนอราคา (แถว "+ เพิ่มสินค้าใหม่" ท้ายผลค้น ⇒ ใส่ลงใบ + ป้าย "เพิ่มเอง") · 390px ไม่ล้น
+   + รอบ 7 (2026-10-02 · mockup `local-product-add`): ช่องรหัสเติมรหัสระบบให้และแก้ในช่องได้ · ป้าย อัตโนมัติ/กำหนดเอง ·
+   ลิงก์ "ใช้รหัสที่ระบบตั้ง" · แก้เป็นค่าอื่นแล้วไม่ต้องติ๊ก "ตรวจรหัสแล้ว" · **ข้อ regression: พิมพ์ model ทีละท่อน
+   ("BH" ได้ ref=null ก่อน) ช่องต้องไม่ว่างค้าง** — ล้มบนโค้ดก่อนแก้ (ธง manualRef ติดค้าง)
    ⚠️ ก้อน /suggest · /price ข้างล่างเป็นของจำลอง — ตรรกะจริงพิสูจน์ใน `diag:local-products` ข้อ 13–17
 
    รัน: `npm run build --prefix frontend` ก่อน แล้ว `npm run diag:op-ui`
@@ -35,6 +38,8 @@ const ORIGIN = 'http://op-probe.local';
 mkdirSync(SHOTS, { recursive: true });
 
 let fail = 0;
+/** error ที่หลุดจากหน้าเว็บ (uncaught) — ทุกหน้าที่ด่านเปิด */
+const pageErrors: string[] = [];
 const ok = (msg: string, cond: boolean, extra = '') => {
   if (cond) console.log(`  ✓ ${msg}${extra ? ' · ' + extra : ''}`);
   else { fail++; console.log(`  ✗ ${msg}${extra ? ' · ' + extra : ''}`); }
@@ -109,6 +114,17 @@ function suggestFor(model: string, parent: string | null) {
       parent_reason: 'key', group_size: 854, group_key: 'BH-01', name: 'Band Heater "PM" BH-01 100x50', inherited: INH_TSK,
       ref: { internal_reference: 'FHTP2XBH010735', tier: 'max_plus_one', prefix_length: 8, siblings: 732, min: 0, max: 734,
         warning: 'เลขท้ายของตระกูลนี้อาจเป็นเลขรุ่น ระบบแค่นับต่อจากตัวล่าสุดให้ — เทียบกับรหัสใน Odoo ก่อนบันทึก' } };
+  }
+  // รีวิว 2026-10-02 · model ถัดไปที่ได้รหัส "ไม่แน่ใจ" อีกตัว — ติ๊กของรหัสเดิมต้องไม่ติดมา
+  if (model === 'BH-01 100x60') {
+    const b = suggestFor('BH-01 100x50', null) as { ref: Record<string, unknown> };
+    return { ...b, model, name: 'Band Heater "PM" BH-01 100x60', ref: { ...b.ref, internal_reference: 'FHTP2XBH010736' } };
+  }
+  // รอบ 7 · regression: "BH" (ท่อนแรกระหว่างพิมพ์) ตกไปก้อนท้ายสุด ref=null · model เต็มได้รหัสแบบมั่นใจ
+  if (model === 'BH-02 120x40') {
+    return { ...sugBase(model), parent: { ...P_TSK, internal_reference: 'FHTP2XBH020247', model: 'BH-02 100x320-230-130W', name: 'Strip Heater "PM" BH-02 100x320-230-130W' },
+      parent_reason: 'key', group_size: 240, group_key: 'BH-02', name: 'Strip Heater "PM" BH-02 120x40', inherited: INH_TSK,
+      ref: { internal_reference: 'FHTP2XBH020249', tier: 'boundary', prefix_length: 8, siblings: 248, min: 0, max: 248, warning: null } };
   }
   if (model === 'TGM-66011.R2') {
     return { ...sugBase(model), parent: { ...P_PICKED, internal_reference: 'FTGP1TGM66011R', model: 'TGM-66011.R1' }, parent_reason: 'key',
@@ -196,11 +212,16 @@ async function route(req: HTTPRequest) {
 const TOKEN_PAYLOAD = Buffer.from(JSON.stringify({ id: 1, role: 'admin', exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url');
 const FAKE_TOKEN = `eyJhbGciOiJIUzI1NiJ9.${TOKEN_PAYLOAD}.probe`;
 
+/** รอให้จอโชว์รหัสนี้ — เป็นข้อความบนจอ หรือค่าในช่อง input (ค่าใน input ไม่อยู่ใน innerText) */
+const waitRef = (pg: Page, ref: string) => pg.waitForFunction((r: string) => document.body.innerText.includes(r)
+  || [...document.querySelectorAll('input')].some((i) => (i as HTMLInputElement).value === r), { timeout: 5000 }, ref);
+
 async function openPage(width: number): Promise<Page> {
   const page = await browser.newPage();
   await page.setViewport({ width, height: 1000 });
   await page.setRequestInterception(true);
   page.on('request', (r) => { void route(r); });
+  page.on('pageerror', (e: unknown) => { pageErrors.push(e instanceof Error ? e.message : String(e)); });
   // tsx (esbuild keepNames) ห่อฟังก์ชันที่มีชื่อด้วย `__name(...)` — โค้ดที่ส่งเข้าไปรันในหน้าเว็บจึงต้องมีตัวนี้
   await page.evaluateOnNewDocument('globalThis.__name = (f) => f;');
   await page.evaluateOnNewDocument((t: string) => {
@@ -406,18 +427,43 @@ try {
     await j6.keyboard.press('Backspace');
     if (v) await j6.type(sel, v);
   };
+  const REF_INPUT = 'input[aria-label="รหัสสินค้า"]';
+  /** ช่องรหัส (โหมดเพิ่ม) — ค่าในช่อง + ข้อความแถวหัวช่อง (ป้าย · ลิงก์/คำอธิบายชิดขวา) */
+  const refState = () => j6.evaluate((sel: string) => {
+    const inp = document.querySelector(sel) as HTMLInputElement | null;
+    const head = inp?.parentElement?.firstElementChild as HTMLElement | null | undefined;
+    // สีตัวอักษรจริงของช่อง เทียบกับ --brand-fg ที่ resolve แล้ว — class สีสองตัวชนกันเคยทำให้รหัสอัตโนมัติเป็นสีปกติ (2026-10-02)
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--brand-fg)';
+    document.body.appendChild(probe);
+    const brandColor = getComputedStyle(probe).color;
+    probe.remove();
+    return { value: inp?.value ?? null, head: head?.innerText ?? '', brand: inp ? getComputedStyle(inp).color === brandColor : null };
+  }, REF_INPUT);
+  const clickText = (label: string) => j6.evaluate((l: string) =>
+    ([...document.querySelectorAll('button')].find((b) => b.textContent?.trim() === l) as HTMLButtonElement).click(), label);
+  const openAdd = async () => {
+    await j6.click('button[aria-label="เพิ่มสินค้าใหม่"]');
+    await j6.waitForSelector('#lp-model');
+  };
+  const cancelAdd = () => j6.evaluate(() =>
+    ([...document.querySelectorAll('button')].filter((b) => b.textContent?.trim() === 'ยกเลิก').at(-1) as HTMLButtonElement).click());
 
   await j6.click('button[aria-label="เพิ่มสินค้าใหม่"]');
   await j6.waitForSelector('#lp-model');
   calls.length = 0;
   await setModel('TSK-04(S2)6x75+3M-S123');
-  await j6.waitForFunction(() => document.body.innerText.includes('FCUP2TSK040178'), { timeout: 5000 });
+  await waitRef(j6, 'FCUP2TSK040178');
   let t = await txt();
+  let rs = await refState();
   ok('พิมพ์ model ⇒ ยิง /suggest แล้วเติมต้นแบบ (ชื่อ + รหัส + เหตุผล) · รหัส · ชื่อให้',
     calls.some((c) => c.path.startsWith('/api/admin/webquote/products/suggest?model=TSK-04'))
       && t.includes('FCUP2TSK040094') && t.includes('เลือกให้จาก 33 สินค้าที่ขึ้นต้น TSK-04(S2)')
       && (await j6.$eval('#lp-name', (e) => (e as HTMLInputElement).value)) === 'Thermocouple K Type "Primus" TSK-04(S2)6x75+3M-S123');
-  ok('  รหัสมีป้าย "อัตโนมัติ" · ไม่มีคำเตือน (ระบบมั่นใจ)', t.includes('อัตโนมัติ') && !t.includes('ระบบไม่แน่ใจรหัสนี้'));
+  ok('  ช่องรหัสเติมรหัสจาก /suggest ให้ + ป้าย "อัตโนมัติ" + "ระบบตั้งให้ · แก้ได้" · ไม่มีคำเตือน (ระบบมั่นใจ)',
+    rs.value === 'FCUP2TSK040178' && rs.head.includes('อัตโนมัติ') && rs.head.includes('ระบบตั้งให้ · แก้ได้')
+      && rs.brand === true && !rs.head.includes('กำหนดเอง') && t.includes('ต่อจากเลขล่าสุดของตระกูลนี้ (178 ตัว)') && !t.includes('ระบบไม่แน่ใจรหัสนี้'),
+    JSON.stringify(rs));
   ok('  ยังไม่กรอกราคา ⇒ ปุ่มเพิ่มกดไม่ได้', await saveDisabled('เพิ่มสินค้า'));
   await j6.evaluate(() => ([...document.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'คิดราคา') as HTMLButtonElement).click());
   await j6.waitForFunction(() => document.body.innerText.includes('ราคาจากสมุดราคา'), { timeout: 5000 });
@@ -445,19 +491,79 @@ try {
     created?.model === 'TSK-04(S2)6x75+3M-S123' && created?.internal_reference === 'FCUP2TSK040178'
       && created?.parent_reference === 'FCUP2TSK040094' && created?.sales_price === 775
       && created?.minimum_sales_price === 500 && created?.pricebook_price === 775 && created?.price_book_revision === 17
-      && !('price_source' in (created ?? {})), JSON.stringify(lastCreated));
+      && !('price_source' in (created ?? {})) && !('ref_manual' in (created ?? {})), JSON.stringify(lastCreated));
   ok('  แล้วปิดหน้าต่าง + โหลดรายการใหม่', calls.some((c) => c.path.startsWith('/api/admin/webquote/products/list')));
 
   // ค่าตั้งต้น 70% ต้องขึ้นแม้ server ไม่ส่ง min_price_ratio — ห้ามขึ้น NaN (เจ้าของเจอ 2026-10-02)
   await j6.click('button[aria-label="เพิ่มสินค้าใหม่"]');
   await j6.waitForSelector('#lp-model');
   await setModel('OLD-SERVER-1');
-  await j6.waitForFunction(() => document.body.innerText.includes('FCUP2TSK040178'), { timeout: 5000 });
+  await waitRef(j6, 'FCUP2TSK040178');
   await j6.type('#lp-price', '1000');
   const pctOld = await j6.$eval('input[aria-label^="ราคาขั้นต่ำ เป็นเปอร์เซ็นต์"]', (e) => (e as HTMLInputElement).value);
   ok('server ไม่ส่ง % ตั้งต้น ⇒ ช่อง % ยังขึ้น 70 (ไม่ใช่ NaN) · ขั้นต่ำ 700.00',
     pctOld === '70' && (await minOf()) === '700.00', `% = ${pctOld} · ขั้นต่ำ = ${await minOf()}`);
-  await j6.evaluate(() => ([...document.querySelectorAll('button')].filter((b) => b.textContent?.trim() === 'ยกเลิก').at(-1) as HTMLButtonElement).click());
+  await cancelAdd();
+
+  // ── รอบ 7 · regression: พิมพ์ model ทีละท่อน ("BH" ได้ ref=null ก่อน) — โค้ดเดิมติดโหมดพิมพ์เอง ช่องว่างค้าง ──
+  //    อยู่ก่อนข้ออื่นของรอบ 7 เพราะไม่อ้างช่อง/ป้ายแบบใหม่ ⇒ รันกับโค้ดก่อนแก้แล้วมาถึงข้อนี้จริง
+  await openAdd();
+  calls.length = 0;
+  await setModel('BH');
+  await j6.waitForFunction(() => document.body.innerText.includes('ระบบหาสินค้าที่ใกล้เคียงไม่เจอ'), { timeout: 5000 });
+  const sawShort = calls.some((c) => c.path === '/api/admin/webquote/products/suggest?model=BH');
+  await j6.type('#lp-model', '-02 120x40');
+  await j6.waitForFunction(() => document.body.innerText.includes('เลือกให้จาก 240 สินค้า'), { timeout: 5000 });
+  await new Promise((r) => setTimeout(r, 300));
+  const shown = await j6.evaluate(() => document.body.innerText.includes('FHTP2XBH020249')
+    || [...document.querySelectorAll('input')].some((i) => (i as HTMLInputElement).value === 'FHTP2XBH020249'));
+  ok('รอบ 7 · regression: พิมพ์ "BH" (ได้ ref=null) แล้วพิมพ์ต่อจนครบ ⇒ ช่องรหัสได้รหัสระบบ ไม่ว่างค้าง',
+    sawShort && shown, `ยิง /suggest?model=BH: ${sawShort} · เห็น FHTP2XBH020249: ${shown}`);
+  await cancelAdd();
+
+  // ── รอบ 7 · ช่องรหัสแก้ในช่องเดิมได้ (mockup ยืนยัน 2026-10-02) ──
+  await openAdd();
+  await setModel('TSK-04(S2)6x75+3M-S123');
+  await waitRef(j6, 'FCUP2TSK040178');
+  await j6.type('#lp-price', '800');
+  await setField(REF_INPUT, 'fcup2tsk049999');
+  rs = await refState();
+  ok('รอบ 7 · พิมพ์แก้รหัส ⇒ ตัวพิมพ์ใหญ่ · ป้าย "กำหนดเอง" · ลิงก์ "ใช้รหัสที่ระบบตั้ง" · บันทึกกดได้',
+    rs.value === 'FCUP2TSK049999' && rs.head.includes('กำหนดเอง') && rs.brand === false && !rs.head.includes('อัตโนมัติ')
+      && rs.head.includes('ใช้รหัสที่ระบบตั้ง') && !(await saveDisabled('เพิ่มสินค้า')), JSON.stringify(rs));
+  await setField(REF_INPUT, 'fcup2tsk04017');
+  ok('  ไม่ครบ 14 ตัว ⇒ บันทึกกดไม่ได้', await saveDisabled('เพิ่มสินค้า'));
+  await j6.type(REF_INPUT, '8');
+  rs = await refState();
+  ok('  พิมพ์จนกลับมาตรงรหัสระบบ ⇒ นับเป็น "อัตโนมัติ" · ลิงก์หาย',
+    rs.value === 'FCUP2TSK040178' && rs.head.includes('อัตโนมัติ') && !rs.head.includes('ใช้รหัสที่ระบบตั้ง'), JSON.stringify(rs));
+  await setField(REF_INPUT, 'FCUP2TSK049999');
+  await j6.evaluate((b) => (b as HTMLButtonElement).click(), await saveBtn('เพิ่มสินค้า'));
+  await j6.waitForFunction(() => !document.querySelector('#lp-model'), { timeout: 5000 });
+  const createdManual = lastCreated as Record<string, unknown> | null;
+  ok('  บันทึก ⇒ POST มี ref_manual: true + รหัสที่พิมพ์',
+    createdManual?.ref_manual === true && createdManual?.internal_reference === 'FCUP2TSK049999', JSON.stringify(createdManual));
+
+  await openAdd();
+  await setModel('TSK-04(S2)6x75+3M-S123');
+  await waitRef(j6, 'FCUP2TSK040178');
+  await j6.type('#lp-price', '800');
+  await setField(REF_INPUT, 'FCUP2TSK049999');
+  await setModel('BH-02 120x40');
+  await j6.waitForFunction(() => document.body.innerText.includes('เลือกให้จาก 240 สินค้า'), { timeout: 5000 });
+  rs = await refState();
+  ok('รอบ 7 · เปลี่ยน model ⇒ รหัสที่พิมพ์ไว้คงอยู่ ไม่ถูกทับ · ลิงก์ยังอยู่',
+    rs.value === 'FCUP2TSK049999' && rs.head.includes('กำหนดเอง') && rs.head.includes('ใช้รหัสที่ระบบตั้ง'), JSON.stringify(rs));
+  await clickText('ใช้รหัสที่ระบบตั้ง');
+  rs = await refState();
+  ok('  กด "ใช้รหัสที่ระบบตั้ง" ⇒ ได้รหัสของ model ใหม่ + ป้าย "อัตโนมัติ"',
+    rs.value === 'FHTP2XBH020249' && rs.head.includes('อัตโนมัติ') && !rs.head.includes('กำหนดเอง'), JSON.stringify(rs));
+  await j6.evaluate((b) => (b as HTMLButtonElement).click(), await saveBtn('เพิ่มสินค้า'));
+  await j6.waitForFunction(() => !document.querySelector('#lp-model'), { timeout: 5000 });
+  const createdAuto = lastCreated as Record<string, unknown> | null;
+  ok('  บันทึก ⇒ ไม่มี ref_manual · internal_reference = รหัสระบบ',
+    !('ref_manual' in (createdAuto ?? {})) && createdAuto?.internal_reference === 'FHTP2XBH020249'
+      && createdAuto?.parent_reference === 'FHTP2XBH020247', JSON.stringify(createdAuto));
 
   // ระบบไม่แน่ใจรหัส — ต้องติ๊กก่อนบันทึก
   await j6.click('button[aria-label="เพิ่มสินค้าใหม่"]');
@@ -470,25 +576,57 @@ try {
   await j6.evaluate(() => ([...document.querySelectorAll('label')].find((l) => l.textContent?.includes('ตรวจรหัสแล้ว'))!.querySelector('input') as HTMLInputElement).click());
   ok('  ติ๊กแล้วกดได้', !(await saveDisabled('เพิ่มสินค้า')));
   ok('  ราคาที่พิมพ์เอง = ป้าย "กำหนดเอง"', (await txt()).includes('กำหนดเอง'));
+  await setField(REF_INPUT, 'FHTP2XBH010799');
+  t = await txt();
+  ok('  รอบ 7 · แก้รหัสเป็นค่าอื่น ⇒ กล่อง "ไม่แน่ใจ"/ช่องติ๊กหาย · กดบันทึกได้โดยไม่ต้องติ๊ก',
+    !t.includes('ระบบไม่แน่ใจรหัสนี้') && !t.includes('ตรวจรหัสแล้ว') && !(await saveDisabled('เพิ่มสินค้า')));
+  await clickText('ใช้รหัสที่ระบบตั้ง');
+  t = await txt();
+  const reChecked = await j6.evaluate(() =>
+    ([...document.querySelectorAll('label')].find((l) => l.textContent?.includes('ตรวจรหัสแล้ว'))?.querySelector('input') as HTMLInputElement | undefined)?.checked ?? null);
+  ok('  กดลิงก์คืนรหัสระบบ ⇒ กล่องกลับมา · ช่องติ๊กว่าง · ต้องติ๊กอีกครั้ง',
+    t.includes('ระบบไม่แน่ใจรหัสนี้') && reChecked === false && await saveDisabled('เพิ่มสินค้า'), `ติ๊ก = ${reChecked}`);
+  // ติ๊กระหว่างที่จอยังโชว์รหัสของ model ก่อน (/suggest ของ model ใหม่ยังไม่ตอบ) ⇒ รหัสใหม่ต้องยังไม่นับว่าติ๊ก
+  await setModel('BH-01 100x60');
+  const tickedStale = await j6.evaluate(() => {
+    const box = [...document.querySelectorAll('label')].find((l) => l.textContent?.includes('ตรวจรหัสแล้ว'))?.querySelector('input') as HTMLInputElement | undefined;
+    const shown = (document.querySelector('input[aria-label="รหัสสินค้า"]') as HTMLInputElement | null)?.value ?? null;
+    if (box && !box.checked) box.click();
+    return { shown, checked: box?.checked ?? null };
+  });
+  await j6.waitForFunction(() => (document.querySelector('input[aria-label="รหัสสินค้า"]') as HTMLInputElement | null)?.value === 'FHTP2XBH010736', { timeout: 5000 });
+  const tickNow = await j6.evaluate(() =>
+    ([...document.querySelectorAll('label')].find((l) => l.textContent?.includes('ตรวจรหัสแล้ว'))?.querySelector('input') as HTMLInputElement | undefined)?.checked ?? null);
+  ok('  ติ๊กไว้ตอนจอยังโชว์รหัสของ model ก่อน ⇒ พอได้รหัสใหม่ ช่องติ๊กว่าง · ต้องติ๊กใหม่',
+    tickedStale.shown === 'FHTP2XBH010735' && tickedStale.checked === true && tickNow === false && await saveDisabled('เพิ่มสินค้า'),
+    `ตอนติ๊ก ${JSON.stringify(tickedStale)} · หลังได้รหัสใหม่ ติ๊ก = ${tickNow}`);
 
   // ออกรหัสให้ไม่ได้ — ช่องพิมพ์รหัสเปิดเอง
   await setModel('TGM-66011.R2');
   await j6.waitForFunction(() => document.body.innerText.includes('ตระกูลนี้ออกเลขต่อให้ไม่ได้'), { timeout: 5000 });
-  ok('ออกรหัสให้ไม่ได้ ⇒ ช่องพิมพ์รหัสเปิดเอง · ยังไม่ครบ 14 ตัวกดไม่ได้',
-    !!(await j6.$('input[aria-label="รหัสสินค้า (พิมพ์เอง)"]')) && await saveDisabled('เพิ่มสินค้า'));
-  await j6.type('input[aria-label="รหัสสินค้า (พิมพ์เอง)"]', 'ftgp1tgm66011s');
-  ok('  ครบ 14 ตัวกดได้', !(await saveDisabled('เพิ่มสินค้า')));
+  rs = await refState();
+  ok('ออกรหัสให้ไม่ได้ ⇒ ช่องรหัสว่างให้พิมพ์เอง · ไม่มีป้าย/ลิงก์ · ยังไม่ครบ 14 ตัวกดไม่ได้',
+    rs.value === '' && !rs.head.includes('อัตโนมัติ') && !rs.head.includes('กำหนดเอง') && !rs.head.includes('ใช้รหัสที่ระบบตั้ง')
+      && await saveDisabled('เพิ่มสินค้า'), JSON.stringify(rs));
+  await j6.type(REF_INPUT, 'ftgp1tgm66011s');
+  rs = await refState();
+  ok('  ครบ 14 ตัวกดได้ · ป้าย "กำหนดเอง"', !(await saveDisabled('เพิ่มสินค้า')) && rs.head.includes('กำหนดเอง'), JSON.stringify(rs));
 
   // หาต้นแบบไม่ได้ — ค้นเอง แล้วได้รหัสจากต้นแบบที่เลือก
   await setModel('XYZ-99 test');
   await j6.waitForFunction(() => document.body.innerText.includes('ระบบหาสินค้าที่ใกล้เคียงไม่เจอ'), { timeout: 5000 });
+  t = await txt();
+  ok('  รอบ 7 · ส่วนต้นแบบบอกว่าพิมพ์รหัสในช่องรหัสเองได้ (ไม่มีลิงก์ "ข้ามไปพิมพ์รหัสเอง")',
+    t.includes('ไม่มีต้นแบบก็พิมพ์รหัสในช่องรหัสสินค้าเองได้') && !t.includes('ข้ามไปพิมพ์รหัสเอง'));
   await j6.type('input[aria-label="ค้นต้นแบบ"]', 'TGM-66');
   await j6.waitForFunction(() => document.body.innerText.includes('FTGP1TGM066099'), { timeout: 5000 });
   calls.length = 0;
   await j6.evaluate(() => ([...document.querySelectorAll('button')].find((b) => b.textContent?.includes('FTGP1TGM066099')) as HTMLButtonElement).click());
-  await j6.waitForFunction(() => document.body.innerText.includes('FTGP1TGM066194'), { timeout: 5000 });
-  ok('หาต้นแบบไม่ได้ ⇒ ค้นเอง → เลือก → /suggest ส่ง parent และได้รหัสของตระกูลนั้น',
-    calls.some((c) => c.path.includes('parent=FTGP1TGM066099')) && (await txt()).includes('คุณเลือกเอง'));
+  await waitRef(j6, 'FTGP1TGM066194');
+  rs = await refState();
+  ok('หาต้นแบบไม่ได้ ⇒ ค้นเอง → เลือก → /suggest ส่ง parent และได้รหัสของตระกูลนั้น (ทับรหัสที่พิมพ์ค้างไว้)',
+    calls.some((c) => c.path.includes('parent=FTGP1TGM066099')) && (await txt()).includes('คุณเลือกเอง')
+      && rs.value === 'FTGP1TGM066194' && rs.head.includes('อัตโนมัติ'), JSON.stringify(rs));
 
   // model ซ้ำ — ไม่มีปุ่มบันทึก (หน้ารายการไม่มี "ใช้สินค้านี้ในใบ")
   await setModel('TSK-04(S2)6x75+1MF-S000');
@@ -524,6 +662,7 @@ try {
   await qp.setViewport({ width: 1280, height: 1000 });
   await qp.setRequestInterception(true);
   qp.on('request', (r) => { void route(r); });
+  qp.on('pageerror', (e: unknown) => { pageErrors.push(e instanceof Error ? e.message : String(e)); });
   await qp.evaluateOnNewDocument('globalThis.__name = (f) => f;');
   await qp.evaluateOnNewDocument((tk: string) => {
     sessionStorage.setItem('admin_token', tk);
@@ -558,7 +697,7 @@ try {
     ok('  ชี้เมาส์ที่แถบ ⇒ พื้นของตัว sticky ยังทึบ (รายการข้างใต้ไม่ทะลุ)', /^rgb|^oklch|^color/.test(stickyBg) && (alpha === undefined || Number(alpha) === 1), stickyBg);
     await qp.screenshot({ path: `${SHOTS}op-j6-quote-entry.png` });
     await qp.evaluate(() => ([...document.querySelectorAll('button')].find((b) => b.textContent?.includes('เพิ่มสินค้าใหม่')) as HTMLButtonElement).click());
-    await qp.waitForFunction(() => document.body.innerText.includes('FCUP2TSK040178'), { timeout: 5000 });
+    await waitRef(qp, 'FCUP2TSK040178');
     ok('  กด ⇒ หน้าต่างเปิดพร้อม model = คำที่พิมพ์', (await qp.$eval('#lp-model', (e) => (e as HTMLInputElement).value)) === 'TSK-04(S2)6x75+3M-S123');
     await qp.type('#lp-price', '800');
     await qp.evaluate(() => ([...document.querySelectorAll('button')].filter((b) => b.textContent?.trim() === 'เพิ่มและใส่ลงใบ').at(-1) as HTMLButtonElement).click());
@@ -597,11 +736,12 @@ try {
   await m.click('button[aria-label="เพิ่มสินค้าใหม่"]');
   await m.waitForSelector('#lp-model');
   await m.type('#lp-model', 'TSK-04(S2)6x75+3M-S123');
-  await m.waitForFunction(() => document.body.innerText.includes('FCUP2TSK040178'), { timeout: 5000 });
+  await waitRef(m, 'FCUP2TSK040178');
   const mo = await m.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   ok('หน้าต่างเพิ่มสินค้าที่ 390px ไม่ล้นแนวนอน', mo <= 0, `${mo}px`);
   await m.screenshot({ path: `${SHOTS}op-j6-390.png` });
   await m.close();
+  ok('ไม่มี error หลุดจากหน้าเว็บ (pageerror)', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
 } finally {
   await browser.close();
 }
