@@ -432,7 +432,13 @@ try {
   const refState = () => j6.evaluate((sel: string) => {
     const inp = document.querySelector(sel) as HTMLInputElement | null;
     const head = inp?.parentElement?.firstElementChild as HTMLElement | null | undefined;
-    return { value: inp?.value ?? null, head: head?.innerText ?? '' };
+    // สีตัวอักษรจริงของช่อง เทียบกับ --brand-fg ที่ resolve แล้ว — class สีสองตัวชนกันเคยทำให้รหัสอัตโนมัติเป็นสีปกติ (2026-10-02)
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--brand-fg)';
+    document.body.appendChild(probe);
+    const brandColor = getComputedStyle(probe).color;
+    probe.remove();
+    return { value: inp?.value ?? null, head: head?.innerText ?? '', brand: inp ? getComputedStyle(inp).color === brandColor : null };
   }, REF_INPUT);
   const clickText = (label: string) => j6.evaluate((l: string) =>
     ([...document.querySelectorAll('button')].find((b) => b.textContent?.trim() === l) as HTMLButtonElement).click(), label);
@@ -456,7 +462,7 @@ try {
       && (await j6.$eval('#lp-name', (e) => (e as HTMLInputElement).value)) === 'Thermocouple K Type "Primus" TSK-04(S2)6x75+3M-S123');
   ok('  ช่องรหัสเติมรหัสจาก /suggest ให้ + ป้าย "อัตโนมัติ" + "ระบบตั้งให้ · แก้ได้" · ไม่มีคำเตือน (ระบบมั่นใจ)',
     rs.value === 'FCUP2TSK040178' && rs.head.includes('อัตโนมัติ') && rs.head.includes('ระบบตั้งให้ · แก้ได้')
-      && !rs.head.includes('กำหนดเอง') && t.includes('ต่อจากเลขล่าสุดของตระกูลนี้ (178 ตัว)') && !t.includes('ระบบไม่แน่ใจรหัสนี้'),
+      && rs.brand === true && !rs.head.includes('กำหนดเอง') && t.includes('ต่อจากเลขล่าสุดของตระกูลนี้ (178 ตัว)') && !t.includes('ระบบไม่แน่ใจรหัสนี้'),
     JSON.stringify(rs));
   ok('  ยังไม่กรอกราคา ⇒ ปุ่มเพิ่มกดไม่ได้', await saveDisabled('เพิ่มสินค้า'));
   await j6.evaluate(() => ([...document.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'คิดราคา') as HTMLButtonElement).click());
@@ -523,7 +529,7 @@ try {
   await setField(REF_INPUT, 'fcup2tsk049999');
   rs = await refState();
   ok('รอบ 7 · พิมพ์แก้รหัส ⇒ ตัวพิมพ์ใหญ่ · ป้าย "กำหนดเอง" · ลิงก์ "ใช้รหัสที่ระบบตั้ง" · บันทึกกดได้',
-    rs.value === 'FCUP2TSK049999' && rs.head.includes('กำหนดเอง') && !rs.head.includes('อัตโนมัติ')
+    rs.value === 'FCUP2TSK049999' && rs.head.includes('กำหนดเอง') && rs.brand === false && !rs.head.includes('อัตโนมัติ')
       && rs.head.includes('ใช้รหัสที่ระบบตั้ง') && !(await saveDisabled('เพิ่มสินค้า')), JSON.stringify(rs));
   await setField(REF_INPUT, 'fcup2tsk04017');
   ok('  ไม่ครบ 14 ตัว ⇒ บันทึกกดไม่ได้', await saveDisabled('เพิ่มสินค้า'));

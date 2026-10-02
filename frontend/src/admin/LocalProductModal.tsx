@@ -614,7 +614,8 @@ export const LocalProductModal: React.FC<Props> = ({
             maxLength={20}
             placeholder="14 ตัว เช่น FTGP1TGM66011S"
             aria-label="รหัสสินค้า"
-            className={`${INPUT_CLS} font-mono uppercase${refIsAuto ? ' font-semibold text-[var(--brand-fg)]' : ''}`}
+            // สีตัวอักษรต้องแทนที่ text-slate-800 ของ INPUT_CLS ไม่ใช่ต่อท้าย — สอง class สีชนกันแล้วตัวที่ชนะขึ้นกับลำดับใน CSS
+            className={`${refIsAuto ? INPUT_CLS.replace('text-slate-800', 'text-[var(--brand-fg)] font-semibold') : INPUT_CLS} font-mono uppercase`}
           />
           {needCheck && sug?.ref ? (
             <div className={`${BOX} border-amber-200 bg-amber-50 text-amber-800 mt-1.5`}
