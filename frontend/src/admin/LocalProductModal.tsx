@@ -19,6 +19,13 @@
 //  · **ต้นแบบที่เลือกให้ต้องโชว์ชื่อ + รหัส + ปุ่ม "เปลี่ยน" เสมอ** — ตระกูลรวมอย่าง Buy to Sell เลือกพลาดได้ (§13.2)
 //  · **ราคา 0 ใช้ไม่ได้** — ผลคิดราคาที่ไม่ใช่ `priced` หรือได้ 0 ไม่มีปุ่ม "ใช้ราคานี้" (§13.5)
 //
+//  ── ช่องรหัสสินค้า (โหมดเพิ่ม · mockup รอบ 7 ที่เจ้าของยืนยัน 2026-10-02) ─────────────────
+//  · ช่องเดียวเสมอ: เติมรหัสที่ระบบตั้งให้ และแก้ในช่องได้เลย — ป้าย "อัตโนมัติ"/"กำหนดเอง" + ลิงก์ "ใช้รหัสที่ระบบตั้ง"
+//  · state `refText`: `null` = ตามรหัสระบบ (ตาม /suggest ล่าสุด) · string = คนพิมพ์เอง · พิมพ์กลับมาตรงรหัสระบบ = อัตโนมัติ
+//    **ห้ามกลับไปเป็นธงโหมดค้าง** — เดิม `ref=null` ระหว่างพิมพ์ model ทีละตัว (เช่น "BH") สลับเป็นโหมดพิมพ์เองแล้ว
+//    ไม่สลับกลับ ⇒ ช่องว่างค้างทั้งที่ระบบออกรหัสให้ได้แล้ว (ด่าน `diag:op-ui` ข้อ regression รอบ 7)
+//  · แก้เป็นค่าอื่นแล้ว คำเตือน "ไม่แน่ใจรหัส" + ช่องติ๊กหาย (คนพิมพ์เองแล้ว) · server ตัดสินรหัสเหมือนเดิม
+//
 //  ── สิ่งที่จงใจไม่มี ──────────────────────────────────────────────────────────
 //  · ช่อง `production` — ปล่อยว่างตามข้อตัดสิน §2.1 (ไม่งั้นติดกฎบล็อกทันที)
 //  · การลอก `sales_description` จากต้นแบบ — ของต้นแบบเป็นสเปกของรุ่นนั้น (§13.4)
@@ -184,8 +191,8 @@ export const LocalProductModal: React.FC<Props> = ({
   const [parentHits, setParentHits] = useState<ParentBrief[]>([]);
   const [parentLoading, setParentLoading] = useState(false);
 
-  const [manualRef, setManualRef] = useState(false);
-  const [refText, setRefText] = useState('');
+  /** `null` = ตามรหัสที่ระบบตั้ง · string = คนพิมพ์เอง (ตัวพิมพ์ใหญ่แล้ว) */
+  const [refText, setRefText] = useState<string | null>(null);
   const [refChecked, setRefChecked] = useState(false);
 
   const [nameEdited, setNameEdited] = useState(false);
@@ -266,8 +273,6 @@ export const LocalProductModal: React.FC<Props> = ({
         setSug(s);
         setSugError(null);
         if (!pctTouched.current) setPct(pctText(s.min_price_ratio));
-        // ระบบออกรหัสให้ไม่ได้ ⇒ เปิดช่องพิมพ์เองให้เลย ไม่ปล่อยให้กดบันทึกแล้วค่อยเจอ 409
-        if (!s.ref) setManualRef(true);
       } catch {
         if (!cancelled) setSugError('ติดต่อเซิร์ฟเวอร์ไม่ได้ — ลองใหม่อีกครั้ง');
       } finally {
@@ -304,9 +309,14 @@ export const LocalProductModal: React.FC<Props> = ({
   // แถวเดิมยังไม่โหลด = ยังไม่รู้ว่ามีใบอ้างไหม ⇒ ถือว่าล็อกไว้ก่อน
   const modelLocked = editing && (row === null || row.quotation_count > 0);
   const shownName = editing || nameEdited ? name : sug?.name ?? model.trim();
-  const refTyped = refText.trim().toUpperCase();
-  const refTypedOk = /^[A-Z0-9]{14}$/.test(refTyped);
-  const needCheck = !editing && !manualRef && sug?.ref?.tier === 'max_plus_one';
+  // รหัสของ /suggest ล่าสุด (แม้ยังโหลดของ model ใหม่อยู่ — ปุ่มบันทึกถูกกันด้วย !sugFresh อยู่แล้ว)
+  const autoRef = editing ? null : sug?.ref?.internal_reference ?? null;
+  const refValue = refText ?? autoRef ?? '';
+  const refFinal = refValue.trim().toUpperCase();
+  const refOk = /^[A-Z0-9]{14}$/.test(refFinal);
+  /** พิมพ์จนกลับมาตรงรหัสระบบ = นับเป็นอัตโนมัติ */
+  const refIsAuto = !!autoRef && refFinal === autoRef;
+  const needCheck = !editing && refIsAuto && sug?.ref?.tier === 'max_plus_one';
   const dup = !editing && sug && sug.duplicate.length > 0 ? sug.duplicate[0] : null;
   const sugFresh = !editing && !!sug && sug.model === model.trim();
 
@@ -325,8 +335,9 @@ export const LocalProductModal: React.FC<Props> = ({
     if (!editing) {
       if (sugLoading || !sugFresh) return 'กำลังหาข้อมูลตั้งต้น…';
       if (dup) return 'model นี้มีอยู่แล้ว';
-      if (manualRef ? !refTypedOk : !sug?.ref) return 'รหัสสินค้าต้องเป็นตัวอักษร A–Z หรือตัวเลข 14 ตัว';
-      if (!manualRef && !sug?.parent) return 'ต้องเลือกต้นแบบ หรือพิมพ์รหัสเอง';
+      // รหัสระบบต้องมาคู่ต้นแบบ · ไม่มีต้นแบบ = ต้องพิมพ์รหัสเอง
+      if (!sug?.parent && (!refFinal || refIsAuto)) return 'ต้องเลือกต้นแบบ หรือพิมพ์รหัสเอง';
+      if (!refOk) return 'รหัสสินค้าต้องเป็นตัวอักษร A–Z หรือตัวเลข 14 ตัว';
       if (needCheck && !refChecked) return 'ติ๊ก “ตรวจรหัสแล้ว” ก่อน';
     }
     if (!shownName.trim()) return 'ชื่อสินค้าว่างไม่ได้';
@@ -354,7 +365,8 @@ export const LocalProductModal: React.FC<Props> = ({
     setPickingParent(false);
     setParentQ('');
     setParentHits([]);
-    setManualRef(false);
+    // เลือกต้นแบบ = อยากได้รหัสจากต้นแบบนั้น ⇒ ทิ้งรหัสที่พิมพ์ค้างไว้
+    setRefText(null);
     setRefChecked(false);
     setSugLoading(true);
   };
@@ -446,11 +458,11 @@ export const LocalProductModal: React.FC<Props> = ({
         if (!modelLocked) payload.model = model.trim();
       } else {
         payload.model = model.trim();
-        if (manualRef) {
-          payload.ref_manual = true;
-          payload.internal_reference = refTyped;
+        if (refIsAuto) {
+          payload.internal_reference = autoRef;
         } else {
-          payload.internal_reference = sug!.ref!.internal_reference;
+          payload.ref_manual = true;
+          payload.internal_reference = refFinal;
         }
         if (sug?.parent) payload.parent_reference = sug.parent.internal_reference;
       }
@@ -462,6 +474,8 @@ export const LocalProductModal: React.FC<Props> = ({
       if (res.status === 409 && body?.code === 'REF_CHANGED' && body?.detail?.ref && sug) {
         // มีคนเพิ่มสินค้าตระกูลเดียวกันแทรกไปก่อน — พรีวิวไม่ใช่การจอง (§1.4) ⇒ เปลี่ยนเป็นรหัสใหม่ให้คนดูก่อนกดซ้ำ
         setSug({ ...sug, ref: body.detail.ref });
+        // ที่ส่งไปเป็นรหัสระบบ ⇒ ตามรหัสใหม่ (ทั้งที่พิมพ์ทับจนตรงรหัสเดิม)
+        if (refIsAuto) setRefText(null);
         setRefChecked(false);
         setError(`${body.error} — เปลี่ยนรหัสให้แล้ว ตรวจแล้วกดบันทึกอีกครั้ง`);
         return;
@@ -558,7 +572,7 @@ export const LocalProductModal: React.FC<Props> = ({
           <p className={HINT_CLS}>
             ต้นแบบใช้ตั้งรหัส ชื่อ และหมวดหมู่ให้
             {parent && <> · <button type="button" className="font-semibold text-[var(--brand-fg)]" onClick={() => setPickingParent(false)}>ใช้ตัวที่ระบบเลือก</button></>}
-            {!parent && !manualRef && <> — หรือ <button type="button" className="font-semibold text-[var(--brand-fg)]" onClick={() => setManualRef(true)}>ข้ามไปพิมพ์รหัสเอง</button></>}
+            {!parent && <> — ไม่มีต้นแบบก็พิมพ์รหัสในช่องรหัสสินค้าเองได้</>}
           </p>
         </div>
       )}
@@ -567,7 +581,16 @@ export const LocalProductModal: React.FC<Props> = ({
 
   const refSection = (
     <div>
-      <div className={LABEL_CLS}>รหัสสินค้า</div>
+      <div className={LABEL_CLS}>
+        รหัสสินค้า
+        {!editing && (refIsAuto
+          ? <span className={`${TAG} bg-emerald-50 text-emerald-700 border-emerald-200`}>อัตโนมัติ</span>
+          : refFinal && <span className={`${TAG} bg-blue-50 text-blue-700 border-blue-200`}>กำหนดเอง</span>)}
+        {!editing && autoRef && (refIsAuto
+          ? <span className="ml-auto font-normal text-[11px] text-slate-400">ระบบตั้งให้ · แก้ได้</span>
+          : <button type="button" className="ml-auto font-semibold text-[11.5px] text-[var(--brand-fg)]"
+                    onClick={() => { setRefText(null); setRefChecked(false); }}>ใช้รหัสที่ระบบตั้ง</button>)}
+      </div>
       {editing ? (
         <div className="flex items-center gap-2 h-9 px-3 rounded-xl border border-slate-200 bg-slate-50">
           <span className="font-mono text-[13px] font-semibold text-[var(--brand-fg)]">{row?.internal_reference}</span>
@@ -576,46 +599,33 @@ export const LocalProductModal: React.FC<Props> = ({
             : <span className={`${TAG} bg-emerald-50 text-emerald-700 border-emerald-200`}>อัตโนมัติ</span>)}
           <span className="ml-auto text-[11px] text-slate-400 truncate">เปลี่ยนรหัสใช้ปุ่ม “ออกรหัสใหม่”</span>
         </div>
-      ) : manualRef || !sug?.ref ? (
+      ) : (
         <>
           {sugFresh && sug?.parent && !sug.ref && sug.ref_message && (
             <div className={`${BOX} border-amber-200 bg-amber-50 text-amber-800 mb-1.5`}>{sug.ref_message}</div>
           )}
           <input
-            value={refText}
-            onChange={(e) => setRefText(e.target.value)}
+            value={refValue}
+            onChange={(e) => { setRefText(e.target.value.toUpperCase()); setRefChecked(false); }}
             maxLength={20}
             placeholder="14 ตัว เช่น FTGP1TGM66011S"
-            aria-label="รหัสสินค้า (พิมพ์เอง)"
-            className={`${INPUT_CLS} font-mono uppercase`}
+            aria-label="รหัสสินค้า"
+            className={`${INPUT_CLS} font-mono uppercase${refIsAuto ? ' font-semibold text-[var(--brand-fg)]' : ''}`}
           />
-          <p className={HINT_CLS}>
-            ตัวอักษร A–Z และตัวเลข 14 ตัว · ระบบตรวจว่าไม่ซ้ำตอนบันทึก
-            {sug?.ref && <> · <button type="button" className="font-semibold text-[var(--brand-fg)]" onClick={() => setManualRef(false)}>ใช้รหัสที่ระบบตั้ง</button></>}
-          </p>
-        </>
-      ) : (
-        <>
-          <div className="flex items-center gap-2 h-9 px-3 rounded-xl border border-slate-200 bg-slate-50">
-            <span className="font-mono text-[13px] font-semibold text-[var(--brand-fg)]">{sug.ref.internal_reference}</span>
-            <span className={`${TAG} bg-emerald-50 text-emerald-700 border-emerald-200`}>อัตโนมัติ</span>
-            <button type="button" className="ml-auto text-[11.5px] font-semibold text-[var(--brand-fg)]"
-                    onClick={() => { setManualRef(true); setRefText(''); }}>
-              พิมพ์เอง
-            </button>
-          </div>
-          {sug.ref.tier === 'max_plus_one' ? (
+          {needCheck && sug?.ref ? (
             <div className={`${BOX} border-amber-200 bg-amber-50 text-amber-800 mt-1.5`}
                  title={`นับต่อจากกลุ่ม ${sug.ref.internal_reference.slice(0, sug.ref.prefix_length)}`}>
-              <b>ระบบไม่แน่ใจรหัสนี้</b> — {sug.ref.warning}
+              <b>ระบบไม่แน่ใจรหัสนี้</b> — {sug.ref.warning} หรือแก้รหัสในช่องได้เลย
               <label className="flex items-center gap-2 mt-1.5 font-semibold cursor-pointer">
                 <input type="checkbox" checked={refChecked} onChange={(e) => setRefChecked(e.target.checked)} />
                 ตรวจรหัสแล้ว ใช้รหัสนี้
               </label>
             </div>
-          ) : (
+          ) : refIsAuto && sug?.ref ? (
             <p className={HINT_CLS}>ต่อจากเลขล่าสุดของตระกูลนี้ ({sug.ref.siblings.toLocaleString('en-US')} ตัว)</p>
-          )}
+          ) : !refIsAuto ? (
+            <p className={HINT_CLS}>ตัวอักษร A–Z และตัวเลข 14 ตัว · ระบบตรวจว่าไม่ซ้ำตอนบันทึก</p>
+          ) : null}
         </>
       )}
     </div>
