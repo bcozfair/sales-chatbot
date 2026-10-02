@@ -6,6 +6,7 @@ import { Button } from '../Button';
 import { ErrorBox } from '../logs/ui';
 import { errMsg, formatDateTime } from '../logs/format';
 import { LocalProductModal, type FromPricing } from '../LocalProductModal';
+import { isFullPrice } from '../localProducts';
 import { SubCodeModal } from './SubCodeModal';
 import { CalcTrace } from './CalcTrace';
 import { CatalogTemplate, NoModelTemplate, TsCatalogTemplate, type FamilyChoice } from './CatalogTemplate';
@@ -255,10 +256,10 @@ export const PricingLab: React.FC<Props> = ({
   const o = result?.outcome ?? null;
   const addCode = result?.code?.trim() ?? '';
   /** ราคาครบ = เติมราคาให้ · คิดได้บางส่วน = เปิดได้แต่ไม่เติมราคา (ราคาครึ่งเดียวห้ามหลุดเข้าใบ) · คิดไม่ได้เลย = ปุ่มปิด */
+  //  "ครบ" = `isFullPrice` ตัวเดียวกับปุ่มคิดราคาในหน้าต่างเพิ่มสินค้า (เท่ากับ notIncluded ว่าง + ไม่ติดบล็อก + ไม่มีปัญหาของรหัส)
   const addPriced: 'full' | 'partial' | 'none' = !o || !(o.unitPrice > 0) ? 'none'
-    : o.status === 'priced'
-      ? (notIncluded.length === 0 && !o.violations.some((v) => v.level === 'block') && result!.parsed.problems.length === 0 ? 'full' : 'partial')
-      : o.status === 'quoteOnRequest' && o.breakdown.length > 0 ? 'partial' : 'none';
+    : isFullPrice(result) ? 'full'
+      : o.status === 'priced' || (o.status === 'quoteOnRequest' && o.breakdown.length > 0) ? 'partial' : 'none';
   const canCheckDup = canAddProduct && addPriced !== 'none' && addCode !== '';
   // รหัสที่มีในระบบแล้ว ⇒ เตือนตั้งแต่ยังไม่กด (เจ้าของสั่งตอนเคาะ mockup) — ถาม `/suggest` ตัวเดียวกับหน้าต่างเพิ่มสินค้า
   // จึงใช้เกณฑ์เดียวกับด่านตอนบันทึก (`findProductsByModel`) · ตรวจไม่สำเร็จ = ไม่บล็อก เพราะหน้าต่างกับ server ตรวจซ้ำ

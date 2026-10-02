@@ -21,7 +21,9 @@
 //  · **คำเตือน "ระบบไม่แน่ใจรหัสนี้" + ช่องติ๊ก "ตรวจรหัสแล้ว"** (tier `max_plus_one`) — เจ้าของเอาป้ายเตือนออกจาก
 //    หน้ารายการเพราะ "คนต้องตรวจก่อนกดยืนยันก่อนเพิ่มสินค้าอยู่แล้ว" ⇒ ที่นี่คือจุดเดียวที่เหลือ (แผน §4.1)
 //  · **ต้นแบบที่เลือกให้ต้องโชว์ชื่อ + รหัส + ปุ่ม "เปลี่ยน" เสมอ** — ตระกูลรวมอย่าง Buy to Sell เลือกพลาดได้ (§13.2)
-//  · **ราคา 0 ใช้ไม่ได้** — ผลคิดราคาที่ไม่ใช่ `priced` หรือได้ 0 ไม่มีปุ่ม "ใช้ราคานี้" (§13.5)
+//  · **ราคาไม่ครบ/ราคา 0 ไม่เติมให้** — ปุ่มคิดราคา (สีหลัก) เติมราคาลงช่องราคาขายทันทีเฉพาะผลที่ `isFullPrice()`
+//    (เจ้าของสั่ง 2026-10-02 "ใส่ราคาที่คิดได้ในช่องได้เลย ไม่ต้องกดใช้ราคาอีก" · เดิมมีปุ่ม "ใช้ราคานี้" §13.5)
+//    ไม่ครบ = กล่องเหลืองบอกเหตุผล ช่องราคาคงค่าเดิม · ปุ่มคิดราคาสีหลักเป็นปุ่มที่สองของหน้าต่างตามที่เจ้าของสั่ง
 //
 //  ── ช่องรหัสสินค้า (โหมดเพิ่ม · mockup รอบ 7 ที่เจ้าของยืนยัน 2026-10-02) ─────────────────
 //  · ช่องเดียวเสมอ: เติมรหัสที่ระบบตั้งให้ และแก้ในช่องได้เลย — ป้าย "อัตโนมัติ"/"กำหนดเอง" + ลิงก์ "ใช้รหัสที่ระบบตั้ง"
@@ -41,7 +43,7 @@ import { Modal } from './Modal';
 import { Button } from './Button';
 import { describeApiError } from './apiError';
 import { notifyBadgesChanged } from './badgeRefresh';
-import type { PickedProduct } from './localProducts';
+import { isFullPrice, type PickedProduct } from './localProducts';
 
 interface ParentBrief {
   product_template_id: number;
@@ -167,12 +169,12 @@ const INHERITED_LABEL: [string, string][] = [
 
 /** แปลงคำตอบของ `POST /price` เป็นสิ่งที่จอโชว์ — ไม่คิดเลขเอง แค่หยิบของที่ตัวคิดราคาคืนมา */
 function toPriceResult(body: {
-  parsed?: { problems?: string[] };
+  parsed?:{ problems?: string[]; parts?: { kind: string; text?: string; reads?: string }[] } | null;
   outcome?: {
     status: string;
     unitPrice: number;
     breakdown?: { label: string; detail?: string; amount: number }[];
-    violations?: { message: string }[];
+    violations?: { message: string; level?: string; partial?: boolean }[];
   } | null;
   revision?: number | null;
 }): PriceResult {
@@ -180,7 +182,8 @@ function toPriceResult(body: {
   if (!o) {
     return { kind: 'none', why: (body.parsed?.problems ?? []).join(' · ') };
   }
-  if (o.status === 'priced' && o.unitPrice > 0) {
+  // เกณฑ์เดียวกับปุ่ม "เพิ่มเป็นสินค้าใหม่" ของหน้าคำนวณราคา — ผลนี้ถูกเติมลงช่องเองแล้ว ราคาครึ่งเดียวต้องไม่ผ่าน
+  if (isFullPrice(body)) {
     return {
       kind: 'priced',
       price: o.unitPrice,
@@ -188,7 +191,13 @@ function toPriceResult(body: {
       revision: body.revision ?? null,
     };
   }
-  return { kind: 'partial', price: o.unitPrice, notes: (o.violations ?? []).map((v) => v.message) };
+  const notes = [
+    ...(o.violations ?? []).map((v) => v.message),
+    ...(body.parsed?.parts ?? []).filter((p) => p.kind === 'unknown' || p.kind === 'choose')
+      .map((p) => `ยังไม่รวมในราคา — ${p.text ?? ''}${p.reads ? ` — ${p.reads}` : ''}`),
+    ...(body.parsed?.problems ?? []),
+  ];
+  return { kind: 'partial', price: o.unitPrice, notes };
 }
 
 export const LocalProductModal: React.FC<Props> = ({
@@ -435,17 +444,16 @@ export const LocalProductModal: React.FC<Props> = ({
       const r = toPriceResult(body);
       setQuote(r);
       setBookPrice(r.kind === 'priced' ? { price: r.price, revision: r.revision } : null);
+      // ราคาครบ = ใส่ลงช่องราคาขายเลย แล้วค่อยแก้ตัวเลขเอา · ราคาขั้นต่ำกลับไปคิดจาก % (เหมือนพิมพ์ราคาขายใหม่)
+      if (r.kind === 'priced') {
+        setPrice(String(r.price));
+        setMinManual(null);
+      }
     } catch {
       setQuote({ kind: 'error', message: 'ติดต่อเซิร์ฟเวอร์ไม่ได้ — ลองใหม่อีกครั้ง' });
     } finally {
       setQuoting(false);
     }
-  };
-
-  const applyBookPrice = () => {
-    if (quote?.kind !== 'priced') return;
-    setPrice(String(quote.price));
-    setMinManual(null);
   };
 
   /** model ซ้ำ ⇒ หาแถวเดิมจากช่องค้นตัวเดียวกับใบ (ได้ราคา/สต็อกครบ) แล้วส่งให้ใบใช้ */
@@ -668,11 +676,9 @@ export const LocalProductModal: React.FC<Props> = ({
         <div className="flex items-center gap-2">
           <span className="text-emerald-800">ราคาจากสมุดราคา</span>
           <span className="text-base font-bold text-emerald-700 tabular-nums">฿{money2(quote.price)}</span>
-          <span className="ml-auto">
-            {Math.round(priceNum * 100) === Math.round(quote.price * 100)
-              ? <span className="text-[11px] text-emerald-700">ใช้แล้ว</span>
-              : <Button variant="primary" onClick={applyBookPrice}>ใช้ราคานี้</Button>}
-          </span>
+          {Math.round(priceNum * 100) === Math.round(quote.price * 100) && (
+            <span className="ml-auto text-[11px] text-emerald-700">ใส่ในช่องราคาขายแล้ว · แก้ตัวเลขได้</span>
+          )}
         </div>
         <div className="mt-1.5 pt-1.5 border-t border-dashed border-emerald-200 space-y-0.5">
           {quote.lines.map((l, i) => (
@@ -785,7 +791,7 @@ export const LocalProductModal: React.FC<Props> = ({
                     <div className="flex gap-2">
                       <input id="lp-price" inputMode="decimal" placeholder="0.00" value={price} disabled={lockedByOdoo}
                              onChange={(e) => onPriceChange(e.target.value)} className={`${INPUT_CLS} tabular-nums`} />
-                      <Button variant="neutral" icon={Calculator} busy={quoting} disabled={!model.trim() || lockedByOdoo}
+                      <Button variant="primary" icon={Calculator} busy={quoting} disabled={!model.trim() || lockedByOdoo}
                               onClick={() => void runQuote()} className="shrink-0">
                         คิดราคา
                       </Button>

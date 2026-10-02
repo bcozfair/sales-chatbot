@@ -18,7 +18,8 @@
    ป้ายสถานะใช้คำเดียวกับตัวกรอง · แถบแดงนับจาก server ทุกกลุ่มและกดแล้วเปิดกลุ่ม "รหัสซ้ำ/ไม่ตรง"
    (ตัวจำลอง `groupOf` ข้างล่างลอกลำดับของ `FILTER_SQL` — ตัวจริงพิสูจน์ใน `diag:local-products`)
    + J6 (2026-10-02 · mockup `local-product-add`): หน้าต่างเพิ่ม/แก้สินค้าทุกกรณี (ปกติ · ไม่แน่ใจรหัส ⇒ ต้องติ๊ก ·
-   ออกรหัสไม่ได้ ⇒ พิมพ์เอง · หาต้นแบบไม่ได้ ⇒ ค้นเอง · model ซ้ำ · แก้ไข) · ปุ่มคิดราคา + ใช้ราคานี้ · % ราคาขั้นต่ำ ·
+   ออกรหัสไม่ได้ ⇒ พิมพ์เอง · หาต้นแบบไม่ได้ ⇒ ค้นเอง · model ซ้ำ · แก้ไข) · ปุ่มคิดราคา (สีหลัก · กดแล้วใส่ราคาลงช่องเลย
+   ตั้งแต่ 2026-10-02 — เดิมมีปุ่ม "ใช้ราคานี้") · % ราคาขั้นต่ำ ·
    ทางเข้าจากหน้าขอใบเสนอราคา (แถว "+ เพิ่มสินค้าใหม่" ท้ายผลค้น ⇒ ใส่ลงใบ + ป้าย "เพิ่มเอง") · 390px ไม่ล้น
    + รอบ 7 (2026-10-02 · mockup `local-product-add`): ช่องรหัสเติมรหัสระบบให้และแก้ในช่องได้ · ป้าย อัตโนมัติ/กำหนดเอง ·
    ลิงก์ "ใช้รหัสที่ระบบตั้ง" · แก้เป็นค่าอื่นแล้วไม่ต้องติ๊ก "ตรวจรหัสแล้ว" · **ข้อ regression: พิมพ์ model ทีละท่อน
@@ -465,17 +466,26 @@ try {
       && rs.brand === true && !rs.head.includes('กำหนดเอง') && t.includes('ต่อจากเลขล่าสุดของตระกูลนี้ (178 ตัว)') && !t.includes('ระบบไม่แน่ใจรหัสนี้'),
     JSON.stringify(rs));
   ok('  ยังไม่กรอกราคา ⇒ ปุ่มเพิ่มกดไม่ได้', await saveDisabled('เพิ่มสินค้า'));
+  // 2026-10-02 · เจ้าของสั่ง: ปุ่มคิดราคาสีหลัก · กดแล้วใส่ราคาลงช่องเลย ไม่มีปุ่ม "ใช้ราคานี้"
+  const quoteBtnBg = await j6.evaluate(() => {
+    const b = [...document.querySelectorAll('button')].find((x) => x.textContent?.trim() === 'คิดราคา') as HTMLButtonElement;
+    // ปุ่มบันทึกของหน้าต่างยังกดไม่ได้ (เป็นสีเทา) ให้เทียบสีไม่ได้ ⇒ ตรวจว่าใช้โทเคนของบทบาท primary
+    return { bg: getComputedStyle(b).backgroundColor, cls: b.className };
+  });
+  ok('ปุ่มคิดราคาเป็นสีหลัก (บทบาท primary)', quoteBtnBg.cls.includes('--btn-primary-bg'), quoteBtnBg.bg);
+  await setField('#lp-price', '999');
   await j6.evaluate(() => ([...document.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'คิดราคา') as HTMLButtonElement).click());
   await j6.waitForFunction(() => document.body.innerText.includes('ราคาจากสมุดราคา'), { timeout: 5000 });
   const priceCall = calls.find((c) => c.path === '/api/admin/webquote/products/price');
   t = await txt();
   ok('ปุ่มคิดราคา = POST /price ด้วย model · โชว์ราคา + ที่มาเป็นบรรทัด', priceCall?.body === JSON.stringify({ code: 'TSK-04(S2)6x75+3M-S123' })
     && t.includes('฿775.00') && t.includes('ราคาตั้ง TSK-04') && t.includes('สายส่วนที่ยาวเกิน 1 เมตร'));
-  await j6.evaluate(() => ([...document.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'ใช้ราคานี้') as HTMLButtonElement).click());
   const minOf = () => j6.$eval('#lp-min', (e) => (e as HTMLInputElement).value);
-  ok('"ใช้ราคานี้" ⇒ ราคาขาย 775 · ป้าย "จากสมุดราคา" · ขั้นต่ำ 70% = 542.50',
+  ok('กดคิดราคา ⇒ ใส่ราคาลงช่องเลย (ทับ 999 ที่พิมพ์ไว้) · ป้าย "จากสมุดราคา" · ขั้นต่ำ 70% = 542.50',
     (await j6.$eval('#lp-price', (e) => (e as HTMLInputElement).value)) === '775' && (await txt()).includes('จากสมุดราคา')
       && (await minOf()) === '542.50', await minOf());
+  ok('  ไม่มีปุ่ม "ใช้ราคานี้" แล้ว · กล่องบอกว่าใส่ในช่องแล้ว',
+    !(await txt()).includes('ใช้ราคานี้') && (await txt()).includes('ใส่ในช่องราคาขายแล้ว'));
   await setField('input[aria-label^="ราคาขั้นต่ำ เป็นเปอร์เซ็นต์"]', '65');
   ok('เปลี่ยน % ⇒ ราคาขั้นต่ำตาม (65% = 503.75)', (await minOf()) === '503.75', await minOf());
   await setField('#lp-min', '500');
