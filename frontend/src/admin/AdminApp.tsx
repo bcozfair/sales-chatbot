@@ -24,6 +24,7 @@ import { SyncPanel } from './SyncPanel';
 import { ProductsDirectory } from './ProductsDirectory';
 import { CustomersDirectory } from './CustomersDirectory';
 import { OdooContacts } from './OdooContacts';
+import { OdooProducts } from './OdooProducts';
 // โมดูลทดลอง "คิดราคาสินค้า" — ถอดออก = ลบ import นี้ + 1 เมนู + 1 แถวใน PAGE_TITLES + 1 สาขา render
 import { PricingLab } from './pricingLab/PricingLab';
 import { PriceBook } from './pricingLab/PriceBook';
@@ -45,6 +46,7 @@ import {
   SlidersHorizontal,
   Settings2,
   PackagePlus,
+  PackageOpen,
   PackageX,
   PackageMinus,
   ShieldBan,
@@ -187,6 +189,8 @@ const NAV_GROUPS: { key: string; label: string; icon: typeof LayoutDashboard; it
       // คิวงานค้าง ไม่ใช่ข้อมูลอ้างอิง แต่อยู่กลุ่มนี้เพราะมันคือรายชื่อผู้ติดต่อ — คนที่มาหามันมาหาต่อจาก
       // "ข้อมูลลูกค้า" ที่อยู่เหนือมัน · ตัวเลขข้างเมนู = คนที่ยังไม่มีใน Odoo (เจ้าของเคาะ 2026-09-21)
       { tab: 'odoocontacts', label: 'ผู้ติดต่อเพิ่มเอง', icon: UserPlus, roles: ['admin', 'approver', 'subadmin'], cap: 'page.odoocontacts' },
+      // ฝาแฝดของเมนูบน (J4 · เจ้าของยืนยัน mockup 2026-10-02) — ตัวเลข = สินค้าที่ยังไม่มีใน Odoo
+      { tab: 'odooproducts', label: 'สินค้าเพิ่มเอง', icon: PackageOpen, roles: ['admin', 'approver', 'subadmin'], cap: 'page.odooproducts' },
       { tab: 'blacklist', label: 'บัญชีห้ามเสนอราคา', icon: Ban, roles: ['admin', 'user'], cap: 'page.blacklist' },
       // รายชื่อลูกค้าที่ระบบใช้ตัดสินใจแบบเดียวกับบัญชีข้างบน (2026-09-28 · เจ้าของตั้งชื่อเมนูเอง)
       { tab: 'quotepm', label: 'บัญชีเสนอในนาม PM', icon: Building2, roles: ['admin', 'approver', 'subadmin'], cap: 'page.quotepm' },
@@ -242,6 +246,7 @@ const PAGE_TITLES: Record<MainTab, string> = {
   productsdata: 'ข้อมูลสินค้า',
   customersdata: 'ข้อมูลลูกค้า & ผู้ติดต่อ',
   odoocontacts: 'ผู้ติดต่อเพิ่มเอง',
+  odooproducts: 'สินค้าเพิ่มเอง',
   quotepm: 'บัญชีเสนอในนาม PM',
   traffic: 'รายงานการใช้งาน',
   apilogs: 'บันทึกการเรียก API',
@@ -379,6 +384,26 @@ function AdminContent() {
     return () => { cancelled = true; };
   }, [token, showsOdooContacts, activeTab]);
 
+  /** ตัวเลขข้างเมนู "สินค้าเพิ่มเอง" — สินค้าที่ยังไม่มีใน Odoo · เหตุผลและท่าเดียวกับเมนูผู้ติดต่อข้างบน */
+  const [odooProductBadge, setOdooProductBadge] = useState(0);
+  const showsOdooProducts = visibleTabs.includes('odooproducts');
+  useEffect(() => {
+    if (!token || !showsOdooProducts) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/admin/webquote/products/count', { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok) return;
+        const data = await res.json();
+        const n = Number(data?.pending ?? 0);
+        if (!cancelled) setOdooProductBadge(Number.isFinite(n) ? n : 0);
+      } catch {
+        // นับไม่ได้ไม่ใช่เหตุให้ทั้งเมนูพัง — ไม่มีตัวเลขก็ยังกดเข้าไปดูได้
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token, showsOdooProducts, activeTab]);
+
   // แท็บที่แสดงจริง — activeTab ตั้งต้นเป็น 'dashboard' ซึ่ง role 'user' ไม่มีสิทธิ์เห็น
   // คำนวณตอน render แทนการ setState ใน effect: ไม่มี re-render รอบพิเศษ และครอบเคสถูกลดสิทธิ์
   // ระหว่างเปิดหน้าค้างไว้ด้วย (adminAuthMiddleware อ่าน role สดจาก DB ทุก request)
@@ -487,10 +512,11 @@ function AdminContent() {
   const renderNavItem = (item: NavItem, nested: boolean) => {
     const Icon = item.icon;
     const active = isItemActive(item);
-    // สองเมนูมีตัวเลขค้างของตัวเอง — อ่านจากแมปที่เดียว ไม่งั้นทุกจุดที่วาดป้ายต้องมี if ของตัวเอง
+    // สามเมนูมีตัวเลขค้างของตัวเอง — อ่านจากแมปที่เดียว ไม่งั้นทุกจุดที่วาดป้ายต้องมี if ของตัวเอง
     const badge = item.tab === 'approvals' ? approvalBadge
       : item.tab === 'odoocontacts' ? odooContactBadge
-        : 0;
+        : item.tab === 'odooproducts' ? odooProductBadge
+          : 0;
     const pendingLabel = badge > 0 ? `${item.label} (${badge} รายการ)` : item.label;
     // ความมนอยู่ในบรรทัดของแต่ละแบบ ไม่ใช่ในบรรทัดฐาน — `rounded-lg` กับ `rounded-xl` ที่อยู่
     // ในคลาสเดียวกัน ตัวที่ชนะคือตัวที่ Tailwind เรียงไว้ทีหลังใน CSS ไม่ใช่ตัวที่พิมพ์ทีหลัง
@@ -523,16 +549,14 @@ function AdminContent() {
       >
         <Icon className={nested ? 'w-4 h-4 shrink-0' : 'w-[18px] h-[18px] shrink-0'} />
         {!collapsed && <span className="whitespace-nowrap">{item.label}</span>}
-        {/* ป้ายจำนวนใช้ **สีแบรนด์พื้นทึบ** (เจ้าของสั่ง 2026-09-17) ไม่ใช่ม่วงจาง ๆ ของหน้าอนุมัติ
-            — ม่วงจางบนแถบเมนูได้คอนทราสต์ 2.56:1 (ธีมมืด) และ 1.02:1 (ธีมสว่าง) คือมองไม่เห็น
-            ใช้คู่ `--btn-primary-bg` + `--btn-primary-ink` ซึ่งเป็นคู่ "พื้น + หมึก" ที่วัดมาแล้ว
-            ในทั้งสองธีม (ดู index.css) · พื้นทึบยังอ่านออกตอนเมนูนี้ถูกเลือกอยู่ ซึ่งพื้นแถวเป็น
-            เขียวจาง — ป้ายพื้นจางบนแถวพื้นจางจะกลายเป็นป้ายที่ไม่มีรูปร่าง */}
+        {/* ป้ายจำนวน = **วงกลมพื้นเหลืองอ่อน + ขอบเหลือง + ตัวเลขเหลืองเข้ม** (เจ้าของสั่ง 2026-10-02
+            จากภาพตัวอย่าง · แทนพื้นเขียวทึบของ 2026-09-17) · เหตุผลเดิมยังใช้: ป้ายต้องมีรูปร่างของตัวเอง
+            บนแถวที่ถูกเลือก (พื้นเขียวจาง) ⇒ **ขอบคือสิ่งที่ห้ามถอด** ไม่ใช่ของประดับ
+            · คอนทราสต์ตัวเลขบนพื้นป้าย (วัด 2026-10-02 จากโทเคนใน index.css): ธีมสว่าง amber-700 บน amber-50
+            = 4.84:1 · ธีมมืด = 9.72:1 — ผ่าน 4.5 ทั้งคู่ */}
         {badge > 0 && !collapsed && (
-          <span
-            className="ml-auto px-1.5 min-w-5 text-center rounded-lg text-[11px] font-bold"
-            style={{ backgroundColor: 'var(--btn-primary-bg)', color: 'var(--btn-primary-ink)' }}
-          >
+          <span className="ml-auto min-w-5 h-5 px-1 grid place-items-center rounded-full border border-amber-300
+                           bg-amber-50 text-amber-700 text-[11px] font-bold tabular-nums">
             {badge}
           </span>
         )}
@@ -855,6 +879,10 @@ function AdminContent() {
           ) : effectiveTab === 'odoocontacts' ? (
             <div className="animate-fade-in">
               <OdooContacts />
+            </div>
+          ) : effectiveTab === 'odooproducts' ? (
+            <div className="animate-fade-in">
+              <OdooProducts />
             </div>
           ) : effectiveTab === 'quotepm' ? (
             <div className="animate-fade-in">

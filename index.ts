@@ -306,15 +306,24 @@ app.use(
 app.use('/api/admin/webquote/contacts', localContactsRouter);
 
 // ── "สินค้าเพิ่มเอง" (local_products) — ดู routes/localProducts.ts ──────────────────────────
-// แผน: docs/plan-local-products.md ก้อน J2 · ยังไม่มี UI เรียก (หน้าต่างกลางหน้าขอใบที่ J6 · หน้ารายการที่ J4)
+// แผน: docs/plan-local-products.md · หน้ารายการ "สินค้าเพิ่มเอง" (J4) · หน้าต่างกลางหน้าขอใบมาที่ J6
 // สิทธิ์บังคับที่บรรทัดแรกบรรทัดเดียวคร่อมทุกเส้น: ช่อง `quote.manage_products` ค่าเริ่มต้น
 // admin · approver · subadmin (เจ้าของยืนยัน 2026-10-01 — ใน LINE คือเซลส์ จึงไม่เปิดให้เพิ่ม)
-// ถอนโมดูลออก = ลบ 4 บรรทัดนี้ + 1 ช่องใน capabilities.ts + 1 บรรทัดใน syncService.ts
+// ถอนโมดูลออก = ลบ 5 บรรทัดนี้ + 2 ช่องใน capabilities.ts + 1 บรรทัดใน syncService.ts
 // + ตัวกวาดใน scripts/sync/syncProducts.ts + ไฟล์ของโมดูล (ดูหัว routes/localProducts.ts)
 app.use('/api/admin/webquote/products', adminAuthMiddleware, requireCapability('quote.manage_products'));
 // ปุ่มคิดราคา (§13.5) — **ตัวจัดการเดียวกับ POST /api/admin/pricing/quote** ไม่ใช่สำเนา ⇒ ราคาตรงกันเสมอ
 // และกดได้ทุกคนที่เพิ่มสินค้าได้แม้ไม่มี page.pricing (เจ้าของ 2026-10-01) · ถอด pricingLab = ลบบรรทัดนี้
 app.post('/api/admin/webquote/products/price', adminAuthMiddleware, requireCapability('quote.manage_products'), express.json({ limit: '64kb' }), pricingQuoteHandler);
+// ด่านชั้นที่สอง — คร่อมเฉพาะ 3 เส้นของหน้ารายการ (J4) · เหตุผลเดียวกับฝั่งผู้ติดต่อข้างบน:
+//  **อย่ายุบรวมกับบรรทัดแรก** ไม่งั้นปิดหน้านี้ให้ใคร = เขาเพิ่มสินค้าตอนออกใบไม่ได้ไปด้วย
+//  ต้องมาก่อนบรรทัด mount router (ด่าน diag:role-permissions ข้อ 12 ตรวจลำดับนี้)
+app.use(
+  ['/api/admin/webquote/products/list',
+    '/api/admin/webquote/products/export',
+    '/api/admin/webquote/products/count'],
+  requireCapability('page.odooproducts'),
+);
 app.use('/api/admin/webquote/products', localProductsRouter);
 
 // Serve admin portal dashboard

@@ -100,6 +100,8 @@ const TODAY: Record<Capability, [admin: PermissionMode, approver: PermissionMode
   'page.productsdata':            ['allow', 'allow', 'allow'],
   'page.customersdata':           ['allow', 'allow', 'allow'],
   'page.odoocontacts':            ['allow', 'allow', 'allow'],
+  // สินค้าเพิ่มเอง (J4 · 2026-10-02) — หน้าใหม่ ตั้งตาม page.odoocontacts / quote.manage_products
+  'page.odooproducts':            ['allow', 'allow', 'allow'],
   'page.blacklist':               ['allow', 'deny', 'deny'],
   // บัญชีเสนอในนาม PM (2026-09-28) — หน้าใหม่ เจ้าของเคาะ admin/approver/subadmin
   'page.quotepm':                 ['allow', 'allow', 'allow'],
@@ -413,6 +415,14 @@ async function main() {
     /app\.use\('\/api\/admin\/data', adminAuthMiddleware, dataDirectoryRouter\)/.test(indexSrc));
   // เส้นที่แก้ราคาต้องอยู่หลัง page.pricebook ไม่ใช่ page.pricing — สลับกันเมื่อไหร่ คนที่ได้แค่
   // "คิดราคา" จะแก้ราคาทั้งเล่มได้ทันที ⇒ อ่านซอร์สของ router มาเทียบว่าไม่มีเส้นเขียนหลุดไปอยู่ฝั่งคิดราคา
+  // หน้ารายการของสองโมดูล "เพิ่มเอง" เป็นด่านชั้นที่สองคร่อมแค่ 3 เส้น — ต้อง **อยู่ก่อน** บรรทัด mount router
+  //  ไม่งั้น router ตอบไปก่อนแล้วด่านไม่เคยได้ทำงาน (ผ่านข้อบนเพราะคำมีอยู่ในไฟล์ ทั้งที่ไม่มีผลจริง)
+  for (const [mod, cap] of [['contacts', 'page.odoocontacts'], ['products', 'page.odooproducts']] as const) {
+    const gate = indexSrc.search(new RegExp(`\\[\\s*'/api/admin/webquote/${mod}/list',\\s*'/api/admin/webquote/${mod}/export',\\s*'/api/admin/webquote/${mod}/count'\\],\\s*requireCapability\\('${cap.replace('.', '\\.')}'\\)`));
+    const mount = indexSrc.search(new RegExp(`app\\.use\\('/api/admin/webquote/${mod}', local\\w+Router\\)`));
+    ok(`หน้ารายการ ${mod}: ${cap} คร่อม /list /export /count และวางก่อนจุด mount router`,
+      gate >= 0 && mount >= 0 && gate < mount, `gate@${gate} mount@${mount}`);
+  }
   ok('สมุดราคา: /api/admin/pricebook บังคับด้วย page.pricebook ที่จุด mount',
     /app\.use\('\/api\/admin\/pricebook',[^)]*requireCapability\('page\.pricebook'\)/.test(indexSrc));
   const pricingSrc = readFileSync(new URL('../../routes/pricingLab.ts', import.meta.url), 'utf-8');

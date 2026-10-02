@@ -24,6 +24,9 @@
 > ปุ่มคิดราคา) — ยังไม่มี UI เรียก · `diag:local-products` 73/73 · ขึ้น prod กับ deploy `184e417` 2026-10-01 17:01
 > · **J3 ลงโค้ดแล้ว 2026-10-02** — ธง `is_local_product` ใน snapshot สองชั้น → เหตุ `custom_product` (§8) ·
 > `diag:local-products` 82/82 · ยังไม่ deploy
+> · **J4 ลงโค้ดแล้ว 2026-10-02** — เมนู/หน้า "สินค้าเพิ่มเอง" + ช่อง `page.odooproducts` (ด่านชั้นที่สอง) ตาม mockup
+> `local-products-list` ที่เจ้าของยืนยันรอบ 4 · ปุ่มเพิ่ม/แก้มากับ J6 · ป้ายรหัสเหลือ "อัตโนมัติ"/"กำหนดเอง" (§4.1) ·
+> `diag:op-ui` 31/31 · `diag:role-permissions` 52/52 · ยังไม่ deploy
 
 ---
 
@@ -431,6 +434,7 @@ migration ของบรรทัดค่าบริการเขียน�
 | `routes/localProducts.ts` | API 7 เส้นใต้ `/api/admin/webquote/products` | J2 |
 | `scripts/diag/localProductsSmoke.ts` | ด่าน `npm run diag:local-products` | J1–J4 |
 | `frontend/src/admin/OdooProducts.tsx` | หน้าจอ + เมนู | J4 |
+| `scripts/diag/odooProductsUiProbe.ts` | ด่าน `npm run diag:op-ui` — เปิดหน้าจริงด้วย API จำลอง **ไม่แตะฐาน ไม่ต้องเปิด server** | J4 |
 | `utils/productNamePattern.ts` | **ตรรกะชื่อ + ต้นแบบล้วน ไม่แตะฐาน** — คำนำหน้าชื่อ · คีย์รุ่นจาก model · เดา CU (§13.2–13.3) | J2 |
 | `frontend/src/admin/LocalProductModal.tsx` + ปุ่มใน `ProductComboBox.tsx` | เพิ่มสินค้ากลางหน้าขอใบเสนอราคา (§13.1) | J6 |
 
@@ -493,6 +497,10 @@ export function nextReference(
 **`tier` ไม่ใช่ของประดับ** — มันคือสิ่งเดียวที่บอกคนหน้างานว่า "เลขนี้เชื่อได้" หรือ "เลขนี้แค่นับต่อ
 ให้เฉย ๆ ช่วยตรวจก่อน" · ถ้าจอไม่แสดงมัน 3.37% ของเคสจะดูเหมือนเลขที่ระบบยืนยันแล้ว
 ทั้งที่ไม่ใช่ (กฎเดียวกับธง `guess` ของ `services/pricingLab/code.ts`)
+· **ที่ที่แสดง (เจ้าของสั่ง 2026-10-02 ตอนเคาะ mockup J4):** หน้ารายการมีป้ายรหัสสองแบบเท่านั้น —
+"อัตโนมัติ" (สีเขียว ทั้ง `boundary` และ `max_plus_one`) / "กำหนดเอง" (`manual`) · เหตุผลของเจ้าของ:
+*"คนต้องตรวจก่อนกดยืนยันก่อนเพิ่มสินค้าอยู่แล้ว"* ⇒ **คำเตือนของ `max_plus_one` ต้องอยู่ในหน้าต่างเพิ่มสินค้า (J6)
+ก่อนกดบันทึก** ไม่ใช่ในหน้ารายการ · J6 ห้ามตัดคำเตือนนั้นทิ้ง — มันคือจุดเดียวที่เหลือ
 
 ### 4.2 `describeRef` ต้องคืน "ไม่รู้" ไม่ใช่เดา
 
@@ -532,6 +540,9 @@ app.use('/api/admin/webquote/products', adminAuthMiddleware,
 ทุกช่องกลุ่ม `page` ต้องมีเมนูของตัวเองใน `AdminApp.tsx`** ⇒ เปิดช่อง `page` ไว้ล่วงหน้าตอนยังไม่มี
 หน้าจอ = ด่านล้มทั้งที่ไม่มีอะไรผิด · J4 เพิ่ม `page.odooproducts` พร้อมเมนู แล้วซ้อนเป็นด่านที่สอง
 ที่จุด mount เดิม (บทเรียนตรงนี้ยกมาจาก `plan-local-contacts.md` ข้อ 1 ของหัวไฟล์ ซึ่งเสียเวลาไปแล้วครั้งหนึ่ง)
+· **ลงแล้ว J4 (2026-10-02)** — `app.use([…/list, …/export, …/count], requireCapability('page.odooproducts'))`
+วางระหว่างด่านแรกกับบรรทัด mount router · `diag:role-permissions` ข้อ 12 ตรวจ **ลำดับ** ด้วย (ด่านที่วางหลัง
+router ไม่เคยได้ทำงาน แต่คำยังอยู่ในไฟล์ จึงผ่านข้อ "มีด่าน" ทั้งที่ไม่มีผล) — ครอบฝั่งผู้ติดต่อไปพร้อมกัน
 
 ---
 
@@ -739,7 +750,7 @@ internal_reference นี้ใน Odoo จะได้ไม่ต้องแ�
 | **J1** | migration (ตาราง · sequence · `products.source` · audit trigger) · ตัวกวาดใน `upsertProductRows()` · `reconcileLocalProductOdooLinks()` | `diag:local-products` ข้อ 1–6 ผ่าน · `sync:products` รันจบโดยมีแถว local ค้างในฐาน |
 | **J2** ✅ 2026-10-01 | `utils/productRefPattern.ts` · `utils/productNamePattern.ts` · repo · service · 11 เส้น API + `POST /price` · ช่อง `quote.manage_products` | ด่านข้อ 1–8 · 11–17 · 19 ผ่าน · **ยังไม่มี UI เรียกสักเส้น** |
 | **J3** ✅ 2026-10-02 | ธง `custom_product` (สอง whitelist + `buildOdooManualReview` + โมดัลพรีวิว) | `diag:web-quote` · `diag:confirm-race` · `diag:odoo-export` ผ่านทั้งก่อนและหลัง |
-| **J4** | หน้าจอ + `page.odooproducts` + เมนู (**คอมมิตเดียวกัน** ไม่งั้นด่านข้อ 12 ล้ม) | `diag:role-permissions` ผ่าน · mockup ผ่านตาเจ้าของก่อนแตะโค้ด (`AGENTS.md` A9) |
+| **J4** ✅ 2026-10-02 | หน้าจอ + `page.odooproducts` + เมนู (**คอมมิตเดียวกัน** ไม่งั้นด่านข้อ 12 ล้ม) · ตัวเลขบนเมนูทุกตัวเป็นวงกลมเหลือง | `diag:role-permissions` ผ่าน · mockup ผ่านตาเจ้าของก่อนแตะโค้ด (`AGENTS.md` A9) |
 | **J6** | หน้าต่างเพิ่มสินค้าในหน้าขอใบเสนอราคา + ปุ่มคิดราคา (§13) | mockup ผ่านตาเจ้าของก่อนแตะโค้ด · ด่านข้อ 13–17 |
 | **J5** | ยุบ migration เข้า `schema.sql` · แก้ `CLAUDE.md` · `README.md` · `AGENTS.md` ตาราง gate | `diag:migrations` บน server ผ่าน |
 
@@ -798,7 +809,7 @@ Postgres 18 ชั่วคราว (`schema.sql` + audit 2026-09-03_04) ได
 | J1 (แตะ sync + `products`) | `diag:data-directory` · `diag:product-candidates` (**หลุดจากรายการต้องเป็น 0 เคส**) · `diag:load-probe` |
 | J1 (กฎบล็อก — ถ้าเลือกทางเลือก (ข) ใน §2.1) | `diag:block-rule` · `diag:block-parity` |
 | J3 (แตะ snapshot + การยืนยัน) | `diag:confirm-race` (ต้องเปิด server ก่อน) · **`diag:odoo-export` ทั้ง qp/qt** · `diag:web-quote` · `diag:quote-validation` · `diag:stock-rule` |
-| J4 | `diag:role-permissions` |
+| J4 | `diag:role-permissions` (50 → 52 · ข้อใหม่ตรวจลำดับด่านชั้นที่สองของทั้งสองโมดูล) · `diag:op-ui` 31/31 · `diag:local-products` 82/82 |
 | J5 / ก่อน deploy | `diag:migrations` **บน host ไม่ใช่ในกล่อง** |
 
 **`diag:odoo-export` ถ้าขึ้น `(ตรวจ 0 ชื่อ)` แปลว่าผ่านแบบว่างเปล่า อย่าเชื่อ**
