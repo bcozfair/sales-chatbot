@@ -14,7 +14,12 @@ import { Button } from './Button';
  * ── ฝาแฝดของหน้า "ผู้ติดต่อเพิ่มเอง" (`OdooContacts.tsx`) ─────────────────────
  *   โครงเดียวกันทุกชิ้น (หัวหน้า · ปุ่มส่งออก · ตัวกรองสองช่อง · ตาราง/การ์ดมือถือ) ต่างแค่คอลัมน์
  *   **งานหลักของหน้าคือปุ่มส่งออกไฟล์** ให้แอดมินเอาไปคีย์ใน Odoo · หน้าตาตาม mockup
- *   `local-products-list` ที่เจ้าของยืนยัน 2026-10-02 (รอบ 4)
+ *   `local-products-list` ที่เจ้าของยืนยัน 2026-10-02 (รอบ 4 · ตัวกรองรอบ 5)
+ *
+ * ── สี่กลุ่มที่ไม่ทับกัน (เจ้าของสั่ง 2026-10-02 รอบ 5) ─────────────────────────
+ *   ยังไม่ส่งออก · รอนำเข้า · รหัสซ้ำ/ไม่ตรง · นำเข้าแล้ว — สินค้าหนึ่งตัวอยู่กลุ่มเดียว และป้ายในคอลัมน์สถานะ
+ *   ใช้คำเดียวกับตัวกรอง ⇒ เห็นป้ายอะไรก็หาเจอในกลุ่มชื่อนั้น · ตัวตัดสินกลุ่มจริงอยู่ที่ server (`FILTER_SQL`)
+ *   `groupOf` ข้างล่างเป็นแค่ตัวเลือกป้าย ใช้กติกาลำดับเดียวกัน (นำเข้าแล้ว > ซ้ำ > ส่งออกแล้ว > ยังไม่ส่งออก)
  *
  * ── สิ่งที่หน้านี้จงใจ "ไม่มี" ────────────────────────────────────────────────
  *   1. **ไม่มีปุ่มติ๊กว่า "คีย์เข้า Odoo แล้ว"** — ระบบตรวจเองท้ายรอบ sync จาก `internal_reference`
@@ -35,7 +40,7 @@ import { Button } from './Button';
  */
 
 type Status = 'imported' | 'not_imported';
-type Filter = 'not_matched' | 'pending' | 'exported' | 'matched' | 'all';
+type Group = 'pending' | 'exported' | 'conflict' | 'matched';
 
 interface Row {
   product_template_id: number;
@@ -57,23 +62,18 @@ interface Row {
   odoo_model_conflicts: { internal_reference: string | null; name: string | null }[];
 }
 
-const STATUS: Record<Status, { text: string; cls: string }> = {
-  not_imported: { text: 'ยังไม่นำเข้า', cls: 'bg-slate-100 text-slate-600 border-slate-200' },
-  imported: { text: 'นำเข้าแล้ว', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-};
-
-/** ค่า (`v`) ตรงกับ `LocalProductFilter` ของ server — ห้ามเปลี่ยน · `not_matched` คือค่าตั้งต้นของไฟล์ส่งออก */
-const FILTER_LABEL: { v: Filter; t: string }[] = [
-  { v: 'not_matched', t: 'ยังไม่นำเข้า (ทั้งหมด)' },
-  { v: 'pending', t: 'ยังไม่ส่งออกไฟล์' },
-  { v: 'exported', t: 'ส่งออกไฟล์แล้ว รอคีย์' },
-  { v: 'matched', t: 'นำเข้าแล้ว' },
-  { v: 'all', t: 'ทั้งหมด' },
+/**
+ * ค่า (`v`) ตรงกับ `LocalProductFilter` ของ server — ห้ามเปลี่ยน · ลำดับ = ลำดับในตัวกรอง · `pending` คือค่าตั้งต้น
+ * คำบนจอตามที่เจ้าของสั่ง 2026-10-02 (รอบ 5) ใช้ทั้งตัวกรองและป้ายสถานะ
+ */
+const GROUPS: { v: Group; t: string; cls: string }[] = [
+  { v: 'pending', t: 'ยังไม่ส่งออก', cls: 'bg-slate-100 text-slate-600 border-slate-200' },
+  { v: 'exported', t: 'รอนำเข้า', cls: 'bg-blue-50 text-blue-700 border-blue-200' },
+  { v: 'conflict', t: 'รหัสซ้ำ/ไม่ตรง', cls: 'bg-red-50 text-red-700 border-red-200' },
+  { v: 'matched', t: 'นำเข้าแล้ว', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
 ];
 
 const TAG = 'inline-block px-1.5 py-0.5 rounded-md border text-[10px] font-semibold whitespace-nowrap';
-
-const StatusTag: React.FC<{ s: Status }> = ({ s }) => <span className={`${TAG} ${STATUS[s].cls}`}>{STATUS[s].text}</span>;
 
 /** ป้ายรหัส — สองแบบตามที่เจ้าของสั่ง + ป้ายเหลืองเมื่อ Odoo เคยไม่รับรหัสเดิม (คนละเรื่องกับความมั่นใจ) */
 const RefTags: React.FC<{ r: Row }> = ({ r }) => (
@@ -101,19 +101,30 @@ const conflictOf = (r: Row): string | null => {
   return c.internal_reference ?? `(ไม่มีรหัส) ${c.name ?? ''}`.trim();
 };
 
-/** บรรทัดที่สองของสถานะ — ที่เดียวที่ตัดสินว่าจะบอกอะไร ใช้ทั้งตารางและการ์ด */
+/** กลุ่มของแถว — ลำดับเดียวกับ `FILTER_SQL` ฝั่ง server (นำเข้าแล้ว > ซ้ำ > ส่งออกแล้ว > ยังไม่ส่งออก) */
+const groupOf = (r: Row): Group =>
+  r.odoo_matched_at ? 'matched' : conflictOf(r) ? 'conflict' : r.exported_at ? 'exported' : 'pending';
+
+const StatusTag: React.FC<{ r: Row }> = ({ r }) => {
+  const g = GROUPS.find((x) => x.v === groupOf(r))!;
+  return <span className={`${TAG} ${g.cls}`}>{g.t}</span>;
+};
+
+/** บรรทัดที่สองของสถานะ — วันที่ของกลุ่มนั้น · กลุ่มซ้ำบอกรหัสที่ Odoo ใช้แทน (ของที่ต้องเอาไปแก้) */
 const StatusLine2: React.FC<{ r: Row }> = ({ r }) => {
-  if (r.odoo_matched_at) return <div className="text-[11px] text-slate-400 whitespace-nowrap">นำเข้าเมื่อ {dayOf(r.odoo_matched_at)}</div>;
-  const exported = r.exported_at ? `ส่งออกไฟล์แล้ว ${dayOf(r.exported_at)}` : 'ยังไม่ส่งออกไฟล์';
+  const line = 'text-[11px] text-slate-400 whitespace-nowrap';
+  if (r.odoo_matched_at) return <div className={line}>นำเข้าเมื่อ {dayOf(r.odoo_matched_at)}</div>;
   const c = conflictOf(r);
   if (c) {
+    const when = r.exported_at ? `ส่งออกเมื่อ ${dayOf(r.exported_at)}` : 'ยังไม่เคยส่งออก';
     return (
-      <div className="text-[11px] text-red-600 whitespace-nowrap" title={`model นี้ซ้ำกับ ${c} ใน Odoo · ${exported}`}>
-        ⚠ ซ้ำ <span className="font-mono">{c}</span>
+      <div className="text-[11px] text-red-600 whitespace-nowrap" title={`model นี้ซ้ำกับ ${c} ใน Odoo · ${when}`}>
+        Odoo ใช้ <span className="font-mono">{c}</span>
       </div>
     );
   }
-  return <div className="text-[11px] text-slate-400 whitespace-nowrap">{exported}</div>;
+  if (r.exported_at) return <div className={line}>ส่งออกเมื่อ {dayOf(r.exported_at)}</div>;
+  return <div className={line}>เพิ่มเมื่อ {dayOf(r.created_at)}</div>;
 };
 
 export const OdooProducts: React.FC = () => {
@@ -123,12 +134,13 @@ export const OdooProducts: React.FC = () => {
   const [rows, setRows] = useState<Row[]>([]);
   const [total, setTotal] = useState(0);
   const [pending, setPending] = useState(0);
+  const [conflicts, setConflicts] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
 
   const [q, setQ] = useState('');
-  const [filter, setFilter] = useState<Filter>('not_matched');
+  const [filter, setFilter] = useState<Group>('pending');
   const [page, setPage] = useState(1);
   const [size, setSize] = useState(50);
 
@@ -149,6 +161,7 @@ export const OdooProducts: React.FC = () => {
       setRows(data.items ?? []);
       setTotal(Number(data.total ?? 0));
       setPending(Number(data.pending ?? 0));
+      setConflicts(Number(data.conflicts ?? 0));
     } catch (e) {
       setError(errMsg(e));
       setRows([]);
@@ -207,7 +220,6 @@ export const OdooProducts: React.FC = () => {
   };
 
   const pages = Math.max(1, Math.ceil(total / size));
-  const conflicts = rows.filter((r) => conflictOf(r) !== null).length;
 
   /** ปุ่มของแต่ละแถว — เหตุผลที่กดไม่ได้อยู่ใน title (กติกาเดียวกับหน้าผู้ติดต่อ) · กติกาจริงอยู่ที่ server */
   const ProductActions: React.FC<{ r: Row }> = ({ r }) => {
@@ -254,17 +266,20 @@ export const OdooProducts: React.FC = () => {
             ส่งออกไฟล์ → คีย์เข้า Odoo <b>ด้วยรหัสตามไฟล์</b> → ระบบเปลี่ยนเป็น “นำเข้าแล้ว” ให้เองในรอบดึงข้อมูลถัดไป
           </p>
         </div>
-        {/* model ซ้ำกับ Odoo ที่รหัสอื่น — กลุ่มเดียวที่ปล่อยไว้แล้วค้างตลอดกาล (แผน §8.4: เตือนอย่างเดียว ไม่แปลงอะไร) */}
-        {!loading && conflicts > 0 && (
-          <div
-            className="flex items-center gap-2 px-4 py-2 rounded-2xl border border-red-200 bg-red-50 text-xs text-red-700"
+        {/* model ซ้ำกับ Odoo ที่รหัสอื่น — กลุ่มเดียวที่ปล่อยไว้แล้วค้างตลอดกาล (แผน §8.4: เตือนอย่างเดียว ไม่แปลงอะไร)
+            นับจาก server ทุกกลุ่ม (แถวพวกนี้อยู่แต่ในกลุ่มของตัวเอง) · กดแล้วเปิดกลุ่มนั้น · ซ่อนเมื่อเปิดกลุ่มนั้นอยู่แล้ว */}
+        {conflicts > 0 && filter !== 'conflict' && (
+          <button
+            type="button"
+            onClick={() => { setFilter('conflict'); setPage(1); }}
+            className="w-full flex items-center gap-2 px-4 py-2 rounded-2xl border border-red-200 bg-red-50 text-xs text-red-700 text-left hover:bg-red-100 transition-colors"
             title="model ซ้ำกับสินค้าใน Odoo แต่รหัสไม่ตรง — น่าจะคีย์เข้าไปด้วยรหัสอื่น แก้รหัสใน Odoo ให้ตรงกับหน้านี้"
           >
             <AlertTriangle className="w-4 h-4 shrink-0" />
-            <p className="truncate min-w-0">
-              <b>{conflicts} รายการ model ซ้ำกับ Odoo แต่รหัสไม่ตรง</b> — แก้รหัสใน Odoo ให้ตรงกับหน้านี้
-            </p>
-          </div>
+            <span className="truncate min-w-0">
+              <b>{formatNumber(conflicts)} รายการ model ซ้ำกับ Odoo แต่รหัสไม่ตรง</b> — แก้รหัสใน Odoo ให้ตรงกับหน้านี้ · <u>ดูรายการ</u>
+            </span>
+          </button>
         )}
       </div>
 
@@ -278,10 +293,10 @@ export const OdooProducts: React.FC = () => {
           <select
             aria-label="สถานะ"
             value={filter}
-            onChange={(e) => { setFilter(e.target.value as Filter); setPage(1); }}
+            onChange={(e) => { setFilter(e.target.value as Group); setPage(1); }}
             className={inputCls}
           >
-            {FILTER_LABEL.map((o) => <option key={o.v} value={o.v}>{o.t}</option>)}
+            {GROUPS.map((o) => <option key={o.v} value={o.v}>{o.t}</option>)}
           </select>
         </div>
       </div>
@@ -290,9 +305,7 @@ export const OdooProducts: React.FC = () => {
 
       <TableCard
         title={`${formatNumber(total)} รายการ`}
-        hint={filter === 'not_matched'
-          ? 'ค่าตั้งต้น = เฉพาะที่ยังไม่นำเข้า · ไฟล์ที่ส่งออกตามตัวกรองนี้เหมือนกัน'
-          : 'ไฟล์ที่ส่งออกตามตัวกรองที่เลือกอยู่'}
+        hint="ไฟล์ที่ส่งออก = รายการในกลุ่มที่เลือกอยู่"
       >
         {loading ? (
           <SkeletonRows rows={8} />
@@ -305,10 +318,8 @@ export const OdooProducts: React.FC = () => {
         ) : rows.length === 0 ? (
           <EmptyState
             icon={CheckCircle2}
-            title={q || filter !== 'not_matched' ? 'ไม่มีรายการที่ตรงกับตัวกรองนี้' : 'ไม่มีสินค้าค้างอยู่เลย'}
-            hint={q || filter !== 'not_matched'
-              ? 'ลองเปลี่ยนสถานะเป็น “ทั้งหมด” หรือค้นด้วยรหัสสินค้าแทน model'
-              : 'สินค้าที่เพิ่มเองเข้า Odoo ครบแล้วทุกตัว'}
+            title={q ? 'ไม่มีรายการที่ตรงกับคำค้นในกลุ่มนี้' : `ไม่มีสินค้าในกลุ่ม “${GROUPS.find((g) => g.v === filter)!.t}”`}
+            hint={q ? 'คำค้นหาเฉพาะในกลุ่มที่เลือก — ลองเปลี่ยนกลุ่ม หรือค้นด้วยรหัสสินค้าแทน model' : 'ลองเปลี่ยนกลุ่มที่ตัวกรองด้านบน'}
           />
         ) : (
           <>
@@ -355,7 +366,7 @@ export const OdooProducts: React.FC = () => {
                           {r.quotation_count > 0 ? r.quotation_count : <span className="text-slate-400">—</span>}
                         </td>
                         <td className={tdCls}>
-                          <StatusTag s={r.status} />
+                          <StatusTag r={r} />
                           <StatusLine2 r={r} />
                         </td>
                         <td className={`${tdCls} text-right`}><ProductActions r={r} /></td>
@@ -376,11 +387,7 @@ export const OdooProducts: React.FC = () => {
                     <RefTags r={r} />
                   </div>
                   <div className="text-right whitespace-nowrap">
-                    <StatusTag s={r.status} />
-                    {conflictOf(r) && (
-                      <span className={`${TAG} ml-1 bg-red-50 text-red-700 border-red-200`}
-                            title={`model นี้ซ้ำกับ ${conflictOf(r)} ใน Odoo`}>⚠ ซ้ำ</span>
-                    )}
+                    <span title={conflictOf(r) ? `model นี้ซ้ำกับ ${conflictOf(r)} ใน Odoo` : undefined}><StatusTag r={r} /></span>
                   </div>
                   <div className="truncate text-[13px] text-slate-800" title={r.name}>
                     {r.model} <span className="text-[11px] text-slate-400">· {baht(r.sales_price)}</span>
@@ -568,7 +575,7 @@ const ReissueRefModal: React.FC<{
         </label>
 
         <p className="text-xs text-slate-500">
-          สินค้านี้จะกลับไปอยู่กลุ่ม “ยังไม่ส่งออกไฟล์” เพราะต้องเอารหัสใหม่ไปคีย์อีกรอบ
+          สินค้านี้จะกลับไปอยู่กลุ่ม “ยังไม่ส่งออก” เพราะต้องเอารหัสใหม่ไปคีย์อีกรอบ
         </p>
         {err && (
           <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-xs text-red-700 whitespace-pre-wrap">{err}</p>

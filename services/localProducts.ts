@@ -19,7 +19,7 @@
 import type pg from 'pg';
 import {
   markMatchedFromProducts, findOdooModelConflicts,
-  countPendingLocalProducts, loadSiblingRefs, isRefTaken, findProductsByModel, findParentCandidates,
+  countPendingLocalProducts, countLocalProductConflicts, loadSiblingRefs, isRefTaken, findProductsByModel, findParentCandidates,
   getProductByRef, listFamilyRows, searchParentProducts, lockLocalProductWrites, insertLocalProduct,
   getLocalProductById, updateLocalProduct, replaceLocalProductRef, deleteLocalProduct,
   countQuotationsReferencing, listLocalProducts, markLocalProductsExported, INHERITED_FIELDS,
@@ -502,7 +502,7 @@ const statusOf = (r: LocalProductRecord): LocalProductStatus => (r.odoo_matched_
 export async function listProducts(
   opts: { filter: LocalProductFilter; q?: string; limit?: number; offset?: number },
   db: pg.PoolClient | typeof pool = pool,
-): Promise<{ items: LocalProductView[]; total: number; pending: number }> {
+): Promise<{ items: LocalProductView[]; total: number; pending: number; conflicts: number }> {
   const limit = Number.isInteger(opts.limit) && opts.limit! > 0 ? Math.min(opts.limit!, 500) : 100;
   const offset = Number.isInteger(opts.offset) && opts.offset! > 0 ? opts.offset! : 0;
   const { rows, total } = await listLocalProducts(db, { filter: opts.filter, q: opts.q, limit, offset });
@@ -513,6 +513,8 @@ export async function listProducts(
     total,
     // ตัวเลขบนหัวหน้า "N รายการยังไม่มีใน Odoo" — ไม่ขึ้นกับตัวกรอง (ท่าเดียวกับหน้าผู้ติดต่อ)
     pending: await countPendingLocalProducts(db),
+    // แถบแดง "model ซ้ำกับ Odoo" ต้องเห็นจากทุกกลุ่ม — แถวพวกนี้อยู่แต่ในกลุ่มของตัวเองแล้ว (รอบ 5)
+    conflicts: await countLocalProductConflicts(db),
     items: rows.map((r) => ({
       ...r,
       status: statusOf(r),
