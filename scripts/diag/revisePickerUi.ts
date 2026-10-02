@@ -11,6 +11,7 @@
         · subadmin "ใบของฉัน" = เฉพาะใบที่ออกจากบัญชีตัวเอง (ขอบเขตเดียวกับหน้าประวัติ)
      ข. หน้าจอ (1280 / 390)
         · เปิดมาเจอ "ใบของฉัน" · คลิกช่องแล้วเห็นใบทันทีโดยไม่ต้องพิมพ์ · ค้นชื่อบริษัทได้
+        · รายการกางขึ้นด้านบนของช่อง ไม่ทะลุขอบบนของจอ (เจ้าของสั่ง 2026-10-02)
         · ป้าย R02 + ป้ายเหลือง "เข้า Odoo แล้ว" (ใส่ลงคำตอบในเบราว์เซอร์ — ไม่พึ่งว่าฐานมีใบแบบนั้น)
         · พิมพ์เลขที่ที่ไม่อยู่ในรายการ ⇒ มีแถว "ใช้เลขที่ … ตามที่พิมพ์" (ทางเดิมไม่หาย)
         · เลือกแล้วมีการ์ดสรุป · ใบว่างไม่เตือน · มีรายการค้างแล้วเตือน "จะถูกแทนที่"
@@ -216,6 +217,16 @@ try {
     let rows = await listRows(page);
     await shot(page, `list-${width}`);
     ok('คลิกช่องแล้วเห็นใบทันทีโดยไม่ต้องพิมพ์', rows.length > 0, `${rows.length} แถว`);
+    // กางขึ้นด้านบน (เจ้าของสั่ง 2026-10-02) — ส่วนนี้อยู่ท้ายหน้า กางลงแล้วรายการจมใต้ขอบจอ
+    const box = await page.evaluate(() => {
+      const field = document.querySelector('[aria-label="เลือกใบที่จะแก้ไข"]') as HTMLElement | null;
+      const list = field?.parentElement?.querySelector('.max-h-64')?.parentElement as HTMLElement | null;
+      if (!field || !list) return null;
+      const f = field.getBoundingClientRect(), l = list.getBoundingClientRect();
+      return { listBottom: Math.round(l.bottom), listTop: Math.round(l.top), fieldTop: Math.round(f.top) };
+    });
+    ok('กล่องรายการกางขึ้นด้านบนของช่อง และไม่ทะลุขอบบนของจอ',
+      !!box && box.listBottom <= box.fieldTop && box.listTop >= 0, JSON.stringify(box));
     ok('แถวแรกมีป้าย R02 และ "เข้า Odoo แล้ว"', /R02/.test(rows[0] ?? '') && (rows[0] ?? '').includes('เข้า Odoo แล้ว'), rows[0]);
     const text = await sectionText(page);
     ok('บอกว่าเป็นฉบับล่าสุดของแต่ละเลข', text.includes('ฉบับล่าสุดของแต่ละเลข'));
