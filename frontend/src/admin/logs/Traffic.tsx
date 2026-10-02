@@ -8,7 +8,7 @@ import {
 import { useHashState } from './useHashState';
 import { TAB_SLUG } from '../navHash';
 import {
-  errMsg, formatDate, formatMs, formatNumber, formatBytes, delta, downloadCsv,
+  errMsg, formatDate, formatMs, formatNumber, formatBytes, delta, downloadCsv, theadRowCls,
 } from './format';
 import { ErrorBox, FilterCard, FilterField, FilterRow, SortHeader } from './ui';
 import { useTableSort } from './useTableSort';
@@ -510,11 +510,11 @@ export const Traffic: React.FC = () => {
           </div>
 
           {/* ── ตารางรายละเอียด (ยุบเป็นการ์ดบนจอแคบ) ── */}
-          <div className="bg-card border border-slate-200 rounded-2xl overflow-hidden">
+          <div className="bg-card border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
             <div className="overflow-x-auto hidden md:block">
               <table className="w-full text-sm">
-                <thead className="bg-slate-50">
-                  <tr>
+                <thead>
+                  <tr className={theadRowCls}>
                     {([
                       ['ช่วง', 'bucket', 'left'],
                       ['เรียก API', 'requests', 'right'],
@@ -530,6 +530,7 @@ export const Traffic: React.FC = () => {
                     ] as const).map(([label, col, align]) => (
                       <SortHeader
                         key={col} label={label} col={col} align={align}
+                        pad={col === 'bucket' || col === 'bytes_out' ? 'px-4 py-3' : undefined}
                         active={tableSort.col} dir={tableSort.dir}
                         title={col === 'p95_worst_day' ? data.notes.p95 : undefined}
                         onSort={(c) => tableSort.toggle(c, c !== 'bucket')}

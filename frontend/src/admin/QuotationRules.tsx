@@ -12,16 +12,13 @@ import {
   AlertTriangle,
   Loader2,
   X,
-  ArrowUpDown,
-  ArrowUp,
-  ArrowDown,
-  ChevronLeft,
-  ChevronRight,
   Layers,
   PackageCheck,
 } from 'lucide-react';
 import { PageHeader } from './PageHeader';
 import { Button } from './Button';
+import { SortHeader, Pagination, RowAction, RowActions } from './logs/ui';
+import { theadRowCls, thBaseCls } from './logs/format';
 import { FilterBar, FilterSearch, FilterSelect } from './FilterBar';
 import { ScopeComboBox } from './ScopeComboBox';
 
@@ -225,14 +222,7 @@ export function QuotationRules() {
     setCurrentPage(1);
   };
 
-  const renderSortIcon = (field: keyof QuotationRule) => {
-    if (sortField !== field) {
-      return <ArrowUpDown className="w-3 h-3 text-slate-300 ml-1 inline-block opacity-65" />;
-    }
-    return sortDirection === 'asc'
-      ? <ArrowUp className="w-3 h-3 text-[var(--brand-fg)] ml-1 inline-block" />
-      : <ArrowDown className="w-3 h-3 text-[var(--brand-fg)] ml-1 inline-block" />;
-  };
+  const sortBy = (c: string) => handleSort(c as keyof QuotationRule);
 
   const openAddModal = () => {
     setEditingRule(null);
@@ -418,25 +408,6 @@ export function QuotationRules() {
   const safePage = Math.min(currentPage, totalPages);
   const startIdx = (safePage - 1) * pageSize;
   const paginatedRules = sortedRules.slice(startIdx, startIdx + pageSize);
-  const rangeStart = totalItems === 0 ? 0 : startIdx + 1;
-  const rangeEnd = Math.min(startIdx + pageSize, totalItems);
-
-  const pageNumbers = React.useMemo(() => {
-    // Show up to 5 page buttons with ellipses for long lists
-    const pages: (number | 'ellipsis')[] = [];
-    if (totalPages <= 7) {
-      for (let i = 1; i <= totalPages; i++) pages.push(i);
-      return pages;
-    }
-    pages.push(1);
-    if (safePage > 3) pages.push('ellipsis');
-    const start = Math.max(2, safePage - 1);
-    const end = Math.min(totalPages - 1, safePage + 1);
-    for (let i = start; i <= end; i++) pages.push(i);
-    if (safePage < totalPages - 2) pages.push('ellipsis');
-    pages.push(totalPages);
-    return pages;
-  }, [totalPages, safePage]);
 
   return (
     <div className="space-y-4">
@@ -554,27 +525,15 @@ export function QuotationRules() {
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-left">
               <thead className="sticky top-0 z-10">
-                <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 text-[11px] font-semibold uppercase tracking-wider select-none">
-                  <th onClick={() => handleSort('production')} className="px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors w-40">
-                    ฝ่ายผลิต {renderSortIcon('production')}
-                  </th>
-                  <th onClick={() => handleSort('brand')} className="px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors">
-                    ยี่ห้อ / ซีรีส์ {renderSortIcon('brand')}
-                  </th>
-                  <th onClick={() => handleSort('quote_company')} className="px-4 py-3 text-center cursor-pointer hover:bg-slate-100 transition-colors w-32">
-                    เสนอในนาม {renderSortIcon('quote_company')}
-                  </th>
-                  <th onClick={() => handleSort('warranty_years')} className="px-4 py-3 text-center cursor-pointer hover:bg-slate-100 transition-colors w-32">
-                    รับประกัน {renderSortIcon('warranty_years')}
-                  </th>
-                  <th onClick={() => handleSort('delivery_in_stock_days')} className="px-4 py-3 text-center cursor-pointer hover:bg-slate-100 transition-colors w-36">
-                    จัดส่ง (มีสต็อก) {renderSortIcon('delivery_in_stock_days')}
-                  </th>
-                  <th onClick={() => handleSort('delivery_out_of_stock_days')} className="px-4 py-3 text-center cursor-pointer hover:bg-slate-100 transition-colors w-40">
-                    จัดส่ง (ไม่มีสต็อก) {renderSortIcon('delivery_out_of_stock_days')}
-                  </th>
-                  <th className="px-4 py-3 text-center w-36">จัดส่งตามจำนวน</th>
-                  <th className="px-4 py-3 text-center w-20">จัดการ</th>
+                <tr className={theadRowCls}>
+                  <SortHeader label="ฝ่ายผลิต" col="production" active={sortField} dir={sortDirection} onSort={sortBy} pad="px-4 py-3" className="w-40" />
+                  <SortHeader label="ยี่ห้อ / ซีรีส์" col="brand" active={sortField} dir={sortDirection} onSort={sortBy} pad="px-4 py-3" />
+                  <SortHeader label="เสนอในนาม" col="quote_company" active={sortField} dir={sortDirection} onSort={sortBy} pad="px-4 py-3" align="center" className="w-32" />
+                  <SortHeader label="รับประกัน" col="warranty_years" active={sortField} dir={sortDirection} onSort={sortBy} pad="px-4 py-3" align="center" className="w-32" />
+                  <SortHeader label="จัดส่ง (มีสต็อก)" col="delivery_in_stock_days" active={sortField} dir={sortDirection} onSort={sortBy} pad="px-4 py-3" align="center" className="w-36" />
+                  <SortHeader label="จัดส่ง (ไม่มีสต็อก)" col="delivery_out_of_stock_days" active={sortField} dir={sortDirection} onSort={sortBy} pad="px-4 py-3" align="center" className="w-40" />
+                  <th className={`${thBaseCls} px-4 py-3 text-center w-36`}>จัดส่งตามจำนวน</th>
+                  <th className={`${thBaseCls} px-4 py-3 text-right w-20`}>การจัดการ</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-sm text-slate-700">
@@ -646,20 +605,10 @@ export function QuotationRules() {
                         )}
                       </td>
                       <td className="px-4 py-2.5 align-top">
-                        <div className="flex items-center justify-center gap-1">
-                          <button
-                            onClick={() => openEditModal(rule)}
-                            className="p-1.5 hover:bg-slate-100 text-slate-500 hover:text-slate-900 rounded-lg transition-colors"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleDeleteRule(rule.id, label)}
-                            className="p-1.5 hover:bg-red-50 text-slate-500 hover:text-red-600 rounded-lg transition-colors"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                        <RowActions>
+                          <RowAction icon={Edit2} label="แก้ไขเงื่อนไข" onClick={() => openEditModal(rule)} />
+                          <RowAction icon={Trash2} label="ลบเงื่อนไข" tone="danger" onClick={() => handleDeleteRule(rule.id, label)} />
+                        </RowActions>
                       </td>
                     </tr>
                   );
@@ -668,63 +617,15 @@ export function QuotationRules() {
             </table>
           </div>
 
-          {/* ── Pagination Footer ── */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 border-t border-slate-100 bg-slate-50/60">
-            <div className="flex items-center gap-2 text-xs text-slate-500">
-              <span>
-                แสดง <span className="font-semibold text-slate-700">{rangeStart}-{rangeEnd}</span> จาก{' '}
-                <span className="font-semibold text-slate-700">{totalItems}</span> รายการ
-              </span>
-              <span className="text-slate-300">|</span>
-              <label className="flex items-center gap-1.5">
-                ต่อหน้า
-                <select
-                  value={pageSize}
-                  onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
-                  className="h-7 px-2 rounded-lg border border-slate-200 bg-card text-xs font-semibold outline-none focus:border-[var(--brand-fg)]"
-                >
-                  {PAGE_SIZE_OPTIONS.map(n => (
-                    <option key={n} value={n}>{n}</option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                disabled={safePage <= 1}
-                className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 bg-card text-slate-500 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                <ChevronLeft className="w-3.5 h-3.5" />
-              </button>
-
-              {pageNumbers.map((p, idx) =>
-                p === 'ellipsis' ? (
-                  <span key={`e-${idx}`} className="w-7 h-7 flex items-center justify-center text-xs text-slate-400">…</span>
-                ) : (
-                  <button
-                    key={p}
-                    onClick={() => setCurrentPage(p)}
-                    className={`w-7 h-7 flex items-center justify-center rounded-lg text-xs font-bold transition-colors ${p === safePage
-                      ? 'bg-[var(--brand)] text-white'
-                      : 'bg-card border border-slate-200 text-slate-600 hover:bg-slate-100'
-                      }`}
-                  >
-                    {p}
-                  </button>
-                )
-              )}
-
-              <button
-                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                disabled={safePage >= totalPages}
-                className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 bg-card text-slate-500 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                <ChevronRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
+          <Pagination
+            page={safePage}
+            pages={totalPages}
+            size={pageSize}
+            total={totalItems}
+            sizes={PAGE_SIZE_OPTIONS}
+            onPage={setCurrentPage}
+            onSize={n => { setPageSize(n); setCurrentPage(1); }}
+          />
         </div>
       )}
 

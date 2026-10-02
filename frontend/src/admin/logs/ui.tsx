@@ -381,26 +381,36 @@ export const Pagination: React.FC<{
  * · `label` บังคับ — ใช้เป็นทั้ง `title` (ชี้แล้วเห็น) และ `aria-label` (ปุ่มไม่มีข้อความ design.md ข้อ 8)
  * · ปุ่มที่ต้องมีข้อความ (เช่น "อนุมัติ") ใช้ `<Button>` ปกติ ไม่ใช่ตัวนี้
  */
+const rowActionCls = (tone: 'neutral' | 'danger') =>
+  'w-8 h-8 shrink-0 inline-flex items-center justify-center rounded-lg border border-slate-200 bg-card text-slate-500 ' +
+  'shadow-[var(--shadow-btn)] transition-all enabled:active:scale-95 ' +
+  'disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none ' +
+  (tone === 'danger'
+    ? 'enabled:hover:bg-red-50 enabled:hover:text-red-600 enabled:hover:border-red-200'
+    : 'enabled:hover:bg-[var(--brand-soft)] enabled:hover:text-[var(--brand-fg)] enabled:hover:border-[var(--brand-fg)]');
+
 export const RowAction: React.FC<Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'children'> & {
   icon: React.ComponentType<{ className?: string }>;
   label: string;
   tone?: 'neutral' | 'danger';
 }> = ({ icon: Icon, label, tone = 'neutral', className = '', type = 'button', ...rest }) => (
-  <button
-    type={type}
-    title={label}
-    aria-label={label}
-    className={`w-8 h-8 shrink-0 inline-flex items-center justify-center rounded-lg border border-slate-200 bg-card text-slate-500
-                shadow-[var(--shadow-btn)] transition-all enabled:active:scale-95
-                disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none
-                ${tone === 'danger'
-                  ? 'enabled:hover:bg-red-50 enabled:hover:text-red-600 enabled:hover:border-red-200'
-                  : 'enabled:hover:bg-[var(--brand-soft)] enabled:hover:text-[var(--brand-fg)] enabled:hover:border-[var(--brand-fg)]'}
-                ${className}`}
-    {...rest}
-  >
+  <button type={type} title={label} aria-label={label} className={`${rowActionCls(tone)} ${className}`} {...rest}>
     <Icon className="w-3.5 h-3.5" />
   </button>
+);
+
+/**
+ * ปุ่มจัดการที่เป็น "ลิงก์" (เปิดไฟล์/แท็บใหม่ เช่น PDF ของใบ) — หน้าตาเดียวกับ `RowAction` ทุกพิกเซล
+ * แยกตัวเพราะ `<a>` ไม่มีสถานะ `disabled` (`enabled:` ไม่ match) ⇒ ใช้ hover ตรง ๆ
+ */
+export const RowActionLink: React.FC<Omit<React.AnchorHTMLAttributes<HTMLAnchorElement>, 'children'> & {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+}> = ({ icon: Icon, label, className = '', ...rest }) => (
+  <a title={label} aria-label={label}
+     className={`${rowActionCls('neutral').replace(/enabled:/g, '')} ${className}`} {...rest}>
+    <Icon className="w-3.5 h-3.5" />
+  </a>
 );
 
 /** แถวปุ่มของคอลัมน์ "การจัดการ" — ชิดขวาเสมอ ระยะห่างเท่ากันทุกหน้า */

@@ -7,7 +7,7 @@ import { DataFilterBar, DataSearch, FilterCombo, type FilterOption } from './Dat
 import {
   TableCard, TableScroll, SortHeader, Pagination, EmptyState, SkeletonRows, ErrorBox,
 } from './logs/ui';
-import { errMsg, formatNumber, formatDateTime, tdCls, numCls, downloadCsv } from './logs/format';
+import { errMsg, formatNumber, formatDateTime, theadRowCls, tdCls, numCls, downloadCsv } from './logs/format';
 
 /**
  * หน้า "ข้อมูลสินค้า" — อ่านอย่างเดียว ต้นทางคือ Odoo
@@ -356,7 +356,7 @@ export const ProductsDirectory: React.FC = () => {
               <TableScroll>
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-slate-100">
+                    <tr className={theadRowCls}>
                       <SortHeader label="รหัสสินค้า" col="internal_reference" active={sort} dir={dir} onSort={onSort} />
                       <SortHeader label="ชื่อสินค้า / รุ่น" col="name" active={sort} dir={dir} onSort={onSort} />
                       <SortHeader label="แบรนด์ / ซีรีส์" col="brand" active={sort} dir={dir} onSort={onSort} />

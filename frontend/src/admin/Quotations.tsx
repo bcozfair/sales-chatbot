@@ -7,17 +7,12 @@ import {
   FileText,
   Download,
   Loader2,
-  ChevronLeft,
-  ChevronRight,
   Filter,
   AlertCircle,
   CheckCircle2,
   FileSpreadsheet,
   Calendar,
   ChevronDown,
-  ArrowUpDown,
-  ArrowUp,
-  ArrowDown,
   History,
   RotateCcw,
   AlertTriangle,
@@ -30,6 +25,8 @@ import {
 } from 'lucide-react';
 import { DeleteQuotationModal } from './DeleteQuotationModal';
 import { ExportHistoryModal } from './ExportHistoryModal';
+import { SortHeader, Pagination, RowAction, RowActionLink, RowActions } from './logs/ui';
+import { theadRowCls, thBaseCls } from './logs/format';
 
 interface QuotationItem {
   model?: string;
@@ -393,15 +390,6 @@ export const Quotations: React.FC = () => {
     setCurrentPage(1);
   };
 
-  const renderSortIcon = (field: string) => {
-    if (sortBy !== field) {
-      return <ArrowUpDown className="w-3.5 h-3.5 text-slate-300 ml-1.5 inline-block" />;
-    }
-    return sortOrder === 'asc'
-      ? <ArrowUp className="w-3.5 h-3.5 text-[var(--brand-fg)] ml-1.5 inline-block font-bold" />
-      : <ArrowDown className="w-3.5 h-3.5 text-[var(--brand-fg)] ml-1.5 inline-block font-bold" />;
-  };
-
   // Expanded row (show items detail)
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -596,24 +584,6 @@ export const Quotations: React.FC = () => {
   const totalItems = total;
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
   const safePage = Math.min(currentPage, totalPages);
-  const rangeStart = totalItems === 0 ? 0 : (safePage - 1) * pageSize + 1;
-  const rangeEnd = Math.min(safePage * pageSize, totalItems);
-
-  const pageNumbers = React.useMemo(() => {
-    const pages: (number | 'ellipsis')[] = [];
-    if (totalPages <= 7) {
-      for (let i = 1; i <= totalPages; i++) pages.push(i);
-      return pages;
-    }
-    pages.push(1);
-    if (safePage > 3) pages.push('ellipsis');
-    const start = Math.max(2, safePage - 1);
-    const end = Math.min(totalPages - 1, safePage + 1);
-    for (let i = start; i <= end; i++) pages.push(i);
-    if (safePage < totalPages - 2) pages.push('ellipsis');
-    pages.push(totalPages);
-    return pages;
-  }, [totalPages, safePage]);
 
   return (
     <div className="space-y-4">
@@ -937,46 +907,16 @@ export const Quotations: React.FC = () => {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm border-collapse">
               <thead>
-                <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 text-[11px] font-semibold uppercase tracking-wider select-none">
-                  <th 
-                    onClick={() => handleSort('created_at')}
-                    className="px-4 py-3 whitespace-nowrap cursor-pointer hover:bg-slate-100 transition-colors"
-                  >
-                    เลขที่ / วันที่ {renderSortIcon('created_at')}
-                  </th>
-                  <th 
-                    onClick={() => handleSort('customer_name')}
-                    className="px-4 py-3 w-full whitespace-nowrap cursor-pointer hover:bg-slate-100 transition-colors"
-                  >
-                    ลูกค้า {renderSortIcon('customer_name')}
-                  </th>
-                  <th 
-                    onClick={() => handleSort('issuer_name')}
-                    className="px-4 py-3 whitespace-nowrap cursor-pointer hover:bg-slate-100 transition-colors"
-                  >
-                    ผู้เสนอราคา {renderSortIcon('issuer_name')}
-                  </th>
-                  <th 
-                    onClick={() => handleSort('total_sum')}
-                    className="px-4 py-3 text-right whitespace-nowrap cursor-pointer hover:bg-slate-100 transition-colors"
-                  >
-                    ยอดรวม {renderSortIcon('total_sum')}
-                  </th>
-                  <th 
-                    onClick={() => handleSort('status')}
-                    className="px-4 py-3 text-center whitespace-nowrap cursor-pointer hover:bg-slate-100 transition-colors"
-                  >
-                    สถานะ {renderSortIcon('status')}
-                  </th>
-                  <th
-                    onClick={() => handleSort('odoo_exported_at')}
-                    className="px-4 py-3 text-center whitespace-nowrap cursor-pointer hover:bg-slate-100 transition-colors"
-                  >
-                    สถานะ Odoo {renderSortIcon('odoo_exported_at')}
-                  </th>
+                <tr className={theadRowCls}>
+                  <SortHeader label="เลขที่ / วันที่" col="created_at" active={sortBy} dir={sortOrder} onSort={handleSort} pad="px-4 py-3" />
+                  <SortHeader label="ลูกค้า" col="customer_name" active={sortBy} dir={sortOrder} onSort={handleSort} pad="px-4 py-3" className="w-full" />
+                  <SortHeader label="ผู้เสนอราคา" col="issuer_name" active={sortBy} dir={sortOrder} onSort={handleSort} pad="px-4 py-3" />
+                  <SortHeader label="ยอดรวม" col="total_sum" active={sortBy} dir={sortOrder} onSort={handleSort} pad="px-4 py-3" align="right" />
+                  <SortHeader label="สถานะ" col="status" active={sortBy} dir={sortOrder} onSort={handleSort} pad="px-4 py-3" align="center" />
+                  <SortHeader label="สถานะ Odoo" col="odoo_exported_at" active={sortBy} dir={sortOrder} onSort={handleSort} pad="px-4 py-3" align="center" />
                   {/* ชิดขวา ไม่ใช่กึ่งกลาง — จำนวนปุ่มต่อแถวไม่เท่ากัน (ใบไม่มีเลขที่ไม่มีปุ่ม PDF)
                       ถ้าจัดกึ่งกลาง ถังขยะของแต่ละแถวจะเยื้องกันจนไล่กดตามแนวตั้งไม่ได้ */}
-                  <th className="px-4 py-3 text-right whitespace-nowrap">จัดการ</th>
+                  <th className={`${thBaseCls} px-4 py-3 text-right`}>การจัดการ</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -1108,49 +1048,42 @@ export const Quotations: React.FC = () => {
 
                         {/* Actions — ชิดขวาให้ถังขยะของทุกแถวอยู่แนวเดียวกัน (ดูหัวคอลัมน์) */}
                         <td className="px-4 py-2.5 text-right whitespace-nowrap">
-                          <div className="flex items-center justify-end gap-2">
+                          <RowActions>
                             {quote.quotation_no && (
-                              <a
+                              <RowActionLink
                                 href={`/download-pdf/${quote.id}/${encodeURIComponent(quote.quotation_no)}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="p-2 bg-card hover:bg-emerald-50 text-slate-500 hover:text-emerald-600 border border-slate-200 hover:border-emerald-200 rounded-xl transition-all active:scale-95 shadow-sm"
-                                title="ส่งออก PDF"
+                                icon={Download}
+                                label="ส่งออก PDF"
                                 onClick={(e) => e.stopPropagation()}
-                              >
-                                <Download className="w-4 h-4" />
-                              </a>
+                              />
                             )}
                             {quote.odoo_exported_at && (
-                              <button
-                                type="button"
+                              <RowAction
+                                icon={unmarkingId === quote.id ? Loader2 : RotateCcw}
+                                label="ยกเลิกเครื่องหมายส่งออก (ให้ส่งออกใหม่ได้)"
+                                tone="danger"
                                 disabled={unmarkingId === quote.id}
-                                className="p-2 bg-card hover:bg-amber-50 text-slate-500 hover:text-amber-600 border border-slate-200 hover:border-amber-200 rounded-xl transition-all active:scale-95 shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
-                                title="ยกเลิกเครื่องหมายส่งออก (ให้ส่งออกใหม่ได้)"
+                                className={unmarkingId === quote.id ? '[&>svg]:animate-spin' : ''}
                                 onClick={(e) => { e.stopPropagation(); handleUnmarkExport(quote); }}
-                              >
-                                {unmarkingId === quote.id
-                                  ? <Loader2 className="w-4 h-4 animate-spin" />
-                                  : <RotateCcw className="w-4 h-4" />}
-                              </button>
+                              />
                             )}
                             {/* ลบได้เฉพาะ admin แต่ขึ้นครบทุกแถวรวมใบที่ยังไม่ออกเลขที่ (เจ้าของสั่ง
                                 2026-09-21) — ความแรงของด่านไปอยู่ในกล่องยืนยันแทน: ใบมีเลขที่ต้อง
                                 พิมพ์เลขที่ · ใบยังไม่ออกเลขกดยืนยันได้เลย และ server ตรวจซ้ำทั้งสองแบบ */}
                             {canDelete && (
-                              <button
-                                type="button"
-                                className="p-2 bg-card hover:bg-red-50 text-slate-500 hover:text-red-600 border border-slate-200 hover:border-red-200 rounded-xl transition-all active:scale-95 shadow-sm"
-                                title="ลบใบเสนอราคาถาวร"
+                              <RowAction
+                                icon={Trash2}
+                                label="ลบใบเสนอราคาถาวร"
+                                tone="danger"
                                 aria-label={quote.quotation_no
                                   ? `ลบใบเสนอราคา ${quote.quotation_no} ถาวร`
                                   : `ลบใบเสนอราคาที่ยังไม่ออกเลขที่ของ ${quote.customer_name || 'ลูกค้าไม่ระบุ'} ถาวร`}
                                 onClick={(e) => { e.stopPropagation(); openDelete(quote); }}
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
+                              />
                             )}
-                          </div>
+                          </RowActions>
                         </td>
                       </tr>
 
@@ -1239,63 +1172,15 @@ export const Quotations: React.FC = () => {
             </table>
           </div>
 
-          {/* ── Pagination Footer ── */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 border-t border-slate-100 bg-slate-50/60">
-            <div className="flex items-center gap-2 text-xs text-slate-500">
-              <span>
-                แสดง <span className="font-semibold text-slate-700">{rangeStart}-{rangeEnd}</span> จาก{' '}
-                <span className="font-semibold text-slate-700">{totalItems}</span> รายการ
-              </span>
-              <span className="text-slate-300">|</span>
-              <label className="flex items-center gap-1.5">
-                ต่อหน้า
-                <select
-                  value={pageSize}
-                  onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
-                  className="h-7 px-2 rounded-lg border border-slate-200 bg-card text-xs font-semibold outline-none focus:border-[var(--brand-fg)]"
-                >
-                  {PAGE_SIZE_OPTIONS.map(n => (
-                    <option key={n} value={n}>{n}</option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                disabled={safePage <= 1}
-                className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 bg-card text-slate-500 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                <ChevronLeft className="w-3.5 h-3.5" />
-              </button>
-
-              {pageNumbers.map((p, idx) =>
-                p === 'ellipsis' ? (
-                  <span key={`e-${idx}`} className="w-7 h-7 flex items-center justify-center text-xs text-slate-400">…</span>
-                ) : (
-                  <button
-                    key={p}
-                    onClick={() => setCurrentPage(p)}
-                    className={`w-7 h-7 flex items-center justify-center rounded-lg text-xs font-bold transition-colors ${p === safePage
-                      ? 'bg-[var(--brand)] text-white'
-                      : 'bg-card border border-slate-200 text-slate-600 hover:bg-slate-100'
-                      }`}
-                  >
-                    {p}
-                  </button>
-                )
-              )}
-
-              <button
-                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                disabled={safePage >= totalPages}
-                className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 bg-card text-slate-500 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                <ChevronRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
+          <Pagination
+            page={safePage}
+            pages={totalPages}
+            size={pageSize}
+            total={totalItems}
+            sizes={PAGE_SIZE_OPTIONS}
+            onPage={setCurrentPage}
+            onSize={n => { setPageSize(n); setCurrentPage(1); }}
+          />
         </div>
       )}
 

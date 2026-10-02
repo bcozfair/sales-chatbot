@@ -18,6 +18,8 @@ import { AlertTriangle, Building2, CheckCircle2, Edit2, Layers, Loader2, Plus, S
 import { PageHeader } from './PageHeader';
 import { Modal } from './Modal';
 import { Button } from './Button';
+import { RowAction, RowActions } from './logs/ui';
+import { theadRowCls, thBaseCls } from './logs/format';
 
 const MIN_SEARCH_CHARS = 2;
 
@@ -271,24 +273,21 @@ export const QuotePmList: React.FC = () => {
   };
 
   const actions = (row: QuotePmRow) => (
-    <div className="flex items-center justify-center gap-1">
-      <button
-        onClick={() => setEditTarget(row)}
-        className="p-1.5 hover:bg-slate-100 text-slate-500 hover:text-slate-900 rounded-lg transition-colors"
-        title="แก้หมายเหตุ"
+    <RowActions>
+      <RowAction
+        icon={Edit2}
+        label="แก้หมายเหตุ"
         aria-label={`แก้หมายเหตุของ ${companyLabel(row)}`}
-      >
-        <Edit2 className="w-3.5 h-3.5" />
-      </button>
-      <button
-        onClick={() => setDeleteTarget(row)}
-        className="p-1.5 hover:bg-red-50 text-slate-500 hover:text-red-600 rounded-lg transition-colors"
-        title="ถอดออกจากรายการ"
+        onClick={() => setEditTarget(row)}
+      />
+      <RowAction
+        icon={Trash2}
+        label="ถอดออกจากรายการ"
         aria-label={`ถอด ${companyLabel(row)} ออกจากรายการ`}
-      >
-        <Trash2 className="w-3.5 h-3.5" />
-      </button>
-    </div>
+        tone="danger"
+        onClick={() => setDeleteTarget(row)}
+      />
+    </RowActions>
   );
 
   return (
@@ -336,13 +335,13 @@ export const QuotePmList: React.FC = () => {
           {/* จอทำงาน = ตาราง */}
           <table className="hidden md:table w-full border-collapse text-left">
             <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 text-[11px] font-semibold uppercase tracking-wider select-none">
-                <th className="px-4 py-3 w-32">รหัสบริษัท</th>
-                <th className="px-4 py-3">บริษัท</th>
-                <th className="px-4 py-3 w-40">ครอบคลุม</th>
-                <th className="px-4 py-3">หมายเหตุ</th>
-                <th className="px-4 py-3 w-40">ผู้เพิ่ม</th>
-                <th className="px-4 py-3 text-center w-24">จัดการ</th>
+              <tr className={theadRowCls}>
+                <th className={`${thBaseCls} px-4 py-3 w-32`}>รหัสบริษัท</th>
+                <th className={`${thBaseCls} px-4 py-3`}>บริษัท</th>
+                <th className={`${thBaseCls} px-4 py-3 w-40`}>ครอบคลุม</th>
+                <th className={`${thBaseCls} px-4 py-3`}>หมายเหตุ</th>
+                <th className={`${thBaseCls} px-4 py-3 w-40`}>ผู้เพิ่ม</th>
+                <th className={`${thBaseCls} px-4 py-3 text-right w-24`}>การจัดการ</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-sm text-slate-700">

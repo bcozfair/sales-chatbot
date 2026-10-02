@@ -231,9 +231,9 @@ export async function downloadCsv(url: string, token: string | null, filename: s
  * · ระยะซ้ายขวาอยู่แยกใน `thPadCls` เพราะต้องเท่ากับ `tdCls` ของตารางนั้น ไม่งั้นหัวกับข้อมูลเยื้องกัน
  *   (ตารางที่ช่องข้อมูลใช้ `px-4` ส่ง `pad="px-4 py-3"` ให้ SortHeader / ต่อ `thBaseCls` เอง)
  */
-export const theadRowCls = 'bg-slate-50 border-b border-slate-200 select-none';
+export const theadRowCls = 'bg-slate-50 border-b border-slate-200 select-none text-left';
 export const thBaseCls =
-  'text-left font-semibold text-[11px] uppercase tracking-wider text-slate-500 whitespace-nowrap';
+  'font-semibold text-[11px] uppercase tracking-wider text-slate-500 whitespace-nowrap';
 export const thPadCls = 'px-3 py-3';
 export const thCls = `${thBaseCls} ${thPadCls}`;
 
