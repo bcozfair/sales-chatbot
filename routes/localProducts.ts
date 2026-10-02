@@ -47,11 +47,15 @@ function sendError(res: Response, where: string, err: unknown): void {
   res.status(500).json({ error: (err as any)?.message || 'ทำรายการไม่สำเร็จ' });
 }
 
-/** ค่าตั้งต้นคือ "ยังไม่เข้า Odoo ทั้งหมด" — ไฟล์ส่งออกต้องตกที่กลุ่มนี้ (บทเรียนจากฝั่งผู้ติดต่อ) */
-const FILTERS: readonly LocalProductFilter[] = ['not_matched', 'pending', 'exported', 'matched', 'all'];
+/**
+ * ค่าตั้งต้นคือ `pending` "ยังไม่ส่งออก" (เจ้าของสั่ง 2026-10-02 รอบ 5 · เดิม `not_matched`) — สี่กลุ่มบนจอไม่ทับกัน
+ * ⇒ ไฟล์ตั้งต้นคือ "ของที่ยังไม่เคยส่ง" · กลุ่ม "รหัสซ้ำ/ไม่ตรง" งานคือแก้รหัสใน Odoo ไม่ได้รอไฟล์ (ต่างจากฝั่งผู้ติดต่อ
+ * ที่ "ชื่อไม่ตรง" ยังต้องอยู่ในไฟล์ ⇒ ฝั่งนั้นยังตั้งต้นที่ `not_matched`)
+ */
+const FILTERS: readonly LocalProductFilter[] = ['pending', 'exported', 'conflict', 'matched', 'not_matched', 'all'];
 function filterOf(req: Request): LocalProductFilter {
   const v = str(req.query.filter);
-  return FILTERS.includes(v as LocalProductFilter) ? (v as LocalProductFilter) : 'not_matched';
+  return FILTERS.includes(v as LocalProductFilter) ? (v as LocalProductFilter) : 'pending';
 }
 
 function idOf(req: Request): number {

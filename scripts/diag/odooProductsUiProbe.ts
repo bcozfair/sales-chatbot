@@ -14,6 +14,9 @@
    ป้าย "อัตโนมัติ"/"กำหนดเอง" เท่านั้น · แถบแจ้งเตือนบรรทัดเดียวเหนือตัวกรอง · ปุ่มส่งออก ·
    ปุ่มกดไม่ได้เมื่อมีใบอ้าง · ออกรหัสใหม่ / ลบ ยิงเส้นที่ถูก · ไม่มีปุ่มเพิ่ม/แก้ (J6) ·
    390px เป็นการ์ดสองบรรทัดและไม่มีแถบเลื่อนแนวนอน
+   + รอบ 5 (2026-10-02): ตัวกรองสี่กลุ่มที่ไม่ทับกัน (ยังไม่ส่งออก · รอนำเข้า · รหัสซ้ำ/ไม่ตรง · นำเข้าแล้ว)
+   ป้ายสถานะใช้คำเดียวกับตัวกรอง · แถบแดงนับจาก server ทุกกลุ่มและกดแล้วเปิดกลุ่ม "รหัสซ้ำ/ไม่ตรง"
+   (ตัวจำลอง `groupOf` ข้างล่างลอกลำดับของ `FILTER_SQL` — ตัวจริงพิสูจน์ใน `diag:local-products`)
 
    รัน: `npm run build --prefix frontend` ก่อน แล้ว `npm run diag:op-ui`
    ───────────────────────────────────────────────────────────────────────────── */
@@ -70,6 +73,12 @@ const ROWS = [
     status: 'imported', quotation_count: 4, odoo_model_conflicts: [] },
 ];
 const PENDING = ROWS.filter((r) => !r.odoo_matched_at).length;
+type Row = (typeof ROWS)[number];
+/** กลุ่มของแถว — ลำดับเดียวกับ `FILTER_SQL` (นำเข้าแล้ว > ซ้ำ > ส่งออกแล้ว > ยังไม่ส่งออก) */
+const groupOf = (r: Row) =>
+  r.odoo_matched_at ? 'matched' : r.odoo_model_conflicts.length ? 'conflict' : r.exported_at ? 'exported' : 'pending';
+const inGroup = (g: string) => ROWS.filter((r) => groupOf(r) === g);
+const CONFLICTS = inGroup('conflict').length;
 
 /** ทุกคำขอ API ที่หน้าเว็บยิงมา — ใช้ตรวจว่าปุ่มยิงเส้นที่ถูกด้วย method ที่ถูก */
 const calls: { method: string; path: string; body: string | undefined }[] = [];
@@ -101,14 +110,8 @@ async function route(req: HTTPRequest) {
   if (path === '/api/admin/me/capabilities') return json(req, { capabilities: {} });  // ไม่ deny อะไร = เห็นทุกเมนู
   if (path === `${P}/count`) return json(req, { pending: PENDING });
   if (path === `${P}/list`) {
-    const f = url.searchParams.get('filter') ?? 'not_matched';
-    const items = ROWS.filter((r) =>
-      f === 'all' ? true
-        : f === 'matched' ? !!r.odoo_matched_at
-          : f === 'pending' ? !r.odoo_matched_at && !r.exported_at
-            : f === 'exported' ? !r.odoo_matched_at && !!r.exported_at
-              : !r.odoo_matched_at);
-    return json(req, { items, total: items.length, pending: PENDING });
+    const items = inGroup(url.searchParams.get('filter') ?? 'pending');
+    return json(req, { items, total: items.length, pending: PENDING, conflicts: CONFLICTS });
   }
   if (path === `${P}/next-ref`) {
     return json(req, { parent_reference: url.searchParams.get('parent'), ref: { internal_reference: 'FHTP2XBH020248', tier: 'boundary' }, ref_message: null });
@@ -177,14 +180,18 @@ try {
     })),
     disabled: [...tr.querySelectorAll('button')].map((b) => (b as HTMLButtonElement).disabled),
   })));
-  ok('ค่าตั้งต้นแสดงเฉพาะที่ยังไม่นำเข้า', rows.length === PENDING, `${rows.length} แถว`);
+  const PENDING_GROUP = inGroup('pending').length;
+  ok('ค่าตั้งต้น = กลุ่ม "ยังไม่ส่งออก"', rows.length === PENDING_GROUP
+    && calls.some((c) => c.path.startsWith('/api/admin/webquote/products/list?filter=pending')), `${rows.length} แถว`);
   ok('ทุกแถวไม่เกินสองบรรทัด', rows.every((r) => r.lines <= 2), rows.map((r) => r.lines).join(','));
   const tagText = rows.map((r) => r.text).join('\n');
-  ok('ป้ายรหัส: "กำหนดเอง" เฉพาะแถวที่คนพิมพ์เอง', (tagText.match(/กำหนดเอง/g) ?? []).length === 1);
-  ok('  ที่เหลือเป็น "อัตโนมัติ" ทุกแถว (รวมแบบนับต่อ — ไม่มีป้ายแยก)', (tagText.match(/อัตโนมัติ/g) ?? []).length === PENDING - 1);
+  ok('ป้ายรหัส "อัตโนมัติ" ทุกแถวที่ระบบออกให้ (รวมแบบนับต่อ — ไม่มีป้ายแยก)', (tagText.match(/อัตโนมัติ/g) ?? []).length === PENDING_GROUP);
   ok('  ไม่มีคำศัพท์ภายในหลุดขึ้นจอ', !/ขอบเลขวิ่ง|นับต่อ|max_plus_one|boundary|สั่งทำ/.test(tagText));
-  ok('แถว model ซ้ำ: บรรทัดที่สองของสถานะบอกรหัสใน Odoo', /ซ้ำ\s*FHTP2XCH021960/.test(tagText));
-  ok('แถวที่ Odoo เคยไม่รับรหัส มีป้าย "เคยเปลี่ยนรหัส"', tagText.includes('เคยเปลี่ยนรหัส'));
+  ok('ป้ายสถานะใช้คำของกลุ่ม + บรรทัดสองเป็นวันที่เพิ่ม', (tagText.match(/ยังไม่ส่งออก/g) ?? []).length === PENDING_GROUP
+    && (tagText.match(/เพิ่มเมื่อ/g) ?? []).length === PENDING_GROUP);
+  const options = await page.$$eval('select[aria-label="สถานะ"] option', (os) => os.map((o) => o.textContent?.trim()));
+  ok('ตัวกรองมีสี่กลุ่มตามที่เจ้าของสั่ง (เรียงตามนี้)',
+    options.join('|') === 'ยังไม่ส่งออก|รอนำเข้า|รหัสซ้ำ/ไม่ตรง|นำเข้าแล้ว', options.join(' | '));
   ok('แถวที่มีใบอ้าง: ออกรหัสใหม่/ลบ กดไม่ได้', rows[0].disabled.every(Boolean), JSON.stringify(rows[0].disabled));
   ok('แถวที่ไม่มีใบอ้าง: กดได้', rows[1].disabled.every((d) => !d), JSON.stringify(rows[1].disabled));
   ok('ไม่มีปุ่มแก้ไข/เพิ่มสินค้า (มากับ J6)',
@@ -193,7 +200,7 @@ try {
   // แถบแจ้งเตือน
   const bars = await page.evaluate(() => {
     const pick = (needle: string) => {
-      const p = [...document.querySelectorAll('p')].find((x) => (x.textContent ?? '').includes(needle));
+      const p = [...document.querySelectorAll('p, button > span')].find((x) => (x.textContent ?? '').includes(needle));
       const box = p?.parentElement;
       return box ? { h: box.getBoundingClientRect().height, top: box.getBoundingClientRect().top, ph: p!.getBoundingClientRect().height } : null;
     };
@@ -206,7 +213,7 @@ try {
 
   const exportBtn = await page.evaluate(() =>
     [...document.querySelectorAll('button')].map((b) => b.textContent?.trim() ?? '').find((t) => t.startsWith('ส่งออก')));
-  ok('ปุ่มส่งออกบอกชนิดไฟล์และจำนวน', exportBtn === `ส่งออก xlsx (${PENDING} รายการ)`, String(exportBtn));
+  ok('ปุ่มส่งออกบอกชนิดไฟล์และจำนวนในกลุ่มที่เลือก', exportBtn === `ส่งออก xlsx (${PENDING_GROUP} รายการ)`, String(exportBtn));
   await page.screenshot({ path: `${SHOTS}op-1280.png`, fullPage: true });
 
   // ออกรหัสใหม่ — แถวที่ 2 (ไม่มีใบอ้าง)
@@ -249,16 +256,44 @@ try {
   await page.waitForFunction(() => !document.body.innerText.includes('ลบสินค้าที่เพิ่มเอง'), { timeout: 5000 });
   ok('ลบ = DELETE /:id', calls.some((c) => c.method === 'DELETE' && c.path === '/api/admin/webquote/products/900000002'));
 
-  // ตัวกรอง
+  // ตัวกรอง — ทุกกลุ่มเห็นเฉพาะแถวของกลุ่มตัวเอง ป้ายสถานะ = ชื่อกลุ่ม
+  const tableRows = () => page.$$eval('table tbody tr', (trs) => trs.map((tr) => ({
+    text: (tr as HTMLElement).innerText,
+    disabled: [...tr.querySelectorAll('button')].every((b) => (b as HTMLButtonElement).disabled),
+  })));
+  const GROUP_TEXT: Record<string, string> = { exported: 'รอนำเข้า', conflict: 'รหัสซ้ำ/ไม่ตรง', matched: 'นำเข้าแล้ว' };
+  for (const g of ['exported', 'conflict', 'matched']) {
+    calls.length = 0;
+    const want = inGroup(g).map((r) => r.internal_reference);
+    await page.select('select[aria-label="สถานะ"]', g);
+    await page.waitForFunction((refs: string[]) => {
+      const t = [...document.querySelectorAll('table tbody tr')].map((x) => (x as HTMLElement).innerText).join('\n');
+      return refs.every((r) => t.includes(r)) && document.querySelectorAll('table tbody tr').length === refs.length;
+    }, { timeout: 5000 }, want);
+    const got = await tableRows();
+    ok(`กลุ่ม "${GROUP_TEXT[g]}" ยิง filter=${g} และเห็น ${want.length} แถวของกลุ่มนี้ ป้ายตรงชื่อกลุ่ม`,
+      calls.some((c) => c.path.includes(`filter=${g}`)) && got.every((r) => r.text.includes(GROUP_TEXT[g])));
+    if (g === 'exported') {
+      const t = got.map((r) => r.text).join('\n');
+      ok('  ป้ายรหัส "กำหนดเอง" + "เคยเปลี่ยนรหัส" ของแถวที่คนพิมพ์รหัสเอง', t.includes('กำหนดเอง') && t.includes('เคยเปลี่ยนรหัส'));
+      ok('  บรรทัดสองเป็นวันที่ส่งออก', (t.match(/ส่งออกเมื่อ/g) ?? []).length === want.length);
+    }
+    if (g === 'conflict') {
+      const t = got.map((r) => r.text).join('\n');
+      ok('  บรรทัดสองบอกรหัสที่ Odoo ใช้', /Odoo ใช้\s*FHTP2XCH021960/.test(t));
+      ok('  แถบแดงซ่อนเมื่อเปิดกลุ่มนี้อยู่แล้ว', !(await page.evaluate(() => document.body.innerText.includes('ดูรายการ'))));
+    }
+    if (g === 'matched') ok('  แถวนำเข้าแล้ว: ปุ่มกดไม่ได้', got.every((r) => r.disabled));
+  }
+
+  // แถบแดงกดแล้วเปิดกลุ่ม "รหัสซ้ำ/ไม่ตรง"
+  await page.select('select[aria-label="สถานะ"]', 'pending');
+  await page.waitForFunction(() => document.body.innerText.includes('ดูรายการ'), { timeout: 5000 });
   calls.length = 0;
-  await page.select('select[aria-label="สถานะ"]', 'all');
-  await page.waitForFunction(() => document.body.innerText.includes('FHTP2XCH021953'), { timeout: 5000 });
-  ok('ตัวกรอง "ทั้งหมด" ยิง filter=all และเห็นแถวที่นำเข้าแล้ว', calls.some((c) => c.path.includes('filter=all')));
-  const importedRow = await page.$$eval('table tbody tr', (trs) => {
-    const tr = trs.find((t) => (t as HTMLElement).innerText.includes('FHTP2XCH021953'))!;
-    return { text: (tr as HTMLElement).innerText, disabled: [...tr.querySelectorAll('button')].every((b) => (b as HTMLButtonElement).disabled) };
-  });
-  ok('  แถวนำเข้าแล้ว: ป้าย "นำเข้าแล้ว" + ปุ่มกดไม่ได้', importedRow.text.includes('นำเข้าแล้ว') && importedRow.disabled);
+  await page.evaluate(() => ([...document.querySelectorAll('button')].find((b) => (b.textContent ?? '').includes('ดูรายการ')) as HTMLButtonElement).click());
+  await page.waitForFunction(() => document.body.innerText.includes('FHTP2XCH021954'), { timeout: 5000 });
+  ok('กดแถบแดง ⇒ เปิดกลุ่ม "รหัสซ้ำ/ไม่ตรง"', calls.some((c) => c.path.includes('filter=conflict'))
+    && (await page.$eval('select[aria-label="สถานะ"]', (s) => (s as HTMLSelectElement).value)) === 'conflict');
   await page.close();
 
   // ═══════════════ 390px ═══════════════
@@ -269,13 +304,20 @@ try {
     const cards = [...document.querySelectorAll('div.sm\\:hidden > div')] as HTMLElement[];
     return {
       tableVisible: !!table && (table as HTMLElement).offsetParent !== null,
-      cards: cards.map((c) => c.getBoundingClientRect().height),
+      // จำนวนบรรทัด = จำนวนแนวของลูกในกริด (จุดกึ่งกลางแนวตั้งที่ต่างกัน — การ์ดจัด items-center) — ไม่เทียบ
+      // ความสูงเป็นพิกเซล เพราะปุ่มจัดการชุดกลาง (table-ds 2026-10-02) สูงขึ้นแล้วเกณฑ์ 80px ล้มทั้งที่ยังสองบรรทัด
+      cards: cards.map((c) => new Set([...c.children].map((k) => {
+        const r = k.getBoundingClientRect();
+        return Math.round((r.top + r.height / 2) / 8);
+      })).size),
+      // ลูกแต่ละตัวต้องเป็นบรรทัดเดียว (ข้อความยาวถูกตัด ไม่ขึ้นบรรทัดใหม่) — สูงไม่เกินปุ่มจัดการ
+      tallest: Math.max(...cards.flatMap((c) => [...c.children].map((k) => k.getBoundingClientRect().height))),
       overflow: document.documentElement.scrollWidth - window.innerWidth,
     };
   });
-  ok('ตารางถูกซ่อน เป็นการ์ดแทน', !mob.tableVisible && mob.cards.length === PENDING, `${mob.cards.length} การ์ด`);
-  // การ์ดสองบรรทัด = ~ 2 × 28px (ปุ่ม 28px คร่อมอยู่ทางขวา) + padding — เกิน 80px แปลว่ามีบรรทัดที่สาม
-  ok('การ์ดสองบรรทัดทุกใบ', mob.cards.every((h) => h <= 80), mob.cards.map((h) => Math.round(h)).join(','));
+  ok('ตารางถูกซ่อน เป็นการ์ดแทน', !mob.tableVisible && mob.cards.length === inGroup('pending').length, `${mob.cards.length} การ์ด`);
+  ok('การ์ดสองบรรทัดทุกใบ', mob.cards.every((n) => n === 2) && mob.tallest <= 40,
+    `บรรทัด ${mob.cards.join(',')} · ช่องสูงสุด ${Math.round(mob.tallest)}px`);
   ok('ไม่มีแถบเลื่อนแนวนอนทั้งหน้า', mob.overflow <= 0, `${mob.overflow}px`);
   await m.screenshot({ path: `${SHOTS}op-390.png`, fullPage: true });
   await m.close();

@@ -410,15 +410,38 @@ export async function countQuotationsReferencing(
   return out;
 }
 
-export type LocalProductFilter = 'not_matched' | 'pending' | 'exported' | 'matched' | 'all';
+/**
+ * กลุ่มของหน้ารายการ — สี่กลุ่มบนจอ **ไม่ทับกัน** สินค้าหนึ่งตัวอยู่กลุ่มเดียวเสมอ (เจ้าของสั่ง 2026-10-02 รอบ 5):
+ * `pending` ยังไม่ส่งออก · `exported` รอนำเข้า · `conflict` รหัสซ้ำ/ไม่ตรง · `matched` นำเข้าแล้ว
+ * - `conflict` ถูกดึงออกจากสองกลุ่มแรก เพราะงานของมันคือ "ไปแก้รหัสใน Odoo" ไม่ใช่ "ส่งออกไฟล์ซ้ำ"
+ * - `not_matched` / `all` ไม่มีบนจอแล้ว — เก็บไว้ให้ API/ด่านเดิม (ค่าตั้งต้นของ route คือ `pending`)
+ */
+export type LocalProductFilter = 'pending' | 'exported' | 'conflict' | 'matched' | 'not_matched' | 'all';
+
+/**
+ * "model ซ้ำกับแถวของ Odoo ที่รหัสอื่น" ในรูปเงื่อนไขของ `local_products` —
+ * ⚠️ **ต้องเท่ากับ `findOdooModelConflicts` ทุกเงื่อนไข** (btrim ทั้งสองฝั่ง · `source = 'odoo'` · `IS DISTINCT FROM`)
+ * ไม่งั้นกลุ่ม "รหัสซ้ำ/ไม่ตรง" กับป้ายในแถวจะไม่ตรงกัน · `diag:local-products` เทียบสองตัวนี้ให้
+ */
+const MODEL_CONFLICT_SQL = `EXISTS (SELECT 1 FROM products p
+   WHERE p.source = 'odoo' AND btrim(p.model) = btrim(local_products.model)
+     AND p.internal_reference IS DISTINCT FROM local_products.internal_reference)`;
 
 const FILTER_SQL: Record<LocalProductFilter, string> = {
-  not_matched: 'odoo_matched_at IS NULL',
-  pending: 'odoo_matched_at IS NULL AND exported_at IS NULL',
-  exported: 'odoo_matched_at IS NULL AND exported_at IS NOT NULL',
+  pending: `odoo_matched_at IS NULL AND exported_at IS NULL AND NOT ${MODEL_CONFLICT_SQL}`,
+  exported: `odoo_matched_at IS NULL AND exported_at IS NOT NULL AND NOT ${MODEL_CONFLICT_SQL}`,
+  conflict: `odoo_matched_at IS NULL AND ${MODEL_CONFLICT_SQL}`,
   matched: 'odoo_matched_at IS NOT NULL',
+  not_matched: 'odoo_matched_at IS NULL',
   all: 'TRUE',
 };
+
+/** จำนวนในกลุ่ม "รหัสซ้ำ/ไม่ตรง" — แถบแดงบนหน้ารายการต้องเห็นทุกกลุ่ม ไม่ใช่แค่หน้าที่เปิดอยู่ */
+export async function countLocalProductConflicts(executor: DbExecutor): Promise<number> {
+  const { rows } = await executor.query<{ n: number }>(
+    `SELECT count(*)::int AS n FROM local_products WHERE ${FILTER_SQL.conflict}`);
+  return Number(rows[0]?.n ?? 0);
+}
 
 /** แถวของหน้ารายการ — ทะเบียน + ชื่อคนเพิ่ม (ไม่มี FK ไป admin_users ⇒ ลบแอดมินแล้วได้ null ไม่ใช่แถวหาย) */
 export type LocalProductListRow = LocalProductRecord & { created_by_name: string | null };

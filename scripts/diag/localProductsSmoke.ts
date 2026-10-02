@@ -239,6 +239,27 @@ try {
     la?.status === 'imported' && lb?.status === 'not_imported' && lb.odoo_model_conflicts.length === 1 &&
     lb.quotation_count === 1, JSON.stringify({ a: la?.status, b: lb?.status, c: lb?.odoo_model_conflicts }));
 
+  // 7c · สี่กลุ่มของหน้ารายการไม่ทับกัน (เจ้าของสั่ง 2026-10-02 รอบ 5) — ซ้ำชนะส่งออกแล้ว · กลุ่มซ้ำ = ป้ายเตือนทุกแถว
+  //      ส่งออก B (ซ้ำ) กับ C (ไม่ซ้ำ) ชั่วคราวเพื่อพิสูจน์ลำดับ แล้วคืนค่า ⇒ ข้อหลังจากนี้เห็นสถานะเดิม
+  await c.query(`UPDATE local_products SET exported_at = '2026-10-01' WHERE product_template_id = ANY($1::int[])`, [[LOCAL_B, LOCAL_C]]);
+  const GROUPS = ['pending', 'exported', 'conflict', 'matched'] as const;
+  const byGroup = new Map<string, number[]>();
+  for (const g of GROUPS) byGroup.set(g, (await listProducts({ filter: g }, c)).items.map((x) => x.product_template_id));
+  const everyone = (await listProducts({ filter: 'all' }, c)).items;
+  const flat = [...byGroup.values()].flat();
+  check('ข้อ 7c · สี่กลุ่มครอบทุกแถวพอดี ไม่มีแถวอยู่สองกลุ่ม',
+    flat.length === everyone.length && new Set(flat).size === everyone.length,
+    JSON.stringify(Object.fromEntries(byGroup)));
+  const tagged = everyone.filter((x) => !x.odoo_matched_at && x.odoo_model_conflicts.length > 0).map((x) => x.product_template_id).sort();
+  check('  กลุ่ม "รหัสซ้ำ/ไม่ตรง" = แถวที่มีป้ายเตือนพอดี (SQL ของกลุ่ม = findOdooModelConflicts)',
+    JSON.stringify([...byGroup.get('conflict')!].sort()) === JSON.stringify(tagged) && tagged.includes(LOCAL_B) && tagged.includes(LOCAL_E),
+    JSON.stringify({ group: byGroup.get('conflict'), tagged }));
+  check('  ส่งออกแล้วแต่ซ้ำ ⇒ อยู่กลุ่มซ้ำ ไม่ใช่รอนำเข้า · ส่งออกแล้วไม่ซ้ำ ⇒ รอนำเข้า',
+    !byGroup.get('exported')!.includes(LOCAL_B) && byGroup.get('exported')!.includes(LOCAL_C));
+  check('  ตัวเลขแถบแดง (conflicts) = ขนาดกลุ่มซ้ำ ไม่ว่าเปิดกลุ่มไหน',
+    (await listProducts({ filter: 'pending' }, c)).conflicts === tagged.length);
+  await c.query(`UPDATE local_products SET exported_at = NULL WHERE product_template_id = ANY($1::int[])`, [[LOCAL_B, LOCAL_C]]);
+
   // ════════════════════════════════════════════════════════════════════════
   //  J2 — บนตารางชั่วคราวชุดเดียวกัน (ข้อมูลสังเคราะห์ล้วน ไม่ขึ้นกับฐานจริง)
   // ════════════════════════════════════════════════════════════════════════
