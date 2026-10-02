@@ -1012,6 +1012,37 @@ export async function getOdooManualReviewCounts(
   return rows.map((r: any) => ({ bucket: String(r.bucket), company: r.company === 'THT' ? 'THT' : 'PM', count: Number(r.count) }));
 }
 
+/**
+ * ยอด "รอนำเข้า" = ส่งออกไฟล์ไปแล้วแต่ยังไม่พบใบใน Odoo — แถบเตือนบนหน้าประวัติใบเสนอราคา
+ *
+ * **ไม่ฟังตัวกรองบนจอ** เพราะตัวกรองตั้งต้นของหน้าคือ "ยังไม่ส่งออก" ซึ่งซ่อนใบกลุ่มนี้ทั้งหมด
+ * ⇒ ใบที่ส่งไฟล์ไปแล้วแต่ไม่มีใครอัปโหลด/อัปโหลดไม่ผ่าน หายจากจอเงียบ ๆ (วัด 2026-10-02:
+ * ค้าง 69 ใบ · 62 ใบเกิน 1 วัน · เก่าสุดส่งออก 2026-09-09) · ฟังแค่ขอบเขต "ใบของฉัน" ซึ่งเป็นสิทธิ์
+ * ไม่ใช่ตัวกรอง — ใบที่เปิดดูไม่ได้ไม่ควรถูกนับให้เห็น (เหมือน getOdooManualReviewCounts)
+ * เงื่อนไขคือ `exportedFilterCondition('pending')` ตัวเดียวกับตัวกรอง ⇒ กด "ดูรายการ" แล้วตารางได้จำนวนเท่ากัน
+ */
+export async function getOdooPendingImportSummary(
+  db: DbExecutor,
+  scope: OwnQuotesScope | null = null
+): Promise<{ total: number; pm: number; tht: number; oldest_exported_at: string | null }> {
+  const own = scope ? ownQuotesCondition(scope, 1) : null;
+  const { rows } = await db.query(
+    `SELECT COUNT(*)::int AS total,
+            COUNT(*) FILTER (WHERE q.quotation_no LIKE 'QT%')::int AS tht,
+            MIN(q.odoo_exported_at) AS oldest
+       FROM quotations q
+       LEFT JOIN salesperson s ON q.user_id = s.user_id
+      WHERE ${exportedFilterCondition('pending')}
+        ${own ? `AND ${own.sql}` : ''}`, own ? own.params : []);
+  const r = rows[0] ?? {};
+  const total = Number(r.total ?? 0);
+  const tht = Number(r.tht ?? 0);
+  return {
+    total, pm: total - tht, tht,
+    oldest_exported_at: r.oldest ? new Date(r.oldest).toISOString() : null,
+  };
+}
+
 /** บันทึกหัวชุดการส่งออก 1 ครั้ง แล้วคืน batch id */
 export async function insertExportBatch(db: DbExecutor, batch: {
   adminId: number | null; adminUsername: string | null; format: string;

@@ -107,6 +107,17 @@ interface QuotationListResponse {
   view_all?: boolean;
   /** จำนวน "ใบของฉัน" ภายใต้ตัวกรองชุดเดียวกัน — ตัวเลขบนปุ่ม */
   mine_total?: number;
+  /** ยอด "รอนำเข้า" ของแถบเตือน — **ไม่ฟังตัวกรอง** ฟังแค่ขอบเขตใบของฉัน · null = นับไม่สำเร็จ */
+  odoo_pending?: OdooPendingSummary | null;
+}
+
+interface OdooPendingSummary { total: number; pm: number; tht: number; oldest_exported_at: string | null }
+
+/** อายุเป็นวันนับตามปฏิทินไทย ต่อท้ายคำกริยาได้ตรง ๆ — "วันนี้" / "เมื่อวาน" / " N วันก่อน" (ตัวเลขมีช่องว่างนำ) */
+function daysAgoLabel(iso: string): string {
+  const day = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok' }).format(d);
+  const n = Math.round((Date.parse(day(new Date())) - Date.parse(day(new Date(iso)))) / 86_400_000);
+  return n <= 0 ? 'วันนี้' : n === 1 ? 'เมื่อวาน' : ` ${n} วันก่อน`;
 }
 
 /**
@@ -309,6 +320,7 @@ export const Quotations: React.FC = () => {
   /** ค่าจากเซิร์ฟเวอร์ — false = ถูกปิด quote.view_all เห็นได้เฉพาะใบตัวเองอยู่แล้ว */
   const [viewAll, setViewAll] = useState(true);
   const [mineTotal, setMineTotal] = useState<number | null>(null);
+  const [odooPending, setOdooPending] = useState<OdooPendingSummary | null>(null);
   const [sortBy, setSortBy] = useState('created_at');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
@@ -434,6 +446,7 @@ export const Quotations: React.FC = () => {
       setTotal(result.total);
       setViewAll(result.view_all !== false);
       setMineTotal(typeof result.mine_total === 'number' ? result.mine_total : null);
+      setOdooPending(result.odoo_pending ?? null);
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการโหลดข้อมูล';
       console.error(err);
@@ -770,6 +783,45 @@ export const Quotations: React.FC = () => {
           )}
         </div>
       </PageHeader>
+
+      {/* ใบรอนำเข้าค้าง — ตัวกรองตั้งต้น "ยังไม่ส่งออก" ซ่อนใบกลุ่มนี้ทั้งหมด ถ้าไม่มีแถบนี้ใบที่ส่งไฟล์ไปแล้ว
+          แต่ไม่มีใครอัปโหลด (หรืออัปโหลดไม่ผ่าน) จะไม่โผล่ให้ใครเห็นอีกเลย · ยอดไม่ฟังตัวกรอง ⇒ แสดงทุกครั้งที่มีค้าง
+          ยกเว้นตอนกรอง "รอนำเข้า" อยู่แล้ว (ตารางข้างล่างคือรายการเดียวกัน) */}
+      {odooPending && odooPending.total > 0 && exportedFilter !== 'pending' && (
+        <div
+          role="status"
+          className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm text-amber-700"
+        >
+          <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
+          <span className="font-semibold text-amber-800">
+            รอนำเข้า Odoo ค้าง {odooPending.total.toLocaleString('en-US')} ใบ
+          </span>
+          {odooPending.pm > 0 && odooPending.tht > 0 && (
+            <span className="text-amber-700">(PM {odooPending.pm.toLocaleString('en-US')} · THT {odooPending.tht.toLocaleString('en-US')})</span>
+          )}
+          <span title={odooPending.oldest_exported_at ? `ใบเก่าสุดส่งออกเมื่อ ${formatDate(odooPending.oldest_exported_at)}` : undefined}>
+            ส่งออกไฟล์แล้วแต่ยังไม่พบใน Odoo
+            {odooPending.oldest_exported_at && <> · ใบเก่าสุดส่งออก{daysAgoLabel(odooPending.oldest_exported_at)}</>}
+          </span>
+          <Button
+            variant="warning"
+            tone="soft"
+            className="ml-auto"
+            onClick={() => {
+              // ล้างตัวกรองอื่นด้วย — ยอดบนแถบไม่ฟังตัวกรอง ถ้าคงไว้ ตารางจะได้น้อยกว่าตัวเลขที่เพิ่งกด
+              setSearchQuery('');
+              setStatusFilter('');
+              setDateFrom('');
+              setDateTo('');
+              setFlagFilter('all');
+              setExportedFilter('pending');
+              setCurrentPage(1);
+            }}
+          >
+            ดูรายการ
+          </Button>
+        </div>
+      )}
 
       {/* Filters — การ์ดร่วมที่ทุกหน้าที่มีตารางใช้ (admin/FilterBar.tsx)
           ทั้งแถวต้องจบในบรรทัดเดียวบนจอทำงาน — เดิมเป็น 6 ช่องบนกริด 5 คอลัมน์เท่ากันหมด

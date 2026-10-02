@@ -35,6 +35,7 @@ import {
   odooManualBucketCondition,
   ODOO_MANUAL_BUCKET_SQL,
   getOdooManualReviewCounts,
+  getOdooPendingImportSummary,
   getAcknowledgedViolationKeys,
   getPriceApproval,
   createdAtFromThaiDayCondition,
@@ -4419,8 +4420,15 @@ app.get('/api/admin/quotations', adminAuthMiddleware, requireCapability('page.qu
       issuer_display: issuerDisplayOf(q.issuer_name || q.salesperson_name),
     }));
 
+    // ยอด "รอนำเข้า" ของแถบเตือน — ไม่ฟังตัวกรอง ฟังแค่ขอบเขต (เหตุผลอยู่ที่ getOdooPendingImportSummary)
+    // นับไม่สำเร็จ = ไม่มีแถบ ไม่ใช่ทั้งตารางโหลดไม่ขึ้น
+    const odooPending = await getOdooPendingImportSummary(pool, ownScope).catch((e) => {
+      console.error('getOdooPendingImportSummary error:', e);
+      return null;
+    });
+
     // scope = ขอบเขตที่ใช้จริงรอบนี้ · view_all = กดดูทั้งหมดได้ไหม (หน้าจอใช้ซ่อนปุ่ม ไม่ต้องเดาจาก role)
-    res.json({ data: dataWithSalesperson, total, scope: ownScope ? 'own' : 'all', view_all: viewAll, mine_total: mineTotal });
+    res.json({ data: dataWithSalesperson, total, scope: ownScope ? 'own' : 'all', view_all: viewAll, mine_total: mineTotal, odoo_pending: odooPending });
   } catch (err: any) {
     console.error("GET /api/admin/quotations error:", err);
     res.status(500).json({ error: 'Internal Server Error' });
