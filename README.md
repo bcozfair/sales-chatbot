@@ -50,6 +50,12 @@
 | DELETE | `/api/admin/quotation-rules/:id` | ลบ rule |
 | GET | `/api/admin/customers/search?q=` | ค้นหาลูกค้า (สำหรับ promotion form) |
 | GET | `/api/admin/products/customer-types` | ดึงประเภทลูกค้า |
+| GET | `/api/admin/webquote/products/suggest?model=` | สินค้าเพิ่มเอง: เดาต้นแบบ · ชื่อ · รหัส · ราคาขั้นต่ำ (%) จาก model ที่พิมพ์ — `quote.manage_products` |
+| GET | `/api/admin/webquote/products/next-ref` · `/parents` | รหัสถัดไปของต้นแบบที่เลือก · ค้นต้นแบบ |
+| POST | `/api/admin/webquote/products/price` | ปุ่มคิดราคา — handler ตัวเดียวกับหน้าคำนวณราคา (`pricingQuoteHandler`) |
+| POST · GET · PUT · DELETE | `/api/admin/webquote/products` · `/:id` | เพิ่ม / อ่านเพื่อแก้ / แก้ / ลบ สินค้าเพิ่มเอง (ลบไม่ได้เมื่อมีใบอ้างหรือนำเข้าแล้ว) |
+| POST | `/api/admin/webquote/products/:id/reissue-ref` | ออกรหัสใหม่เมื่อ Odoo ไม่รับรหัสเดิม (รหัสเดิมเก็บใน `rejected_refs`) |
+| GET | `/api/admin/webquote/products/list` · `/export` · `/count` | หน้า "สินค้าเพิ่มเอง": รายการ (`filter` = `pending` ตั้งต้น · `exported` · `conflict` · `matched` · `all`) · ไฟล์ xlsx ของกลุ่มที่เลือก · ตัวเลขบนเมนู — ด่านชั้นที่สอง `page.odooproducts` |
 | GET | `/api/admin` | Serve Admin SPA |
 
 ---
@@ -119,6 +125,11 @@ user_id, message_id, type, content, reply_token, reply_content, meta (jsonb), cr
 
 **`products`** — ข้อมูลสินค้า PK: `product_template_id`
 - ฟิลด์สำคัญ: model (= code), name, brand, series, sales_price (= price), minimum_sales_price, quantity_on_hand_unreserved (= stock, ของว่างขายได้จริงหลังหักที่ถูกจอง — ทุกจุดในระบบใช้ตัวนี้), product_sub_category (= category), production, sales_description
+- **`source`** = `'odoo'` (sync) / `'local'` (แอดมินเพิ่มเอง · `product_template_id` ≥ 900,000,000) — sync ห้ามเขียนคอลัมน์นี้
+
+**`local_products`** — ทะเบียนสินค้าที่แอดมินเพิ่มเอง (คู่กับแถว `products` ที่ `source = 'local'`) PK: `product_template_id`
+- ฟิลด์สำคัญ: internal_reference (ไม่ถูกเขียนทับ), parent_reference, ref_tier (`boundary`/`max_plus_one`/`manual`), rejected_refs, model, name, sales_price, minimum_sales_price, price_source, exported_at, odoo_matched_at (ระบบเขียนเอง — "เข้า Odoo แล้ว" = Odoo มี `internal_reference` ตรงตัว)
+- แบบเต็ม: `docs/plan-local-products.md`
 
 **`sale_orders`** — ประวัติใบสั่งซื้อ PK: `(order_reference, model_code, model)`
 - ฟิลด์สำคัญ: salesperson, salesperson_id, salesperson_phone, employee_quotations, employee_quotations_phone, customer_sale_area, sales_team
