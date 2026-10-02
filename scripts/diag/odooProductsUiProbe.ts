@@ -81,7 +81,7 @@ type Row = (typeof ROWS)[number];
 /** กลุ่มของแถว — ลำดับเดียวกับ `FILTER_SQL` (นำเข้าแล้ว > ซ้ำ > ส่งออกแล้ว > ยังไม่ส่งออก) */
 const groupOf = (r: Row) =>
   r.odoo_matched_at ? 'matched' : r.odoo_model_conflicts.length ? 'conflict' : r.exported_at ? 'exported' : 'pending';
-const inGroup = (g: string) => ROWS.filter((r) => groupOf(r) === g);
+const inGroup = (g: string) => ROWS.filter((r) => g === 'all' || groupOf(r) === g);
 const CONFLICTS = inGroup('conflict').length;
 
 // ── J6 · ก้อนของ GET /suggest — ลอกจากฐานจริง 2026-10-02 (อ่านอย่างเดียว) ยกเว้น max_plus_one ที่หาเคสจริงไม่เจอ ──
@@ -164,6 +164,9 @@ async function route(req: HTTPRequest) {
   if (path === `${P}/list`) {
     const items = inGroup(url.searchParams.get('filter') ?? 'pending');
     return json(req, { items, total: items.length, pending: PENDING, conflicts: CONFLICTS });
+  }
+  if (path === `${P}/export`) {
+    return req.respond({ status: 200, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', body: Buffer.from('PK') });
   }
   if (path === `${P}/next-ref`) {
     return json(req, { parent_reference: url.searchParams.get('parent'), ref: { internal_reference: 'FHTP2XBH020248', tier: 'boundary' }, ref_message: null });
@@ -260,8 +263,8 @@ try {
   ok('ป้ายสถานะใช้คำของกลุ่ม + บรรทัดสองเป็นวันที่เพิ่ม', (tagText.match(/ยังไม่ส่งออก/g) ?? []).length === PENDING_GROUP
     && (tagText.match(/เพิ่มเมื่อ/g) ?? []).length === PENDING_GROUP);
   const options = await page.$$eval('select[aria-label="สถานะ"] option', (os) => os.map((o) => o.textContent?.trim()));
-  ok('ตัวกรองมีสี่กลุ่มตามที่เจ้าของสั่ง (เรียงตามนี้)',
-    options.join('|') === 'ยังไม่ส่งออก|รอนำเข้า|รหัสซ้ำ/ไม่ตรง|นำเข้าแล้ว', options.join(' | '));
+  ok('ตัวกรองมีสี่กลุ่ม + "ทั้งหมด" เป็นตัวเลือกสุดท้าย ตามที่เจ้าของสั่ง (เรียงตามนี้)',
+    options.join('|') === 'ยังไม่ส่งออก|รอนำเข้า|รหัสซ้ำ/ไม่ตรง|นำเข้าแล้ว|ทั้งหมด', options.join(' | '));
   // ปุ่มแรกคือแก้ไข (J6) ซึ่งกดได้แม้มีใบอ้าง — แก้ชื่อ/ราคาได้ แค่ model ล็อก
   ok('แถวที่มีใบอ้าง: ออกรหัสใหม่/ลบ กดไม่ได้ · แก้ไขยังกดได้', rows[0].disabled.slice(-2).every(Boolean) && rows[0].disabled[0] === false,
     JSON.stringify(rows[0].disabled));
@@ -359,9 +362,26 @@ try {
     if (g === 'matched') ok('  แถวนำเข้าแล้ว: ปุ่มกดไม่ได้', got.every((r) => r.disabled));
   }
 
+  // "ทั้งหมด" (เจ้าของสั่ง 2026-10-02 รอบ 6) — ยิง filter=all · เห็นทุกแถว · ป้ายแต่ละแถวยังเป็นกลุ่มของตัวเอง
+  calls.length = 0;
+  await page.select('select[aria-label="สถานะ"]', 'all');
+  await page.waitForFunction((n: number) => document.querySelectorAll('table tbody tr').length === n, { timeout: 5000 }, ROWS.length);
+  const allRows = await tableRows();
+  const allText = allRows.map((r) => r.text).join('\n');
+  ok(`"ทั้งหมด" ยิง filter=all และเห็นครบ ${ROWS.length} แถว · ป้ายครบทั้งสี่กลุ่ม`,
+    calls.some((c) => c.path.includes('filter=all'))
+      && ['ยังไม่ส่งออก', 'รอนำเข้า', 'รหัสซ้ำ/ไม่ตรง', 'นำเข้าแล้ว'].every((t) => allText.includes(t)));
+  calls.length = 0;
+  await page.click('button[aria-label^="ส่งออก xlsx"]');
+  await new Promise((r) => setTimeout(r, 500));
+  ok('  ส่งออกตอนเลือก "ทั้งหมด" = filter=all (ไฟล์ = กลุ่มที่เลือกอยู่)', calls.some((c) => c.path.includes('/export') && c.path.includes('filter=all')),
+    calls.map((c) => c.path).join(' '));
+
   // แถบแดงกดแล้วเปิดกลุ่ม "รหัสซ้ำ/ไม่ตรง"
   await page.select('select[aria-label="สถานะ"]', 'pending');
-  await page.waitForFunction(() => document.body.innerText.includes('ดูรายการ'), { timeout: 5000 });
+  // รอรายการของกลุ่มนี้โหลดเสร็จก่อน — แถบแดงขึ้นค้างมาจากกลุ่มก่อนหน้า (เช่น "ทั้งหมด") ถ้ากดเร็วไป ผลโหลดที่มาทีหลังทับ
+  await page.waitForFunction((n: number) => document.querySelectorAll('table tbody tr').length === n
+    && document.body.innerText.includes('ดูรายการ'), { timeout: 5000 }, inGroup('pending').length);
   calls.length = 0;
   await page.evaluate(() => ([...document.querySelectorAll('button')].find((b) => (b.textContent ?? '').includes('ดูรายการ')) as HTMLButtonElement).click());
   await page.waitForFunction(() => document.body.innerText.includes('FHTP2XCH021954'), { timeout: 5000 });
