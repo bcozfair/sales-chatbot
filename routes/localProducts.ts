@@ -21,7 +21,7 @@ import type { LocalProductFilter } from '../db/localProductsRepo.js';
  * **สิทธิ์บังคับที่จุด mount ใน index.ts ไม่ใช่ในไฟล์นี้** — ช่อง `quote.manage_products`
  * (admin · approver · subadmin · เจ้าของยืนยัน 2026-10-01) · ช่องกลุ่ม `quote.` ไม่ใช่ `page.` เพราะ
  * ด่าน `diag:role-permissions` บังคับว่าทุกช่อง `page` ต้องมีเมนู — หน้ารายการมาที่ J4 พร้อม `page.odooproducts`
- * ซึ่งจะซ้อนเป็นด่านที่สองเฉพาะ `/list` · `/export` · `/count` (เหตุผลที่เส้นรายการอยู่ที่ `/list` ไม่ใช่ `/`
+ * ซึ่งซ้อนเป็นด่านที่สองเฉพาะ `/list` · `/export` · `/count` (ลงแล้ว J4 · 2026-10-02) (เหตุผลที่เส้นรายการอยู่ที่ `/list` ไม่ใช่ `/`
  * เหมือนฝั่งผู้ติดต่อ: ด่านที่คร่อมบางเส้นต้องระบุ path แต่ `/` คือ path เดียวกับจุด mount)
  *
  * **ปุ่มคิดราคา (`POST /price`) ไม่อยู่ในไฟล์นี้** — mount ที่ index.ts ด้วยตัวจัดการตัวเดียวกับ
@@ -176,7 +176,7 @@ localProductsRouter.delete('/:id', async (req: Request, res: Response) => {
   }
 });
 
-/** Odoo ปฏิเสธรหัสเดิม → ขอเลขถัดไป (รหัสเดิมเข้า `rejected_refs` · ใบที่อ้างอยู่ถูกทับรหัสตาม · §1.5) */
+/** Odoo ปฏิเสธรหัสเดิม → ขอเลขถัดไป (รหัสเดิมเข้า `rejected_refs` · **มีใบอ้างรหัสนี้แล้ว = 409** ระบบไม่ทับรหัสในใบ · §1.5 · §8.4) */
 localProductsRouter.post('/:id/reissue-ref', express.json(), async (req: Request, res: Response) => {
   try {
     res.json(await reissueLocalProductRef(idOf(req), req.body ?? {}));

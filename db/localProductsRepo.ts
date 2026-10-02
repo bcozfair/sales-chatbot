@@ -420,10 +420,13 @@ const FILTER_SQL: Record<LocalProductFilter, string> = {
   all: 'TRUE',
 };
 
+/** แถวของหน้ารายการ — ทะเบียน + ชื่อคนเพิ่ม (ไม่มี FK ไป admin_users ⇒ ลบแอดมินแล้วได้ null ไม่ใช่แถวหาย) */
+export type LocalProductListRow = LocalProductRecord & { created_by_name: string | null };
+
 export async function listLocalProducts(
   executor: DbExecutor,
   opts: { filter: LocalProductFilter; q?: string; limit: number; offset: number },
-): Promise<{ rows: LocalProductRecord[]; total: number }> {
+): Promise<{ rows: LocalProductListRow[]; total: number }> {
   const params: unknown[] = [];
   let where = FILTER_SQL[opts.filter];
   if (opts.q) {
@@ -433,8 +436,10 @@ export async function listLocalProducts(
   const { rows: cnt } = await executor.query<{ n: number }>(
     `SELECT count(*)::int AS n FROM local_products WHERE ${where}`, params);
   params.push(opts.limit, opts.offset);
-  const { rows } = await executor.query<LocalProductRecord>(
-    `SELECT ${LOCAL_COLS} FROM local_products WHERE ${where}
+  const { rows } = await executor.query<LocalProductListRow>(
+    `SELECT ${LOCAL_COLS},
+            (SELECT a.name FROM admin_users a WHERE a.id = local_products.created_by) AS created_by_name
+       FROM local_products WHERE ${where}
       ORDER BY created_at DESC, product_template_id DESC
       LIMIT $${params.length - 1} OFFSET $${params.length}`,
     params
