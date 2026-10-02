@@ -203,6 +203,21 @@ const modalButton = (page: Page, label: string) => page.evaluate((l: string) => 
   if (b && !b.disabled) { b.click(); return true; }
   return false;
 }, label);
+/**
+ * แถวราคาของหน้าต่าง (เจ้าของทักภาพ 2026-10-02 "ระดับความสูง ui ของ item ไม่เสมอกัน")
+ * วัดกล่องจริง: หัวช่องสองฝั่ง + ของสี่ชิ้นในแถว ต้องขอบบนเท่ากันและสูงเท่ากัน (คลาดได้ไม่เกิน 0.5px)
+ */
+const priceRowBoxes = (page: Page) => page.evaluate(() => {
+  const price = document.getElementById('lp-price') as HTMLElement;
+  const min = document.getElementById('lp-min') as HTMLElement;
+  const pct = document.querySelector('input[aria-label^="ราคาขั้นต่ำ เป็นเปอร์เซ็นต์"]') as HTMLElement;
+  const btn = [...(price.parentElement?.querySelectorAll('button') ?? [])].find((b) => b.textContent?.trim() === 'คิดราคา') as HTMLElement;
+  const labels = [document.querySelector('label[for="lp-price"]'), document.querySelector('label[for="lp-min"]')]
+    .map((l) => l!.getBoundingClientRect()).map((r) => ({ top: +r.top.toFixed(1), h: +r.height.toFixed(1) }));
+  const boxes = [price, btn, pct, min].map((e) => e.getBoundingClientRect()).map((r) => ({ top: +r.top.toFixed(1), h: +r.height.toFixed(1) }));
+  const even = (xs: { top: number; h: number }[]) => xs.every((x) => Math.abs(x.top - xs[0].top) <= 0.5 && Math.abs(x.h - xs[0].h) <= 0.5);
+  return { labels, boxes, labelsEven: even(labels), boxesEven: even(boxes) };
+});
 /** สลับธีมด้วยปุ่มจริงของแอป (จอแคบปุ่มอยู่ในเมนูที่ซ่อน — `click()` ของ DOM ยังยิง onClick ได้) */
 const toggleTheme = async (page: Page) => {
   const before = await page.evaluate(() => document.documentElement.dataset.theme ?? 'dark');
@@ -240,6 +255,9 @@ try {
   ok('3 · หน้าต่าง: model = รหัสที่คิด + ป้าย "จากรหัสที่คิดราคา"', m.model === C.priced && m.fromCode, String(m.model));
   ok('   ราคาครบ = เติมราคา + ป้าย "จากสมุดราคา"', m.price === '12480' && m.bookTag && !m.manualTag, `${m.price}`);
   ok('   ไม่มีตัวเลือกนอกรหัส = Description ว่าง', m.desc === '' && !m.descHint);
+  const row = await priceRowBoxes(page);
+  ok('   แถวราคา: หัวช่องสองฝั่งสูงเท่ากัน (ป้าย "จากสมุดราคา" ไม่ดันช่องลง)', row.labelsEven, JSON.stringify(row.labels));
+  ok('   แถวราคา: ช่องราคาขาย · ปุ่มคิดราคา · ช่อง % · ช่องบาท ขอบบนและความสูงเท่ากัน', row.boxesEven, JSON.stringify(row.boxes));
   await page.screenshot({ path: `${SHOTS}pa-modal-priced-1280.png` });
   calls.length = 0;
   ok('   กด "เพิ่มสินค้า" ได้', await modalButton(page, 'เพิ่มสินค้า'));

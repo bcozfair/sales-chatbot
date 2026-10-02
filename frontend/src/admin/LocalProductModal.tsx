@@ -140,7 +140,9 @@ const INPUT_CLS =
   'w-full h-9 px-3 rounded-xl border border-slate-200 bg-card text-sm text-slate-800 outline-none ' +
   'focus:border-[var(--brand-fg)] focus:ring-2 focus:ring-[var(--brand-fg)]/20 ' +
   'disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed';
-const LABEL_CLS = 'flex items-center gap-1.5 text-xs font-semibold text-slate-600 mb-1.5';
+// หัวช่องสูงตายตัว (h-5 = 20px) — ป้ายอย่าง "จากสมุดราคา" (~19px) สูงกว่าตัวหนังสือเปล่า (16px) ถ้าปล่อยตามเนื้อหา
+// ช่องใต้หัวที่มีป้ายจะต่ำกว่าช่องข้าง ๆ 3px (เจ้าของทัก 2026-10-02 · ด่าน diag:pricing-add-ui "แถวราคา")
+const LABEL_CLS = 'flex items-center gap-1.5 h-5 text-xs font-semibold text-slate-600 mb-1.5';
 const HINT_CLS = 'text-[11px] text-slate-400 mt-1';
 const TAG = 'inline-block px-1.5 py-0.5 rounded-md border text-[10px] font-semibold whitespace-nowrap';
 const BOX = 'rounded-xl border px-3 py-2 text-xs leading-relaxed';
