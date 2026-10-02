@@ -769,7 +769,10 @@ export const LocalProductModal: React.FC<Props> = ({
 
                 <details className="rounded-xl border border-slate-200" open={desc.trim() !== ''}>
                   <summary className="cursor-pointer list-none flex items-center gap-2 px-3 py-2 text-xs text-slate-600">
-                    <Plus className="w-3.5 h-3.5 shrink-0" /> รายละเอียดบนใบ <span className="ml-auto text-[11px] text-slate-400">ไม่บังคับ · ไม่ลอกจากต้นแบบ</span>
+                    <Plus className="w-3.5 h-3.5 shrink-0" />
+                    {/* ชื่อช่องตามที่เจ้าของสั่ง 2026-10-02 · บรรทัดเดียวเสมอ — จอแคบตัดคำอธิบายด้านขวาแทน */}
+                    <span className="whitespace-nowrap">รายละเอียดสินค้า (Description)</span>
+                    <span className="ml-auto min-w-0 truncate text-[11px] text-slate-400" title="ไม่บังคับ · ไม่ลอกจากต้นแบบ">ไม่บังคับ · ไม่ลอกจากต้นแบบ</span>
                   </summary>
                   <div className="px-3 pb-3">
                     <textarea value={desc} onChange={(e) => setDesc(e.target.value)} maxLength={MAX.sales_description} rows={3}
@@ -781,7 +784,7 @@ export const LocalProductModal: React.FC<Props> = ({
                 {inherited.length > 0 && (
                   <details className="rounded-xl border border-slate-200">
                     <summary className="cursor-pointer list-none flex items-center gap-2 px-3 py-2 text-xs text-slate-600">
-                      ข้อมูลที่ลอกจากต้นแบบ
+                      <span className="whitespace-nowrap">ข้อมูลที่ลอกจากต้นแบบ</span>
                       <span className="ml-auto min-w-0 truncate text-[11px] text-slate-400">{inherited.map(([, v]) => v).join(' · ')}</span>
                     </summary>
                     <dl className="px-3 pb-3 grid grid-cols-[96px_1fr] gap-x-3 gap-y-0.5 text-xs">
