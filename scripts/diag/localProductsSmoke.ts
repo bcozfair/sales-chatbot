@@ -3,7 +3,7 @@
  *
  * J1 = ข้อ 6–7 (ตัวกวาดตอน sync + reconcile: รหัสตรงเท่านั้น · model ซ้ำเป็นป้ายเตือน)
  * J2 = ข้อ 1–5 · 8 · 11–17 · 19 (ออกรหัส · ต้นแบบ · ชื่อ · สร้าง/แก้/ลบ · ออกเลขใหม่ · ส่งออก · ด่านสิทธิ์)
- * ข้อ 9–10 (ธง custom_product) มากับ J3
+ * J3 = ข้อ 9–10 (ธง is_local_product ใน snapshot สองชั้น → เหตุ custom_product → กลุ่มในเมนูส่งออก)
  *
  * ข้อ 1 · 13 · 14 อ่าน `products` ของจริงผ่าน pool (อีก connection · SELECT อย่างเดียว) — ตัวเลขเป็นรายงาน
  * gate คือเกณฑ์ที่เขียนไว้ในแต่ละข้อ ไม่ใช่ค่าเป๊ะ (ข้อมูลโตทุกวัน · ห้ามเทียบกับ golden ที่ขึ้นกับข้อมูล)
@@ -33,6 +33,8 @@ import {
   suggestParent, suggestName, namePrefix, modelKeyBare, isCustomModel, isCustomRef,
 } from '../../utils/productNamePattern.js';
 import { upsertProductRows } from '../sync/syncProducts.js';
+import { buildItemSnapshots, buildOdooManualReview, enrichQuotationData } from '../../services/quotationService.js';
+import { ODOO_MANUAL_BUCKET_SQL } from '../../db/repositories.js';
 
 let pass = 0;
 let fail = 0;
@@ -330,6 +332,69 @@ try {
   check('ข้อ 8 · แถวจริงใน products: source=local · ค้นเจอ (is_system_item=false) · สต็อก 0 · production ว่าง',
     pRow[0]?.source === 'local' && pRow[0]?.is_system_item === false && pRow[0]?.q === 0 &&
     pRow[0]?.production === null && pRow[0]?.sp === 1000, JSON.stringify(pRow[0]));
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  ข้อ 9 · 10 — ธง is_local_product / เหตุ custom_product (J3 · §8) · ทำใน SAVEPOINT แล้วถอยคืน
+  //  ใบที่สร้างตรงนี้ต้องไม่ไปทำให้ข้อ 11 ("มีใบอ้าง ⇒ ห้ามลบ") เห็นใบเกินมา
+  // ════════════════════════════════════════════════════════════════════════
+  section('ข้อ 9 · 10 · ธงสินค้าเพิ่มเองใน snapshot → คิวแก้มือ');
+  await c.query('SAVEPOINT j3');
+  const ODOO_MODEL = 'QQQ-04(S2)6x50+5M';
+  const GONE_MODEL = 'QQQ-GONE-1';          // แถว local ถูกกวาดไปแล้ว — ฐานไม่มี model นี้ให้ถาม
+  const raw = [
+    { model: created.model, price: 1000, quantity: 1 },
+    { model: ODOO_MODEL, price: 100, quantity: 2 },
+    { model: created.model, price: 1000, quantity: 3 },     // รหัสเดียวกันสองบรรทัด ⇒ นับเหตุครั้งเดียว
+    { model: GONE_MODEL, price: 10, quantity: 1, is_local_product: true },
+    { model: 'QQQ-UNKNOWN', price: 10, quantity: 1 },
+  ];
+  const snaps = await buildItemSnapshots(raw, c);
+  check('ข้อ 9 · snapshot: local ⇒ true · Odoo ⇒ false · ไม่มีในฐาน ⇒ ถือค่าเดิมของบรรทัด',
+    snaps.map((s) => s.is_local_product).join(',') === 'true,false,true,true,false' &&
+    snaps[0]?.internal_reference === created.internal_reference,
+    JSON.stringify(snaps.map((s) => [s.model, s.internal_reference, s.is_local_product])));
+
+  const enriched = await enrichQuotationData({
+    id: 0, status: 'draft', item_details: snaps, customer_details: {}, employee_details: {},
+    created_at: new Date().toISOString(),
+  });
+  check('ข้อ 9 · enrichQuotationData (whitelist ขาอ่าน) ส่งธงต่อครบ',
+    enriched?.items?.map((i: any) => i.is_local_product).join(',') === 'true,false,true,true,false',
+    JSON.stringify(enriched?.items?.map((i: any) => i.is_local_product)));
+  // round-trip แบบ LIFF/PUT หลังสินค้าเข้า Odoo แล้ว (แถว local ถูกกวาด) — ธงของใบเดิมต้องไม่หาย
+  await c.query(`DELETE FROM products WHERE product_template_id = $1`, [created.product_template_id]);
+  const again = await buildItemSnapshots(enriched.items, c);
+  check('ข้อ 9 · round-trip หลังแถว local ถูกกวาด ⇒ ธงยังอยู่ (สร้างใหม่จากฐานไม่ได้แล้ว)',
+    again.map((s) => s.is_local_product).join(',') === 'true,false,true,true,false',
+    JSON.stringify(again.map((s) => s.is_local_product)));
+  // ฐานที่ยังไม่มีคอลัมน์ source (dump เก่า) — query ต้องไม่ล้ม ไม่งั้นทุกบรรทัดเสียค่าจากฐานเงียบ ๆ
+  await c.query('SAVEPOINT nosrc');
+  await c.query(`ALTER TABLE products DROP COLUMN source`);
+  const noSrc = await buildItemSnapshots([{ model: ODOO_MODEL, price: 1, quantity: 1 }], c);
+  await c.query('ROLLBACK TO SAVEPOINT nosrc');
+  check('ข้อ 9 · ฐานที่ไม่มี products.source ⇒ ธง false และยังได้รหัสจากฐาน (query ไม่ล้ม)',
+    noSrc[0]?.is_local_product === false && noSrc[0]?.internal_reference === 'FTCP2QQQ040000',
+    JSON.stringify(noSrc[0]));
+
+  const review = buildOdooManualReview({ ...enriched, customer_details: { payment_terms_override: '30 Days' } });
+  const kinds = review?.reasons.map((r) => `${r.kind}:${r.value}`) ?? [];
+  check('ข้อ 10 · ใบที่มีสินค้าเพิ่มเอง ⇒ custom_product หนึ่งเหตุต่อรหัส (ช่อง order_line/product) · เรียงก่อนเครดิต',
+    kinds.join(' ') === `custom_product:${created.internal_reference} custom_product:${GONE_MODEL} payment_terms_override:30 Days` &&
+    review!.reasons[0]!.field === 'order_line/product' && review!.reasons[0]!.display_message.includes(created.internal_reference),
+    kinds.join(' '));
+  check('ข้อ 10 · ใบปกติ (ไม่มีธง) ⇒ ไม่มีเหตุ',
+    buildOdooManualReview({ item_details: snaps.filter((s) => !s.is_local_product), customer_details: {} }) === null);
+  check('ข้อ 10 · ไม่มี item_details (ใบเก่า/พรีวิว) ⇒ ถอยไปอ่าน items',
+    buildOdooManualReview({ items: enriched.items, customer_details: {} })?.reasons.length === 2);
+  const qid = await insertQuote(c, 'QP-T-0900', 'confirmed', snaps);
+  await c.query(`UPDATE quotations SET odoo_manual_review = $2::jsonb WHERE id = $1`, [qid, JSON.stringify(review)]);
+  const { rows: bucket } = await c.query(`SELECT ${ODOO_MANUAL_BUCKET_SQL} AS b FROM quotations q WHERE q.id = $1`, [qid]);
+  check('ข้อ 10 · เมนูส่งออกจัดใบนี้ไว้กลุ่ม custom_product (ไม่ใช่ payment_terms_override)', bucket[0]?.b === 'custom_product',
+    bucket[0]?.b);
+  const wqSrc = readFileSync(new URL('../../services/webQuoteService.ts', import.meta.url), 'utf-8');
+  check('ข้อ 10 · โมดัลพรีวิวส่ง snapshot เข้า buildOdooManualReview ตัวเดียวกับตอนยืนยัน',
+    /buildOdooManualReview\(\{[\s\S]{0,200}item_details:[^\n]*snaps/.test(wqSrc));
+  await c.query('ROLLBACK TO SAVEPOINT j3');
 
   const dupErr = await expectError(() => createLocalProduct({
     model: ' QQQ-04(S2)6x50+5M ', sales_price: 10, parent_reference: 'FTCP2QQQ040000' }, null, c));

@@ -1770,8 +1770,12 @@ async function previewDraftInternal(
       .map(violationKey),
     approval_required: violations.filter((v) => violationMode(v, ruleModes) === 'approval'),
     needs_approval: violations.some((v) => violationMode(v, ruleModes) === 'approval'),
+    // snapshot ทุกใบของรอบนี้ (PM+THT) — ธง is_local_product มาจาก buildItemSnapshots ตัวเดียวกับใบจริง
     odoo_manual_reasons:
-      buildOdooManualReview({ customer_details: { payment_terms_override: paymentTermsOverride } })?.reasons ?? [],
+      buildOdooManualReview({
+        customer_details: { payment_terms_override: paymentTermsOverride },
+        item_details: Object.values(artifacts.byCompany).flatMap((a) => a?.snaps ?? []),
+      })?.reasons ?? [],
     service_line: {
       product_template_id: cfg.productId,
       model: cfg.productModel,
