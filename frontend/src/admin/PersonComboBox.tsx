@@ -104,6 +104,11 @@ interface ComboProps<T extends ComboOption> {
    * (`onQueryChange`) ใช้ตัวนี้ล้างคำค้นของตัวเองตาม ไม่งั้นเปิดรอบหน้าช่องว่างแต่รายการยังกรองด้วยคำเก่า
    */
   onClose?: () => void;
+  /**
+   * กางรายการขึ้นด้านบนของช่อง — สำหรับช่องที่อยู่ท้ายหน้า (ช่องเลือกใบที่จะแก้ไข · เจ้าของสั่ง 2026-10-02)
+   * กางลงแล้วรายการจมใต้ขอบจอ ต้องเลื่อนหน้าตามทุกครั้ง · ไม่ส่ง = กางลงเหมือนเดิม
+   */
+  dropUp?: boolean;
 }
 
 export function ComboBox<T extends ComboOption>({
@@ -126,6 +131,7 @@ export function ComboBox<T extends ComboOption>({
   onQueryChange,
   renderOption,
   onClose,
+  dropUp,
 }: ComboProps<T>) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -221,7 +227,7 @@ export function ComboBox<T extends ComboOption>({
       </div>
 
       {open && (
-        <div className="absolute z-50 mt-1.5 w-full min-w-[260px] bg-card border border-slate-200 rounded-xl shadow-xl overflow-hidden">
+        <div className={`absolute z-50 ${dropUp ? 'bottom-full mb-1.5' : 'mt-1.5'} w-full min-w-[260px] bg-card border border-slate-200 rounded-xl shadow-xl overflow-hidden`}>
           {/* slate-500 ไม่ใช่ slate-400: ตัวอักษร 10px บนพื้น slate-50 ของธีมสว่าง
               ที่ slate-400 ได้ contrast ~2.6:1 ซึ่งตกเกณฑ์ 4.5 ของตัวอักษรขนาดปกติ */}
           <div className="flex items-center gap-2 px-3.5 py-1 bg-slate-50 border-b border-slate-200 text-[10px] text-slate-500">
