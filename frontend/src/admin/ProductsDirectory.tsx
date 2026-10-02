@@ -327,7 +327,7 @@ export const ProductsDirectory: React.FC = () => {
             disabled={exporting || total === 0}
             className="shrink-0"
           >
-            {exporting ? 'กำลังส่งออก…' : <>ส่งออก CSV<span className="hidden sm:inline">{` (${formatNumber(total)} แถวที่กรองอยู่)`}</span></>}
+            {exporting ? 'กำลังส่งออก…' : <>ส่งออก csv<span className="hidden sm:inline">{` (${formatNumber(total)} แถวที่กรองอยู่)`}</span></>}
           </Button>
         }
       >

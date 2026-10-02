@@ -2,16 +2,15 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { PageHeader } from '../PageHeader';
 import { Button } from '../Button';
-import { DateInput } from '../DateInput';
+import { FilterDateRange } from '../FilterBar';
 import {
   Terminal, Download, AlertTriangle,
-  ChevronDown, ChevronRight as ChevronRightSmall, Link2,
-} from 'lucide-react';
+  ChevronDown, ChevronRight as ChevronRightSmall, Link2, CalendarDays } from 'lucide-react';
 import { useHashState } from './useHashState';
 import { TAB_SLUG } from '../navHash';
 import {
   errMsg, formatDateTime, relativeTime, formatNumber, levelStyle,
-  downloadCsv, inputCls,
+  downloadCsv,
 } from './format';
 import {
   EmptyState, ErrorBox, FilterCard, FilterField, FilterFooter, FilterRow,
@@ -252,9 +251,9 @@ export const SystemLogs: React.FC = () => {
           busy={exporting}
           onClick={() => { void doExport(); }}
           disabled={exporting}
-          aria-label="ส่งออก CSV"
+          aria-label="ส่งออก csv"
         >
-          <span className="hidden sm:inline">ส่งออก CSV</span>
+          <span className="hidden sm:inline">ส่งออก csv</span>
         </Button>
       </PageHeader>
 
@@ -271,13 +270,11 @@ export const SystemLogs: React.FC = () => {
               placeholder="พิมพ์เพื่อค้นหา… (กด / เพื่อโฟกัส)"
             />
           </FilterField>
-          <FilterField label="ตั้งแต่" width="w-36">
-            <DateInput className={inputCls} value={state.dateFrom}
-                       onChange={v => set({ dateFrom: v, page: '1' })} aria-label="ตั้งแต่วันที่" />
-          </FilterField>
-          <FilterField label="ถึง" width="w-36">
-            <DateInput className={inputCls} value={state.dateTo}
-                       onChange={v => set({ dateTo: v, page: '1' })} aria-label="ถึงวันที่" />
+          {/* ช่วงวันที่กล่องเดียว — แบบเดียวกับหน้าประวัติใบเสนอราคา/โปรโมชัน (เจ้าของสั่ง 2026-10-02) */}
+          <FilterField label="ช่วงวันที่" width="w-72">
+            <FilterDateRange from={state.dateFrom} to={state.dateTo} icon={CalendarDays}
+                             onFrom={v => set({ dateFrom: v, page: '1' })} onTo={v => set({ dateTo: v, page: '1' })}
+                             fromLabel="ตั้งแต่วันที่" toLabel="ถึงวันที่" />
           </FilterField>
           <FilterField label="ระดับ" width="w-44">
             <SelectField value={state.minLevel} onChange={v => set({ minLevel: v, page: '1' })}>

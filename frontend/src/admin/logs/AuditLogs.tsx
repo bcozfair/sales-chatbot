@@ -2,16 +2,15 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { PageHeader } from '../PageHeader';
 import { Button } from '../Button';
-import { DateInput } from '../DateInput';
+import { FilterDateRange } from '../FilterBar';
 import {
   History, Download,
-  ChevronDown, ChevronRight as ChevronRightSmall, ArrowRight, Link2, Layers,
-} from 'lucide-react';
+  ChevronDown, ChevronRight as ChevronRightSmall, ArrowRight, Link2, Layers, CalendarDays } from 'lucide-react';
 import { useHashState } from './useHashState';
 import { TAB_SLUG } from '../navHash';
 import {
   errMsg, formatDateTime, relativeTime, formatNumber, actorStyle, entityLabel,
-  actionLabel, displayValue, downloadCsv, inputCls, isBulk,
+  actionLabel, displayValue, downloadCsv, isBulk,
 } from './format';
 import {
   CheckField, EmptyState, ErrorBox, FilterCard, FilterField, FilterFooter, FilterRow,
@@ -265,9 +264,9 @@ export const AuditLogs: React.FC = () => {
           busy={exporting}
           onClick={() => { void doExport(); }}
           disabled={exporting}
-          aria-label="ส่งออก CSV"
+          aria-label="ส่งออก csv"
         >
-          <span className="hidden sm:inline">ส่งออก CSV</span>
+          <span className="hidden sm:inline">ส่งออก csv</span>
         </Button>
       </PageHeader>
 
@@ -282,13 +281,11 @@ export const AuditLogs: React.FC = () => {
               placeholder="พิมพ์เพื่อค้นหา… (กด / เพื่อโฟกัส)"
             />
           </FilterField>
-          <FilterField label="ตั้งแต่" width="w-36">
-            <DateInput className={inputCls} value={state.dateFrom}
-                       onChange={v => set({ dateFrom: v, page: '1' })} aria-label="ตั้งแต่วันที่" />
-          </FilterField>
-          <FilterField label="ถึง" width="w-36">
-            <DateInput className={inputCls} value={state.dateTo}
-                       onChange={v => set({ dateTo: v, page: '1' })} aria-label="ถึงวันที่" />
+          {/* ช่วงวันที่กล่องเดียว — แบบเดียวกับหน้าประวัติใบเสนอราคา/โปรโมชัน (เจ้าของสั่ง 2026-10-02) */}
+          <FilterField label="ช่วงวันที่" width="w-72">
+            <FilterDateRange from={state.dateFrom} to={state.dateTo} icon={CalendarDays}
+                             onFrom={v => set({ dateFrom: v, page: '1' })} onTo={v => set({ dateTo: v, page: '1' })}
+                             fromLabel="ตั้งแต่วันที่" toLabel="ถึงวันที่" />
           </FilterField>
           <FilterField label="ชนิดข้อมูล" width="w-52">
             <SelectField value={state.entityType} onChange={v => set({ entityType: v, page: '1' })}>

@@ -868,10 +868,10 @@ export const Promotions: React.FC = () => {
         <Button
           icon={FileSpreadsheet}
           onClick={() => handleExportCsv()}
-          aria-label="ส่งออก CSV"
+          aria-label="ส่งออก csv"
           className="flex-shrink-0"
         >
-          <span className="hidden sm:inline">ส่งออก CSV</span>
+          <span className="hidden sm:inline">ส่งออก csv</span>
         </Button>
         <Button
           id="add-promo-btn"
@@ -1107,7 +1107,7 @@ export const Promotions: React.FC = () => {
                         <button
                           onClick={() => handleExportCsv(promo.code)}
                           className="p-1.5 bg-card hover:bg-slate-50 text-slate-500 hover:text-blue-600 border border-slate-200 rounded-lg transition-all active:scale-95 shadow-sm"
-                          title="ส่งออก CSV แคมเปญนี้"
+                          title="ส่งออก csv แคมเปญนี้"
                         >
                           <Download className="w-3.5 h-3.5" />
                         </button>
@@ -1309,12 +1309,12 @@ export const Promotions: React.FC = () => {
                       นำเข้าเงื่อนไขจากไฟล์ CSV ของแคมเปญนี้
                     </span>
                     <span className="block text-[10px] text-slate-500 font-medium leading-relaxed">
-                      อัปโหลด CSV เพื่อกรอกสินค้า/ลูกค้าของรายการนี้แบบอัตโนมัติ
+                      อัปโหลด csv เพื่อกรอกสินค้า/ลูกค้าของรายการนี้แบบอัตโนมัติ
                     </span>
                   </div>
                   <label className="flex items-center justify-center gap-1.5 text-xs font-semibold px-3 py-2 bg-card hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl shadow-sm transition-all active:scale-95 cursor-pointer flex-shrink-0">
                     <Upload className="w-3.5 h-3.5 text-slate-500" />
-                    อัปโหลด CSV
+                    อัปโหลด csv
                     <input
                       type="file"
                       accept=".csv"

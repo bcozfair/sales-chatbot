@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { DateInput } from './DateInput';
+import { FilterDateRange } from './FilterBar';
 import { PageHeader } from './PageHeader';
 import { Button } from './Button';
 import { RequestTimeline } from './logs/RequestTimeline';
@@ -20,8 +20,7 @@ import type { SortAccessors } from './logs/useTableSort';
 import { AreaChart, ChartLegend, Donut } from './logs/charts';
 import {
   Activity, AlertTriangle, Check, ChevronDown, ChevronUp, Copy, Info, Link2,
-  Loader2, RefreshCw, SlidersHorizontal,
-} from 'lucide-react';
+  Loader2, RefreshCw, SlidersHorizontal, CalendarDays } from 'lucide-react';
 
 /**
  * หน้าดูบันทึกการเรียก API — ใครเรียกอะไร เมื่อไหร่ ได้ status อะไร และช้าตรงไหน
@@ -640,13 +639,11 @@ export function ApiLogs() {
               <option value="5xx">5xx ผิดฝั่งระบบ</option>
             </SelectField>
           </FilterField>
-          <FilterField label="ตั้งแต่" width="w-36">
-            <DateInput value={state.dateFrom} onChange={(v) => set({ dateFrom: v, page: '1' })}
-                       className={inputCls} aria-label="ตั้งแต่วันที่" />
-          </FilterField>
-          <FilterField label="ถึง" width="w-36">
-            <DateInput value={state.dateTo} onChange={(v) => set({ dateTo: v, page: '1' })}
-                       className={inputCls} aria-label="ถึงวันที่" />
+          {/* ช่วงวันที่กล่องเดียว — แบบเดียวกับหน้าประวัติใบเสนอราคา/โปรโมชัน (เจ้าของสั่ง 2026-10-02) */}
+          <FilterField label="ช่วงวันที่" width="w-72">
+            <FilterDateRange from={state.dateFrom} to={state.dateTo} icon={CalendarDays}
+                             onFrom={v => set({ dateFrom: v, page: '1' })} onTo={v => set({ dateTo: v, page: '1' })}
+                             fromLabel="ตั้งแต่วันที่" toLabel="ถึงวันที่" />
           </FilterField>
           <div className="pb-px">
             <CheckField
