@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { PackageOpen, Download, RefreshCw, Trash2, AlertTriangle, Info, CheckCircle2 } from 'lucide-react';
+import { PackageOpen, Download, RefreshCw, Trash2, AlertTriangle, Info, CheckCircle2, Pencil, Plus } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { PageHeader } from './PageHeader';
 import { DataSearch } from './DataFilterBar';
@@ -7,6 +7,7 @@ import { TableCard, TableScroll, Pagination, EmptyState, SkeletonRows, ErrorBox,
 import { errMsg, formatNumber, formatDate, thCls, theadRowCls, tdCls, inputCls, downloadCsv } from './logs/format';
 import { Modal } from './Modal';
 import { Button } from './Button';
+import { LocalProductModal } from './LocalProductModal';
 
 /**
  * หน้า "สินค้าเพิ่มเอง" — คิวงานค้างของโมดูล `local_products` (docs/plan-local-products.md J4)
@@ -24,8 +25,8 @@ import { Button } from './Button';
  * ── สิ่งที่หน้านี้จงใจ "ไม่มี" ────────────────────────────────────────────────
  *   1. **ไม่มีปุ่มติ๊กว่า "คีย์เข้า Odoo แล้ว"** — ระบบตรวจเองท้ายรอบ sync จาก `internal_reference`
  *      ที่ตรงกันเท่านั้น (เจ้าของเคาะ 2026-10-01 · แผน §7)
- *   2. **ยังไม่มีปุ่มเพิ่ม/แก้ไข** — ใช้หน้าต่างตัวเดียวกับตอนเพิ่มกลางหน้าขอใบ ซึ่งมากับ J6
- *      (เจ้าของเคาะ 2026-10-02) ⇒ ไม่มีฟอร์มสองชุด
+ *   2. **ไม่มีฟอร์มเพิ่ม/แก้ของตัวเอง** — ปุ่ม "เพิ่มสินค้าใหม่" (สีหลัก) กับไอคอนแก้ไขเปิด `LocalProductModal`
+ *      ตัวเดียวกับตอนเพิ่มกลางหน้าขอใบ (J6 · เจ้าของยืนยัน mockup 2026-10-02) · โผล่เฉพาะคนที่มี `quote.manage_products`
  *   3. **ป้ายรหัสมีสองแบบเท่านั้น** "อัตโนมัติ" (เขียวทุกระดับความมั่นใจ) / "กำหนดเอง" — เจ้าของสั่ง
  *      2026-10-02 ว่าคนต้องตรวจรหัสในหน้าต่างเพิ่มสินค้าก่อนกดยืนยันอยู่แล้ว ⇒ คำเตือน `max_plus_one`
  *      ไปอยู่ที่หน้าต่างนั้น (J6) ไม่ใช่หน้ารายการ
@@ -127,7 +128,7 @@ const StatusLine2: React.FC<{ r: Row }> = ({ r }) => {
   return <div className={line}>เพิ่มเมื่อ {dayOf(r.created_at)}</div>;
 };
 
-export const OdooProducts: React.FC = () => {
+export const OdooProducts: React.FC<{ canManage?: boolean }> = ({ canManage = false }) => {
   const { token } = useAuth();
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
@@ -148,6 +149,8 @@ export const OdooProducts: React.FC = () => {
   const [delBusy, setDelBusy] = useState(false);
   const [delError, setDelError] = useState<string | null>(null);
   const [reissueRow, setReissueRow] = useState<Row | null>(null);
+  /** หน้าต่างเพิ่ม/แก้ (J6) — `'new'` = เพิ่ม · ตัวเลข = แก้แถวนั้น · `null` = ปิด */
+  const [editing, setEditing] = useState<'new' | number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -228,6 +231,10 @@ export const OdooProducts: React.FC = () => {
     const why = locked ? 'นำเข้าแล้ว — ' : used ? `มีใบเสนอราคาใช้สินค้านี้ ${r.quotation_count} ใบ — ` : '';
     return (
       <RowActions>
+        {canManage && (
+          <RowAction icon={Pencil} label={`แก้ไข ${r.model}`} onClick={() => setEditing(r.product_template_id)} disabled={locked}
+                     title={locked ? 'นำเข้าแล้ว — แก้ที่ Odoo แทน' : used ? 'แก้ไข (model ล็อกเพราะมีใบอ้างแล้ว)' : 'แก้ไข'} />
+        )}
         <RowAction icon={RefreshCw} label={`ออกรหัสใหม่ ${r.model}`} onClick={() => setReissueRow(r)} disabled={locked || used}
                    title={locked || used ? `${why}ออกรหัสใหม่ไม่ได้` : 'Odoo ไม่ยอมรับรหัสนี้ → ออกรหัสใหม่'} />
         <RowAction icon={Trash2} label={`ลบ ${r.model}`} tone="danger" onClick={() => { setDelError(null); setDelRow(r); }}
@@ -252,6 +259,11 @@ export const OdooProducts: React.FC = () => {
         >
           {exporting ? 'กำลังสร้างไฟล์…' : <span className="hidden sm:inline">{`ส่งออก xlsx (${formatNumber(total)} รายการ)`}</span>}
         </Button>
+        {canManage && (
+          <Button variant="primary" icon={Plus} onClick={() => setEditing('new')} aria-label="เพิ่มสินค้าใหม่" className="shrink-0">
+            <span className="hidden sm:inline">เพิ่มสินค้าใหม่</span>
+          </Button>
+        )}
       </PageHeader>
 
       {/* แถบแจ้งเตือนอยู่เหนือตัวกรองด้วยกันทั้งหมด และบรรทัดเดียว (เจ้าของสั่ง 2026-10-02) —
@@ -410,6 +422,16 @@ export const OdooProducts: React.FC = () => {
           </>
         )}
       </TableCard>
+
+      {editing !== null && (
+        <LocalProductModal
+          editId={editing === 'new' ? null : editing}
+          saveLabel="เพิ่มสินค้า"
+          authHeaders={authHeaders}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); void load(); }}
+        />
+      )}
 
       {reissueRow && (
         <ReissueRefModal

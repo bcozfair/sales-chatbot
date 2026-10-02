@@ -31,6 +31,12 @@
 > รอนำเข้า (`exported`) · รหัสซ้ำ/ไม่ตรง (`conflict` · ดึงออกจากสองกลุ่มแรก เพราะงานคือแก้รหัสใน Odoo) · นำเข้าแล้ว ·
 > เงื่อนไข "ซ้ำ" ใน `FILTER_SQL` **ต้องเท่ากับ `findOdooModelConflicts`** (ข้อ 7c ตรวจให้) · ป้ายสถานะใช้คำเดียวกับตัวกรอง ·
 > แถบแดงนับจาก server (`conflicts`) และกดแล้วเปิดกลุ่มซ้ำ · `diag:local-products` 86/86 · `diag:op-ui` 36/36
+> · **J6 ลงโค้ดแล้ว 2026-10-02** — `LocalProductModal` (mockup `local-product-add` ที่เจ้าของยืนยัน + ช่อง % ราคาขั้นต่ำ) ·
+> ทางเข้าในใบ = แถว "+ เพิ่มสินค้าใหม่" ท้ายผลค้น **ขึ้นเสมอ** (เห็นเฉพาะ `quote.manage_products`) ⇒ เพิ่มแล้วใส่ลงแถวนั้น +
+> ป้าย "เพิ่มเอง" · หน้า "สินค้าเพิ่มเอง" ได้ปุ่มเพิ่ม (สีหลัก) + ไอคอนแก้ไข · ไม่แน่ใจรหัส (`max_plus_one`) ⇒ **ต้องติ๊ก
+> "ตรวจรหัสแล้ว" ก่อนบันทึก** (บังคับที่จอ) · ราคาขั้นต่ำ = ราคาขาย × % (ตั้งต้นจาก `min_price_ratio` ของ server) ·
+> `/suggest` เพิ่ม `group_key` + `min_price_ratio` · `GET /:id` เพิ่ม `parent` + `min_price_ratio` · `diag:op-ui` 58/58 ·
+> `diag:local-products` 86/86 · `diag:role-permissions` 52/52 · ยังไม่ deploy
 
 ---
 
@@ -755,7 +761,7 @@ internal_reference นี้ใน Odoo จะได้ไม่ต้องแ�
 | **J2** ✅ 2026-10-01 | `utils/productRefPattern.ts` · `utils/productNamePattern.ts` · repo · service · 11 เส้น API + `POST /price` · ช่อง `quote.manage_products` | ด่านข้อ 1–8 · 11–17 · 19 ผ่าน · **ยังไม่มี UI เรียกสักเส้น** |
 | **J3** ✅ 2026-10-02 | ธง `custom_product` (สอง whitelist + `buildOdooManualReview` + โมดัลพรีวิว) | `diag:web-quote` · `diag:confirm-race` · `diag:odoo-export` ผ่านทั้งก่อนและหลัง |
 | **J4** ✅ 2026-10-02 | หน้าจอ + `page.odooproducts` + เมนู (**คอมมิตเดียวกัน** ไม่งั้นด่านข้อ 12 ล้ม) · ตัวเลขบนเมนูทุกตัวเป็นวงกลมเหลือง | `diag:role-permissions` ผ่าน · mockup ผ่านตาเจ้าของก่อนแตะโค้ด (`AGENTS.md` A9) |
-| **J6** | หน้าต่างเพิ่มสินค้าในหน้าขอใบเสนอราคา + ปุ่มคิดราคา (§13) | mockup ผ่านตาเจ้าของก่อนแตะโค้ด · ด่านข้อ 13–17 |
+| **J6** ✅ 2026-10-02 | หน้าต่างเพิ่มสินค้าในหน้าขอใบเสนอราคา + ปุ่มคิดราคา (§13) + ปุ่มเพิ่ม/แก้ของหน้า "สินค้าเพิ่มเอง" | mockup ผ่านตาเจ้าของก่อนแตะโค้ด · ด่านข้อ 13–17 · `diag:op-ui` 58/58 |
 | **J5** | ยุบ migration เข้า `schema.sql` · แก้ `CLAUDE.md` · `README.md` · `AGENTS.md` ตาราง gate | `diag:migrations` บน server ผ่าน |
 
 **J1 ต้องมาก่อน J2 อย่างเคร่งครัด** — ถ้ามีคนสร้างสินค้า local ได้ก่อนที่ตัวกวาดใน §6.2 จะมีอยู่
@@ -814,6 +820,7 @@ Postgres 18 ชั่วคราว (`schema.sql` + audit 2026-09-03_04) ได
 | J1 (กฎบล็อก — ถ้าเลือกทางเลือก (ข) ใน §2.1) | `diag:block-rule` · `diag:block-parity` |
 | J3 (แตะ snapshot + การยืนยัน) | `diag:confirm-race` (ต้องเปิด server ก่อน) · **`diag:odoo-export` ทั้ง qp/qt** · `diag:web-quote` · `diag:quote-validation` · `diag:stock-rule` |
 | J4 | `diag:role-permissions` (50 → 52 · ข้อใหม่ตรวจลำดับด่านชั้นที่สองของทั้งสองโมดูล) · `diag:op-ui` 31/31 · `diag:local-products` 82/82 |
+| J6 | `diag:op-ui` 58/58 (หน้าต่างทุกกรณี + ทางเข้าจากใบ · API จำลอง) · `diag:local-products` 86/86 · `diag:role-permissions` 52/52 · `diag:dead-classes` |
 | J4 ตัวกรองรอบ 5 | `diag:local-products` 86/86 (ข้อ 7c) · `diag:op-ui` 36/36 (เกณฑ์การ์ดมือถือนับแนวแทนพิกเซล — ปุ่มจัดการชุดกลางสูงขึ้นแล้ว 80px ล้มตั้งแต่ main) |
 | J5 / ก่อน deploy | `diag:migrations` **บน host ไม่ใช่ในกล่อง** |
 

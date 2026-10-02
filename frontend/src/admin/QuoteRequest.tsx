@@ -45,6 +45,8 @@ import { ConfirmIssueModal } from './ConfirmIssueModal';
 import { describeApiError } from './apiError';
 import { LocalContactModal, DeleteContactModal } from './LocalContactModal';
 import { isLocalContactId } from './localContacts';
+import { LocalProductModal } from './LocalProductModal';
+import { isLocalProductId } from './localProducts';
 import { formatDate } from './logs/format';
 import {
   AlertCircle,
@@ -1461,7 +1463,12 @@ const ProductSearchBox: React.FC<{
   /** จำนวนที่แถวนั้นขอ — ใช้ตัดสินว่าสต็อก "ไม่พอ" · ช่องเพิ่มสินค้ายังไม่รู้จำนวน ถือว่า 1 */
   needQty?: number;
   onPick: (hit: SearchHit) => void;
-}> = ({ initialQuery = '', placeholder, tone, clearOnPick, needQty = 1, onPick }) => {
+  /**
+   * แถว "+ เพิ่มสินค้าใหม่" ท้ายรายการผลค้น (J6 · เจ้าของยืนยัน mockup 2026-10-02) — **ขึ้นเสมอ** ทั้งตอนไม่เจอ
+   * และตอนเจอแต่ไม่ใช่ตัวที่ต้องการ (แบบเดียวกับ "เพิ่มผู้ติดต่อใหม่") · `undefined` = ไม่มีสิทธิ์ ⇒ ไม่มีแถวนี้
+   */
+  onAddNew?: (query: string) => void;
+}> = ({ initialQuery = '', placeholder, tone, clearOnPick, needQty = 1, onPick, onAddNew }) => {
   const [query, setQuery] = useState(initialQuery);
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [loading, setLoading] = useState(false);
@@ -1635,6 +1642,20 @@ const ProductSearchBox: React.FC<{
                 ))}
               </div>
             )}
+            {onAddNew && !loading && (
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  onAddNew(query.trim());
+                }}
+                className="sticky bottom-0 w-full flex items-center gap-2 px-3.5 py-2.5 border-t border-slate-200 bg-slate-50 text-left text-xs font-bold text-[var(--brand-fg)] hover:bg-[var(--brand-soft)] transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5 shrink-0" />
+                <span className="shrink-0">เพิ่มสินค้าใหม่</span>
+                <span className="min-w-0 truncate font-semibold text-slate-700">&ldquo;{query.trim()}&rdquo;</span>
+              </button>
+            )}
           </div>,
           document.body,
         )}
@@ -1711,6 +1732,11 @@ interface DocCtx {
   onPickContact: (id: number) => void;
   /** เปิดกล่อง "เพิ่มผู้ติดต่อใหม่" พร้อมชื่อที่พิมพ์ค้างไว้ในช่องค้น (ว่างได้) */
   onAddContact: (prefill: string) => void;
+  /**
+   * เปิดหน้าต่าง "เพิ่มสินค้าใหม่" (J6) — `rowKey` = แถวที่ยังหาสินค้าไม่เจอ (ใส่ลงแถวนั้น) · `null` = แถบเพิ่มสินค้าใต้ตาราง
+   * `null` ทั้งตัว = ไม่มีสิทธิ์ `quote.manage_products` ⇒ ช่องค้นไม่มีแถว "เพิ่มสินค้าใหม่"
+   */
+  onAddProduct: ((query: string, rowKey: string | null) => void) | null;
   /**
    * แก้ไข/ลบ "คนที่เราเพิ่มเอง" — `null` เมื่อคนที่เลือกอยู่เป็นของ Odoo หรือยังไม่ได้เลือกใคร
    *
@@ -2064,7 +2090,18 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx; firstLabel?: string }>
                     </div>
                   ) : r.status === 'ok' ? (
                     <>
-                      <p className="font-semibold text-slate-800 text-[13px]">{r.model}</p>
+                      <p className="font-semibold text-slate-800 text-[13px]">
+                        {r.model}
+                        {/* สินค้าที่แอดมินเพิ่มเอง (J6) — ใบไปกลุ่ม "ต้องแก้มือก่อน" จนกว่าจะเข้า Odoo (ธง custom_product · J3) */}
+                        {isLocalProductId(r.productTemplateId) && (
+                          <span
+                            className="ml-1.5 align-middle inline-block px-1.5 py-0.5 rounded-md border border-blue-200 bg-blue-50 text-[10px] font-semibold text-blue-700"
+                            title="สินค้าที่เพิ่มเอง ยังไม่อยู่ใน Odoo — ใบที่มีสินค้านี้ไปกลุ่ม “ต้องแก้มือก่อน” จนกว่าจะคีย์เข้า Odoo"
+                          >
+                            เพิ่มเอง
+                          </span>
+                        )}
+                      </p>
                       <p className="text-[11px] text-slate-500">{r.name}</p>
                       {/* สองบรรทัดนี้ขึ้นบนใบจริง ⇒ ต้องอ่านได้ตอนทำใบ ไม่ใช่ไปเจอตอนเปิด PDF */}
                       {hit?.sales_description && (
@@ -2103,6 +2140,7 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx; firstLabel?: string }>
                         placeholder="ค้นหารุ่นที่ถูกต้อง..."
                         tone="danger"
                         needQty={num(r.quantity) || 1}
+                        onAddNew={ctx.onAddProduct ? (q) => ctx.onAddProduct!(q, r.key) : undefined}
                         onPick={(h) =>
                           ctx.patchRow(r.key, {
                             productTemplateId: h.product_id,
@@ -2326,6 +2364,7 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx; firstLabel?: string }>
             tone="plain"
             clearOnPick
             onPick={ctx.addProductRow}
+            onAddNew={ctx.onAddProduct ? (q) => ctx.onAddProduct!(q, null) : undefined}
           />
         </div>
         <Button variant="neutral" tone="soft" onClick={ctx.addRow}>
@@ -2621,7 +2660,11 @@ const BulkDiscountChips: React.FC<{
 
 // ── หน้าหลัก ─────────────────────────────────────────────────────────────────
 
-export const QuoteRequest: React.FC = () => {
+/**
+ * `canAddProduct` = ช่อง `quote.manage_products` ของคนที่เปิดหน้า (AdminApp ถามจาก /me/capabilities ให้)
+ * — แค่ซ่อนแถว "เพิ่มสินค้าใหม่" · ด่านจริงอยู่ที่ index.ts ซึ่งคร่อมทั้งโมดูล
+ */
+export const QuoteRequest: React.FC<{ canAddProduct?: boolean }> = ({ canAddProduct = false }) => {
   const { token, user } = useAuth();
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
@@ -2666,6 +2709,11 @@ export const QuoteRequest: React.FC = () => {
    * พร้อมกันเสมอคือสองตัวที่วันหนึ่งจะไม่ตรงกัน (เปิดกล่องแต่ชื่อเป็นของรอบก่อน)
    */
   const [addContactFor, setAddContactFor] = useState<string | null>(null);
+  /**
+   * หน้าต่าง "เพิ่มสินค้าใหม่" (J6) — `null` = ปิด · `query` = คำที่พิมพ์ค้าง (เป็น model ตั้งต้น)
+   * · `rowKey` = แถวที่หาสินค้าไม่เจอ ⇒ ใส่ลงแถวนั้น · `null` = แถบเพิ่มสินค้า ⇒ ต่อแถวใหม่
+   */
+  const [addProductFor, setAddProductFor] = useState<{ query: string; rowKey: string | null } | null>(null);
   /** `contact_id` ที่กำลังแก้อยู่ — `null` = ไม่ได้เปิดกล่องแก้ไข */
   const [editContactId, setEditContactId] = useState<number | null>(null);
   /** คนที่กำลังจะลบ — เก็บชื่อมาด้วย เพราะรายชื่อถูกดึงใหม่หลังลบ แล้วชื่อจะหายไปจากที่เดิม */
@@ -3278,6 +3326,24 @@ export const QuoteRequest: React.FC = () => {
   // ── ส่วนที่ 2: ตารางสินค้า ──
   const patchRow = (key: string, patch: Partial<Row>) =>
     setRows((rs) => (rs ? rs.map((r) => (r.key === key ? { ...r, ...patch } : r)) : rs));
+
+  /** สินค้าที่เพิ่มใหม่ (หรือ "ใช้สินค้านี้ในใบ" เมื่อ model ซ้ำ) — ลงแถวเดียวกับที่เลือกจากผลค้น */
+  const placeProduct = (h: SearchHit) => {
+    const target = addProductFor;
+    setAddProductFor(null);
+    if (target?.rowKey) {
+      patchRow(target.rowKey, {
+        productTemplateId: h.product_id,
+        model: h.model,
+        name: h.name,
+        price: String(num(h.price)),
+        status: 'ok',
+        candidates: [],
+      });
+    } else {
+      addProductRow(h);
+    }
+  };
 
   const pickCandidate = (key: string, c: Candidate) =>
     patchRow(key, {
@@ -4102,6 +4168,7 @@ export const QuoteRequest: React.FC = () => {
     contactOpts,
     onPickContact: setContactId,
     onAddContact: openAddContact,
+    onAddProduct: canAddProduct ? (query, rowKey) => setAddProductFor({ query, rowKey }) : null,
     onEditContact: isLocalContactId(contactId) ? () => setEditContactId(contactId) : null,
     onDeleteContact:
       isLocalContactId(contactId) && contactOpt
@@ -4580,6 +4647,18 @@ export const QuoteRequest: React.FC = () => {
           authHeaders={authHeaders}
           onClose={() => setAddContactFor(null)}
           onPicked={onContactAdded}
+        />
+      )}
+
+      {/* เพิ่มสินค้าใหม่ (J6) — เปิดจากแถว "+ เพิ่มสินค้าใหม่" ท้ายผลค้นสินค้า · เสร็จแล้วใส่ลงใบทันที */}
+      {addProductFor && (
+        <LocalProductModal
+          initialModel={addProductFor.query}
+          saveLabel="เพิ่มและใส่ลงใบ"
+          authHeaders={authHeaders}
+          onClose={() => setAddProductFor(null)}
+          onSaved={placeProduct}
+          onUseExisting={placeProduct}
         />
       )}
 
