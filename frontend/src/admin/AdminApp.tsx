@@ -318,7 +318,7 @@ function AdminContent() {
   };
   /**
    * ใครเพิ่ม/แก้สินค้าเพิ่มเองได้ (`quote.manage_products` · J6) — ช่องกลุ่ม quote ไม่มีเมนูของตัวเอง จึงถามตรงนี้
-   * แล้วส่งลงสองหน้าที่มีปุ่ม (ขอใบเสนอราคา · สินค้าเพิ่มเอง) · ค่าสำรองตอนยังถามไม่ได้ = `defaults` ของช่องนั้น
+   * แล้วส่งลงสามหน้าที่มีปุ่ม (ขอใบเสนอราคา · สินค้าเพิ่มเอง · คำนวณราคา) · ค่าสำรองตอนยังถามไม่ได้ = `defaults` ของช่องนั้น
    * ใน config/capabilities.ts (admin · approver · subadmin) · แค่ซ่อนปุ่ม ด่านจริงอยู่ที่ index.ts
    */
   const canManageProducts = !!user && (caps === null
@@ -866,6 +866,9 @@ function AdminContent() {
               <PricingLab
                 canEditBook={visibleTabs.includes('pricebook')}
                 onOpenBook={(at) => { goTo('pricebook'); setBookAt(at ?? null); }}
+                canAddProduct={canManageProducts}
+                canOpenLocalProducts={visibleTabs.includes('odooproducts')}
+                onOpenLocalProducts={() => goTo('odooproducts')}
               />
             </div>
           ) : effectiveTab === 'pricebook' ? (

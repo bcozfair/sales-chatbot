@@ -104,6 +104,7 @@
     "diag:lc-ui": "tsx scripts/diag/lcUiProbe.ts",
     "diag:oc-ui": "tsx scripts/diag/odooContactsUiProbe.ts",
     "diag:op-ui": "tsx scripts/diag/odooProductsUiProbe.ts",
+    "diag:pricing-add-ui": "tsx scripts/diag/pricingAddProductUi.ts",
     "diag:dead-classes": "tsx scripts/diag/deadClasses.ts",
     "diag:export-history-ui": "tsx scripts/diag/exportHistoryUi.ts",
     "diag:quote-history-mine": "tsx scripts/diag/quoteHistoryMine.ts",
