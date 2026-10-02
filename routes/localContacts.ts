@@ -9,9 +9,11 @@ import {
 } from '../services/localContacts.js';
 import { countPendingLocalContacts } from '../db/localContactsRepo.js';
 import type { LocalContactFilter } from '../db/localContactsRepo.js';
+import { searchCustomersAdmin } from '../db/repositories.js';
 
 /**
- * API ของโมดูล "เพิ่มผู้ติดต่อใหม่เอง" — 5 เส้นใต้ `/api/admin/webquote/contacts` (§4.1)
+ * API ของโมดูล "เพิ่มผู้ติดต่อใหม่เอง" — 8 เส้นใต้ `/api/admin/webquote/contacts` (§4.1 · เดิม 5 เส้น
+ *   + `/list` `/count` ของก้อน I4 + `/companies` ของปุ่มเพิ่มบนหน้ารายการ 2026-10-02)
  *
  * ⚠️ ไฟล์ใหม่ทั้งไฟล์ ไม่แตะ endpoint เดิมสักตัว (ท่าเดียวกับ routes/dataDirectory.ts)
  *    ถอนทั้งโมดูลออก = ลบไฟล์นี้ + services/localContacts.ts + db/localContactsRepo.ts
@@ -183,6 +185,31 @@ localContactsRouter.get('/count', async (_req: Request, res: Response) => {
     res.json({ pending: await countPendingLocalContacts() });
   } catch (err) {
     sendError(res, 'GET /api/admin/webquote/contacts/count', err);
+  }
+});
+
+/**
+ * ค้นบริษัทให้ปุ่ม "+ เพิ่มผู้ติดต่อใหม่" บนหน้า "ผู้ติดต่อเพิ่มเอง" (เจ้าของสั่ง 2026-10-02) —
+ * หน้านั้นไม่มีใบเป็นตัวบอกบริษัทเหมือนหน้าขอใบ จึงต้องให้คนเลือกบริษัทก่อน
+ *
+ * ทำไมอยู่ใต้ router นี้ ไม่ยืม `/api/admin/quote-pm/customers` (ค้นด้วยฟังก์ชันเดียวกัน):
+ * เส้นนั้นคร่อมด้วย `page.quotepm` ⇒ วันที่เจ้าของปิดหน้า PM ให้ใคร ปุ่มเพิ่มของหน้านี้จะพังตาม
+ * ส่วนที่นี่ได้ `quote.manage_contacts` จากจุด mount = ช่องเดียวกับ `POST /` ที่ปุ่มนี้จะยิงต่อ
+ *
+ * ผลค้นมาจาก `customers_data_view` ตัวเดียวกับที่ `POST /` ตรวจด้วย `companyExistsInDirectory()`
+ * ⇒ บริษัทที่เลือกได้จากที่นี่ เพิ่มผู้ติดต่อได้เสมอ
+ *
+ * ⚠️ ต้องประกาศก่อน `/:id` ด้วยเหตุผลเดียวกับ `/export`
+ */
+localContactsRouter.get('/companies', async (req: Request, res: Response) => {
+  try {
+    const q = str(req.query.q) ?? '';
+    // ต่ำกว่า 2 ตัวอักษร = ได้ทั้งตารางมาแบบสุ่ม ไม่ช่วยใครเลือก (ค่าเดียวกับหน้าเสนอในนาม PM)
+    if (q.length < 2) { res.json([]); return; }
+    const rows = await searchCustomersAdmin(q, 30);
+    res.json(rows.map((r: any) => ({ id: Number(r.id), display_name: r.display_name, reference: r.reference })));
+  } catch (err) {
+    sendError(res, 'GET /api/admin/webquote/contacts/companies', err);
   }
 });
 

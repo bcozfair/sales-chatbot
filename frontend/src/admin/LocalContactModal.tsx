@@ -38,7 +38,7 @@
 //     เขียนทับเป็นว่างโดยที่คนแก้ไม่ได้ตั้งใจ
 // ─────────────────────────────────────────────────────────────────────────────
 import React, { useEffect, useState } from 'react';
-import { UserPlus, Pencil, Trash2, Lock, Loader2 } from 'lucide-react';
+import { UserPlus, Pencil, Trash2, Lock, Loader2, Building2, Search } from 'lucide-react';
 import { Modal } from './Modal';
 import { Button } from './Button';
 import { describeApiError } from './apiError';
@@ -333,7 +333,7 @@ export const LocalContactModal: React.FC<Props> = ({
         </div>
 
         <p className="text-[11px] text-slate-400">
-          ผู้ติดต่อนี้จะเข้าคิว “ต้องคีย์เข้า Odoo” ให้เอง — ไม่มีใครต้องมากดปิดสถานะทีหลัง
+          ผู้ติดต่อนี้จะขึ้นในหน้า “ผู้ติดต่อเพิ่มเอง” ให้เอง — ไม่มีใครต้องมากดปิดสถานะทีหลัง
         </p>
       </div>
     </Modal>
@@ -385,7 +385,7 @@ export const DeleteContactModal: React.FC<DeleteProps> = ({
         <b className="text-slate-900">{companyName}</b> ใช่ไหม
       </p>
       <p className="text-xs text-slate-500">
-        เขาจะหายจากทุกที่ที่ค้นหาผู้ติดต่อได้ รวมฝั่ง LINE และหายจากคิว “ต้องคีย์เข้า Odoo” ด้วย
+        เขาจะหายจากทุกที่ที่ค้นหาผู้ติดต่อได้ รวมฝั่ง LINE และหายจากหน้า “ผู้ติดต่อเพิ่มเอง” ด้วย
         <br />
         ถ้ามีใบเสนอราคาอ้างเขาอยู่ ระบบจะไม่ยอมให้ลบ
       </p>
@@ -397,3 +397,125 @@ export const DeleteContactModal: React.FC<DeleteProps> = ({
     </div>
   </Modal>
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  กล่อง "เลือกบริษัท" ก่อนเพิ่มผู้ติดต่อ — ปุ่ม "+ เพิ่มผู้ติดต่อใหม่" ของหน้า "ผู้ติดต่อเพิ่มเอง"
+//  (เจ้าของสั่ง 2026-10-02)
+//
+//  หน้าขอใบรู้บริษัทจากใบอยู่แล้ว แต่หน้ารายการไม่มีบริษัทตั้งต้น ⇒ ต้องมีขั้นนี้คั่นก่อน
+//  แล้วส่งต่อให้ `LocalContactModal` ตัวเดิมทั้งดุ้น — **ไม่เติมช่องค้นบริษัทเข้าไปในกล่องนั้น**
+//  เพราะกล่องนั้นใช้ร่วมกับหน้าขอใบ ซึ่งบริษัทต้องล็อกตามใบเสมอ (ข้อ "จงใจไม่มีช่องบริษัท" ด้านบน)
+//
+//  ค้นผ่าน `GET /api/admin/webquote/contacts/companies` (สิทธิ์เดียวกับการเพิ่ม) ท่าเดียวกับกล่อง
+//  เพิ่มบริษัทของหน้า "บัญชีเสนอในนาม PM": พิมพ์ ≥ 2 ตัวอักษร · หน่วง 300ms · กดแถว = เลือก
+// ─────────────────────────────────────────────────────────────────────────────
+export interface CompanyPick {
+  id: number;
+  display_name: string;
+  reference: string | null;
+}
+
+const MIN_COMPANY_CHARS = 2;
+
+export const PickCompanyModal: React.FC<{
+  authHeaders: Record<string, string>;
+  onClose: () => void;
+  onPick: (c: CompanyPick) => void;
+}> = ({ authHeaders, onClose, onPick }) => {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<CompanyPick[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  /** คำค้นที่ผลชุดปัจจุบันตอบ — ใช้แยก "ยังไม่ได้ค้น" ออกจาก "ค้นแล้วไม่เจอ" */
+  const [answered, setAnswered] = useState('');
+
+  // setState อยู่ใน callback ของ timer (กฎ react-hooks/set-state-in-effect)
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < MIN_COMPANY_CHARS) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      (async () => {
+        setSearching(true);
+        setError(null);
+        try {
+          const res = await fetch(`/api/admin/webquote/contacts/companies?q=${encodeURIComponent(q)}`, { headers: authHeaders });
+          const body = await res.json().catch(() => ({}));
+          if (cancelled) return;
+          if (!res.ok) {
+            setError(describeApiError(body, 'ค้นหาบริษัทไม่สำเร็จ'));
+            setResults([]);
+          } else {
+            setResults(Array.isArray(body) ? body : []);
+          }
+          setAnswered(q);
+        } catch {
+          if (!cancelled) setError('ติดต่อเซิร์ฟเวอร์ไม่ได้ — ลองใหม่อีกครั้ง');
+        } finally {
+          if (!cancelled) setSearching(false);
+        }
+      })();
+    }, 300);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [query, authHeaders]);
+
+  const q = query.trim();
+  const visible = q.length >= MIN_COMPANY_CHARS ? results : [];
+  const noHit = q.length >= MIN_COMPANY_CHARS && !searching && !error && answered === q && results.length === 0;
+
+  return (
+    <Modal
+      icon={UserPlus}
+      title="เพิ่มผู้ติดต่อใหม่"
+      size="lg"
+      onClose={onClose}
+      footer={<Button variant="neutral" size="md" onClick={onClose}>ยกเลิก</Button>}
+    >
+      <div className="p-5 space-y-3">
+        <label htmlFor="lc-company" className="block text-xs font-semibold text-slate-600">
+          เลือกบริษัทที่จะเพิ่มผู้ติดต่อ
+        </label>
+        <div className="relative">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input
+            id="lc-company"
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={`พิมพ์ชื่อบริษัท หรือรหัสลูกค้า อย่างน้อย ${MIN_COMPANY_CHARS} ตัวอักษร`}
+            className={`${INPUT_CLS} pl-9`}
+            autoComplete="off"
+          />
+          {searching && <Loader2 className="w-4 h-4 text-slate-400 animate-spin absolute right-3 top-1/2 -translate-y-1/2" />}
+        </div>
+
+        {error && (
+          <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-xs text-red-700">{error}</p>
+        )}
+
+        {visible.length > 0 && (
+          <div className="max-h-64 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100">
+            {visible.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => onPick(c)}
+                className="w-full text-left px-3 py-2.5 hover:bg-slate-50 transition-colors flex items-center gap-2"
+              >
+                <Building2 className="w-4 h-4 text-slate-400 shrink-0" />
+                <span className="flex-1 min-w-0 text-sm text-slate-800 truncate">{c.display_name}</span>
+                {c.reference && <span className="shrink-0 font-mono text-[11px] text-[var(--brand-fg)] font-semibold">{c.reference}</span>}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {noHit && (
+          <p className="px-1 text-xs text-slate-500">
+            ไม่พบบริษัทนี้ — เพิ่มผู้ติดต่อได้เฉพาะใต้บริษัทที่มีอยู่แล้วเท่านั้น
+          </p>
+        )}
+      </div>
+    </Modal>
+  );
+};
