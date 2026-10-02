@@ -114,6 +114,14 @@ PUPPETEER_SKIP_DOWNLOAD=true npm ci --include=dev         # node_modules ขอ�
 | `scripts/preview/*` | stop/start |
 | เวอร์ชัน node ของ nvm | ไม่ต้องทำอะไร — สคริปต์ใช้ `node` ตัวที่อยู่ใน PATH ตอนสั่ง start |
 
+**backend ไม่รีสตาร์ตเองหลัง merge — เกิดจริง 2026-10-02:** `tsx watch` ของพรีวิวรันมาตั้งแต่ 10:34
+แล้วไม่ขยับเลยหลัง merge `caa0d02` (แก้ `index.ts` + `db/repositories.ts`) แม้สั่ง `touch` ซ้ำก็ไม่ขึ้นใหม่
+⇒ หน้าจอใหม่ขึ้นแล้วแต่ API ยังเป็นโค้ดเก่า ฟีเจอร์ที่พึ่งช่องใหม่ของ API **เงียบหายไม่มี error**
+(เจ้าของเปิดดูแล้วไม่เห็นแถบเตือนที่เพิ่ง merge) · ตัวตรวจ: เวลาเริ่มของโปรเซสลูก
+`ps -o lstart= --ppid $(systemctl --user show primus-preview-api -p MainPID --value)` ต้องหลังเวลา merge ·
+ทางแก้: `systemctl --user restart primus-preview-api` (ขึ้นใน ~4 วิ · ฝั่ง web ไม่ต้องแตะ และไม่ใช่การปิดพรีวิวของเจ้าของ)
+⇒ **merge งานที่แก้ backend แล้ว ตรวจเวลาเริ่มของโปรเซสก่อนบอกเจ้าของว่าดูได้ที่ 5180**
+
 ## กลไก (เผื่อต้องแก้)
 
 - **รีโหลดเมื่อ backend รีสตาร์ต** ตัดสินจากรหัสโปรเซสที่ `/__preview/boot` ตอบ ไม่ใช่จากเวลาไฟล์เปลี่ยน
