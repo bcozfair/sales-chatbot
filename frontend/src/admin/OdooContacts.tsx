@@ -278,6 +278,7 @@ export const OdooContacts: React.FC = () => {
 
       <TableCard
         title={`${formatNumber(total)} คน`}
+        inline
         hint={filter === 'not_matched'
           ? 'ค่าตั้งต้น = เฉพาะคนที่ยังไม่มีใน Odoo · ไฟล์ที่ส่งออกตามตัวกรองนี้เหมือนกัน'
           : 'ไฟล์ที่ส่งออกตามตัวกรองที่เลือกอยู่'}
