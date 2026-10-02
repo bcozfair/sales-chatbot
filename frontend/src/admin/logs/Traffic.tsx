@@ -2,14 +2,13 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { PageHeader } from '../PageHeader';
 import { Button } from '../Button';
-import { DateInput } from '../DateInput';
+import { FilterDateRange } from '../FilterBar';
 import {
-  BarChart3, Download, Loader2, TrendingUp, TrendingDown, Minus, Info, RefreshCw,
-} from 'lucide-react';
+  BarChart3, Download, Loader2, TrendingUp, TrendingDown, Minus, Info, RefreshCw, CalendarDays } from 'lucide-react';
 import { useHashState } from './useHashState';
 import { TAB_SLUG } from '../navHash';
 import {
-  errMsg, formatDate, formatMs, formatNumber, formatBytes, delta, downloadCsv, inputCls,
+  errMsg, formatDate, formatMs, formatNumber, formatBytes, delta, downloadCsv,
 } from './format';
 import { ErrorBox, FilterCard, FilterField, FilterRow, SortHeader } from './ui';
 import { useTableSort } from './useTableSort';
@@ -342,10 +341,10 @@ export const Traffic: React.FC = () => {
           busy={exporting}
           onClick={() => { void doExport(); }}
           disabled={exporting}
-          title={exportError ?? 'ส่งออกเป็น CSV — รูปแบบที่ใช้ส่งมอบเมื่อมีหมายเรียก'}
-          aria-label="ส่งออก CSV"
+          title={exportError ?? 'ส่งออกเป็น csv — รูปแบบที่ใช้ส่งมอบเมื่อมีหมายเรียก'}
+          aria-label="ส่งออก csv"
         >
-          <span className="hidden sm:inline">ส่งออก CSV</span>
+          <span className="hidden sm:inline">ส่งออก csv</span>
         </Button>
       </PageHeader>
 
@@ -369,13 +368,11 @@ export const Traffic: React.FC = () => {
             </div>
           </FilterField>
 
-          <FilterField label="ตั้งแต่" width="w-36">
-            <DateInput className={inputCls} value={state.dateFrom}
-                       onChange={v => set({ dateFrom: v })} aria-label="ตั้งแต่วันที่" />
-          </FilterField>
-          <FilterField label="ถึง" width="w-36">
-            <DateInput className={inputCls} value={state.dateTo}
-                       onChange={v => set({ dateTo: v })} aria-label="ถึงวันที่" />
+          {/* ช่วงวันที่กล่องเดียว — แบบเดียวกับหน้าประวัติใบเสนอราคา/โปรโมชัน (เจ้าของสั่ง 2026-10-02) */}
+          <FilterField label="ช่วงวันที่" width="w-72">
+            <FilterDateRange from={state.dateFrom} to={state.dateTo} icon={CalendarDays}
+                             onFrom={v => set({ dateFrom: v })} onTo={v => set({ dateTo: v })}
+                             fromLabel="ตั้งแต่วันที่" toLabel="ถึงวันที่" />
           </FilterField>
 
           <FilterField label="เลื่อนช่วง" width="w-auto">

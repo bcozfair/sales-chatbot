@@ -542,7 +542,7 @@ export const Quotations: React.FC = () => {
       window.URL.revokeObjectURL(url);
 
       showToast(exportedCount > 0
-        ? `ส่งออก ${company} ${exportedCount} ใบเป็นไฟล์ ${format === 'xlsx' ? 'Excel' : 'CSV'} สำเร็จ — ใบเหล่านี้ถูกทำเครื่องหมายว่าส่งออกแล้ว`
+        ? `ส่งออก ${company} ${exportedCount} ใบเป็นไฟล์ ${format === 'xlsx' ? 'xlsx' : 'csv'} สำเร็จ — ใบเหล่านี้ถูกทำเครื่องหมายว่าส่งออกแล้ว`
         : `ไม่มีใบ ${company} ใหม่ให้ส่งออก (ทุกใบตามตัวกรองนี้ถูกส่งออกไปแล้ว)`);
 
       // ใบที่เพิ่งดาวน์โหลดถูกมาร์กไปแล้ว ถ้าไม่โหลดใหม่หน้าจอจะแสดงสถานะเก่าที่ไม่จริง
@@ -690,11 +690,11 @@ export const Quotations: React.FC = () => {
                     <button
                       onClick={() => handleExportOdoo('xlsx', value)}
                       disabled={n === 0}
-                      title={n === 0 ? `ไม่มีใบ ${value} (${company}) ตามตัวกรองนี้` : `ส่งออก ${value} (${company}) เป็น Excel`}
+                      title={n === 0 ? `ไม่มีใบ ${value} (${company}) ตามตัวกรองนี้` : `ส่งออก ${value} (${company}) เป็น xlsx`}
                       className={`${EXPORT_BTN} disabled:opacity-40 disabled:shadow-none disabled:pointer-events-none`}
                     >
                       <FileSpreadsheet className="w-3.5 h-3.5" />
-                      Excel
+                      xlsx
                     </button>
                   </div>
                 );
@@ -753,11 +753,11 @@ export const Quotations: React.FC = () => {
                               <span className="text-xs font-extrabold tabular-nums whitespace-nowrap text-amber-800">{g.count.toLocaleString('en-US')} ใบ</span>
                               <button
                                 onClick={() => handleExportOdoo('xlsx', g.company === 'THT' ? 'QT' : 'QP', kind)}
-                                title={`ส่งออกใบที่ต้องแก้มือ (${label}) ของ ${g.company} เป็น Excel`}
+                                title={`ส่งออกใบที่ต้องแก้มือ (${label}) ของ ${g.company} เป็น xlsx`}
                                 className={EXPORT_BTN}
                               >
                                 <FileSpreadsheet className="w-3.5 h-3.5" />
-                                Excel
+                                xlsx
                               </button>
                             </div>
                           ))}
