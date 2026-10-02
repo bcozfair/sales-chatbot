@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { UserPlus, Download, Pencil, Trash2, Phone, Mail, AlertTriangle, Info, CheckCircle2 } from 'lucide-react';
+import { UserPlus, Download, Pencil, Trash2, Phone, Mail, AlertTriangle, Info, CheckCircle2, Plus } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { PageHeader } from './PageHeader';
 import { DataSearch } from './DataFilterBar';
 import { TableCard, TableScroll, Pagination, EmptyState, SkeletonRows, ErrorBox } from './logs/ui';
 import { errMsg, formatNumber, formatDate, thCls, tdCls, inputCls, downloadCsv } from './logs/format';
-import { LocalContactModal, DeleteContactModal } from './LocalContactModal';
+import { LocalContactModal, DeleteContactModal, PickCompanyModal, type CompanyPick } from './LocalContactModal';
+import { Button } from './Button';
 
 /**
  * หน้า "ผู้ติดต่อเพิ่มเอง" — คิวงานค้างของโมดูล `local_contacts` (แผน §5.2)
@@ -13,7 +14,9 @@ import { LocalContactModal, DeleteContactModal } from './LocalContactModal';
  * ── หน้านี้มีอยู่เพื่ออะไร ────────────────────────────────────────────────
  *   แอดมินเพิ่มผู้ติดต่อเองได้ตั้งแต่ก้อน I3 และออกใบให้เขาได้ทันที **แต่คนคนนั้นยังไม่มีตัวตน
  *   ใน Odoo** ⇒ ใบที่อ้างถึงเขาจะตกตอนนำเข้า · ก่อนมีหน้านี้ไม่มีอะไรบอกใครเลยว่ามีกี่คนค้าง
- *   และไม่มีทางเอารายชื่อออกไปคีย์ · **ปุ่มหลักของหน้าคือปุ่มดาวน์โหลดไฟล์** ไม่ใช่ตาราง
+ *   และไม่มีทางเอารายชื่อออกไปคีย์ · **งานหลักของหน้าคือปุ่มดาวน์โหลดไฟล์** ไม่ใช่ตาราง
+ *   · ตั้งแต่ 2026-10-02 เพิ่มผู้ติดต่อจากหน้านี้ได้ด้วย (ปุ่ม "+ เพิ่มผู้ติดต่อใหม่" → เลือกบริษัท
+ *     → กล่องเพิ่มตัวเดียวกับหน้าขอใบ) · ก่อนหน้านั้นเพิ่มได้ทางเดียวคือกลางหน้าขอใบเสนอราคา
  *
  * ── สองอย่างที่หน้านี้จงใจ "ไม่มี" ────────────────────────────────────────
  *   1. **ไม่มีปุ่มติ๊กว่า "คีย์เข้า Odoo แล้ว"** — ระบบตรวจเองท้ายรอบ sync (§6) เพราะคนที่คีย์ชื่อ
@@ -59,14 +62,16 @@ const STATUS: Record<Status, { text: string; cls: string }> = {
   // เหลืองเหมือนป้ายรอดำเนินการของใบเสนอราคา (เจ้าของเลือก 2026-09-21)
   pending: { text: 'รอนำเข้า', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
   name_mismatch: { text: 'ชื่อไม่ตรง', cls: 'bg-red-50 text-red-700 border-red-200' },
-  matched: { text: 'เข้า Odoo แล้ว', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  // คู่กับ "รอนำเข้า" และตรงกับตัวเลือกในช่องสถานะ (เจ้าของสั่ง 2026-10-02)
+  matched: { text: 'นำเข้าแล้ว', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
 };
 
+/** คำบนตัวเลือกเจ้าของตั้งเอง 2026-10-02 · ค่า (`v`) ห้ามเปลี่ยน — server กับด่าน diag:oc-ui ใช้ค่านี้ */
 const FILTER_LABEL: { v: Filter; t: string }[] = [
-  { v: 'not_matched', t: 'ยังไม่เข้า Odoo (ทุกแบบ)' },
+  { v: 'not_matched', t: 'ยังไม่ส่งออก' },
   { v: 'pending', t: 'รอนำเข้า' },
   { v: 'name_mismatch', t: 'ชื่อไม่ตรง' },
-  { v: 'matched', t: 'เข้า Odoo แล้ว' },
+  { v: 'matched', t: 'นำเข้าแล้ว' },
   { v: 'all', t: 'ทั้งหมด' },
 ];
 
@@ -100,6 +105,13 @@ export const OdooContacts: React.FC = () => {
   const [delRow, setDelRow] = useState<Row | null>(null);
   const [delBusy, setDelBusy] = useState(false);
   const [delError, setDelError] = useState<string | null>(null);
+  /**
+   * ปุ่ม "+ เพิ่มผู้ติดต่อใหม่" เดินสองขั้น: `picking` = กำลังเลือกบริษัท → `addTo` = บริษัทที่เลือก
+   * แล้วเปิดกล่องเพิ่มตัวเดิมของหน้าขอใบ · ไม่ต้องเช็กสิทธิ์ที่จอ — คนที่เห็นหน้านี้ผ่าน
+   * `quote.manage_contacts` มาแล้ว (คร่อมทั้ง router รวม `/list` ที่หน้านี้โหลด)
+   */
+  const [picking, setPicking] = useState(false);
+  const [addTo, setAddTo] = useState<CompanyPick | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -215,13 +227,19 @@ export const OdooContacts: React.FC = () => {
         <button
           onClick={() => void onExport()}
           disabled={exporting || total === 0}
+          aria-label={`ดาวน์โหลด xlsx ${formatNumber(total)} คน`}
           className="btn-h px-3 rounded-lg border border-slate-200 bg-card text-xs font-semibold text-slate-600
                      hover:border-[var(--brand-border)] hover:text-[var(--brand-fg)] disabled:opacity-40
                      flex items-center gap-1.5 shrink-0"
         >
           <Download className="w-3.5 h-3.5" />
-          {exporting ? 'กำลังสร้างไฟล์…' : <>ดาวน์โหลด xlsx<span className="hidden sm:inline">{` (${formatNumber(total)} คน)`}</span></>}
+          {/* จอแคบเหลือแต่ไอคอนทั้งสองปุ่ม (ท่าเดียวกับหน้าโปรโมชัน) ไม่งั้นชื่อหน้าถูกบีบหายทั้งแถบ */}
+          {exporting ? 'กำลังสร้างไฟล์…' : <span className="hidden sm:inline">{`ดาวน์โหลด xlsx (${formatNumber(total)} คน)`}</span>}
         </button>
+        <Button variant="primary" size="md" icon={Plus} onClick={() => setPicking(true)} className="shrink-0"
+                aria-label="เพิ่มผู้ติดต่อใหม่">
+          <span className="hidden sm:inline">เพิ่มผู้ติดต่อใหม่</span>
+        </Button>
       </PageHeader>
 
       {/* วิธีใช้ — คนเปิดหน้านี้ครั้งแรกต้องรู้ว่า "แล้วยังไงต่อ" โดยไม่ต้องถามใคร */}
@@ -297,27 +315,19 @@ export const OdooContacts: React.FC = () => {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-slate-100">
-                      <th className={thCls}>สถานะ</th>
+                      {/* บริษัทเป็นคอลัมน์แรก · สถานะอยู่ชิดปุ่มจัดการ (เจ้าของสั่ง 2026-10-02) */}
                       <th className={thCls}>บริษัท</th>
                       <th className={thCls}>ผู้ติดต่อ</th>
                       <th className={`${thCls} hidden lg:table-cell`}>ติดต่อ</th>
                       <th className={`${thCls} hidden xl:table-cell`}>เพิ่มเมื่อ</th>
                       <th className={`${thCls} text-right`}>ใบที่อ้าง</th>
+                      <th className={thCls}>สถานะ</th>
                       <th className={`${thCls} text-right`}>จัดการ</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {rows.map((r) => (
                       <tr key={r.contact_id} className="hover:bg-slate-50 transition-colors">
-                        <td className={tdCls}>
-                          <StatusTag s={r.status} />
-                          {r.similar_odoo_name && (
-                            <div className="text-[11px] text-red-600 mt-1 max-w-[150px] truncate"
-                                 title={r.similar_odoo_name}>
-                              คล้าย “{r.similar_odoo_name}”
-                            </div>
-                          )}
-                        </td>
                         <td className={tdCls}>
                           <div className="font-medium text-slate-800 max-w-[240px] truncate">
                             {r.customer_name ?? <span className="text-slate-400">—</span>}
@@ -350,6 +360,15 @@ export const OdooContacts: React.FC = () => {
                         </td>
                         <td className={`${tdCls} text-right tabular-nums text-slate-600`}>
                           {r.quote_count > 0 ? r.quote_count : <span className="text-slate-400">—</span>}
+                        </td>
+                        <td className={tdCls}>
+                          <StatusTag s={r.status} />
+                          {r.similar_odoo_name && (
+                            <div className="text-[11px] text-red-600 mt-1 max-w-[150px] truncate"
+                                 title={r.similar_odoo_name}>
+                              คล้าย “{r.similar_odoo_name}”
+                            </div>
+                          )}
                         </td>
                         <td className={`${tdCls} text-right`}><RowActions r={r} /></td>
                       </tr>
@@ -422,6 +441,26 @@ export const OdooContacts: React.FC = () => {
           onClose={() => setEditRow(null)}
           /* หน้านี้ไม่มี "ใบ" ให้เลือกคนลง — บันทึกเสร็จแค่ปิดกล่องแล้วโหลดรายการใหม่ */
           onPicked={() => { setEditRow(null); void load(); }}
+        />
+      )}
+
+      {picking && (
+        <PickCompanyModal
+          authHeaders={authHeaders}
+          onClose={() => setPicking(false)}
+          onPick={(c) => { setPicking(false); setAddTo(c); }}
+        />
+      )}
+
+      {addTo && (
+        <LocalContactModal
+          companyId={addTo.id}
+          companyName={addTo.display_name}
+          companyRef={addTo.reference}
+          authHeaders={authHeaders}
+          onClose={() => setAddTo(null)}
+          /* เพิ่มเสร็จ หรือกด "ใช้คนเดิม" ตอนชื่อชน — หน้านี้ไม่มีใบให้เลือกคนลง แค่โหลดรายการใหม่ */
+          onPicked={() => { setAddTo(null); void load(); }}
         />
       )}
 
