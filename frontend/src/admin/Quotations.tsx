@@ -790,23 +790,26 @@ export const Quotations: React.FC = () => {
       {odooPending && odooPending.total > 0 && exportedFilter !== 'pending' && (
         <div
           role="status"
-          className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm text-amber-700"
+          // ขนาด/ระยะเดียวกับแถบวิธีใช้ของหน้าผู้ติดต่อเพิ่มเอง (เจ้าของชี้ 2026-10-02) — ตัวอักษร xs บรรทัดเดียว
+          // ⇒ ปุ่มเป็นลิงก์ในบรรทัด ไม่ใช่ <Button> ซึ่งสูงกว่าบรรทัดข้อความจนดันแถบให้หนาขึ้น
+          className="flex items-start gap-2 px-4 py-3 rounded-2xl border border-amber-200 bg-amber-50 text-xs text-amber-800"
         >
-          <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
-          <span className="font-semibold text-amber-800">
-            รอนำเข้า Odoo ค้าง {odooPending.total.toLocaleString('en-US')} ใบ
-          </span>
-          {odooPending.pm > 0 && odooPending.tht > 0 && (
-            <span className="text-amber-700">(PM {odooPending.pm.toLocaleString('en-US')} · THT {odooPending.tht.toLocaleString('en-US')})</span>
-          )}
-          <span title={odooPending.oldest_exported_at ? `ใบเก่าสุดส่งออกเมื่อ ${formatDate(odooPending.oldest_exported_at)}` : undefined}>
-            ส่งออกไฟล์แล้วแต่ยังไม่พบใน Odoo
-            {odooPending.oldest_exported_at && <> · ใบเก่าสุดส่งออก{daysAgoLabel(odooPending.oldest_exported_at)}</>}
-          </span>
-          <Button
-            variant="warning"
-            tone="soft"
-            className="ml-auto"
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" />
+          <p className="flex-1 min-w-0 leading-relaxed">
+            <b>รอนำเข้า Odoo ค้าง {odooPending.total.toLocaleString('en-US')} ใบ</b>
+            {odooPending.pm > 0 && odooPending.tht > 0 && (
+              <> (PM {odooPending.pm.toLocaleString('en-US')} · THT {odooPending.tht.toLocaleString('en-US')})</>
+            )}
+            <span title={odooPending.oldest_exported_at ? `ใบเก่าสุดส่งออกเมื่อ ${formatDate(odooPending.oldest_exported_at)}` : undefined}>
+              {' '}— ส่งออกไฟล์แล้วแต่ยังไม่พบใน Odoo
+              {odooPending.oldest_exported_at && (
+                <span className="text-amber-600"> (ใบเก่าสุดส่งออก{daysAgoLabel(odooPending.oldest_exported_at)})</span>
+              )}
+            </span>
+          </p>
+          <button
+            type="button"
+            className="shrink-0 font-bold text-amber-800 underline underline-offset-2 hover:text-amber-900 leading-relaxed"
             onClick={() => {
               // ล้างตัวกรองอื่นด้วย — ยอดบนแถบไม่ฟังตัวกรอง ถ้าคงไว้ ตารางจะได้น้อยกว่าตัวเลขที่เพิ่งกด
               setSearchQuery('');
@@ -819,7 +822,7 @@ export const Quotations: React.FC = () => {
             }}
           >
             ดูรายการ
-          </Button>
+          </button>
         </div>
       )}
 
