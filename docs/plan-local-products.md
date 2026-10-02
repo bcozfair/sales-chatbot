@@ -34,7 +34,9 @@
 > · **J6 ลงโค้ดแล้ว 2026-10-02** — `LocalProductModal` (mockup `local-product-add` ที่เจ้าของยืนยัน + ช่อง % ราคาขั้นต่ำ) ·
 > ทางเข้าในใบ = แถว "+ เพิ่มสินค้าใหม่" ท้ายผลค้น **ขึ้นเสมอ** (เห็นเฉพาะ `quote.manage_products`) ⇒ เพิ่มแล้วใส่ลงแถวนั้น +
 > ป้าย "เพิ่มเอง" · หน้า "สินค้าเพิ่มเอง" ได้ปุ่มเพิ่ม (สีหลัก) + ไอคอนแก้ไข · ไม่แน่ใจรหัส (`max_plus_one`) ⇒ **ต้องติ๊ก
-> "ตรวจรหัสแล้ว" ก่อนบันทึก** (บังคับที่จอ) · ราคาขั้นต่ำ = ราคาขาย × % (ตั้งต้นจาก `min_price_ratio` ของ server) ·
+> "ตรวจรหัสแล้ว" ก่อนบันทึก** (บังคับที่จอ · การติ๊กผูกกับรหัสที่ติ๊ก ไม่ใช่ธงเปล่า) · **ช่องรหัสเติมรหัสที่ระบบตั้งให้และพิมพ์แก้ในช่องได้**
+> (mockup รอบ 7 · เจ้าของยืนยัน 2026-10-02 · แทนชิปอ่านอย่างเดียว + ปุ่ม "พิมพ์เอง" ซึ่งติดโหมดพิมพ์เองค้างเมื่อ /suggest
+> ระหว่างพิมพ์ model ตอบ `ref=null` ⇒ ช่องว่างทั้งที่ระบบมีรหัส) · แก้แล้วตรงรหัสระบบ = อัตโนมัติ · ราคาขั้นต่ำ = ราคาขาย × % (ตั้งต้นจาก `min_price_ratio` ของ server) ·
 > `/suggest` เพิ่ม `group_key` + `min_price_ratio` · `GET /:id` เพิ่ม `parent` + `min_price_ratio` · `diag:op-ui` 58/58 ·
 > `diag:local-products` 86/86 · `diag:role-permissions` 52/52 · แถบ "+ เพิ่มสินค้าใหม่" ทึบตอนชี้เมาส์ (`diag:op-ui` 60/60) ·
 > **ขึ้น prod กับ J3/J4/ตัวกรองรอบ 5 ใน deploy `612550c` 2026-10-02 12:58** (ไม่มี migration)
@@ -821,7 +823,7 @@ Postgres 18 ชั่วคราว (`schema.sql` + audit 2026-09-03_04) ได
 | J1 (กฎบล็อก — ถ้าเลือกทางเลือก (ข) ใน §2.1) | `diag:block-rule` · `diag:block-parity` |
 | J3 (แตะ snapshot + การยืนยัน) | `diag:confirm-race` (ต้องเปิด server ก่อน) · **`diag:odoo-export` ทั้ง qp/qt** · `diag:web-quote` · `diag:quote-validation` · `diag:stock-rule` |
 | J4 | `diag:role-permissions` (50 → 52 · ข้อใหม่ตรวจลำดับด่านชั้นที่สองของทั้งสองโมดูล) · `diag:op-ui` 31/31 · `diag:local-products` 82/82 |
-| J6 | `diag:op-ui` 58/58 (หน้าต่างทุกกรณี + ทางเข้าจากใบ · API จำลอง) · `diag:local-products` 86/86 · `diag:role-permissions` 52/52 · `diag:dead-classes` |
+| J6 | `diag:op-ui` 58/58 → 75/75 หลังรอบ 7 (หน้าต่างทุกกรณี + ทางเข้าจากใบ · API จำลอง) · `diag:local-products` 86/86 · `diag:role-permissions` 52/52 · `diag:dead-classes` |
 | J4 ตัวกรองรอบ 5 | `diag:local-products` 86/86 (ข้อ 7c) · `diag:op-ui` 36/36 (เกณฑ์การ์ดมือถือนับแนวแทนพิกเซล — ปุ่มจัดการชุดกลางสูงขึ้นแล้ว 80px ล้มตั้งแต่ main) |
 | J5 / ก่อน deploy | `diag:migrations` **บน host ไม่ใช่ในกล่อง** |
 

@@ -115,6 +115,11 @@ function suggestFor(model: string, parent: string | null) {
       ref: { internal_reference: 'FHTP2XBH010735', tier: 'max_plus_one', prefix_length: 8, siblings: 732, min: 0, max: 734,
         warning: 'เลขท้ายของตระกูลนี้อาจเป็นเลขรุ่น ระบบแค่นับต่อจากตัวล่าสุดให้ — เทียบกับรหัสใน Odoo ก่อนบันทึก' } };
   }
+  // รีวิว 2026-10-02 · model ถัดไปที่ได้รหัส "ไม่แน่ใจ" อีกตัว — ติ๊กของรหัสเดิมต้องไม่ติดมา
+  if (model === 'BH-01 100x60') {
+    const b = suggestFor('BH-01 100x50', null) as { ref: Record<string, unknown> };
+    return { ...b, model, name: 'Band Heater "PM" BH-01 100x60', ref: { ...b.ref, internal_reference: 'FHTP2XBH010736' } };
+  }
   // รอบ 7 · regression: "BH" (ท่อนแรกระหว่างพิมพ์) ตกไปก้อนท้ายสุด ref=null · model เต็มได้รหัสแบบมั่นใจ
   if (model === 'BH-02 120x40') {
     return { ...sugBase(model), parent: { ...P_TSK, internal_reference: 'FHTP2XBH020247', model: 'BH-02 100x320-230-130W', name: 'Strip Heater "PM" BH-02 100x320-230-130W' },
@@ -575,6 +580,20 @@ try {
     ([...document.querySelectorAll('label')].find((l) => l.textContent?.includes('ตรวจรหัสแล้ว'))?.querySelector('input') as HTMLInputElement | undefined)?.checked ?? null);
   ok('  กดลิงก์คืนรหัสระบบ ⇒ กล่องกลับมา · ช่องติ๊กว่าง · ต้องติ๊กอีกครั้ง',
     t.includes('ระบบไม่แน่ใจรหัสนี้') && reChecked === false && await saveDisabled('เพิ่มสินค้า'), `ติ๊ก = ${reChecked}`);
+  // ติ๊กระหว่างที่จอยังโชว์รหัสของ model ก่อน (/suggest ของ model ใหม่ยังไม่ตอบ) ⇒ รหัสใหม่ต้องยังไม่นับว่าติ๊ก
+  await setModel('BH-01 100x60');
+  const tickedStale = await j6.evaluate(() => {
+    const box = [...document.querySelectorAll('label')].find((l) => l.textContent?.includes('ตรวจรหัสแล้ว'))?.querySelector('input') as HTMLInputElement | undefined;
+    const shown = (document.querySelector('input[aria-label="รหัสสินค้า"]') as HTMLInputElement | null)?.value ?? null;
+    if (box && !box.checked) box.click();
+    return { shown, checked: box?.checked ?? null };
+  });
+  await j6.waitForFunction(() => (document.querySelector('input[aria-label="รหัสสินค้า"]') as HTMLInputElement | null)?.value === 'FHTP2XBH010736', { timeout: 5000 });
+  const tickNow = await j6.evaluate(() =>
+    ([...document.querySelectorAll('label')].find((l) => l.textContent?.includes('ตรวจรหัสแล้ว'))?.querySelector('input') as HTMLInputElement | undefined)?.checked ?? null);
+  ok('  ติ๊กไว้ตอนจอยังโชว์รหัสของ model ก่อน ⇒ พอได้รหัสใหม่ ช่องติ๊กว่าง · ต้องติ๊กใหม่',
+    tickedStale.shown === 'FHTP2XBH010735' && tickedStale.checked === true && tickNow === false && await saveDisabled('เพิ่มสินค้า'),
+    `ตอนติ๊ก ${JSON.stringify(tickedStale)} · หลังได้รหัสใหม่ ติ๊ก = ${tickNow}`);
 
   // ออกรหัสให้ไม่ได้ — ช่องพิมพ์รหัสเปิดเอง
   await setModel('TGM-66011.R2');

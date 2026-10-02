@@ -193,7 +193,9 @@ export const LocalProductModal: React.FC<Props> = ({
 
   /** `null` = ตามรหัสที่ระบบตั้ง · string = คนพิมพ์เอง (ตัวพิมพ์ใหญ่แล้ว) */
   const [refText, setRefText] = useState<string | null>(null);
-  const [refChecked, setRefChecked] = useState(false);
+  /** รหัสที่คนติ๊ก "ตรวจรหัสแล้ว" ไว้ — ผูกกับรหัส ไม่ใช่ธงเปล่า: ติ๊กไว้ตอนจอยังโชว์รหัสของ model ก่อน
+   *  แล้ว /suggest ตอบรหัสใหม่มา ต้องไม่นับว่าติ๊กรหัสใหม่แล้ว (รีวิว 2026-10-02) */
+  const [refCheckedFor, setRefCheckedFor] = useState<string | null>(null);
 
   const [nameEdited, setNameEdited] = useState(false);
   const [name, setName] = useState('');
@@ -317,6 +319,8 @@ export const LocalProductModal: React.FC<Props> = ({
   /** พิมพ์จนกลับมาตรงรหัสระบบ = นับเป็นอัตโนมัติ */
   const refIsAuto = !!autoRef && refFinal === autoRef;
   const needCheck = !editing && refIsAuto && sug?.ref?.tier === 'max_plus_one';
+  const refChecked = refCheckedFor !== null && refCheckedFor === autoRef;
+  const setRefChecked = (on: boolean) => setRefCheckedFor(on ? autoRef : null);
   const dup = !editing && sug && sug.duplicate.length > 0 ? sug.duplicate[0] : null;
   const sugFresh = !editing && !!sug && sug.model === model.trim();
 
