@@ -592,9 +592,9 @@ function AdminContent() {
         {!collapsed && (
           <div className="overflow-hidden">
             <h1 className="text-sm font-bold tracking-tight text-slate-900 leading-tight whitespace-nowrap">
-              Primus <span style={{ color: BRAND }}>Admin</span>
+              Primus <span style={{ color: BRAND }}>Quotation</span>
             </h1>
-            <p className="text-[10px] text-slate-400 font-medium whitespace-nowrap">Quotation Portal</p>
+            <p className="text-[10px] text-slate-400 font-medium whitespace-nowrap">System</p>
           </div>
         )}
         {/* mr-2 กันชนกับปุ่มย่อ sidebar ที่ลอยคร่อมขอบขวาอยู่ระดับเดียวกัน */}

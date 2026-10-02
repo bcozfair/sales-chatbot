@@ -70,10 +70,10 @@ export const Login: React.FC = () => {
             />
           </div>
           <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 mb-1">
-            Admin Portal
+            Primus <span className="text-[var(--brand-fg)]">Quotation</span> System
           </h1>
           <p className="text-slate-500 text-sm font-medium">
-            ระบบจัดการหลังบ้าน บริษัท ไพรมัส จำกัด
+            ระบบช่วยงานเสนอราคา · บริษัท ไพรมัส จำกัด
           </p>
         </div>
 
