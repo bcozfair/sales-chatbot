@@ -86,6 +86,7 @@ export type PageCapability =
   | 'page.productsdata'
   | 'page.customersdata'
   | 'page.odoocontacts'
+  | 'page.odooproducts'
   | 'page.blacklist'
   | 'page.quotepm'
   | 'page.salespersons'
@@ -479,6 +480,19 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     // เจ้าของเคาะ 2026-09-17 (§9 ข้อ 2): admin · approver · subadmin — ตรงกับ quote.manage_contacts
     defaults: switchFor('allow', 'allow', 'allow', 'deny'),
     enforcedAt: 'app.use([/api/admin/webquote/contacts/{list,export,count}]) — ด่านชั้นที่สอง ซ้อนกับ quote.manage_contacts ที่คร่อมทั้งโมดูล',
+  },
+  {
+    // หน้า "สินค้าเพิ่มเอง" (J4 · docs/plan-local-products.md §4.3) — ฝาแฝดของ page.odoocontacts ทุกข้อ
+    //
+    // ⚠ **คนละช่องกับ `quote.manage_products` โดยตั้งใจ** — ช่องนั้นคือ "ใครเพิ่มสินค้าได้ตอนออกใบ"
+    //    ช่องนี้คือ "ใครดูกองสินค้าที่รอคีย์เข้า Odoo ได้" · ปิดหน้านี้ให้ใคร เขายังเพิ่มสินค้าตอนออกใบได้
+    key: 'page.odooproducts',
+    group: 'page',
+    label: 'สินค้าเพิ่มเอง',
+    modes: SWITCH,
+    // เจ้าของยืนยัน 2026-10-02 (mockup local-products-list): admin · approver · subadmin — ตรงกับ quote.manage_products
+    defaults: switchFor('allow', 'allow', 'allow', 'deny'),
+    enforcedAt: 'app.use([/api/admin/webquote/products/{list,export,count}]) — ด่านชั้นที่สอง ซ้อนกับ quote.manage_products ที่คร่อมทั้งโมดูล',
   },
   {
     key: 'page.blacklist',
