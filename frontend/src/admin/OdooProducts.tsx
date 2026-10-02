@@ -317,6 +317,7 @@ export const OdooProducts: React.FC<{ canManage?: boolean }> = ({ canManage = fa
 
       <TableCard
         title={`${formatNumber(total)} รายการ`}
+        inline
         hint="ไฟล์ที่ส่งออก = รายการในกลุ่มที่เลือกอยู่"
       >
         {loading ? (

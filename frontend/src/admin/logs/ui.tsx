@@ -198,18 +198,30 @@ export const SkeletonRows: React.FC<{ rows?: number }> = ({ rows = 8 }) => (
 export const TableCard: React.FC<{
   title?: string;
   hint?: string;
+  /**
+   * หัวการ์ดบรรทัดเดียว — คำอธิบายต่อท้ายหัวข้อ ยาวเกินจอแล้วตัดด้วย … (ชี้ดูข้อความเต็มได้)
+   * ใช้กับหัวที่เป็นแค่ "จำนวนแถว" ซึ่งไม่ควรกินสองบรรทัด (เจ้าของสั่ง 2026-10-02) · ปกติไม่ต้องส่ง
+   */
+  inline?: boolean;
   action?: React.ReactNode;
   /** ใช้ตอนวางในกริดที่ต้องการให้การ์ดสูงเท่ากัน (h-full) — ปกติไม่ต้องส่ง */
   className?: string;
   children: React.ReactNode;
-}> = ({ title, hint, action, className = '', children }) => (
+}> = ({ title, hint, inline = false, action, className = '', children }) => (
   <div className={`bg-card border border-slate-200 rounded-2xl overflow-hidden shadow-sm ${className}`}>
     {title && (
-      <div className="px-4 py-3 border-b border-slate-100 flex items-start gap-3">
-        <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-semibold text-slate-800">{title}</h3>
-          {hint && <p className="text-xs text-slate-400 mt-0.5">{hint}</p>}
-        </div>
+      <div className={`px-4 border-b border-slate-100 flex gap-3 ${inline ? 'py-2.5 items-center' : 'py-3 items-start'}`}>
+        {inline ? (
+          <div className="min-w-0 flex-1 flex items-baseline gap-2">
+            <h3 className="text-sm font-semibold text-slate-800 shrink-0">{title}</h3>
+            {hint && <p className="text-xs text-slate-400 truncate" title={hint}>· {hint}</p>}
+          </div>
+        ) : (
+          <div className="min-w-0 flex-1">
+            <h3 className="text-sm font-semibold text-slate-800">{title}</h3>
+            {hint && <p className="text-xs text-slate-400 mt-0.5">{hint}</p>}
+          </div>
+        )}
         {action}
       </div>
     )}

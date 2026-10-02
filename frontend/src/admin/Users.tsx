@@ -3,7 +3,7 @@ import { useAuth, type Role } from '../context/AuthContext';
 import {
   Users as UsersIcon,
   Plus,
-  Edit2,
+  Pencil,
   Trash2,
   KeyRound,
   Shield,
@@ -288,7 +288,7 @@ export const Users: React.FC = () => {
                       <td className="px-4 py-2.5">
                         <RowActions>
                           <RowAction
-                            icon={Edit2}
+                            icon={Pencil}
                             label="แก้ไขชื่อและสิทธิ์"
                             onClick={() => setFormMode({ kind: 'edit', target: row })}
                           />

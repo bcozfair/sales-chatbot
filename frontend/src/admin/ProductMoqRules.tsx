@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { 
   Plus, 
   Filter, 
-  Edit2, 
+  Pencil, 
   Trash2, 
   X, 
   Loader2, 
@@ -429,7 +429,7 @@ export const ProductMoqRules: React.FC = () => {
                     </td>
                     <td className="px-4 py-2.5">
                       <RowActions>
-                        <RowAction icon={Edit2} label="แก้ไขข้อมูลกฎ MOQ" onClick={() => handleEditOpen(rule)} />
+                        <RowAction icon={Pencil} label="แก้ไขข้อมูลกฎ MOQ" onClick={() => handleEditOpen(rule)} />
                         <RowAction icon={Trash2} label="ลบกฎ MOQ" tone="danger" onClick={() => handleDeleteOpen(rule)} />
                       </RowActions>
                     </td>

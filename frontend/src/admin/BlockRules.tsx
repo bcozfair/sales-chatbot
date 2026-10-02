@@ -11,7 +11,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import {
-  Plus, Edit2, Trash2, X, Loader2, CheckCircle2, AlertTriangle, Filter,
+  Plus, Pencil, Trash2, X, Loader2, CheckCircle2, AlertTriangle, Filter,
   ShieldBan
 } from 'lucide-react';
 import { PageHeader } from './PageHeader';
@@ -463,7 +463,7 @@ export const BlockRules: React.FC = () => {
                       </td>
                       <td className="px-4 py-2.5">
                         <RowActions>
-                          <RowAction icon={Edit2} label="แก้ไขกฎบล็อก" onClick={() => handleEditOpen(rule)} />
+                          <RowAction icon={Pencil} label="แก้ไขกฎบล็อก" onClick={() => handleEditOpen(rule)} />
                           <RowAction icon={Trash2} label="ลบกฎบล็อก" tone="danger" onClick={() => { setRuleToDelete(rule); setIsDeleteConfirmOpen(true); }} />
                         </RowActions>
                       </td>

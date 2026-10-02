@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChevronDown, X } from 'lucide-react';
+import { ChevronDown, Plus, Trash2, X } from 'lucide-react';
 import type { BhForm, CatalogFamilySpec, CatalogOption, CatalogSlot, HoleRow, SizeKey, TsFamilySpec, TsForm, TsSlot } from './types';
 
 /**
@@ -127,14 +127,14 @@ const HoleRows: React.FC<{ rows: HoleRow[]; onChange: (rows: HoleRow[], now?: bo
           mm
           <button type="button" className="ml-0.5 p-1 text-slate-400 hover:text-red-600 cursor-pointer" aria-label={`ลบแถวเจาะรู ${i + 1}`}
                   onClick={() => onChange(rows.filter((_, j) => j !== i), true)}>
-            <X className="h-4 w-4" />
+            <Trash2 className="h-4 w-4" />
           </button>
         </span>
       ))}
       <span className="inline-flex flex-wrap items-center gap-3">
-        <button type="button" className="font-medium text-[var(--brand-btn)] hover:underline cursor-pointer"
+        <button type="button" className="inline-flex items-center gap-1 font-medium text-[var(--brand-btn)] hover:underline cursor-pointer"
                 onClick={() => onChange([...rows, { count: 1, mm: NaN }])}>
-          + เพิ่มขนาดรู
+          <Plus className="h-3.5 w-3.5" />เพิ่มขนาดรู
         </button>
         {valid.length > 0 && <span className="text-slate-500">รวม {total} mm</span>}
       </span>

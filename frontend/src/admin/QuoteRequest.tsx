@@ -64,9 +64,9 @@ import {
   Eye,
   FilePlus2,
   FileText,
+  Printer,
   Link2,
   Loader2,
-  MessageSquarePlus,
   Pencil,
   Plus,
   RotateCcw,
@@ -503,7 +503,7 @@ const RemarkField: React.FC<{
         onClick={() => setOpen(true)}
         className="mt-1 inline-flex items-center gap-1 text-[10.5px] font-semibold text-slate-500 hover:text-slate-800"
       >
-        <MessageSquarePlus className="w-3 h-3 shrink-0" />
+        <Plus className="w-3 h-3 shrink-0" />
         เพิ่มหมายเหตุ
       </button>
     );
@@ -2370,7 +2370,7 @@ const QuoteDocument: React.FC<{ g: DocGroup; ctx: DocCtx; firstLabel?: string }>
         <Button variant="neutral" tone="soft" onClick={ctx.addRow}>
           แถวเปล่า
         </Button>
-        <Button variant="secondary" icon={Wrench} disabled={!ctx.canAddService} onClick={ctx.addServiceRow}>
+        <Button variant="secondary" icon={Plus} disabled={!ctx.canAddService} onClick={ctx.addServiceRow}>
           เพิ่มค่าบริการ
         </Button>
         {ctx.justAdded && (
@@ -2529,7 +2529,7 @@ const PdfPreviewButton: React.FC<{
       <Button
         variant="neutral"
         tone="soft"
-        icon={FileText}
+        icon={Printer}
         busy={busy !== null}
         disabled={ready.length === 0}
         title={ready.length === 0 ? 'ต้องตรวจก่อน ระบบจึงรู้ว่าใบนี้เป็นของบริษัทไหน' : undefined}
@@ -2556,7 +2556,7 @@ const PdfPreviewButton: React.FC<{
               onClick={() => pick(g.quote!.quote_company)}
               className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
             >
-              <FileText className="w-3.5 h-3.5 shrink-0 text-slate-400" />
+              <Printer className="w-3.5 h-3.5 shrink-0 text-slate-400" />
               {g.co}
             </button>
           ))}
@@ -4510,7 +4510,7 @@ export const QuoteRequest: React.FC<{ canAddProduct?: boolean }> = ({ canAddProd
                   rel="noreferrer"
                   className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-emerald-300 text-emerald-800 hover:bg-emerald-100"
                 >
-                  <FileText className="w-3.5 h-3.5" />
+                  <Printer className="w-3.5 h-3.5" />
                   เปิดไฟล์ PDF
                 </a>
               </div>

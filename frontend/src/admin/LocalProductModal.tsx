@@ -25,7 +25,7 @@
 //  · ปุ่มคิดราคาไม่ import `pricingLab` — ยิง `POST /price` ซึ่งเป็นตัวจัดการเดียวกับหน้าคำนวณราคา (§13.5)
 // ─────────────────────────────────────────────────────────────────────────────
 import React, { useEffect, useMemo, useState } from 'react';
-import { PackageOpen, Pencil, Calculator, Loader2, Lock, Search, ChevronRight } from 'lucide-react';
+import { Plus, Pencil, Calculator, Loader2, Lock, Search, ChevronRight } from 'lucide-react';
 import { Modal } from './Modal';
 import { Button } from './Button';
 import { describeApiError } from './apiError';
@@ -643,7 +643,7 @@ export const LocalProductModal: React.FC<Props> = ({
 
   return (
     <Modal
-      icon={editing ? Pencil : PackageOpen}
+      icon={editing ? Pencil : Plus}
       title={editing ? 'แก้ไขสินค้าเพิ่มเอง' : 'เพิ่มสินค้าใหม่'}
       size="lg"
       onClose={busy ? undefined : onClose}
@@ -652,7 +652,7 @@ export const LocalProductModal: React.FC<Props> = ({
           <Button variant="neutral" disabled={busy} onClick={onClose}>{lockedByOdoo ? 'ปิด' : 'ยกเลิก'}</Button>
           {!lockedByOdoo && !dup && (
             <span title={blockedBecause ?? undefined}>
-              <Button variant="primary" icon={editing ? Pencil : PackageOpen} busy={busy}
+              <Button variant="primary" icon={editing ? Pencil : Plus} busy={busy}
                       disabled={!!blockedBecause} onClick={() => void submit()}>
                 {editing ? 'บันทึก' : saveLabel}
               </Button>
@@ -751,7 +751,7 @@ export const LocalProductModal: React.FC<Props> = ({
 
                 <details className="rounded-xl border border-slate-200" open={desc.trim() !== ''}>
                   <summary className="cursor-pointer list-none flex items-center gap-2 px-3 py-2 text-xs text-slate-600">
-                    + รายละเอียดบนใบ <span className="ml-auto text-[11px] text-slate-400">ไม่บังคับ · ไม่ลอกจากต้นแบบ</span>
+                    <Plus className="w-3.5 h-3.5 shrink-0" /> รายละเอียดบนใบ <span className="ml-auto text-[11px] text-slate-400">ไม่บังคับ · ไม่ลอกจากต้นแบบ</span>
                   </summary>
                   <div className="px-3 pb-3">
                     <textarea value={desc} onChange={(e) => setDesc(e.target.value)} maxLength={MAX.sales_description} rows={3}

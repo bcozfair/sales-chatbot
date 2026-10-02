@@ -5,12 +5,12 @@ import { PageHeader } from './PageHeader';
 import { Button } from './Button';
 import {
   FileText,
+  Printer,
   Download,
   Loader2,
   Filter,
   AlertCircle,
   CheckCircle2,
-  FileSpreadsheet,
   Calendar,
   ChevronDown,
   History,
@@ -634,7 +634,7 @@ export const Quotations: React.FC = () => {
         <div className="relative" ref={exportMenuRef}>
           <Button
             variant="primary"
-            icon={FileSpreadsheet}
+            icon={Download}
             busy={isExporting}
             onClick={() => setExportMenuOpen(open => !open)}
             aria-label="ส่งออก Odoo"
@@ -663,7 +663,7 @@ export const Quotations: React.FC = () => {
                       title={n === 0 ? `ไม่มีใบ ${value} (${company}) ตามตัวกรองนี้` : `ส่งออก ${value} (${company}) เป็น xlsx`}
                       className={`${EXPORT_BTN} disabled:opacity-40 disabled:shadow-none disabled:pointer-events-none`}
                     >
-                      <FileSpreadsheet className="w-3.5 h-3.5" />
+                      <Download className="w-3.5 h-3.5" />
                       xlsx
                     </button>
                   </div>
@@ -726,7 +726,7 @@ export const Quotations: React.FC = () => {
                                 title={`ส่งออกใบที่ต้องแก้มือ (${label}) ของ ${g.company} เป็น xlsx`}
                                 className={EXPORT_BTN}
                               >
-                                <FileSpreadsheet className="w-3.5 h-3.5" />
+                                <Download className="w-3.5 h-3.5" />
                                 xlsx
                               </button>
                             </div>
@@ -821,7 +821,7 @@ export const Quotations: React.FC = () => {
         <FilterSelect
           id="quotation-exported-filter"
           aria-label="กรองตามสถานะการส่งออก Odoo"
-          icon={FileSpreadsheet}
+          icon={Download}
           value={exportedFilter}
           onChange={(v) => { setExportedFilter(v as ExportedFilter); setCurrentPage(1); }}
         >
@@ -1054,7 +1054,7 @@ export const Quotations: React.FC = () => {
                                 href={`/download-pdf/${quote.id}/${encodeURIComponent(quote.quotation_no)}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                icon={Download}
+                                icon={Printer}
                                 label="ส่งออก PDF"
                                 onClick={(e) => e.stopPropagation()}
                               />
