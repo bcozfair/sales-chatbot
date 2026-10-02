@@ -209,7 +209,9 @@ async function openPage(width: number): Promise<Page> {
   return page;
 }
 
-const browser = await puppeteer.launch({ args: ['--no-sandbox'] });
+// headless ตอบ (hover: hover) = false และ Tailwind 4 ห่อ hover: ไว้ในเงื่อนไขนั้น ⇒ ไม่ตั้งเป็นเมาส์ก็ไม่มีสีตอนชี้ให้ตรวจ
+// (puppeteer emulateMediaFeatures กับ CDP setEmulatedMedia ไม่รับ `hover` — ต้องตั้งที่ blink · 2 = hover · 4 = fine)
+const browser = await puppeteer.launch({ args: ['--no-sandbox', '--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4'] });
 try {
   // ═══════════════ 1280px ═══════════════
   console.log('\n── 1280px ─────────────────────────────────────────');
@@ -516,6 +518,24 @@ try {
     await qp.waitForFunction(() => [...document.querySelectorAll('button')].some((b) => b.textContent?.includes('เพิ่มสินค้าใหม่')), { timeout: 5000 });
     const act = await qp.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent?.includes('เพิ่มสินค้าใหม่'))?.textContent);
     ok('ช่องค้นในใบ: ผลค้นว่างแล้วมีแถว "+ เพิ่มสินค้าใหม่ “คำที่พิมพ์”"', !!act && act.includes('“TSK-04(S2)6x75+3M-S123”'), String(act));
+    // บั๊กจริง 2026-10-02: ตอนชี้ พื้นแถบกลายเป็น --brand-soft (โปร่ง 90%) ⇒ รายการข้างใต้โผล่ทะลุ
+    // รอผลค้นนิ่งก่อน — ระหว่างค้นแถบถูกถอดออก (`!loading`) แล้วสร้างใหม่ ป้ายที่ติดไว้จะหายไปกับมัน
+    // ("ไม่พบ…" ขึ้นตั้งแต่ก่อนการค้นแบบหน่วงจะยิง ใช้รอไม่ได้ ⇒ รอเน็ตเงียบแทน)
+    await new Promise((r) => setTimeout(r, 600));
+    await qp.waitForNetworkIdle({ idleTime: 400, timeout: 5000 });
+    await qp.evaluate(() => ([...document.querySelectorAll('button')].find((b) => b.textContent?.includes('เพิ่มสินค้าใหม่')) as HTMLElement).setAttribute('data-probe-add', '1'));
+    if (!(await qp.evaluate(() => matchMedia('(hover: hover)').matches))) ok('  จำลอง (hover: hover) ได้ — ไม่งั้นข้อถัดไปผ่านแบบไม่ได้ตรวจ', false);
+    // ห้าม qp.hover() — มันเลื่อนหน้าก่อน แล้วป๊อปอัปที่ position: fixed ปิดตัวเองเมื่อหน้าเลื่อน
+    const box = await qp.$eval('[data-probe-add]', (b) => { const r = b.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+    await qp.mouse.move(box.x, box.y);
+    await new Promise((r) => setTimeout(r, 300));
+    const stickyBg = await qp.$eval('[data-probe-add]', (b) => {
+      let el: HTMLElement | null = b as HTMLElement;
+      while (el && getComputedStyle(el).position !== 'sticky') el = el.parentElement;
+      return el ? getComputedStyle(el).backgroundColor : 'ไม่มีตัว sticky';
+    });
+    const alpha = /rgba?\(([^)]+)\)/.exec(stickyBg)?.[1].split(/[,\s/]+/).filter(Boolean)[3];
+    ok('  ชี้เมาส์ที่แถบ ⇒ พื้นของตัว sticky ยังทึบ (รายการข้างใต้ไม่ทะลุ)', /^rgb|^oklch|^color/.test(stickyBg) && (alpha === undefined || Number(alpha) === 1), stickyBg);
     await qp.screenshot({ path: `${SHOTS}op-j6-quote-entry.png` });
     await qp.evaluate(() => ([...document.querySelectorAll('button')].find((b) => b.textContent?.includes('เพิ่มสินค้าใหม่')) as HTMLButtonElement).click());
     await qp.waitForFunction(() => document.body.innerText.includes('FCUP2TSK040178'), { timeout: 5000 });
