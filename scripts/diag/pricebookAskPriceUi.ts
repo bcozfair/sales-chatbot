@@ -108,7 +108,7 @@ const addOwn = async (slotLabel: string, value: string) => {
   await page.keyboard.up('Control');
   await page.keyboard.press('Backspace');
   await page.type('#ask-TSK-01 input[aria-label="ค่าที่จะเพิ่ม"]', value);
-  await clickButton(/^\+ เพิ่ม$/, '#ask-TSK-01');
+  await clickButton(/^เพิ่ม$/, '#ask-TSK-01');
 };
 /** ช่องรหัสของหน้าคำนวณราคา — ล้างด้วยคีย์บอร์ด (คลิกสามครั้งไม่เลือกทั้งช่องเสมอ) แล้วกด Enter */
 const typeCode = async (code: string) => {

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, BookOpen, ChevronLeft, Settings2, Undo2 } from 'lucide-react';
+import { AlertTriangle, BookOpen, ChevronLeft, Plus, Settings2, Undo2 } from 'lucide-react';
 import { Button } from '../Button';
 import { ErrorBox } from '../logs/ui';
 import { errMsg } from '../logs/format';
@@ -1193,7 +1193,7 @@ const AskCard: React.FC<{
                    onKeyDown={(e) => { if (e.key === 'Enter' && text.trim()) addOwn(); }}
                    placeholder={slots.find((x) => x.axis === slotAxis)?.slot === 'd' ? 'เช่น 8' : slots.find((x) => x.axis === slotAxis)?.slot === 'sensor' ? 'เช่น TSE' : 'เช่น M12'}
                    className="w-[110px] rounded-lg border border-slate-200 bg-card px-2 py-1 font-mono text-[12px] text-slate-900" />
-            <Button size="sm" disabled={!text.trim()} onClick={addOwn}>+ เพิ่ม</Button>
+            <Button size="sm" icon={Plus} disabled={!text.trim()} onClick={addOwn}>เพิ่ม</Button>
           </div>
           {why && <p role="alert" className="mt-1 text-[11.5px] text-red-700">{why}</p>}
         </div>

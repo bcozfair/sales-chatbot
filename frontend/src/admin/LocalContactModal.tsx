@@ -38,7 +38,7 @@
 //     เขียนทับเป็นว่างโดยที่คนแก้ไม่ได้ตั้งใจ
 // ─────────────────────────────────────────────────────────────────────────────
 import React, { useEffect, useState } from 'react';
-import { UserPlus, Pencil, Trash2, Lock, Loader2, Building2, Search } from 'lucide-react';
+import { Plus, Pencil, Trash2, Lock, Loader2, Building2, Search } from 'lucide-react';
 import { Modal } from './Modal';
 import { Button } from './Button';
 import { describeApiError } from './apiError';
@@ -184,7 +184,7 @@ export const LocalContactModal: React.FC<Props> = ({
 
   return (
     <Modal
-      icon={editing ? Pencil : UserPlus}
+      icon={editing ? Pencil : Plus}
       title={editing ? 'แก้ไขผู้ติดต่อ' : 'เพิ่มผู้ติดต่อใหม่'}
       size="lg"
       // กำลังเขียนอยู่ = ปิดกลางคันไม่ได้ (กติกาเดียวกับอีก 4 กล่องที่ใช้ Modal.tsx)
@@ -197,7 +197,7 @@ export const LocalContactModal: React.FC<Props> = ({
           {!lockedByOdoo && (
             <Button
               variant="primary"
-              icon={editing ? Pencil : UserPlus}
+              icon={editing ? Pencil : Plus}
               busy={busy}
               disabled={!canSubmit}
               onClick={submit}
@@ -464,7 +464,7 @@ export const PickCompanyModal: React.FC<{
 
   return (
     <Modal
-      icon={UserPlus}
+      icon={Plus}
       title="เพิ่มผู้ติดต่อใหม่"
       size="lg"
       onClose={onClose}

@@ -4,7 +4,7 @@ import {
   Plus,
   Factory,
   Building2,
-  Edit2,
+  Pencil,
   Trash2,
   FileText,
   ShieldAlert,
@@ -606,7 +606,7 @@ export function QuotationRules() {
                       </td>
                       <td className="px-4 py-2.5 align-top">
                         <RowActions>
-                          <RowAction icon={Edit2} label="แก้ไขเงื่อนไข" onClick={() => openEditModal(rule)} />
+                          <RowAction icon={Pencil} label="แก้ไขเงื่อนไข" onClick={() => openEditModal(rule)} />
                           <RowAction icon={Trash2} label="ลบเงื่อนไข" tone="danger" onClick={() => handleDeleteRule(rule.id, label)} />
                         </RowActions>
                       </td>
