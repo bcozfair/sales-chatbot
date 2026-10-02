@@ -115,6 +115,13 @@ function suggestFor(model: string, parent: string | null) {
       group_size: 2, group_key: 'TGM-66011', name: '7 Segment Big Display 4" Red "Primus" TGM-66011.R2', inherited: INH_TSK,
       ref_message: 'ตระกูลนี้ออกเลขต่อให้ไม่ได้ (เลขท้ายคือเลขรุ่น หรือนับต่อแล้วจะกลายเป็นรหัสของรุ่นอื่น) — กรุณาพิมพ์รหัสเอง' };
   }
+  // server รุ่นที่ยังไม่ส่ง min_price_ratio (เกิดจริงบนพรีวิว 2026-10-02 · ช่อง % ขึ้น NaN)
+  if (model === 'OLD-SERVER-1') {
+    const { min_price_ratio: _drop, ...old } = { ...sugBase(model), parent: P_TSK, parent_reason: 'key',
+      ref: { internal_reference: 'FCUP2TSK040178', tier: 'boundary', prefix_length: 10, siblings: 178, min: 0, max: 177, warning: null } };
+    void _drop;
+    return old;
+  }
   if (model === 'TSK-04(S2)6x75+1MF-S000') return { ...sugBase(model), duplicate: [P_TSK], parent: P_TSK, parent_reason: 'key', ref: null };
   return { ...sugBase(model), ref_message: 'ระบบหาต้นแบบให้ไม่ได้ — กรุณาเลือกต้นแบบเอง' };
 }
@@ -418,6 +425,17 @@ try {
       && created?.minimum_sales_price === 500 && created?.pricebook_price === 775 && created?.price_book_revision === 17
       && !('price_source' in (created ?? {})), JSON.stringify(lastCreated));
   ok('  แล้วปิดหน้าต่าง + โหลดรายการใหม่', calls.some((c) => c.path.startsWith('/api/admin/webquote/products/list')));
+
+  // ค่าตั้งต้น 70% ต้องขึ้นแม้ server ไม่ส่ง min_price_ratio — ห้ามขึ้น NaN (เจ้าของเจอ 2026-10-02)
+  await j6.click('button[aria-label="เพิ่มสินค้าใหม่"]');
+  await j6.waitForSelector('#lp-model');
+  await setModel('OLD-SERVER-1');
+  await j6.waitForFunction(() => document.body.innerText.includes('FCUP2TSK040178'), { timeout: 5000 });
+  await j6.type('#lp-price', '1000');
+  const pctOld = await j6.$eval('input[aria-label^="ราคาขั้นต่ำ เป็นเปอร์เซ็นต์"]', (e) => (e as HTMLInputElement).value);
+  ok('server ไม่ส่ง % ตั้งต้น ⇒ ช่อง % ยังขึ้น 70 (ไม่ใช่ NaN) · ขั้นต่ำ 700.00',
+    pctOld === '70' && (await minOf()) === '700.00', `% = ${pctOld} · ขั้นต่ำ = ${await minOf()}`);
+  await j6.evaluate(() => ([...document.querySelectorAll('button')].filter((b) => b.textContent?.trim() === 'ยกเลิก').at(-1) as HTMLButtonElement).click());
 
   // ระบบไม่แน่ใจรหัส — ต้องติ๊กก่อนบันทึก
   await j6.click('button[aria-label="เพิ่มสินค้าใหม่"]');
