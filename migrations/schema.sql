@@ -20,6 +20,8 @@
 --
 -- ผลที่ถูกต้อง = ต่างแค่ก้อน `COMMENT ON SCHEMA public` ข้างบนก้อนเดียว
 -- ถ้าต่างมากกว่านั้น แปลว่ามี migration ที่ยังไม่ถูกยุบเข้าไฟล์นี้
+-- 2026-10-02: ยุบ 2026-10-01_01 (local_products + products.source) — ตรวจเฉพาะ products / local_products / sequence
+--   ด้วย pg_dump -t เทียบฐานจริง ตรงทุกบรรทัด (ไม่ได้รัน diff ทั้งไฟล์ — รอบเต็มล่าสุดยังเป็นของ 2026-08-25)
 -- ตรวจล่าสุด 2026-08-25 (ผ่าน — ยุบ 2026-08-25_01 นิยาม last_order_at ใหม่ + 2026-08-25_02 ปลดโหมด warn เข้าไปแล้ว)
 -- ก่อนหน้า 2026-08-21 (รอบนั้นพบว่าขาด quotation_counters, sync_settings, index 6 ตัว
 -- และ role 'subadmin' — ยุบเข้าครบแล้ว)
@@ -370,6 +372,64 @@ CREATE INDEX IF NOT EXISTS idx_local_contacts_pending
 -- (เทียบแบบ btrim ให้ตรงกับเกณฑ์ dedupe ของ CTE local_taken ในนิยาม view ข้างล่างเป๊ะ)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_local_contacts_company_name
   ON public.local_contacts (company_id, btrim(contact_name));
+
+
+--
+-- Name: local_products; Type: TABLE; Schema: public; Owner: -
+-- สินค้าที่แอดมินเพิ่มเอง (ยังไม่มีใน Odoo) — ทะเบียนของแถว products ที่ source = 'local'
+-- ยุบจาก migrations/changes/2026-10-01_01_local_products.sql (เหตุผลรายคอลัมน์อยู่ในไฟล์นั้น · แผน docs/plan-local-products.md)
+--
+-- ⚠️ trigger audit ของตารางนี้อยู่ในไฟล์ migration นั้น ไม่ได้อยู่ที่นี่ — เหตุผลเดียวกับ local_contacts ข้างบน
+--
+
+-- product_template_id ของ Odoo อยู่ในช่วง -1 ถึง 180,985 (วัด 2026-10-01) · เริ่ม 900 ล้านเพื่อกันชน
+-- ⚠️ ห้ามเลขติดลบ — -1 ถูกจองให้บรรทัดค่าบริการ · AS integer เพราะ products.product_template_id เป็น integer
+CREATE SEQUENCE IF NOT EXISTS public.local_product_template_id_seq
+  AS integer START WITH 900000001 INCREMENT BY 1 MINVALUE 900000001 MAXVALUE 2147483647;
+
+CREATE TABLE IF NOT EXISTS public.local_products (
+  product_template_id integer     PRIMARY KEY
+                                  DEFAULT nextval('public.local_product_template_id_seq'),
+  internal_reference  text        NOT NULL,   -- ไม่ถูกเขียนทับ — "เข้า Odoo แล้ว" = Odoo มีรหัสนี้ตรงตัว
+  parent_reference    text,                   -- รหัสต้นแบบ · หลักฐาน ไม่ใช่ FK
+  ref_tier            text        NOT NULL DEFAULT 'boundary',
+  rejected_refs       text[]      NOT NULL DEFAULT '{}',   -- ประวัติ ห้ามทับทิ้ง
+  model               text        NOT NULL,
+  name                text        NOT NULL,
+  sales_description   text,
+  brand               text,
+  series              text,
+  product_group       text,
+  product_category    text,
+  product_sub_category text,
+  -- ⚠️ ไม่มี production โดยตั้งใจ — ว่างไว้จนกว่า Odoo เติมให้ ไม่งั้นติดกฎบล็อกทันที
+  unit_of_measure     text,
+  sales_price         numeric     NOT NULL DEFAULT 0,
+  minimum_sales_price numeric     NOT NULL DEFAULT 0,
+  price_source        text        NOT NULL DEFAULT 'manual',
+  price_book_revision bigint,                 -- ไม่มี FK — โมดูลคิดราคาต้องถอดได้ทั้งก้อน
+  pricebook_price     numeric,
+  created_by          integer,                -- admin_users.id · ไม่มี FK
+  created_at          timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at          timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  exported_at         timestamptz,
+  -- ── สองคอลัมน์นี้ "ระบบเขียน" เท่านั้น ไม่มี endpoint ให้คนกด ──
+  odoo_matched_at          timestamptz,
+  odoo_matched_template_id integer,
+
+  CONSTRAINT local_products_ref_shape CHECK (internal_reference ~ '^[A-Z0-9]{14}$'),
+  CONSTRAINT local_products_ref_tier_check CHECK (
+    ref_tier IN ('boundary', 'max_plus_one', 'manual')),
+  CONSTRAINT local_products_price_source_check CHECK (price_source IN ('pricebook', 'manual')),
+  CONSTRAINT local_products_model_not_blank CHECK (btrim(model) <> ''),
+  CONSTRAINT local_products_name_not_blank CHECK (btrim(name) <> ''),
+  CONSTRAINT local_products_id_range CHECK (product_template_id >= 900000000)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_local_products_ref
+  ON public.local_products (internal_reference);
+CREATE INDEX IF NOT EXISTS idx_local_products_pending
+  ON public.local_products (created_at) WHERE odoo_matched_at IS NULL;
 
 
 --
@@ -956,7 +1016,11 @@ CREATE TABLE public.products (
     sales_description text,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
-    is_system_item boolean DEFAULT false NOT NULL
+    is_system_item boolean DEFAULT false NOT NULL,
+    -- 'local' = สินค้าที่แอดมินเพิ่มเอง (ทะเบียนอยู่ที่ local_products) · sync:products ห้ามเขียนคอลัมน์นี้
+    -- (upsertProductRows ระบุคอลัมน์ไว้ครบโดยไม่มี source ⇒ INSERT ได้ 'odoo' จาก DEFAULT) — 2026-10-01_01
+    source text DEFAULT 'odoo'::text NOT NULL,
+    CONSTRAINT products_source_check CHECK ((source = ANY (ARRAY['odoo'::text, 'local'::text])))
 );
 
 
@@ -1658,6 +1722,16 @@ CREATE INDEX idx_products_name_norm_trgm ON public.products USING gin ((lower(re
 --
 
 CREATE UNIQUE INDEX idx_products_internal_reference ON public.products USING btree (internal_reference) WHERE ((internal_reference IS NOT NULL) AND (TRIM(BOTH FROM internal_reference) <> ''::text));
+
+
+--
+-- Name: idx_products_source_local; Type: INDEX; Schema: public; Owner: -
+--
+-- ตัวกวาดตอน sync ถามด้วย internal_reference = ANY(...) AND source = 'local' ทุกหน้า
+-- partial index มีแต่แถว local (หลักสิบ) ⇒ ไม่เพิ่มภาระให้การเขียนแถวของ Odoo — 2026-10-01_01
+--
+
+CREATE INDEX idx_products_source_local ON public.products USING btree (internal_reference) WHERE (source = 'local'::text);
 
 
 --
