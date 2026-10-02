@@ -29,6 +29,7 @@
 //     ข้อ 12 PUT /api/admin/webquote/me ปิดถาวรแล้ว — ต้อง 403 เสมอและคอลัมน์ไม่ขยับ
 //
 //  ⚠️ เขียนข้อมูลจริงลง DB (salesperson · admin_users · quotations ของ user ทดสอบ)
+//     ใบที่ยืนยันได้ **เลขงวดสมมุติ 2099-12** (`confirmFetch`) ไม่กินเลขใบจริง (เจ้าของสั่ง 2026-10-02)
 //     แล้วลบทิ้งใน finally ทุกกรณี — user/แอดมินทดสอบเป็นค่าคงที่ที่ไม่ชนของจริง
 //  ค่าใช้จ่าย: LLM ~2-4 call (ข้อ 1 และข้อ 2 อย่างละรอบ)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -77,6 +78,31 @@ function ok(label: string, cond: boolean, extra = '') {
   else { fail++; console.log(`  ${RED}✗${RESET} ${label}${extra ? ` ${DIM}${extra}${RESET}` : ''}`); }
 }
 
+// ── เลขสมมุติ (เจ้าของสั่ง 2026-10-02) ───────────────────────────────────────────
+// ด่านนี้ยืนยันใบผ่าน HTTP จริงหลายใบ — เดิมใบได้เลขงวดเดือนปัจจุบันของจริงแล้วถูกลบตอนจบ ⇒ เลขใบจริงขาดช่วง
+// เลขงวดมาจาก created_at (วันที่ร่าง · `allocateQuotationNo`) ⇒ ย้ายวันที่ร่างไปงวดสมมุติ 2099-12 ก่อนยิงทุกครั้ง
+// แบบเดียวกับ diag:confirm-race · ใบแก้ (revision) นับต่อจากเลขต้นทาง จึงได้คีย์ `REV:Q?-9912…` ตามไปเอง
+// ⚠️ ย้ายวันที่ไม่สำเร็จ = หยุดทั้งด่าน ไม่ยิงต่อ (ยิงไปก็คือเผาเลขจริง) · ทุกเส้นยืนยันในไฟล์นี้ต้องผ่าน `confirmFetch`
+const FAKE_PERIOD = '9912';
+const FAKE_CREATED_AT = '2099-12-15T05:00:00.000Z';
+const FAKE_NO = /^Q[PT]-9912\d+(-\d+)?$/;
+const FAKE_COUNTERS_SQL =
+  `DELETE FROM quotation_counters WHERE counter_key IN ('QP:9912', 'QT:9912')
+      OR counter_key LIKE 'REV:QP-9912%' OR counter_key LIKE 'REV:QT-9912%'`;
+
+async function confirmFetch(quoteId: string | undefined, init: RequestInit): Promise<Response> {
+  if (quoteId) {
+    const r = await pool.query(
+      `UPDATE quotations SET created_at = $2 WHERE id = $1 AND status = 'draft' AND quotation_no IS NULL`,
+      [quoteId, FAKE_CREATED_AT]);
+    if (r.rowCount !== 1) throw new Error(`[เลขสมมุติ] ย้ายวันที่ร่างของใบ ${quoteId} ไม่สำเร็จ — หยุดก่อนยิง confirm ไม่งั้นได้เลขจริง`);
+  }
+  const resp = await fetch(`${BASE}/api/quotation/${quoteId}/confirm`, init);
+  const no = quoteId ? (await pool.query('SELECT quotation_no FROM quotations WHERE id = $1', [quoteId])).rows[0]?.quotation_no : null;
+  if (no) ok(`  เลขที่เป็นงวดสมมุติ ${FAKE_PERIOD} (ไม่กินเลขใบจริง)`, FAKE_NO.test(no), no);
+  return resp;
+}
+
 /** ข้อความทดสอบชุดเดียวกับด่านเฟส C — 3 บรรทัดสินค้า = 3 ทางออกของ slots */
 const SAMPLE_TEXT = [
   'เสนอราคา',
@@ -123,6 +149,7 @@ async function teardown() {
   }
   await pool.query("DELETE FROM salesperson WHERE user_id = ANY($1)", [users]).catch(() => {});
   await pool.query('DELETE FROM admin_users WHERE username = $1', [TEST_ADMIN_USERNAME]).catch(() => {});
+  await pool.query(FAKE_COUNTERS_SQL).catch(() => {});   // ตัวนับของงวดสมมุติ — ของจริงไม่ถูกแตะ
 }
 
 /** หา (บริษัท × ผู้ติดต่อ) จริงที่ผ่านด่านลูกค้า (ไม่ติด blacklist / ไม่ติดเครดิต) */
@@ -286,7 +313,7 @@ async function case3(): Promise<string | null> {
   });
   ok('PUT ด้วย userId ของคนอื่น → 403', wrongResp.status === 403, `HTTP ${wrongResp.status}`);
 
-  const confirmResp = await fetch(`${BASE}/api/quotation/${quote.id}/confirm`, {
+  const confirmResp = await confirmFetch(quote.id, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ userId: webUserId }),
@@ -375,7 +402,7 @@ async function case4(quotationNo: string | null) {
   ok('ใบใหม่ติดธง revise_from ของใบต้นทาง',
     nameRow?.revise_from === quotationNo, String(nameRow?.revise_from ?? '(ไม่มี)'));
 
-  const reConfirm = await fetch(`${BASE}/api/quotation/${newQuote?.id}/confirm`, {
+  const reConfirm = await confirmFetch(newQuote?.id, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ userId: webUserId }),
@@ -497,7 +524,7 @@ async function case8() {
     Array.isArray(ov?.violations) && ov.violations.length > 0 && !!ov.violations[0]?.display_message);
   ok('  ยังไม่ยืนยัน ⇒ odoo_manual_review ยังว่าง (ตรึงตอนยืนยันที่เดียว)', savedRow?.odoo_manual_review === null);
 
-  const ovConfirm = await fetch(`${BASE}/api/quotation/${ovQuote.id}/confirm`, {
+  const ovConfirm = await confirmFetch(ovQuote.id, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ userId: okDraft.web_user_id }),
   });
@@ -522,7 +549,7 @@ async function case8() {
     });
     ok('  PUT ใบจาก LINE ที่ติดกฎ → 422 (ไม่ทะลุ)', linePut.status === 422, `HTTP ${linePut.status}`);
 
-    const lineConfirm = await fetch(`${BASE}/api/quotation/${lineQuote.id}/confirm`, {
+    const lineConfirm = await confirmFetch(lineQuote.id, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId: TEST_SP_USER }),
     });
@@ -847,7 +874,7 @@ async function case7() {
     `${afterPut?.delivery_type_override} / ${afterPut?.delivery_days_override}`);
 
   // ── ง) ยืนยันแล้วค่าที่ตั้งไว้ต้องถูก "ตรึง" ลงใบ ──
-  const confirmResp = await fetch(`${BASE}/api/quotation/${target.id}/confirm`, {
+  const confirmResp = await confirmFetch(target.id, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ userId: webUserId }),
