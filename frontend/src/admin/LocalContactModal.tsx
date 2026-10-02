@@ -191,13 +191,12 @@ export const LocalContactModal: React.FC<Props> = ({
       onClose={busy ? undefined : onClose}
       footer={
         <>
-          <Button variant="neutral" size="md" disabled={busy} onClick={onClose}>
+          <Button variant="neutral" disabled={busy} onClick={onClose}>
             {lockedByOdoo ? 'ปิด' : 'ยกเลิก'}
           </Button>
           {!lockedByOdoo && (
             <Button
               variant="primary"
-              size="md"
               icon={editing ? Pencil : UserPlus}
               busy={busy}
               disabled={!canSubmit}
@@ -370,10 +369,10 @@ export const DeleteContactModal: React.FC<DeleteProps> = ({
     onClose={busy ? undefined : onCancel}
     footer={
       <>
-        <Button variant="neutral" size="md" disabled={busy} onClick={onCancel}>
+        <Button variant="neutral" disabled={busy} onClick={onCancel}>
           ยกเลิก
         </Button>
-        <Button variant="danger" size="md" icon={Trash2} busy={busy} onClick={onConfirm}>
+        <Button variant="danger" icon={Trash2} busy={busy} onClick={onConfirm}>
           ลบ
         </Button>
       </>
@@ -469,7 +468,7 @@ export const PickCompanyModal: React.FC<{
       title="เพิ่มผู้ติดต่อใหม่"
       size="lg"
       onClose={onClose}
-      footer={<Button variant="neutral" size="md" onClick={onClose}>ยกเลิก</Button>}
+      footer={<Button variant="neutral" onClick={onClose}>ยกเลิก</Button>}
     >
       <div className="p-5 space-y-3">
         <label htmlFor="lc-company" className="block text-xs font-semibold text-slate-600">

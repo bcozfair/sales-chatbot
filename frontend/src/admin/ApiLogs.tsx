@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAuth } from '../context/AuthContext';
 import { DateInput } from './DateInput';
 import { PageHeader } from './PageHeader';
+import { Button } from './Button';
 import { RequestTimeline } from './logs/RequestTimeline';
 import { useHashState } from './logs/useHashState';
 import { TAB_SLUG } from './navHash';
@@ -350,15 +351,15 @@ export function ApiLogs() {
     <div className="space-y-4">
       <PageHeader icon={Activity} title="บันทึกการเรียก API"
                   description="ใครเรียกอะไร เมื่อไหร่ ได้ status อะไร และช้าตรงไหน">
-        <button
+        <Button
+          icon={RefreshCw}
+          busy={statsLoading || listLoading}
           onClick={() => { void loadStats(); void loadList(); }}
           disabled={statsLoading || listLoading}
-          className="inline-flex items-center gap-1.5 px-3 btn-h rounded-xl text-sm font-medium
-                     border border-slate-200 text-slate-600 hover:bg-slate-50 transition disabled:opacity-60"
+          aria-label="โหลดใหม่"
         >
-          <RefreshCw className={`w-4 h-4 ${statsLoading || listLoading ? 'animate-spin' : ''}`} />
           <span className="hidden sm:inline">โหลดใหม่</span>
-        </button>
+        </Button>
       </PageHeader>
 
       {/* ══════════ 1. ภาพรวมของช่วงที่เลือก ══════════ */}

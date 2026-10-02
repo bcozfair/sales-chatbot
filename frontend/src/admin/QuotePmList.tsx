@@ -305,7 +305,7 @@ export const QuotePmList: React.FC = () => {
         title="บัญชีเสนอในนาม PM"
         description="บริษัทในรายการนี้ ทุกสินค้าจะออกเป็นใบ Primus (PM) ใบเดียว ไม่แยกใบ Themtech — ทั้งจาก LINE และหน้าเว็บ"
       >
-        <Button variant="primary" size="md" icon={Plus} onClick={() => setIsAdding(true)} className="flex-shrink-0">
+        <Button variant="primary" icon={Plus} onClick={() => setIsAdding(true)} className="flex-shrink-0">
           เพิ่มบริษัท
         </Button>
       </PageHeader>
@@ -472,10 +472,10 @@ const FormButtons: React.FC<{ onClose: () => void; busy: boolean; disabled?: boo
   onClose, busy, disabled, label, danger,
 }) => (
   <div className="flex gap-2 pt-1">
-    <Button type="button" size="md" onClick={onClose} disabled={busy} className="flex-1">
+    <Button type="button" onClick={onClose} disabled={busy} className="flex-1">
       ยกเลิก
     </Button>
-    <Button type="submit" size="md" variant={danger ? 'danger' : 'primary'} busy={busy} disabled={disabled} className="flex-1">
+    <Button type="submit" variant={danger ? 'danger' : 'primary'} busy={busy} disabled={disabled} className="flex-1">
       {label}
     </Button>
   </div>

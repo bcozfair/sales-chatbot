@@ -114,7 +114,6 @@ export const ConfirmIssueModal: React.FC<Props> = ({
           </Button>
           <Button
             variant={needApproval ? 'warning' : 'danger'}
-            size="md"
             icon={needApproval ? Send : CheckCircle2}
             busy={busy}
             disabled={needAck && !acked}

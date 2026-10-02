@@ -23,6 +23,7 @@ import {
   FileSpreadsheet
 } from 'lucide-react';
 import { PageHeader } from './PageHeader';
+import { Button } from './Button';
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
@@ -516,12 +517,9 @@ export function Salespersons() {
           <AlertTriangle className="w-10 h-10 text-red-600" />
           <p className="font-bold">เกิดข้อผิดพลาด</p>
           <p className="text-sm text-red-600">{error}</p>
-          <button 
-            onClick={fetchSalespersons}
-            className="mt-3 px-4 btn-h bg-card border border-red-200 text-red-700 hover:bg-red-100/50 rounded-xl text-xs font-semibold transition-all active:scale-95"
-          >
+          <Button variant="danger" tone="soft" onClick={fetchSalespersons} className="mt-3">
             ลองใหม่อีกครั้ง
-          </button>
+          </Button>
         </div>
       ) : sortedSalespersons.length === 0 ? (
         <div className="bg-card border border-slate-200 rounded-3xl p-12 text-center shadow-sm text-slate-500 flex flex-col items-center justify-center gap-2">
@@ -871,21 +869,12 @@ export function Salespersons() {
               </div>
 
               <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-slate-100 bg-slate-50/60 rounded-b-2xl">
-                <button
-                  type="button"
-                  onClick={() => setEditingSp(null)}
-                  className="px-4 btn-h text-xs font-semibold text-slate-600 hover:text-slate-800 border border-slate-200 hover:bg-slate-100 rounded-lg transition-all"
-                >
+                <Button type="button" onClick={() => setEditingSp(null)}>
                   ยกเลิก
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSaving}
-                  className="px-5 btn-h text-xs font-bold text-white bg-[var(--brand)] hover:bg-[var(--brand-hover)] rounded-lg transition-all active:scale-95 shadow-sm flex items-center gap-1.5 disabled:opacity-60"
-                >
-                  {isSaving && <Loader2 className="w-3 h-3 animate-spin" />}
+                </Button>
+                <Button variant="primary" type="submit" busy={isSaving}>
                   บันทึกข้อมูล
-                </button>
+                </Button>
               </div>
             </form>
           </div>
@@ -923,22 +912,12 @@ export function Salespersons() {
             </div>
 
             <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-slate-100 bg-slate-50/60 rounded-b-2xl">
-              <button
-                type="button"
-                onClick={() => setDeletingSp(null)}
-                className="px-4 btn-h text-xs font-semibold text-slate-600 hover:text-slate-800 border border-slate-200 hover:bg-slate-100 rounded-lg transition-all"
-              >
+              <Button type="button" onClick={() => setDeletingSp(null)}>
                 ยกเลิก
-              </button>
-              <button
-                type="button"
-                onClick={handleDelete}
-                disabled={isDeleting}
-                className="px-5 btn-h text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-all active:scale-95 shadow-sm flex items-center gap-1.5 disabled:opacity-60"
-              >
-                {isDeleting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+              </Button>
+              <Button variant="danger" type="button" icon={Trash2} busy={isDeleting} onClick={handleDelete}>
                 ลบพนักงานขาย
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -1022,13 +1001,9 @@ function SignatureCell({ salesperson, hasSig, uploading, sigTimestamp, onUpload,
             <ImageIcon className="w-5 h-5 text-slate-300 mb-1" />
             <span className="text-[10px] font-semibold uppercase tracking-wider">ไม่มีรูปภาพ</span>
           </div>
-          <button
-            onClick={onUpload}
-            className="flex items-center gap-1.5 px-3 py-1 bg-card hover:bg-slate-100 text-slate-700 hover:text-slate-950 border border-slate-200 hover:border-slate-300 rounded-xl text-xs font-semibold shadow-sm transition-all active:scale-95"
-          >
-            <Upload className="w-3.5 h-3.5 text-slate-500" />
+          <Button icon={Upload} onClick={onUpload}>
             อัปโหลด
-          </button>
+          </Button>
         </div>
       )}
     </div>

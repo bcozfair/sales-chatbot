@@ -21,6 +21,7 @@ import {
   PackageCheck,
 } from 'lucide-react';
 import { PageHeader } from './PageHeader';
+import { Button } from './Button';
 import { FilterBar, FilterSearch, FilterSelect } from './FilterBar';
 import { ScopeComboBox } from './ScopeComboBox';
 
@@ -462,13 +463,15 @@ export function QuotationRules() {
         title="เงื่อนไขใบเสนอราคา"
         description="ตั้งค่าการรับประกัน/จัดส่งตามฝ่ายผลิต ยี่ห้อ หรือซีรีส์"
       >
-        <button
+        <Button
+          variant="primary"
+          icon={Plus}
           onClick={openAddModal}
-          className="flex items-center justify-center gap-1.5 px-3.5 btn-h bg-[var(--brand)] hover:bg-[var(--brand-hover)] text-white text-sm font-bold rounded-xl shadow-sm transition-all active:scale-95 flex-shrink-0"
+          aria-label="เพิ่มเงื่อนไข"
+          className="flex-shrink-0"
         >
-          <Plus className="w-4 h-4" />
           <span className="hidden sm:inline">เพิ่มเงื่อนไข</span>
-        </button>
+        </Button>
       </PageHeader>
 
       <FilterBar
@@ -530,12 +533,14 @@ export function QuotationRules() {
           <AlertTriangle className="w-9 h-9 text-red-600" />
           <p className="font-bold">เกิดข้อผิดพลาดในการดึงข้อมูล</p>
           <p className="text-sm text-red-600">{error}</p>
-          <button
+          <Button
+            variant="danger"
+            tone="soft"
             onClick={fetchRules}
-            className="mt-3 px-4 btn-h bg-card border border-red-200 text-red-700 hover:bg-red-50 rounded-xl text-xs font-semibold transition-all active:scale-95"
+            className="mt-3"
           >
             ลองใหม่อีกครั้ง
-          </button>
+          </Button>
         </div>
       ) : sortedRules.length === 0 ? (
         <div className="bg-card border border-slate-200 rounded-2xl p-10 text-center shadow-sm text-slate-500 flex flex-col items-center justify-center gap-2">
@@ -800,20 +805,19 @@ export function QuotationRules() {
             </div>
 
             <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-slate-100 bg-slate-50/60 rounded-b-2xl">
-              <button
+              <Button
                 type="button"
                 onClick={() => setTierDetailRule(null)}
-                className="px-4 btn-h text-xs font-semibold text-slate-600 hover:text-slate-800 border border-slate-200 hover:bg-slate-100 rounded-lg transition-all"
               >
                 ปิด
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
+                variant="primary"
                 onClick={() => { const r = tierDetailRule; setTierDetailRule(null); openEditModal(r); }}
-                className="px-4 btn-h text-xs font-bold text-white bg-[var(--brand)] hover:bg-[var(--brand-hover)] rounded-lg transition-all active:scale-95 shadow-sm"
               >
                 แก้ไขเงื่อนไข
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -1077,19 +1081,18 @@ export function QuotationRules() {
               </div>
 
               <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-slate-100 bg-slate-50/60 rounded-b-2xl">
-                <button
+                <Button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 btn-h text-xs font-semibold text-slate-600 hover:text-slate-800 border border-slate-200 hover:bg-slate-100 rounded-lg transition-all"
                 >
                   ยกเลิก
-                </button>
-                <button
+                </Button>
+                <Button
                   type="submit"
-                  className="px-5 btn-h text-xs font-bold text-white bg-[var(--brand)] hover:bg-[var(--brand-hover)] rounded-lg transition-all active:scale-95 shadow-sm"
+                  variant="primary"
                 >
                   {editingRule ? 'บันทึกการแก้ไข' : 'เพิ่มเงื่อนไข'}
-                </button>
+                </Button>
               </div>
             </form>
           </div>

@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { PageHeader } from '../PageHeader';
+import { Button } from '../Button';
 import { DateInput } from '../DateInput';
 import {
-  Terminal, Download, Loader2, AlertTriangle,
+  Terminal, Download, AlertTriangle,
   ChevronDown, ChevronRight as ChevronRightSmall, Link2,
 } from 'lucide-react';
 import { useHashState } from './useHashState';
@@ -28,8 +29,6 @@ import { RequestTimeline } from './RequestTimeline';
  *   worker เป็นโปรเซสแยกบน host ที่แอปไม่รู้จัก ⇒ ถ้ามันตายเงียบ ๆ ตารางจะหยุดโตโดยไม่มีใครรู้
  *   แล้วคนจะเข้าใจผิดว่า "ระบบไม่มี error เลย" ทั้งที่ความจริงคือ "ไม่มีใครเก็บอยู่"
  */
-
-const BRAND = 'var(--brand-fg)';
 
 interface SystemRow {
   id: string;
@@ -248,16 +247,15 @@ export const SystemLogs: React.FC = () => {
     <div className="space-y-4">
       <PageHeader icon={Terminal} title="บันทึกระบบ"
                   description="ระบบพังตรงไหน เพราะอะไร — ย้อนหลังได้เกินอายุ docker logs">
-        <button
+        <Button
+          icon={Download}
+          busy={exporting}
           onClick={() => { void doExport(); }}
           disabled={exporting}
-          className="inline-flex items-center gap-1.5 px-3 btn-h rounded-xl text-sm font-medium text-white
-                     transition disabled:opacity-60"
-          style={{ background: BRAND }}
+          aria-label="ส่งออก CSV"
         >
-          {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
           <span className="hidden sm:inline">ส่งออก CSV</span>
-        </button>
+        </Button>
       </PageHeader>
 
       {jobs.length > 0 && <WorkerBanner jobs={jobs} />}

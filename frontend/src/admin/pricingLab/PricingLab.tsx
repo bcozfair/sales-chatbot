@@ -249,7 +249,7 @@ export const PricingLab: React.FC<Props> = ({ canEditBook, onOpenBook }) => {
               placeholder="เช่น TSK-14 6x200+150-BU"
             />
           </div>
-          <Button variant="primary" size="md" icon={Calculator} busy={busy}
+          <Button variant="primary" icon={Calculator} busy={busy}
                   onClick={() => void quote(code)} disabled={!!bookMissing}>
             คิดราคา
           </Button>

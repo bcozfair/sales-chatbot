@@ -15,6 +15,7 @@ import {
   X,
 } from 'lucide-react';
 import { PageHeader } from './PageHeader';
+import { Button } from './Button';
 
 const BRAND = 'var(--brand-fg)';
 const MIN_SEARCH_CHARS = 2;
@@ -133,13 +134,9 @@ export const Blacklist: React.FC = () => {
         title="บัญชีห้ามเสนอราคา"
         description="บริษัทหรือผู้ติดต่อในบัญชีนี้ เซลล์จะกดยืนยันออกใบเสนอราคาไม่ได้"
       >
-        <button
-          onClick={() => setIsAdding(true)}
-          className="flex items-center justify-center gap-1.5 px-3.5 btn-h bg-[var(--brand)] hover:bg-[var(--brand-hover)] text-white text-sm font-bold rounded-xl shadow-sm transition-all active:scale-95 flex-shrink-0"
-        >
-          <Plus className="w-4 h-4" />
+        <Button variant="primary" icon={Plus} onClick={() => setIsAdding(true)} className="flex-shrink-0">
           <span>เพิ่มรายการ</span>
-        </button>
+        </Button>
       </PageHeader>
 
       {isLoading ? (
@@ -317,23 +314,18 @@ const SubmitRow: React.FC<{
   danger?: boolean;
 }> = ({ onClose, isSubmitting, disabled, label, danger }) => (
   <div className="flex gap-2 pt-1">
-    <button
-      type="button"
-      onClick={onClose}
-      disabled={isSubmitting}
-      className="flex-1 btn-h px-4 border border-slate-200 text-slate-600 text-sm font-semibold rounded-xl hover:bg-slate-50 transition-all disabled:opacity-50"
-    >
+    <Button type="button" onClick={onClose} disabled={isSubmitting} className="flex-1">
       ยกเลิก
-    </button>
-    <button
+    </Button>
+    <Button
+      variant={danger ? 'danger' : 'primary'}
       type="submit"
-      disabled={isSubmitting || disabled}
-      className="flex-1 btn-h px-4 text-white text-sm font-semibold rounded-xl transition-all active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50"
-      style={{ backgroundColor: danger ? 'var(--color-red-600)' : 'var(--brand)' }}
+      busy={isSubmitting}
+      disabled={disabled}
+      className="flex-1"
     >
-      {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
       {label}
-    </button>
+    </Button>
   </div>
 );
 

@@ -1,5 +1,6 @@
 import React from 'react';
 import { AlertCircle, ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Search, X } from 'lucide-react';
+import { Button } from '../Button';
 import { formatMs, formatNumber, inputCls, PAGE_SIZE_OPTIONS, thCls } from './format';
 
 /**
@@ -155,12 +156,9 @@ export const ErrorBox: React.FC<{ message: string; onRetry?: () => void }> = ({ 
       <div className="text-xs text-red-600 mt-0.5 break-words">{message}</div>
     </div>
     {onRetry && (
-      <button
-        onClick={onRetry}
-        className="px-3 btn-h rounded-lg bg-card border border-red-200 text-sm text-red-700 shrink-0"
-      >
+      <Button variant="danger" tone="soft" onClick={onRetry} className="shrink-0">
         ลองใหม่
-      </button>
+      </Button>
     )}
   </div>
 );

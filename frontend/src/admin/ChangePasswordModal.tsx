@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Modal } from './Modal';
-import { KeyRound, Eye, EyeOff, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
+import { KeyRound, Eye, EyeOff, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Button } from './Button';
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -79,13 +80,9 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ onClos
               กรุณาเข้าสู่ระบบใหม่ด้วยรหัสผ่านที่เพิ่งตั้ง
             </p>
           </div>
-          <button
-            onClick={() => logout()}
-            className="w-full btn-h px-4 text-white text-sm font-semibold rounded-xl transition-all active:scale-[0.98]"
-            style={{ backgroundColor: 'var(--brand)' }}
-          >
+          <Button variant="primary" onClick={() => logout()} className="w-full">
             เข้าสู่ระบบใหม่
-          </button>
+          </Button>
         </div>
       ) : (
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
@@ -154,23 +151,12 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ onClos
           </button>
 
           <div className="flex gap-2 pt-1">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={isSubmitting}
-              className="flex-1 btn-h px-4 border border-slate-200 text-slate-600 text-sm font-semibold rounded-xl hover:bg-slate-50 transition-all disabled:opacity-50"
-            >
+            <Button type="button" onClick={onClose} disabled={isSubmitting} className="flex-1">
               ยกเลิก
-            </button>
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="flex-1 btn-h px-4 text-white text-sm font-semibold rounded-xl transition-all active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50"
-              style={{ backgroundColor: 'var(--brand)' }}
-            >
-              {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+            </Button>
+            <Button variant="primary" type="submit" busy={isSubmitting} className="flex-1">
               บันทึก
-            </button>
+            </Button>
           </div>
       </form>
     )}

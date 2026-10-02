@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { PageHeader } from '../PageHeader';
-import { DatabaseBackup, AlertTriangle, CheckCircle2, XCircle, RefreshCw, Loader2 } from 'lucide-react';
+import { Button } from '../Button';
+import { DatabaseBackup, AlertTriangle, CheckCircle2, XCircle, RefreshCw } from 'lucide-react';
 import { useHashState } from './useHashState';
 import { TAB_SLUG } from '../navHash';
 import { errMsg, formatDateTime, relativeTime, formatBytes, formatMs, formatNumber, thCls, tdCls, numCls } from './format';
@@ -24,8 +25,6 @@ import { EmptyState, ErrorBox, Pagination, SkeletonRows, StatTile, TableCard, Ta
  *   สำรองเดี๋ยวนี้ — แอปในคอนเทนเนอร์สั่ง cron/docker บน host ไม่ได้ จะให้ได้ต้องเปิด
  *                   docker socket เข้ากล่อง = ยกสิทธิ์ระดับเครื่องให้โปรเซสที่เสิร์ฟเว็บ
  */
-
-const BRAND = 'var(--brand-fg)';
 
 /** ช้ากว่านี้ = ผิดนัด · รอบละวัน + เผื่อเวลารันจริงคลาดจาก cron (ตรงกับเกณฑ์ใน diag:backup) */
 const FRESH_LIMIT_HOURS = 25;
@@ -183,17 +182,15 @@ export const BackupReport: React.FC = () => {
     <div className="space-y-4">
       <PageHeader icon={DatabaseBackup} title="การสำรองข้อมูล"
                   description="ฐานข้อมูลถูกสำรองอัตโนมัติทุกวันตี 3 โดยตัวจับเวลาบนเครื่องเซิร์ฟเวอร์">
-        <button
+        <Button
+          icon={RefreshCw}
+          busy={loading}
           onClick={() => { void load(); }}
           disabled={loading}
           aria-label="โหลดรายงานใหม่"
-          className="inline-flex items-center gap-1.5 px-3 btn-h rounded-xl text-sm font-medium text-white
-                     transition disabled:opacity-60"
-          style={{ background: BRAND }}
         >
-          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
           <span className="hidden sm:inline">รีเฟรช</span>
-        </button>
+        </Button>
       </PageHeader>
 
       <StatusBanner installed={installed} summary={summary} />

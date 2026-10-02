@@ -675,7 +675,6 @@ export const PriceApprovals: React.FC = () => {
               </Button>
               <Button
                 variant="danger"
-                size="md"
                 icon={XCircle}
                 busy={busyId === rejecting.request_id}
                 disabled={rejectReason.trim() === ''}

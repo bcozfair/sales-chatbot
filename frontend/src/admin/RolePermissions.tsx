@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth, type Role } from '../context/AuthContext';
 import { ShieldCheck, Check, Clock, X, Loader2, AlertTriangle, RotateCcw, Lock } from 'lucide-react';
 import { PageHeader } from './PageHeader';
+import { Button } from './Button';
 import { SettingsStatus, SettingsSaveBar } from './SettingsSaveBar';
 import { ROLE_LABEL } from './roles';
 
@@ -245,15 +246,9 @@ export function RolePermissions() {
 
   const header = (
     <PageHeader icon={ShieldCheck} title="สิทธิ์ตามบทบาท" description="กำหนดว่าแต่ละบทบาททำอะไรได้บ้าง">
-      <button
-        type="button"
-        onClick={resetAll}
-        disabled={!hasOverrides || saving || loading}
-        className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 btn-h text-sm font-bold text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
-      >
-        <RotateCcw className="w-4 h-4" />
+      <Button type="button" icon={RotateCcw} onClick={resetAll} disabled={!hasOverrides || saving || loading}>
         คืนค่าเริ่มต้นทั้งหมด
-      </button>
+      </Button>
     </PageHeader>
   );
 
@@ -278,14 +273,15 @@ export function RolePermissions() {
             <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
             <span>{error}</span>
           </div>
-          <button
+          <Button
+            variant="danger"
+            tone="soft"
             type="button"
+            icon={RotateCcw}
             onClick={() => { setLoading(true); void load(); }}
-            className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 btn-h text-sm font-bold"
           >
-            <RotateCcw className="w-4 h-4" />
             ลองใหม่
-          </button>
+          </Button>
         </div>
       </>
     );
