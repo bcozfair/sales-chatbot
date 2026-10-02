@@ -241,7 +241,7 @@ const PAGE_TITLES: Record<MainTab, string> = {
   pricebook: 'สมุดราคา',
   productsdata: 'ข้อมูลสินค้า',
   customersdata: 'ข้อมูลลูกค้า & ผู้ติดต่อ',
-  odoocontacts: 'ผู้ติดต่อที่ต้องคีย์เข้า Odoo',
+  odoocontacts: 'ผู้ติดต่อเพิ่มเอง',
   quotepm: 'บัญชีเสนอในนาม PM',
   traffic: 'รายงานการใช้งาน',
   apilogs: 'บันทึกการเรียก API',

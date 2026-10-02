@@ -8,7 +8,7 @@ import { errMsg, formatNumber, formatDate, thCls, tdCls, inputCls, downloadCsv }
 import { LocalContactModal, DeleteContactModal } from './LocalContactModal';
 
 /**
- * หน้า "ผู้ติดต่อที่ต้องคีย์เข้า Odoo" — คิวงานค้างของโมดูล `local_contacts` (แผน §5.2)
+ * หน้า "ผู้ติดต่อเพิ่มเอง" — คิวงานค้างของโมดูล `local_contacts` (แผน §5.2)
  *
  * ── หน้านี้มีอยู่เพื่ออะไร ────────────────────────────────────────────────
  *   แอดมินเพิ่มผู้ติดต่อเองได้ตั้งแต่ก้อน I3 และออกใบให้เขาได้ทันที **แต่คนคนนั้นยังไม่มีตัวตน
@@ -209,7 +209,7 @@ export const OdooContacts: React.FC = () => {
     <div className="space-y-4">
       <PageHeader
         icon={UserPlus}
-        title="ผู้ติดต่อที่ต้องคีย์เข้า Odoo"
+        title="ผู้ติดต่อเพิ่มเอง"
         description={`${formatNumber(pending)} คนยังไม่มีใน Odoo · สถานะระบบตรวจให้เอง`}
       >
         <button
