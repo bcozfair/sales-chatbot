@@ -20,6 +20,7 @@
  * - เขียนแถวเติม **หลัง** handleEvent จบเท่านั้น ⇒ แถวของ handler (insertMessage ถูก await ก่อนจบ
  *   ทุกจุด) ลงฐานไปก่อนเสมอ แล้ว NOT EXISTS ใน `insertWebhookFillMessage` กันซ้ำได้คำสั่งเดียว
  * - เกินเพดาน 120 วิ (งานผีที่ยังไม่จบ) = ไม่เขียนแถวเติม · reply_status = pending
+ *   (แม้รอบที่จดได้จะล้มหมดแล้ว — งานที่ยังไม่จบยังส่งทางสำรองสำเร็จได้ ⇒ failed ได้เฉพาะงานที่จบแล้ว)
  *
  * ## ทางที่ไม่ได้เลือก
  *
@@ -48,10 +49,19 @@ const SAFE_KIND = /^[a-z_]{1,20}$/;
 
 // ── ฟังก์ชันบริสุทธิ์ ─────────────────────────────────────────────────────────
 
+/**
+ * สถานะการตอบของหนึ่ง event — ลำดับของเงื่อนไขคือความหมาย ห้ามสลับ
+ *   1. มีรอบที่ส่งสำเร็จ                          → sent
+ *   2. งานยังไม่จบ (ไม่ settled) หรือยังมีรอบค้าง  → pending
+ *      แม้ทุกรอบที่จดได้จะล้มแล้วก็ตาม — งานที่ยังวิ่งอยู่ยังส่งทางสำรองสำเร็จได้
+ *      (ทางสำรอง "ระบบขัดข้อง" ท้าย handleEvent) จึงยังตัดสินว่า failed ไม่ได้
+ *   3. จบแล้ว มีแต่รอบที่ล้ม                       → failed
+ *   4. จบแล้ว ไม่เคยเรียกส่งเลย                     → none
+ */
 export function replyStatusOf(attempts: readonly ReplyAttempt[], settled: boolean): ReplyStatus {
   if (attempts.some(a => a.ok === true)) return 'sent';
-  if (attempts.some(a => a.ok === null)) return 'pending';
-  if (attempts.length === 0) return settled ? 'none' : 'pending';
+  if (!settled || attempts.some(a => a.ok === null)) return 'pending';
+  if (attempts.length === 0) return 'none';
   return 'failed';
 }
 

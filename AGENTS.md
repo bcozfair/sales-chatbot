@@ -450,7 +450,8 @@ docker compose exec -T db psql -U "$PG_USER" -d "$PG_DATABASE" -c "SELECT …"  
 `webDecisionParity.ts` · `salespersonDedupeSmoke.ts` · `migrationsAudit.mjs` · `backupHealth.mjs`
 · `customerCacheMemo.ts` (2026-09-28 · grep ได้ 0 · SELECT อย่างเดียว แต่เขียนไฟล์สำเนา `services/__cacheMemo*.gen.ts` แล้วลบเอง)
 · `webhookRecorder.ts` (2026-10-02 · **ตารางชั่วคราว + ROLLBACK** แบบ `pricingDbRoundtrip` — เขียนแต่ `webhook_events`/`messages`
-  ชั่วคราวที่บังของจริง ข้อ 0 ยืนยันก่อนเขียน · ส่วนที่อ่านฐานจริงเป็น SELECT อย่างเดียว ⇒ รันบน PMSV ได้ · **ห้ามแก้เป็น `COMMIT`**)
+  ชั่วคราวที่บังของจริง ข้อ 0 ยืนยันก่อนเขียน · ส่วนที่อ่านฐานจริงเป็น SELECT/EXPLAIN อย่างเดียว ⇒ รันบน PMSV ได้ · **ห้ามแก้เป็น `COMMIT`**
+  · `-- --frozen-handler` เรียก `git diff` อ่านอย่างเดียว · ชุด (จ) ต้องอยู่ท้ายสุดเพราะกระตุ้นตัวพักเขียนระดับโมดูล)
 
 **`scripts/dev/` คือของที่ห้ามรันบน PMSV ทั้งโฟลเดอร์** — ต่างจาก `scripts/diag/` ตรงที่มันตั้งใจ
 เขียนข้อมูลปลอมลงฐานและ commit เพื่อ **จำลองสถานการณ์** (`seedPhaseH.ts` เพิ่ม/ลบแถวใน
