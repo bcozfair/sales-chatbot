@@ -763,7 +763,7 @@ internal_reference นี้ใน Odoo จะได้ไม่ต้องแ�
 | **J3** ✅ 2026-10-02 | ธง `custom_product` (สอง whitelist + `buildOdooManualReview` + โมดัลพรีวิว) | `diag:web-quote` · `diag:confirm-race` · `diag:odoo-export` ผ่านทั้งก่อนและหลัง |
 | **J4** ✅ 2026-10-02 | หน้าจอ + `page.odooproducts` + เมนู (**คอมมิตเดียวกัน** ไม่งั้นด่านข้อ 12 ล้ม) · ตัวเลขบนเมนูทุกตัวเป็นวงกลมเหลือง | `diag:role-permissions` ผ่าน · mockup ผ่านตาเจ้าของก่อนแตะโค้ด (`AGENTS.md` A9) |
 | **J6** ✅ 2026-10-02 | หน้าต่างเพิ่มสินค้าในหน้าขอใบเสนอราคา + ปุ่มคิดราคา (§13) + ปุ่มเพิ่ม/แก้ของหน้า "สินค้าเพิ่มเอง" | mockup ผ่านตาเจ้าของก่อนแตะโค้ด · ด่านข้อ 13–17 · `diag:op-ui` 58/58 |
-| **J5** ✅ 2026-10-02 | ยุบ migration เข้า `schema.sql` (ตรวจ `pg_dump -t` เทียบฐานจริงตรงทุกบรรทัด · audit trigger อยู่ในไฟล์ migration เหมือน `local_contacts`) · `README.md` (endpoint + ตาราง) · `AGENTS.md` แถวด่าน | `diag:migrations` บน host ผ่าน · `diag:confirm-race` บนฐานจริง (ได้รับอนุญาต 2026-10-02) ผ่าน |
+| **J5** ✅ 2026-10-02 | ยุบ migration เข้า `schema.sql` (ตรวจ `pg_dump -t` เทียบฐานจริงตรงทุกบรรทัด · audit trigger อยู่ในไฟล์ migration เหมือน `local_contacts`) · `README.md` (endpoint + ตาราง) · `AGENTS.md` แถวด่าน | `diag:migrations` บน host ผ่าน · `diag:confirm-race` + `diag:web-quote` 174/174 บนฐานจริง (ได้รับอนุญาต 2026-10-02 · เลขงวดสมมุติ ตัวนับจริงไม่ขยับ) ผ่าน |
 
 **J1 ต้องมาก่อน J2 อย่างเคร่งครัด** — ถ้ามีคนสร้างสินค้า local ได้ก่อนที่ตัวกวาดใน §6.2 จะมีอยู่
 วันที่แอดมินคีย์เข้า Odoo สำเร็จคือวันที่ `sync:products` ตาย และอาการจะไม่ชี้กลับมาที่โมดูลนี้เลย
