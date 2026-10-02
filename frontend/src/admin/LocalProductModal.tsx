@@ -24,7 +24,7 @@
 //  · การลอก `sales_description` จากต้นแบบ — ของต้นแบบเป็นสเปกของรุ่นนั้น (§13.4)
 //  · ปุ่มคิดราคาไม่ import `pricingLab` — ยิง `POST /price` ซึ่งเป็นตัวจัดการเดียวกับหน้าคำนวณราคา (§13.5)
 // ─────────────────────────────────────────────────────────────────────────────
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Pencil, Calculator, Loader2, Lock, Search, ChevronRight } from 'lucide-react';
 import { Modal } from './Modal';
 import { Button } from './Button';
@@ -125,6 +125,17 @@ const money2 = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits:
 /** ปัดเป็นสตางค์ — ตรงกับ `money()` ฝั่ง server */
 const satang = (n: number) => Math.round(n * 100) / 100;
 
+/**
+ * % ราคาขั้นต่ำที่ขึ้นตั้งแต่เปิดหน้าต่าง (เจ้าของสั่ง 2026-10-02 "ให้ขึ้น default 70% แต่แก้ไขได้")
+ * — ค่าจริงมาจาก server (`min_price_ratio` = `MIN_PRICE_RATIO` ใน services/localProducts.ts) และทับตัวนี้เมื่อมาถึง
+ * · ตัวนี้มีไว้กันจอว่าง/ขึ้น NaN ตอน server ยังไม่ตอบ หรือเป็นรุ่นที่ยังไม่ส่งค่านี้ (เกิดจริงบนพรีวิว 2026-10-02:
+ *   backend ค้างโค้ดเก่า ⇒ `undefined × 100` = NaN ในช่อง %) ⇒ ต้องเท่ากับค่าของ server เสมอ
+ */
+const DEFAULT_MIN_PCT = 70;
+/** อัตราส่วนจาก server → ข้อความในช่อง % (ทศนิยมหนึ่งตำแหน่ง) · ค่าเพี้ยน/ไม่มี = ค่าตั้งต้น ไม่ใช่ NaN */
+const pctText = (ratio: unknown): string =>
+  typeof ratio === 'number' && Number.isFinite(ratio) && ratio >= 0 ? String(Math.round(ratio * 1000) / 10) : String(DEFAULT_MIN_PCT);
+
 const INHERITED_LABEL: [string, string][] = [
   ['brand', 'แบรนด์'], ['series', 'ซีรีส์'], ['product_group', 'กลุ่ม'],
   ['product_category', 'หมวด'], ['product_sub_category', 'หมวดย่อย'], ['unit_of_measure', 'หน่วย'],
@@ -181,7 +192,10 @@ export const LocalProductModal: React.FC<Props> = ({
   const [name, setName] = useState('');
 
   const [price, setPrice] = useState('');
-  const [pct, setPct] = useState('');
+  const [pct, setPct] = useState(String(DEFAULT_MIN_PCT));
+  /** คนแก้ % เอง (หรือพิมพ์บาทเอง) แล้ว — คำตอบของ /suggest ที่มาทีหลังต้องไม่ทับ */
+  //  เป็น ref ไม่ใช่ state — เปลี่ยนแล้วต้องไม่ทำให้ effect ของ /suggest ยิงใหม่
+  const pctTouched = useRef(false);
   /** คนพิมพ์ราคาขั้นต่ำเป็นบาทเอง — `null` = คิดจาก % */
   const [minManual, setMinManual] = useState<string | null>(null);
   const [quote, setQuote] = useState<PriceResult | null>(null);
@@ -219,7 +233,7 @@ export const LocalProductModal: React.FC<Props> = ({
         setPrice(String(p.sales_price));
         setDesc(p.sales_description ?? '');
         // % ของแถวเดิม = ขั้นต่ำ ÷ ราคาขาย (ทศนิยมหนึ่งตำแหน่ง) · ราคาขั้นต่ำที่โชว์คือค่าที่เก็บไว้จริง
-        setPct(String(p.sales_price > 0 ? Math.round((p.minimum_sales_price / p.sales_price) * 1000) / 10 : p.min_price_ratio * 100));
+        setPct(p.sales_price > 0 ? pctText(p.minimum_sales_price / p.sales_price) : pctText(p.min_price_ratio));
         setMinManual(money2(p.minimum_sales_price));
       } catch {
         if (!cancelled) setError('ติดต่อเซิร์ฟเวอร์ไม่ได้ — ลองใหม่อีกครั้ง');
@@ -251,7 +265,7 @@ export const LocalProductModal: React.FC<Props> = ({
         const s: Suggestion = body;
         setSug(s);
         setSugError(null);
-        setPct((p) => (p === '' ? String(Math.round(s.min_price_ratio * 1000) / 10) : p));
+        if (!pctTouched.current) setPct(pctText(s.min_price_ratio));
         // ระบบออกรหัสให้ไม่ได้ ⇒ เปิดช่องพิมพ์เองให้เลย ไม่ปล่อยให้กดบันทึกแล้วค่อยเจอ 409
         if (!s.ref) setManualRef(true);
       } catch {
@@ -353,13 +367,17 @@ export const LocalProductModal: React.FC<Props> = ({
 
   const onPctChange = (v: string) => {
     setPct(v);
+    pctTouched.current = true;
     setMinManual(null);
   };
 
   const onMinChange = (v: string) => {
     setMinManual(v);
     const m = toNum(v);
-    if (priceNum > 0 && m >= 0) setPct(String(Math.round((m / priceNum) * 1000) / 10));
+    if (priceNum > 0 && m >= 0) {
+      setPct(pctText(m / priceNum));
+      pctTouched.current = true;
+    }
   };
 
   const runQuote = async () => {
