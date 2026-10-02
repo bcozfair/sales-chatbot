@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { PageHeader } from '../PageHeader';
+import { Button } from '../Button';
 import { DateInput } from '../DateInput';
 import {
-  History, Download, Loader2,
+  History, Download,
   ChevronDown, ChevronRight as ChevronRightSmall, ArrowRight, Link2, Layers,
 } from 'lucide-react';
 import { useHashState } from './useHashState';
@@ -31,8 +32,6 @@ import { RequestTimeline } from './RequestTimeline';
  * ตั้งต้นซ่อนแถว 'เข้าดู' (log.view) เพราะมีมากกว่าการแก้จริงหลายเท่าจนกลบของที่ต้องดู
  * — ไม่ได้ลบทิ้ง ติ๊กช่องเดียวก็เห็นครบ
  */
-
-const BRAND = 'var(--brand-fg)';
 
 interface AuditRow {
   id: string;
@@ -261,16 +260,15 @@ export const AuditLogs: React.FC = () => {
     <div className="space-y-4">
       <PageHeader icon={History} title="บันทึกการแก้ไข"
                   description="ใครแก้อะไร จากค่าอะไรเป็นค่าอะไร">
-        <button
+        <Button
+          icon={Download}
+          busy={exporting}
           onClick={() => { void doExport(); }}
           disabled={exporting}
-          className="inline-flex items-center gap-1.5 px-3 btn-h rounded-xl text-sm font-medium text-white
-                     transition disabled:opacity-60"
-          style={{ background: BRAND }}
+          aria-label="ส่งออก CSV"
         >
-          {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
           <span className="hidden sm:inline">ส่งออก CSV</span>
-        </button>
+        </Button>
       </PageHeader>
 
       {/* ── ตัวกรอง ── */}

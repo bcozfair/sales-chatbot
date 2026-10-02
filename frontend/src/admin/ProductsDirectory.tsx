@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Package, PackageX, Ban, AlertTriangle, CheckCircle2, Download, X, Database, Info } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { PageHeader } from './PageHeader';
+import { Button } from './Button';
 import { DataFilterBar, DataSearch, FilterCombo, type FilterOption } from './DataFilterBar';
 import {
   TableCard, TableScroll, SortHeader, Pagination, EmptyState, SkeletonRows, ErrorBox,
@@ -320,16 +321,14 @@ export const ProductsDirectory: React.FC = () => {
         title={`รายการสินค้า · ${formatNumber(total)} รายการ`}
         hint="คลิกแถวเพื่อดูข้อมูลทั้งหมด · หัวคอลัมน์กดเรียงได้"
         action={
-          <button
+          <Button
+            icon={Download}
             onClick={() => void onExport()}
             disabled={exporting || total === 0}
-            className="btn-h px-3 rounded-lg border border-slate-200 bg-card text-xs font-semibold text-slate-600
-                       hover:border-[var(--brand-border)] hover:text-[var(--brand-fg)] disabled:opacity-40
-                       flex items-center gap-1.5 shrink-0"
+            className="shrink-0"
           >
-            <Download className="w-3.5 h-3.5" />
             {exporting ? 'กำลังส่งออก…' : <>ส่งออก CSV<span className="hidden sm:inline">{` (${formatNumber(total)} แถวที่กรองอยู่)`}</span></>}
-          </button>
+          </Button>
         }
       >
         {loading ? (

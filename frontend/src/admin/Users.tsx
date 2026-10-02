@@ -18,6 +18,7 @@ import {
   X,
 } from 'lucide-react';
 import { PageHeader } from './PageHeader';
+import { Button } from './Button';
 import { FilterBar, FilterSearch, FilterSelect } from './FilterBar';
 import { EmptyState, Pagination } from './logs/ui';
 import { ROLE_ORDER, ROLE_LABEL, ROLE_DESCRIPTION } from './roles';
@@ -203,13 +204,9 @@ export const Users: React.FC = () => {
         title="ผู้ใช้งานระบบหลังบ้าน"
         description="เพิ่ม ลบ แก้ไข และกำหนดสิทธิ์ผู้เข้าใช้ Admin Portal"
       >
-        <button
-          onClick={() => setFormMode({ kind: 'create' })}
-          className="flex items-center justify-center gap-1.5 px-3.5 btn-h bg-[var(--brand)] hover:bg-[var(--brand-hover)] text-white text-sm font-bold rounded-xl shadow-sm transition-all active:scale-95 flex-shrink-0"
-        >
-          <Plus className="w-4 h-4" />
+        <Button variant="primary" icon={Plus} onClick={() => setFormMode({ kind: 'create' })} className="flex-shrink-0">
           <span>เพิ่มผู้ใช้</span>
-        </button>
+        </Button>
       </PageHeader>
 
       {isLoading ? (
@@ -419,23 +416,12 @@ const SubmitRow: React.FC<{
   danger?: boolean;
 }> = ({ onClose, isSubmitting, label, danger }) => (
   <div className="flex gap-2 pt-1">
-    <button
-      type="button"
-      onClick={onClose}
-      disabled={isSubmitting}
-      className="flex-1 btn-h px-4 border border-slate-200 text-slate-600 text-sm font-semibold rounded-xl hover:bg-slate-50 transition-all disabled:opacity-50"
-    >
+    <Button type="button" onClick={onClose} disabled={isSubmitting} className="flex-1">
       ยกเลิก
-    </button>
-    <button
-      type="submit"
-      disabled={isSubmitting}
-      className="flex-1 btn-h px-4 text-white text-sm font-semibold rounded-xl transition-all active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50"
-      style={{ backgroundColor: danger ? 'var(--color-red-600)' : 'var(--brand)' }}
-    >
-      {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+    </Button>
+    <Button variant={danger ? 'danger' : 'primary'} type="submit" busy={isSubmitting} className="flex-1">
       {label}
-    </button>
+    </Button>
   </div>
 );
 

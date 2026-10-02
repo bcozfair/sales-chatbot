@@ -224,18 +224,16 @@ export const OdooContacts: React.FC = () => {
         title="ผู้ติดต่อเพิ่มเอง"
         description={`${formatNumber(pending)} คนยังไม่มีใน Odoo · สถานะระบบตรวจให้เอง`}
       >
-        <button
+        <Button
+          icon={Download}
           onClick={() => void onExport()}
           disabled={exporting || total === 0}
           aria-label={`ส่งออก xlsx ${formatNumber(total)} คน`}
-          className="btn-h px-3 rounded-lg border border-slate-200 bg-card text-xs font-semibold text-slate-600
-                     hover:border-[var(--brand-border)] hover:text-[var(--brand-fg)] disabled:opacity-40
-                     flex items-center gap-1.5 shrink-0"
+          className="shrink-0"
         >
-          <Download className="w-3.5 h-3.5" />
           {/* จอแคบเหลือแต่ไอคอนทั้งสองปุ่ม (ท่าเดียวกับหน้าโปรโมชัน) ไม่งั้นชื่อหน้าถูกบีบหายทั้งแถบ */}
           {exporting ? 'กำลังสร้างไฟล์…' : <span className="hidden sm:inline">{`ส่งออก xlsx (${formatNumber(total)} คน)`}</span>}
-        </button>
+        </Button>
         <Button variant="primary" icon={Plus} onClick={() => setPicking(true)} className="shrink-0"
                 aria-label="เพิ่มผู้ติดต่อใหม่">
           <span className="hidden sm:inline">เพิ่มผู้ติดต่อใหม่</span>

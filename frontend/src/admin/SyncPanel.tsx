@@ -14,6 +14,7 @@ import {
   RotateCcw,
   MoreVertical,
 } from 'lucide-react';
+import { Button } from './Button';
 
 const BRAND = 'var(--brand-fg)';
 
@@ -504,15 +505,9 @@ export function SyncPanel() {
         </div>
         {/* Sync ทั้งหมด = incremental เสมอ — full sync มีให้เฉพาะรายรายการด้านล่าง
             (กวาดใหม่ทั้ง 3 resource พร้อมกันกินเวลานานเกินกว่าจะเป็นปุ่มกดพลาดได้) */}
-        <button
-          onClick={() => triggerSync('all')}
-          disabled={running}
-          className="flex items-center justify-center gap-1.5 px-3.5 btn-h text-white text-xs font-bold rounded-lg shadow-sm transition-all active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed shrink-0"
-          style={{ backgroundColor: 'var(--brand)' }}
-        >
-          {running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+        <Button variant="primary" icon={RefreshCw} busy={running} onClick={() => triggerSync('all')} className="shrink-0">
           {running ? 'กำลัง sync...' : 'Sync ทั้งหมด'}
-        </button>
+        </Button>
       </div>
 
       {/* Running banner */}
@@ -601,18 +596,14 @@ export function SyncPanel() {
                 </span>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
-                <button
+                <Button
+                  icon={RefreshCw}
+                  busy={isCurrent && !fullRun}
                   onClick={() => triggerSync([r.id])}
                   disabled={running}
-                  className="flex items-center gap-1 px-2.5 py-1 bg-card hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-md text-[11px] font-semibold shadow-sm transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {isCurrent && !fullRun ? (
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                  ) : (
-                    <RefreshCw className="w-3 h-3" />
-                  )}
                   Sync
-                </button>
+                </Button>
                 {/* Full sync — กวาดใหม่ทั้งหมด เสี่ยง/ใช้เวลานาน จึงเก็บไว้ในเมนู "..." ไม่ให้เด่นเท่า Sync ปกติ */}
                 <div className="relative" ref={menuFor === r.id ? menuRef : undefined}>
                   <button
@@ -846,15 +837,9 @@ export function SyncPanel() {
                 {form.updated_at ? `ตั้งค่าล่าสุด: ${formatThaiDateTime(form.updated_at)}` : 'ยังไม่เคยตั้งค่า'}
               </p>
             )}
-            <button
-              onClick={saveSettings}
-              disabled={isSaving}
-              className="flex items-center gap-1.5 px-4 btn-h text-[11px] font-bold text-white rounded-lg transition-all active:scale-95 shadow-sm disabled:opacity-60 shrink-0"
-              style={{ backgroundColor: 'var(--brand)' }}
-            >
-              {isSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+            <Button variant="primary" icon={Save} busy={isSaving} onClick={saveSettings} className="shrink-0">
               บันทึก
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -914,22 +899,18 @@ export function SyncPanel() {
             </div>
 
             <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-slate-100 bg-slate-50/60 rounded-b-2xl">
-              <button
-                type="button"
-                onClick={() => setFullTarget(null)}
-                className="px-4 btn-h text-xs font-semibold text-slate-600 hover:text-slate-800 border border-slate-200 hover:bg-slate-100 rounded-lg transition-all"
-              >
+              <Button type="button" onClick={() => setFullTarget(null)}>
                 ยกเลิก
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="warning"
                 type="button"
+                icon={RotateCcw}
                 onClick={confirmFullSync}
                 disabled={confirmText.trim() !== CONFIRM_WORD}
-                className="px-5 btn-h text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-lg transition-all active:scale-95 shadow-sm flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-amber-600"
               >
-                <RotateCcw className="w-3 h-3" />
                 เริ่ม full sync
-              </button>
+              </Button>
             </div>
           </div>
         </div>

@@ -1,5 +1,6 @@
 import React from 'react';
-import { AlertTriangle, CheckCircle2, Loader2, Save, RotateCcw } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Save, RotateCcw } from 'lucide-react';
+import { Button } from './Button';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  ท้ายฟอร์มตั้งค่าที่ "แก้แล้วกดบันทึก" — แถบสถานะ + แถบปุ่ม
@@ -68,24 +69,11 @@ export const SettingsSaveBar: React.FC<SaveBarProps> = ({ isDirty, isSaving, onS
     {isDirty && (
       <span className="mr-auto text-xs font-bold text-amber-600">⚠️ ยังไม่ได้บันทึก</span>
     )}
-    <button
-      type="button"
-      onClick={onSave}
-      disabled={!isDirty || isSaving}
-      className="inline-flex items-center gap-2 rounded-lg px-4 btn-h text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
-      style={{ backgroundColor: 'var(--brand)' }}
-    >
-      {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+    <Button variant="primary" type="button" icon={Save} busy={isSaving} onClick={onSave} disabled={!isDirty}>
       บันทึก
-    </button>
-    <button
-      type="button"
-      onClick={onReset}
-      disabled={!isDirty || isSaving}
-      className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 btn-h text-sm font-bold text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
-    >
-      <RotateCcw className="w-4 h-4" />
+    </Button>
+    <Button type="button" icon={RotateCcw} onClick={onReset} disabled={!isDirty || isSaving}>
       ย้อนกลับ
-    </button>
+    </Button>
   </div>
 );

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { PageHeader } from '../PageHeader';
+import { Button } from '../Button';
 import { DateInput } from '../DateInput';
 import {
   BarChart3, Download, Loader2, TrendingUp, TrendingDown, Minus, Info, RefreshCw,
@@ -331,25 +332,21 @@ export const Traffic: React.FC = () => {
     <div className="space-y-4">
       <PageHeader icon={BarChart3} title="รายงานการใช้งาน"
                   description="ปริมาณการใช้งานย้อนหลัง วัน / สัปดาห์ / เดือน / ปี">
-        <button
-          onClick={() => { void load(); }}
-          className="inline-flex items-center gap-1.5 px-3 btn-h rounded-xl border border-slate-200
-                     text-sm text-slate-600 hover:bg-slate-50 transition"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+        {/* ไม่ใช้ `busy` เพราะเดิมปุ่มนี้กดได้ระหว่างโหลด — ไอคอนหมุนเป็นแค่ตัวบอกสถานะ */}
+        <Button onClick={() => { void load(); }} aria-label="โหลดใหม่">
+          <RefreshCw className={`w-3.5 h-3.5 shrink-0 ${loading ? 'animate-spin' : ''}`} />
           <span className="hidden sm:inline">โหลดใหม่</span>
-        </button>
-        <button
+        </Button>
+        <Button
+          icon={Download}
+          busy={exporting}
           onClick={() => { void doExport(); }}
           disabled={exporting}
-          className="inline-flex items-center gap-1.5 px-3 btn-h rounded-xl text-sm font-medium text-white
-                     transition disabled:opacity-60"
-          style={{ background: BRAND }}
           title={exportError ?? 'ส่งออกเป็น CSV — รูปแบบที่ใช้ส่งมอบเมื่อมีหมายเรียก'}
+          aria-label="ส่งออก CSV"
         >
-          {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
           <span className="hidden sm:inline">ส่งออก CSV</span>
-        </button>
+        </Button>
       </PageHeader>
 
       {/* ── ตัวเลือกช่วงเวลา ── */}

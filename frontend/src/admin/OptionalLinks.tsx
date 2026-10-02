@@ -18,6 +18,7 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { PageHeader } from './PageHeader';
+import { Button } from './Button';
 import { FilterBar, FilterSearch, FilterSelect } from './FilterBar';
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
@@ -519,13 +520,15 @@ export const OptionalLinks: React.FC = () => {
         title="คู่สินค้าหลัก-สินค้าเสริม (Optional)"
         description="พ่วงเสนอขายสินค้าเสริมอัตโนมัติเมื่อเลือกสินค้าหลัก"
       >
-        <button
+        <Button
+          variant="primary"
+          icon={Plus}
           onClick={handleCreateOpen}
-          className="flex items-center justify-center gap-1.5 px-3.5 btn-h bg-[var(--brand)] hover:bg-[var(--brand-hover)] text-white text-sm font-bold rounded-xl shadow-sm transition-all active:scale-95 flex-shrink-0"
+          aria-label="สร้างคู่ใหม่"
+          className="flex-shrink-0"
         >
-          <Plus className="w-4 h-4" />
           <span className="hidden sm:inline">สร้างคู่ใหม่</span>
-        </button>
+        </Button>
       </PageHeader>
 
       <FilterBar
@@ -784,21 +787,19 @@ export const OptionalLinks: React.FC = () => {
               </div>
 
               <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-slate-100 bg-slate-50/60 rounded-b-2xl">
-                <button
+                <Button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 btn-h text-xs font-semibold text-slate-600 hover:text-slate-800 border border-slate-200 hover:bg-slate-100 rounded-lg transition-all"
                 >
                   ยกเลิก
-                </button>
-                <button
+                </Button>
+                <Button
                   type="submit"
-                  disabled={isSaving}
-                  className="px-5 btn-h text-xs font-bold text-white bg-[var(--brand)] hover:bg-[var(--brand-hover)] rounded-lg transition-all active:scale-95 shadow-sm flex items-center gap-1.5"
+                  variant="primary"
+                  busy={isSaving}
                 >
-                  {isSaving && <Loader2 className="w-3 h-3 animate-spin" />}
                   {editingLink ? 'บันทึกการแก้ไข' : 'บันทึกข้อมูล'}
-                </button>
+                </Button>
               </div>
             </form>
           </div>
@@ -819,22 +820,20 @@ export const OptionalLinks: React.FC = () => {
               </p>
             </div>
             <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-slate-100 bg-slate-50/60 rounded-b-2xl">
-              <button
+              <Button
                 type="button"
                 onClick={() => setIsDeleteConfirmOpen(false)}
-                className="px-4 btn-h text-xs font-semibold text-slate-600 hover:text-slate-800 border border-slate-200 hover:bg-slate-100 rounded-lg transition-all"
               >
                 ยกเลิก
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={handleDeleteConfirm}
-                disabled={isSaving}
-                className="px-5 btn-h text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-all active:scale-95 shadow-sm flex items-center gap-1.5"
+                variant="danger"
+                busy={isSaving}
               >
-                {isSaving && <Loader2 className="w-3 h-3 animate-spin" />}
                 ยืนยันการลบ
-              </button>
+              </Button>
             </div>
           </div>
         </div>

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { FilterBar, FilterSearch, FilterSelect, FilterDateRange } from './FilterBar';
 import { PageHeader } from './PageHeader';
+import { Button } from './Button';
 import {
   FileText,
   Download,
@@ -661,17 +662,17 @@ export const Quotations: React.FC = () => {
           </div>
         )}
         <div className="relative" ref={exportMenuRef}>
-          <button
+          <Button
+            variant="primary"
+            icon={FileSpreadsheet}
+            busy={isExporting}
             onClick={() => setExportMenuOpen(open => !open)}
-            disabled={isExporting}
-            className="flex items-center justify-center gap-1.5 px-3.5 btn-h bg-[var(--brand)] hover:bg-[var(--brand-hover)] disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl shadow-sm transition-all active:scale-95 flex-shrink-0"
+            aria-label="ส่งออก Odoo"
+            className="flex-shrink-0"
           >
-            {isExporting
-              ? <Loader2 className="w-4 h-4 animate-spin" />
-              : <FileSpreadsheet className="w-4 h-4" />}
             <span className="hidden sm:inline">ส่งออก Odoo</span>
             <ChevronDown className="w-3.5 h-3.5" />
-          </button>
+          </Button>
 
           {exportMenuOpen && (
             <div className="absolute right-0 top-full mt-2 z-30 w-[17rem] bg-card border border-slate-200 rounded-xl shadow-xl overflow-hidden">
@@ -916,14 +917,9 @@ export const Quotations: React.FC = () => {
                 “ใบของฉัน” แสดงเฉพาะใบที่คุณเสนอราคา{viewAll ? ' · ใบของคนอื่นอยู่ใน “ทั้งหมด”' : ''} — หรือลองปรับตัวกรองด้านบน
               </p>
               {viewAll && (
-                <button
-                  type="button"
-                  onClick={() => { setMineOnly(false); setCurrentPage(1); }}
-                  className="mt-1.5 flex items-center gap-1.5 px-3.5 btn-h bg-card border border-slate-200 hover:bg-slate-50 text-slate-700 text-sm font-bold rounded-xl shadow-sm transition-all active:scale-95"
-                >
-                  <Users className="w-4 h-4" />
+                <Button type="button" icon={Users} onClick={() => { setMineOnly(false); setCurrentPage(1); }} className="mt-1.5">
                   ดูใบทั้งหมด
-                </button>
+                </Button>
               )}
             </>
           ) : (

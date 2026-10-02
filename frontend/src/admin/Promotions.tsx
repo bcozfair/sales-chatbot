@@ -33,6 +33,7 @@ import {
   FileSpreadsheet
 } from 'lucide-react';
 import { PageHeader } from './PageHeader';
+import { Button } from './Button';
 
 interface Promotion {
   id: number;
@@ -864,21 +865,24 @@ export const Promotions: React.FC = () => {
         title="จัดการโปรโมชันส่วนลด"
         description="สร้าง ปรับปรุง หรือระงับโปรโมชันส่วนลดพิเศษสำหรับลูกค้า"
       >
-        <button
+        <Button
+          icon={FileSpreadsheet}
           onClick={() => handleExportCsv()}
-          className="flex items-center justify-center gap-1.5 px-3.5 btn-h bg-[var(--brand)] hover:bg-[var(--brand-hover)] text-white text-sm font-bold rounded-xl shadow-sm transition-all active:scale-95 flex-shrink-0"
+          aria-label="ส่งออก CSV"
+          className="flex-shrink-0"
         >
-          <FileSpreadsheet className="w-4 h-4" />
           <span className="hidden sm:inline">ส่งออก CSV</span>
-        </button>
-        <button
+        </Button>
+        <Button
           id="add-promo-btn"
+          variant="primary"
+          icon={Plus}
           onClick={handleCreateOpen}
-          className="flex items-center justify-center gap-1.5 px-3.5 btn-h bg-card hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl shadow-sm transition-all active:scale-95 flex-shrink-0"
+          aria-label="สร้างโปรโมชันใหม่"
+          className="flex-shrink-0"
         >
-          <Plus className="w-4 h-4" />
           <span className="hidden sm:inline">สร้างโปรโมชันใหม่</span>
-        </button>
+        </Button>
       </PageHeader>
 
       {/* Filters — การ์ดร่วมชุดเดียวกับหน้าประวัติใบเสนอราคา (admin/FilterBar.tsx)
@@ -1418,21 +1422,19 @@ export const Promotions: React.FC = () => {
 
               {/* Form Footer */}
               <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-3">
-                <button
+                <Button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-5 btn-h border border-slate-200 hover:border-slate-350 bg-card hover:bg-slate-50 text-slate-700 rounded-xl text-sm font-semibold transition-all active:scale-95"
                 >
                   ยกเลิก
-                </button>
-                <button
+                </Button>
+                <Button
                   type="submit"
-                  disabled={isSaving}
-                  className="flex items-center justify-center gap-2 px-6 btn-h bg-[var(--brand)] hover:bg-[var(--brand)]/95 text-white rounded-xl text-sm font-semibold shadow-md shadow-[var(--brand-fg)]/10 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                  variant="primary"
+                  busy={isSaving}
                 >
-                  {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                   บันทึก
-                </button>
+                </Button>
               </div>
             </form>
           </div>
@@ -1455,21 +1457,21 @@ export const Promotions: React.FC = () => {
               </div>
               
               <div className="pt-2 flex items-center justify-center gap-3">
-                <button
+                <Button
                   onClick={() => setIsDeleteConfirmOpen(false)}
                   disabled={isSaving}
-                  className="flex-1 btn-h border border-slate-200 hover:border-slate-350 bg-card hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-bold transition-all active:scale-95 disabled:opacity-50"
+                  className="flex-1"
                 >
                   ยกเลิก
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="danger"
                   onClick={handleDeleteConfirm}
-                  disabled={isSaving}
-                  className="flex-1 btn-h bg-red-600 hover:bg-red-550 text-white rounded-xl text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  busy={isSaving}
+                  className="flex-1"
                 >
-                  {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
                   ยืนยันลบ
-                </button>
+                </Button>
               </div>
             </div>
           </div>
@@ -1557,12 +1559,11 @@ export const Promotions: React.FC = () => {
               </div>
 
               <div className="pt-3 border-t border-slate-100 flex justify-end">
-                <button
+                <Button
                   onClick={() => setSelectedPromoForDetails(null)}
-                  className="px-4 btn-h bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition-all active:scale-95 cursor-pointer"
                 >
                   ปิดหน้าต่าง
-                </button>
+                </Button>
               </div>
             </div>
           </div>

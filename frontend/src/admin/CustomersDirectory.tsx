@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { PageHeader } from './PageHeader';
+import { Button } from './Button';
 import { DataFilterBar, DataSearch, FilterCombo, type FilterOption } from './DataFilterBar';
 import {
   TableCard, TableScroll, SortHeader, Pagination, EmptyState, SkeletonRows, ErrorBox,
@@ -327,16 +328,14 @@ export const CustomersDirectory: React.FC = () => {
           ? 'หนึ่งแถว = หนึ่งบริษัท (company_id) · คลิกแถวเพื่อดูผู้ติดต่อทั้งหมดและประวัติส่วนลด'
           : 'หนึ่งแถว = หนึ่งผู้ติดต่อ (ตรงกับตารางจริง) · ชื่อบริษัทซ้ำได้สูงสุด 12 แถว'}
         action={
-          <button
+          <Button
+            icon={Download}
             onClick={() => void onExport()}
             disabled={exporting || total === 0}
-            className="btn-h px-3 rounded-lg border border-slate-200 bg-card text-xs font-semibold text-slate-600
-                       hover:border-[var(--brand-border)] hover:text-[var(--brand-fg)] disabled:opacity-40
-                       flex items-center gap-1.5 shrink-0"
+            className="shrink-0"
           >
-            <Download className="w-3.5 h-3.5" />
             {exporting ? 'กำลังส่งออก…' : <>ส่งออก CSV<span className="hidden sm:inline">{` (${formatNumber(total)} ${unit}ที่กรองอยู่)`}</span></>}
-          </button>
+          </Button>
         }
       >
         {loading ? (
