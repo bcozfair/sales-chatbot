@@ -305,6 +305,7 @@ export const OdooProducts: React.FC = () => {
 
       <TableCard
         title={`${formatNumber(total)} รายการ`}
+        inline
         hint="ไฟล์ที่ส่งออก = รายการในกลุ่มที่เลือกอยู่"
       >
         {loading ? (
