@@ -14,7 +14,7 @@
 import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '../context/AuthContext';
-import { AlertTriangle, Building2, CheckCircle2, Edit2, Layers, Loader2, Plus, Search, Trash2 } from 'lucide-react';
+import { AlertTriangle, Building2, CheckCircle2, Pencil, Layers, Loader2, Plus, Search, Trash2 } from 'lucide-react';
 import { PageHeader } from './PageHeader';
 import { Modal } from './Modal';
 import { Button } from './Button';
@@ -275,7 +275,7 @@ export const QuotePmList: React.FC = () => {
   const actions = (row: QuotePmRow) => (
     <RowActions>
       <RowAction
-        icon={Edit2}
+        icon={Pencil}
         label="แก้หมายเหตุ"
         aria-label={`แก้หมายเหตุของ ${companyLabel(row)}`}
         onClick={() => setEditTarget(row)}
@@ -644,7 +644,7 @@ const EditModal: React.FC<{ target: QuotePmRow; token: string | null; onClose: (
   };
 
   return (
-    <Modal icon={Edit2} title="แก้หมายเหตุ" onClose={busy ? undefined : onClose}>
+    <Modal icon={Pencil} title="แก้หมายเหตุ" onClose={busy ? undefined : onClose}>
       <form onSubmit={handleSubmit} className="p-5 space-y-3">
         {error && <ErrorBox message={error} />}
         <div className="space-y-1">

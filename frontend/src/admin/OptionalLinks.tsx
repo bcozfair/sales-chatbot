@@ -4,7 +4,7 @@ import {
   Plus, 
   Search, 
   Filter, 
-  Edit2, 
+  Pencil, 
   Trash2, 
   X, 
   Loader2, 
@@ -585,7 +585,7 @@ export const OptionalLinks: React.FC = () => {
                     </td>
                     <td className="px-4 py-2.5">
                       <RowActions>
-                        <RowAction icon={Edit2} label="แก้ไขความสัมพันธ์" onClick={() => handleEditOpen(link)} />
+                        <RowAction icon={Pencil} label="แก้ไขความสัมพันธ์" onClick={() => handleEditOpen(link)} />
                         <RowAction icon={Trash2} label="ลบความสัมพันธ์" tone="danger" onClick={() => handleDeleteOpen(link)} />
                       </RowActions>
                     </td>

@@ -15,7 +15,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, BadgeCheck, Ban, CheckCircle2, ChevronDown, ChevronUp,
-  FileText, Pencil, RotateCcw, Save, Send, XCircle,
+  Pencil, Printer, RotateCcw, Save, Send, XCircle,
 } from 'lucide-react';
 import { useAuth, type Role } from '../context/AuthContext';
 import { PageHeader } from './PageHeader';
@@ -425,7 +425,7 @@ export const PriceApprovals: React.FC = () => {
                 rel="noreferrer"
                 className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-emerald-300 text-emerald-800 hover:bg-emerald-100"
               >
-                <FileText className="w-3.5 h-3.5" />
+                <Printer className="w-3.5 h-3.5" />
                 เปิดไฟล์ PDF
               </a>
             </div>

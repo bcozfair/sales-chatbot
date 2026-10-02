@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import {
   Ban,
   Plus,
-  Edit2,
+  Pencil,
   Trash2,
   Search,
   Loader2,
@@ -221,7 +221,7 @@ export const Blacklist: React.FC = () => {
                     </td>
                     <td className="px-4 py-2.5">
                       <RowActions>
-                        <RowAction icon={Edit2} label="แก้ไขขอบเขตและเหตุผล" onClick={() => setEditTarget(row)} />
+                        <RowAction icon={Pencil} label="แก้ไขขอบเขตและเหตุผล" onClick={() => setEditTarget(row)} />
                         <RowAction icon={Trash2} label="ปลดออกจากบัญชีระงับ" tone="danger" onClick={() => setDeleteTarget(row)} />
                       </RowActions>
                     </td>
@@ -720,7 +720,7 @@ const EditBlacklistModal: React.FC<{
   };
 
   return (
-    <ModalShell title="แก้ไขรายการระงับ" icon={<Edit2 className="w-4 h-4" />} onClose={onClose}>
+    <ModalShell title="แก้ไขรายการระงับ" icon={<Pencil className="w-4 h-4" />} onClose={onClose}>
       <form onSubmit={handleSubmit} className="p-5 space-y-3">
         {error && <ErrorBox message={error} />}
 

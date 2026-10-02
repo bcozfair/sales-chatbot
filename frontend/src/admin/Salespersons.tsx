@@ -13,7 +13,7 @@ import {
   Loader2, 
   Image as ImageIcon,
   UserCheck,
-  Edit2,
+  Pencil,
   X,
   FileSpreadsheet
 } from 'lucide-react';
@@ -576,7 +576,7 @@ export function Salespersons() {
                     {/* จัดการ */}
                     <td className="px-6 py-4">
                       <RowActions>
-                        <RowAction icon={Edit2} label="แก้ไขชื่อ / เบอร์โทร / รหัสพนักงาน" onClick={() => openEditModal(sp)} />
+                        <RowAction icon={Pencil} label="แก้ไขชื่อ / เบอร์โทร / รหัสพนักงาน" onClick={() => openEditModal(sp)} />
                         <RowAction icon={Trash2} label="ลบพนักงานขายออกจากระบบ" tone="danger" onClick={() => setDeletingSp(sp)} />
                       </RowActions>
                     </td>

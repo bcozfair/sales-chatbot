@@ -5,7 +5,7 @@ import { FilterBar, FilterSearch, FilterSelect, FilterDateRange } from './Filter
 import { 
   Tag, 
   Plus, 
-  Edit2, 
+  Pencil, 
   Trash2, 
   ToggleLeft, 
   ToggleRight, 
@@ -24,8 +24,7 @@ import {
   Download,
   Upload,
   Info,
-  Filter,
-  FileSpreadsheet
+  Filter
 } from 'lucide-react';
 import { PageHeader } from './PageHeader';
 import { Button } from './Button';
@@ -837,7 +836,7 @@ export const Promotions: React.FC = () => {
         description="สร้าง ปรับปรุง หรือระงับโปรโมชันส่วนลดพิเศษสำหรับลูกค้า"
       >
         <Button
-          icon={FileSpreadsheet}
+          icon={Download}
           onClick={() => handleExportCsv()}
           aria-label="ส่งออก csv"
           className="flex-shrink-0"
@@ -1056,7 +1055,7 @@ export const Promotions: React.FC = () => {
                     <td className="py-2.5 px-4 text-right">
                       <RowActions>
                         <RowAction icon={Download} label="ส่งออก csv แคมเปญนี้" onClick={() => handleExportCsv(promo.code)} />
-                        <RowAction icon={Edit2} label="แก้ไขข้อมูล" onClick={() => handleEditOpen(promo)} />
+                        <RowAction icon={Pencil} label="แก้ไขข้อมูล" onClick={() => handleEditOpen(promo)} />
                         <RowAction icon={Trash2} label="ลบโปรโมชัน" tone="danger" onClick={() => handleDeleteOpen(promo)} />
                       </RowActions>
                     </td>
