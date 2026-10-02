@@ -203,7 +203,7 @@ export const Users: React.FC = () => {
       <PageHeader
         icon={UsersIcon}
         title="ผู้ใช้งานระบบหลังบ้าน"
-        description="เพิ่ม ลบ แก้ไข และกำหนดสิทธิ์ผู้เข้าใช้ Admin Portal"
+        description="เพิ่ม ลบ แก้ไข และกำหนดสิทธิ์ผู้เข้าใช้ Primus Quotation System"
       >
         <Button variant="primary" icon={Plus} onClick={() => setFormMode({ kind: 'create' })} className="flex-shrink-0">
           <span>เพิ่มผู้ใช้</span>

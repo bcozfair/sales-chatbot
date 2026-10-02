@@ -77,7 +77,7 @@ page.on('pageerror', (e) => errors.push(e instanceof Error ? e.message : String(
 page.on('dialog', (d) => void d.accept());
 
 const text = () => page.evaluate(() => document.body.innerText);
-/** หัวของหน้าชีต ("ชีต TS-04") — แถบบนของแอปก็เป็น h1 ("Primus Admin") จึงเลือกตัวที่ขึ้นต้นด้วย "ชีต" */
+/** หัวของหน้าชีต ("ชีต TS-04") — แถบบนของแอปก็เป็น h1 ("Primus Quotation") จึงเลือกตัวที่ขึ้นต้นด้วย "ชีต" */
 const sheetTitle = () => page.evaluate(() =>
   ([...document.querySelectorAll('h1')].map((h) => (h as HTMLElement).innerText.trim()).find((t) => t.startsWith('ชีต')) ?? '').replace(/^ชีต\s*/, ''));
 const clickButton = async (label: RegExp, scope = 'body') => {
