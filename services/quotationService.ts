@@ -362,17 +362,38 @@ export function buildManualReasonDisplay(r: Omit<OdooManualReason, 'display_mess
  * ใบนี้ต้องแก้มือใน Odoo ก่อนไหม — อ่านจากข้อมูลของใบเองล้วน ๆ ไม่ยิง query เพิ่ม
  * (เรียกอยู่ใน transaction ของ confirmQuotationAtomic จึงห้ามยิงงานหนัก)
  *
- * วันนี้มีเหตุเดียวคือ **เครดิตที่แอดมินตั้งทับ** และเจ้าของเลือกไว้ชัดเมื่อ 2026-09-15 ว่าให้
+ * `payment_terms_override` = **เครดิตที่แอดมินตั้งทับ** — เจ้าของเลือกไว้ชัดเมื่อ 2026-09-15 ว่าให้
  * นับ **ทุกครั้งที่ทับ** ไม่ต้องดูว่าค่าที่ตั้งบังเอิญตรงกับ payment term ที่ Odoo รู้จักหรือไม่ —
  * ปลอดภัยกว่าและอธิบายให้คนหน้างานเข้าใจง่ายกว่า "ทับแล้วต้องดูอีกทีว่าตรงรายการไหม"
  * แลกกับคิวที่ยาวกว่าความจำเป็นบ้าง (วัด 2026-09-15: ใบที่ทับเครดิตทั้งฐานมี 2 ใบ)
  *
- * เหตุอีกสองชนิด (`new_contact` · `custom_product`) ยังไม่มีฟีเจอร์ที่สร้างมันได้ในวันนี้ —
- * จงใจประกาศชนิดไว้ก่อน เพื่อให้ตัวกรองหน้าประวัติกับเมนูส่งออกที่ทำรอบนี้ใช้ต่อได้เลย
- * โดยไม่ต้องแก้ schema หรือ backfill อีกรอบ
+ * `custom_product` (ตั้งแต่ 2026-10-01 · เฟส J3 ของ docs/plan-local-products.md §8) = บรรทัดที่
+ * snapshot ติดธง `is_local_product` — สินค้าที่แอดมินเพิ่มเองและ ณ ตอนออกใบยังไม่มีใน Odoo
+ * ⇒ ช่อง order_line/product ในไฟล์จะจับคู่ไม่ติด · หนึ่งเหตุต่อรหัส (รหัสซ้ำหลายบรรทัดนับครั้งเดียว)
+ * · อ่านจาก `item_details` (snapshot ดิบ — มี internal_reference ซึ่ง whitelist ของ `items` ตัดทิ้ง)
+ *   แล้วถอยไป `items` เมื่อไม่มี (หน้าพรีวิวส่ง snapshot มาเป็น item_details อยู่แล้ว)
+ * · ธงอยู่ใน snapshot ไม่ใช่ query ตอนนี้ เพราะฟังก์ชันนี้อยู่ใน transaction ของการยืนยัน
+ *
+ * `new_contact` ยังไม่มีฟีเจอร์ที่สร้างมันได้ — ประกาศชนิดไว้ก่อนเพื่อให้ตัวกรองหน้าประวัติ
+ * กับเมนูส่งออกใช้ต่อได้โดยไม่ต้องแก้ schema หรือ backfill อีกรอบ
  */
 export function buildOdooManualReview(enrichedQuote: any): { reasons: OdooManualReason[] } | null {
   const reasons: OdooManualReason[] = [];
+
+  // เรียงตาม ODOO_MANUAL_REASON_KINDS (new_contact → custom_product → payment_terms_override)
+  const lines: any[] = Array.isArray(enrichedQuote?.item_details)
+    ? enrichedQuote.item_details
+    : Array.isArray(enrichedQuote?.items) ? enrichedQuote.items : [];
+  const localRefs = new Set<string>();
+  for (const it of lines) {
+    if (it?.is_local_product !== true) continue;
+    const ref = String(it.internal_reference || it.model || it.product_code || '').trim();
+    if (ref) localRefs.add(ref);
+  }
+  for (const ref of localRefs) {
+    const r = { kind: 'custom_product' as const, field: 'order_line/product', value: ref };
+    reasons.push({ ...r, display_message: buildManualReasonDisplay(r) });
+  }
 
   const ptOverride = enrichedQuote?.customer_details?.payment_terms_override;
   if (ptOverride !== null && ptOverride !== undefined) {
@@ -613,8 +634,13 @@ export async function buildItemSnapshots(rawItems: any[], executor: DbExecutor =
     const code = item.product_code || item.model || item.code || '';
     let dbProduct: any = null;
     try {
+      // is_local_product อ่านผ่าน to_jsonb แทนชื่อคอลัมน์ตรง ๆ — ฐานที่ยังไม่มี products.source
+      // (ก่อน migration 2026-10-01_01 · restore จาก dump เก่า) ต้องได้ false ไม่ใช่ query ล้ม
+      // เพราะ query นี้ล้มเมื่อไหร่ ทุกบรรทัดของทุกใบตกไปใช้ค่าจาก item แทนฐานเงียบ ๆ
       const prodRes = await executor.query(
-        'SELECT product_template_id AS product_id, internal_reference, name, sales_description, brand, series, production FROM products WHERE model = $1 ORDER BY quantity_on_hand_unreserved DESC LIMIT 1',
+        `SELECT product_template_id AS product_id, internal_reference, name, sales_description, brand, series, production,
+                (to_jsonb(p) ->> 'source') IS NOT DISTINCT FROM 'local' AS is_local_product
+           FROM products p WHERE model = $1 ORDER BY quantity_on_hand_unreserved DESC LIMIT 1`,
         [code]
       );
       dbProduct = prodRes.rows[0];
@@ -661,7 +687,12 @@ export async function buildItemSnapshots(rawItems: any[], executor: DbExecutor =
       is_optional: !!item.is_optional,
       // ผูกสินค้าเสริมกลับไปยังสินค้าหลัก — ต้อง persist ลง snapshot ด้วย
       // ไม่งั้นหายตอน round-trip แล้วฝั่งแสดงผล (Flex/LIFF) แยกสินค้าพ่วงไม่ออก
-      linked_to_product_id: item.linked_to_product_id ?? null
+      linked_to_product_id: item.linked_to_product_id ?? null,
+      // สินค้าที่แอดมินเพิ่มเอง (products.source = 'local') — ยังไม่มีใน Odoo ⇒ ใบต้องเข้าคิวแก้มือ
+      // (buildOdooManualReview · docs/plan-local-products.md §8) · ข้อเท็จจริง ณ ตอนออกใบที่สร้างใหม่
+      // ไม่ได้ เพราะพอ Odoo มีสินค้าแล้วแถว local ถูกตัวกวาดลบ ⇒ ต้องอยู่ใน whitelist ของ legacyItems ด้วย
+      // หาแถวในฐานไม่เจอ = ถือค่าเดิมของบรรทัด (round-trip ผ่าน LIFF/PUT) เหมือนช่องอื่นในก้อนนี้
+      is_local_product: dbProduct ? dbProduct.is_local_product === true : item.is_local_product === true
     });
   }
   return snapshotItems;
@@ -2334,7 +2365,9 @@ export async function enrichQuotationData(quoteDb: any): Promise<any> {
         linked_to_product_id: item.linked_to_product_id || null,
         // ข้อเท็จจริงของบรรทัดนั้นที่สร้างใหม่ไม่ได้ (ใครเป็นคนใส่บรรทัดค่าบริการ) ⇒ ต้องอยู่ในลิสต์
         // ตกหล่นเมื่อไหร่ = ค่าบริการที่แอดมินเพิ่มกลายเป็นบรรทัดของกฎ แล้วโดนถอดทิ้งรอบถัดไป
-        is_manual_service: item.is_manual_service === true
+        is_manual_service: item.is_manual_service === true,
+        // สินค้าเพิ่มเองที่ยังไม่มีใน Odoo ณ ตอนออกใบ — สร้างใหม่ไม่ได้หลังแถว local ถูกกวาด (§8.1)
+        is_local_product: item.is_local_product === true
       };
     });
 
