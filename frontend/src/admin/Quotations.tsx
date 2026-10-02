@@ -1119,7 +1119,7 @@ export const Quotations: React.FC = () => {
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="p-2 bg-card hover:bg-emerald-50 text-slate-500 hover:text-emerald-600 border border-slate-200 hover:border-emerald-200 rounded-xl transition-all active:scale-95 shadow-sm"
-                                title="ดาวน์โหลด PDF"
+                                title="ส่งออก PDF"
                                 onClick={(e) => e.stopPropagation()}
                               >
                                 <Download className="w-4 h-4" />

@@ -4192,7 +4192,6 @@ export const QuoteRequest: React.FC = () => {
           <div className="flex flex-wrap items-center gap-3">
             <Button
               variant="primary"
-              size="md"
               icon={ArrowRight}
               busy={proposing}
               disabled={!text.trim() || (!canPickAnySp && !spUserId)}
@@ -4504,7 +4503,7 @@ export const QuoteRequest: React.FC = () => {
 
           <div className="flex flex-wrap items-center gap-2 ml-auto">
             {issued || requested ? (
-              <Button variant="primary" size="md" icon={FilePlus2} onClick={resetAll}>
+              <Button variant="primary" icon={FilePlus2} onClick={resetAll}>
                 เริ่มใบใหม่
               </Button>
             ) : (
@@ -4529,7 +4528,6 @@ export const QuoteRequest: React.FC = () => {
                     (docs/design.md หัวข้อสีปุ่ม: แดง = ของที่ย้อนยาก) */}
                 <Button
                   variant={needsApproval ? 'warning' : (blockers.length > 0 || manualReasons.length > 0 ? 'danger' : 'primary')}
-                  size="md"
                   icon={needsApproval ? Send : CheckCircle2}
                   busy={confirming}
                   disabled={!canIssue || strandedIds.length > 0}

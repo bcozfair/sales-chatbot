@@ -66,12 +66,11 @@ export const DeleteQuotationModal: React.FC<Props> = ({
       onClose={busy ? undefined : onCancel}
       footer={
         <>
-          <Button variant="neutral" size="md" disabled={busy} onClick={onCancel}>
+          <Button variant="neutral" disabled={busy} onClick={onCancel}>
             ยกเลิก
           </Button>
           <Button
             variant="danger"
-            size="md"
             icon={Trash2}
             busy={busy}
             disabled={!matched}
@@ -108,7 +107,7 @@ export const DeleteQuotationModal: React.FC<Props> = ({
             <ul className="pl-4 list-disc space-y-1 leading-relaxed">
               {hasNo ? (
                 <>
-                  <li>ใบนี้จะหายจากหน้าประวัติ และดาวน์โหลด PDF ไม่ได้อีก</li>
+                  <li>ใบนี้จะหายจากหน้าประวัติ และส่งออก PDF ไม่ได้อีก</li>
                   <li>เลขที่ <b>{quotationNo}</b> จะไม่ถูกนำกลับมาใช้ซ้ำ</li>
                 </>
               ) : (

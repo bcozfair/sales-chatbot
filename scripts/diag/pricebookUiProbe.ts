@@ -164,7 +164,7 @@ for (const width of [1280, 390]) {
   const body = await page.evaluate(() => document.body.innerText);
   ok(`${width}px — เข้าหน้าสมุดราคาได้`, body.includes('สมุดราคาที่ระบบใช้อยู่'), body.slice(0, 60).replace(/\n/g, ' '));
   ok(`${width}px — การ์ด "สมุดราคาที่ระบบใช้อยู่" ขึ้น`, body.includes('สมุดราคาที่ระบบใช้อยู่'));
-  ok(`${width}px — มีปุ่มดาวน์โหลดแม่แบบ`, body.includes('แม่แบบ'));
+  ok(`${width}px — มีปุ่มส่งออกแม่แบบ`, body.includes('แม่แบบ'));
   ok(`${width}px — มีปุ่มอัปโหลดราคาใหม่`, body.includes('อัปโหลด'));
   ok(`${width}px — หน้าไม่เลื่อนแนวนอน`, (await overflow()) <= 0, `เกิน ${await overflow()}px`);
 

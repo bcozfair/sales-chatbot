@@ -637,7 +637,7 @@ export const Promotions: React.FC = () => {
   const handleExportCsv = async (code?: string) => {
     if (!token) return;
     try {
-      showToast(code ? `กำลังเตรียมไฟล์ CSV สำหรับโปรโมชัน ${code}...` : 'กำลังเตรียมไฟล์ CSV สำหรับดาวน์โหลด...');
+      showToast(code ? `กำลังเตรียมไฟล์ CSV สำหรับโปรโมชัน ${code}...` : 'กำลังเตรียมไฟล์ CSV สำหรับส่งออก...');
       const urlPath = code 
         ? `/api/admin/promotions/export?code=${encodeURIComponent(code)}`
         : '/api/admin/promotions/export';
@@ -649,7 +649,7 @@ export const Promotions: React.FC = () => {
       });
       
       if (!response.ok) {
-        throw new Error('ไม่สามารถดาวน์โหลดไฟล์ได้');
+        throw new Error('ไม่สามารถส่งออกไฟล์ได้');
       }
 
       const blob = await response.blob();
@@ -663,10 +663,10 @@ export const Promotions: React.FC = () => {
       a.click();
       a.remove();
       window.URL.revokeObjectURL(url);
-      showToast('ดาวน์โหลดไฟล์ CSV สำเร็จ');
+      showToast('ส่งออกไฟล์ CSV สำเร็จ');
     } catch (err: unknown) {
       console.error('Export CSV error:', err);
-      const errMsg = err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการดาวน์โหลด CSV';
+      const errMsg = err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการส่งออก CSV';
       setError(errMsg);
     }
   };

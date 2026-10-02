@@ -142,7 +142,7 @@ export const PriceBook: React.FC<Props> = ({ canQuote, onOpenQuote, openAt }) =>
     setError('');
     try {
       const res = await fetch('/api/admin/pricebook/template', { headers: authHeaders });
-      if (!res.ok) throw new Error((await res.json())?.error ?? 'ดาวน์โหลดไม่สำเร็จ');
+      if (!res.ok) throw new Error((await res.json())?.error ?? 'ส่งออกไม่สำเร็จ');
       const blob = await res.blob();
       // ชื่อไฟล์ภาษาไทยมากับ Content-Disposition (RFC 5987) — ถอดออกมาใช้ ไม่ใช่ตั้งชื่อเอง
       const cd = res.headers.get('Content-Disposition') ?? '';
@@ -272,7 +272,7 @@ export const PriceBook: React.FC<Props> = ({ canQuote, onOpenQuote, openAt }) =>
         )}
         <Button icon={Download} busy={downloading} onClick={() => void downloadTemplate()}>
           <span className="sm:hidden">แม่แบบ</span>
-          <span className="hidden sm:inline">ดาวน์โหลดแม่แบบราคา</span>
+          <span className="hidden sm:inline">ส่งออกแม่แบบราคา</span>
         </Button>
         <Button variant="primary" icon={Upload} onClick={() => setImporting(true)}>
           <span className="sm:hidden">อัปโหลด</span>

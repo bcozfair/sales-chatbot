@@ -227,16 +227,16 @@ export const OdooContacts: React.FC = () => {
         <button
           onClick={() => void onExport()}
           disabled={exporting || total === 0}
-          aria-label={`ดาวน์โหลด xlsx ${formatNumber(total)} คน`}
+          aria-label={`ส่งออก xlsx ${formatNumber(total)} คน`}
           className="btn-h px-3 rounded-lg border border-slate-200 bg-card text-xs font-semibold text-slate-600
                      hover:border-[var(--brand-border)] hover:text-[var(--brand-fg)] disabled:opacity-40
                      flex items-center gap-1.5 shrink-0"
         >
           <Download className="w-3.5 h-3.5" />
           {/* จอแคบเหลือแต่ไอคอนทั้งสองปุ่ม (ท่าเดียวกับหน้าโปรโมชัน) ไม่งั้นชื่อหน้าถูกบีบหายทั้งแถบ */}
-          {exporting ? 'กำลังสร้างไฟล์…' : <span className="hidden sm:inline">{`ดาวน์โหลด xlsx (${formatNumber(total)} คน)`}</span>}
+          {exporting ? 'กำลังสร้างไฟล์…' : <span className="hidden sm:inline">{`ส่งออก xlsx (${formatNumber(total)} คน)`}</span>}
         </button>
-        <Button variant="primary" size="md" icon={Plus} onClick={() => setPicking(true)} className="shrink-0"
+        <Button variant="primary" icon={Plus} onClick={() => setPicking(true)} className="shrink-0"
                 aria-label="เพิ่มผู้ติดต่อใหม่">
           <span className="hidden sm:inline">เพิ่มผู้ติดต่อใหม่</span>
         </Button>
@@ -246,7 +246,7 @@ export const OdooContacts: React.FC = () => {
       <div className="flex items-start gap-2 px-4 py-3 rounded-2xl border border-blue-200 bg-blue-50 text-xs text-blue-800">
         <Info className="w-4 h-4 shrink-0 mt-0.5" />
         <p className="leading-relaxed">
-          กดดาวน์โหลดไฟล์ → เปิดแล้วคีย์เข้า Odoo ทีละคน → รอบซิงก์ถัดไประบบจะเห็นเองว่าใครเข้าไปแล้ว
+          กดส่งออกไฟล์ → เปิดแล้วคีย์เข้า Odoo ทีละคน → รอบซิงก์ถัดไประบบจะเห็นเองว่าใครเข้าไปแล้ว
           แล้วย้ายออกจากรายการนี้ให้ <span className="text-blue-600">(ไม่ต้องกลับมากดอะไรที่นี่อีก)</span>
         </p>
       </div>
@@ -288,8 +288,8 @@ export const OdooContacts: React.FC = () => {
       <TableCard
         title={`${formatNumber(total)} คน`}
         hint={filter === 'not_matched'
-          ? 'ค่าตั้งต้น = เฉพาะคนที่ยังไม่มีใน Odoo · ไฟล์ที่ดาวน์โหลดตามตัวกรองนี้เหมือนกัน'
-          : 'ไฟล์ที่ดาวน์โหลดตามตัวกรองที่เลือกอยู่'}
+          ? 'ค่าตั้งต้น = เฉพาะคนที่ยังไม่มีใน Odoo · ไฟล์ที่ส่งออกตามตัวกรองนี้เหมือนกัน'
+          : 'ไฟล์ที่ส่งออกตามตัวกรองที่เลือกอยู่'}
       >
         {loading ? (
           <SkeletonRows rows={8} />
