@@ -1642,19 +1642,23 @@ const ProductSearchBox: React.FC<{
                 ))}
               </div>
             )}
+            {/* พื้นทึบอยู่ที่ตัวห่อ sticky ส่วนสีตอนชี้อยู่ที่ปุ่มข้างใน — `--brand-soft` โปร่ง 90%
+                ถ้าเอาไปแทนพื้นของตัว sticky เอง รายการที่เลื่อนอยู่ข้างใต้จะโผล่ทะลุตอนเอาเมาส์ชี้ */}
             {onAddNew && !loading && (
-              <button
-                type="button"
-                onClick={() => {
-                  setOpen(false);
-                  onAddNew(query.trim());
-                }}
-                className="sticky bottom-0 w-full flex items-center gap-2 px-3.5 py-2.5 border-t border-slate-200 bg-slate-50 text-left text-xs font-bold text-[var(--brand-fg)] hover:bg-[var(--brand-soft)] transition-colors"
-              >
-                <Plus className="w-3.5 h-3.5 shrink-0" />
-                <span className="shrink-0">เพิ่มสินค้าใหม่</span>
-                <span className="min-w-0 truncate font-semibold text-slate-700">&ldquo;{query.trim()}&rdquo;</span>
-              </button>
+              <div className="sticky bottom-0 z-10 border-t border-slate-200 bg-slate-50">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpen(false);
+                    onAddNew(query.trim());
+                  }}
+                  className="w-full flex items-center gap-2 px-3.5 py-2.5 text-left text-xs font-bold text-[var(--brand-fg)] hover:bg-[var(--brand-soft)] transition-colors"
+                >
+                  <Plus className="w-3.5 h-3.5 shrink-0" />
+                  <span className="shrink-0">เพิ่มสินค้าใหม่</span>
+                  <span className="min-w-0 truncate font-semibold text-slate-700">&ldquo;{query.trim()}&rdquo;</span>
+                </button>
+              </div>
             )}
           </div>,
           document.body,
