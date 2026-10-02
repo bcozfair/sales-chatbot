@@ -8,6 +8,7 @@ import { errMsg, formatNumber, formatDate, thCls, theadRowCls, tdCls, inputCls, 
 import { Modal } from './Modal';
 import { Button } from './Button';
 import { LocalProductModal } from './LocalProductModal';
+import { notifyBadgesChanged } from './badgeRefresh';
 
 /**
  * หน้า "สินค้าเพิ่มเอง" — คิวงานค้างของโมดูล `local_products` (docs/plan-local-products.md J4)
@@ -219,6 +220,7 @@ export const OdooProducts: React.FC<{ canManage?: boolean }> = ({ canManage = fa
         throw new Error(body?.error || `HTTP ${res.status}`);
       }
       setDelRow(null);
+      notifyBadgesChanged();   // ตัวเลขข้างเมนูของหน้านี้ลดตาม — ไม่ต้องรอเปลี่ยนหน้า
       await load();
     } catch (e) {
       setDelError(errMsg(e));

@@ -7,6 +7,7 @@ import { TableCard, TableScroll, Pagination, EmptyState, SkeletonRows, ErrorBox,
 import { errMsg, formatNumber, formatDate, theadRowCls, thCls, tdCls, inputCls, downloadCsv } from './logs/format';
 import { LocalContactModal, DeleteContactModal, PickCompanyModal, type CompanyPick } from './LocalContactModal';
 import { Button } from './Button';
+import { notifyBadgesChanged } from './badgeRefresh';
 
 /**
  * หน้า "ผู้ติดต่อเพิ่มเอง" — คิวงานค้างของโมดูล `local_contacts` (แผน §5.2)
@@ -176,6 +177,7 @@ export const OdooContacts: React.FC = () => {
         throw new Error(body?.error || `HTTP ${res.status}`);
       }
       setDelRow(null);
+      notifyBadgesChanged();   // ตัวเลขข้างเมนูของหน้านี้ลดตาม — ไม่ต้องรอเปลี่ยนหน้า
       await load();
     } catch (e) {
       setDelError(errMsg(e));

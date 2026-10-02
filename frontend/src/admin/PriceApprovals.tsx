@@ -25,6 +25,7 @@ import { EmptyState, ErrorBox, SkeletonRows, TableCard } from './logs/ui';
 import { APPROVAL_RELOAD_KEY, type ApprovalReloadPayload } from './QuoteRequest';
 import { TAB_SLUG } from './navHash';
 import { describeApiError } from './apiError';
+import { notifyBadgesChanged } from './badgeRefresh';
 
 type ApprovalStatus = 'pending' | 'approved' | 'rejected';
 
@@ -229,6 +230,9 @@ export const PriceApprovals: React.FC = () => {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(String(data?.error || 'ทำรายการไม่สำเร็จ'));
+      // อนุมัติ/ไม่อนุมัติ/ยกเลิก ล้วนย้ายคำขอออกจาก "รออนุมัติ" หรือ "ถูกตีกลับ" ⇒ ตัวเลขข้างเมนูต้องตาม
+      // (อนุมัติแล้วบางใบออกไม่ได้ก็นับ — สถานะของคำขอเปลี่ยนไปแล้ว)
+      notifyBadgesChanged();
       return data;
     } finally {
       setBusyId(null);

@@ -42,6 +42,7 @@ import { Plus, Pencil, Trash2, Lock, Loader2, Building2, Search } from 'lucide-r
 import { Modal } from './Modal';
 import { Button } from './Button';
 import { describeApiError } from './apiError';
+import { notifyBadgesChanged } from './badgeRefresh';
 
 /** แถวที่ server คืนกลับมา — เท่าที่หน้าจอใช้ */
 interface ContactBrief {
@@ -174,6 +175,7 @@ export const LocalContactModal: React.FC<Props> = ({
         return;
       }
       const saved: ContactBrief = body.contact;
+      notifyBadgesChanged();   // ตัวเลขข้างเมนู "ผู้ติดต่อเพิ่มเอง"
       onPicked(Number(saved.contact_id), String(saved.contact_name));
     } catch {
       setError('ติดต่อเซิร์ฟเวอร์ไม่ได้ — ลองใหม่อีกครั้ง');
