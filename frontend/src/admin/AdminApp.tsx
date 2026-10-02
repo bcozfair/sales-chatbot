@@ -31,6 +31,7 @@ import { PriceBook } from './pricingLab/PriceBook';
 import { LogsShell } from './logs/LogsShell';
 import type { LogTab } from './logs/LogsShell';
 import { useAdminRoute, type MainTab, type SubTab } from './navHash';
+import { BADGES_CHANGED_EVENT, BADGE_POLL_MS, BADGE_COALESCE_MS } from './badgeRefresh';
 import {
   LogOut,
   User as UserIcon,
@@ -256,6 +257,23 @@ const PAGE_TITLES: Record<MainTab, string> = {
   settings: 'ตั้งค่าเงื่อนไข & กฎ',
 };
 
+type BadgeTab = 'approvals' | 'odoocontacts' | 'odooproducts';
+/**
+ * ตัวเลขข้างเมนู — หนึ่งแถวต่อหนึ่งเมนู · ทุกตัวใช้เส้น `/count` ที่นับอย่างเดียว
+ * จังหวะนับใหม่อยู่ใน effect เดียวของ `AdminContent` · หน้าที่เขียนแล้วตัวเลขอาจเปลี่ยนให้เรียก `notifyBadgesChanged()`
+ */
+const BADGE_SOURCES: { tab: BadgeTab; url: string; pick: (data: Record<string, unknown> | null) => number }[] = [
+  // "อนุมัติราคา" — ถ้าไม่มีตัวเลขตรงนี้ คำขอที่รออยู่จะไม่มีอะไรบอกใครเลย
+  // · ผู้อนุมัติได้ "รออนุมัติกี่ชุด" · คนขอได้ "ของฉันถูกตีกลับกี่ชุด" (server เป็นคนตัดสินว่าใครเห็นอะไร)
+  { tab: 'approvals', url: '/api/admin/approvals/count',
+    pick: (d) => Number(d?.pending ?? 0) + Number(d?.rejected ?? 0) },
+  // "ผู้ติดต่อเพิ่มเอง" — จำนวนคนที่ยังไม่มีใน Odoo (เจ้าของเคาะ 2026-09-21) · ไม่ใช้เส้นรายการ
+  // ที่ต้องคำนวณชื่อคล้ายทุกแถว
+  { tab: 'odoocontacts', url: '/api/admin/webquote/contacts/count', pick: (d) => Number(d?.pending ?? 0) },
+  // "สินค้าเพิ่มเอง" — สินค้าที่ยังไม่มีใน Odoo · เหตุผลเดียวกับเมนูผู้ติดต่อ
+  { tab: 'odooproducts', url: '/api/admin/webquote/products/count', pick: (d) => Number(d?.pending ?? 0) },
+];
+
 function AdminContent() {
   const { isAuthenticated, isLoading, user, token, logout } = useAuth();
   // แท็บที่เปิดอยู่มาจาก URL hash — refresh แล้วต้องอยู่หน้าเดิม ไม่เด้งกลับแผงควบคุม
@@ -344,73 +362,65 @@ function AdminContent() {
   ];
 
   /**
-   * ตัวเลขข้างเมนู "อนุมัติราคา" — **แทนการแจ้งเตือน** เพราะระบบนี้ห้ามใช้ LINE push
-   * (กฎเหล็กของ CLAUDE.md) ⇒ ถ้าไม่มีตัวเลขตรงนี้ คำขอที่รออยู่จะไม่มีอะไรบอกใครเลย
-   * · ผู้อนุมัติได้ "รออนุมัติกี่ชุด" · คนขอได้ "ของฉันถูกตีกลับกี่ชุด" (server เป็นคนตัดสินว่าใครเห็นอะไร)
-   */
-  const [approvalBadge, setApprovalBadge] = useState(0);
-  const showsApprovals = visibleTabs.includes('approvals');
-  useEffect(() => {
-    if (!token || !showsApprovals) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch('/api/admin/approvals/count', { headers: { Authorization: `Bearer ${token}` } });
-        if (!res.ok) return;
-        const data = await res.json();
-        const n = Number(data?.pending ?? 0) + Number(data?.rejected ?? 0);
-        if (!cancelled) setApprovalBadge(Number.isFinite(n) ? n : 0);
-      } catch {
-        // นับไม่ได้ไม่ใช่เหตุให้ทั้งเมนูพัง — ไม่มีตัวเลขก็ยังกดเข้าไปดูได้
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [token, showsApprovals, activeTab]);
-
-  /**
-   * ตัวเลขข้างเมนู "ผู้ติดต่อเพิ่มเอง" — จำนวนคนที่ยังไม่มีใน Odoo (เจ้าของเคาะ 2026-09-21)
+   * ตัวเลขข้างเมนู — **แทนการแจ้งเตือน** เพราะระบบนี้ห้ามใช้ LINE push (เหตุผลรายเมนูอยู่ที่ `BADGE_SOURCES`)
    *
-   * เหตุผลเดียวกับ badge ของ "อนุมัติราคา": ระบบนี้ห้ามใช้ LINE push ⇒ ถ้าไม่มีตัวเลขตรงนี้
-   * งานค้างจะไม่มีอะไรบอกใครเลย · ใช้เส้น `/count` ที่นับอย่างเดียว ไม่ใช่เส้นรายการที่ต้องคำนวณชื่อคล้ายทุกแถว
+   * effect เดียวนับทุกป้ายที่คนนี้เห็น (ป้ายของเมนูที่มองไม่เห็นไม่ถูกถาม) · นับใหม่เมื่อ: เปลี่ยนแท็บ ·
+   * หน้าใดเพิ่งเขียน (`notifyBadgesChanged`) · แท็บกลับมาเห็น/หน้าต่างได้โฟกัส · ทุก `BADGE_POLL_MS` ตอนเห็นหน้า
+   * — เหตุผลอยู่หัวไฟล์ badgeRefresh.ts · กติกาของรอบ: สัญญาณติด ๆ กันรวมเป็นรอบเดียว · ระหว่างรอบยังไม่จบ
+   * สัญญาณใหม่ = นับอีกรอบหลังจบ (ไม่ยิงซ้อน ⇒ คำตอบเก่าทับคำตอบใหม่ไม่ได้) · effect ถูกล้าง = ยกเลิกคำขอที่ค้าง
+   * และไม่ setState อีก
    */
-  const [odooContactBadge, setOdooContactBadge] = useState(0);
-  const showsOdooContacts = visibleTabs.includes('odoocontacts');
+  const [badgeCounts, setBadgeCounts] = useState<Record<BadgeTab, number>>({ approvals: 0, odoocontacts: 0, odooproducts: 0 });
+  // สตริงแทน array — dep ของ effect เทียบด้วยค่า (array ใหม่ทุก render = effect วิ่งทุก render)
+  const shownBadges = BADGE_SOURCES.filter((b) => visibleTabs.includes(b.tab)).map((b) => b.tab).join(' ');
   useEffect(() => {
-    if (!token || !showsOdooContacts) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch('/api/admin/webquote/contacts/count', { headers: { Authorization: `Bearer ${token}` } });
-        if (!res.ok) return;
-        const data = await res.json();
-        const n = Number(data?.pending ?? 0);
-        if (!cancelled) setOdooContactBadge(Number.isFinite(n) ? n : 0);
-      } catch {
-        // นับไม่ได้ไม่ใช่เหตุให้ทั้งเมนูพัง — ไม่มีตัวเลขก็ยังกดเข้าไปดูได้
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [token, showsOdooContacts, activeTab]);
-
-  /** ตัวเลขข้างเมนู "สินค้าเพิ่มเอง" — สินค้าที่ยังไม่มีใน Odoo · เหตุผลและท่าเดียวกับเมนูผู้ติดต่อข้างบน */
-  const [odooProductBadge, setOdooProductBadge] = useState(0);
-  const showsOdooProducts = visibleTabs.includes('odooproducts');
-  useEffect(() => {
-    if (!token || !showsOdooProducts) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch('/api/admin/webquote/products/count', { headers: { Authorization: `Bearer ${token}` } });
-        if (!res.ok) return;
-        const data = await res.json();
-        const n = Number(data?.pending ?? 0);
-        if (!cancelled) setOdooProductBadge(Number.isFinite(n) ? n : 0);
-      } catch {
-        // นับไม่ได้ไม่ใช่เหตุให้ทั้งเมนูพัง — ไม่มีตัวเลขก็ยังกดเข้าไปดูได้
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [token, showsOdooProducts, activeTab]);
+    if (!token || !shownBadges) return;
+    const sources = BADGE_SOURCES.filter((b) => shownBadges.split(' ').includes(b.tab));
+    const ctrl = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let running = false;
+    let again = false;
+    const round = async () => {
+      running = true;
+      again = false;
+      // แต่ละป้ายล้มแยกกัน — เส้นหนึ่งล้ม อีกสองป้ายยังได้ค่าใหม่
+      await Promise.all(sources.map(async (b) => {
+        try {
+          const res = await fetch(b.url, { headers: { Authorization: `Bearer ${token}` }, signal: ctrl.signal });
+          if (!res.ok) return;
+          const n = b.pick(await res.json());
+          if (ctrl.signal.aborted) return;
+          const v = Number.isFinite(n) ? n : 0;
+          setBadgeCounts((cur) => (cur[b.tab] === v ? cur : { ...cur, [b.tab]: v }));
+        } catch {
+          // นับไม่ได้ไม่ใช่เหตุให้ทั้งเมนูพัง — ไม่มีตัวเลขก็ยังกดเข้าไปดูได้ (รวมคำขอที่ถูกยกเลิกตอนล้าง effect)
+        }
+      }));
+      running = false;
+      if (again) schedule();
+    };
+    const schedule = () => {
+      if (ctrl.signal.aborted) return;
+      if (running) { again = true; return; }
+      if (timer !== null) return;
+      timer = setTimeout(() => { timer = null; void round(); }, BADGE_COALESCE_MS);
+    };
+    const onVisible = () => { if (document.visibilityState === 'visible') schedule(); };
+    // แท็บซ่อน = ข้ามรอบ (ไม่เขียน api_logs เปล่า ๆ) · กลับมาเห็นเมื่อไหร่ visibilitychange นับให้เอง
+    const poll = setInterval(onVisible, BADGE_POLL_MS);
+    window.addEventListener(BADGES_CHANGED_EVENT, schedule);
+    window.addEventListener('focus', schedule);
+    document.addEventListener('visibilitychange', onVisible);
+    schedule();
+    return () => {
+      ctrl.abort();
+      if (timer !== null) clearTimeout(timer);
+      clearInterval(poll);
+      window.removeEventListener(BADGES_CHANGED_EVENT, schedule);
+      window.removeEventListener('focus', schedule);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [token, shownBadges, activeTab]);
 
   // แท็บที่แสดงจริง — activeTab ตั้งต้นเป็น 'dashboard' ซึ่ง role 'user' ไม่มีสิทธิ์เห็น
   // คำนวณตอน render แทนการ setState ใน effect: ไม่มี re-render รอบพิเศษ และครอบเคสถูกลดสิทธิ์
@@ -521,10 +531,7 @@ function AdminContent() {
     const Icon = item.icon;
     const active = isItemActive(item);
     // สามเมนูมีตัวเลขค้างของตัวเอง — อ่านจากแมปที่เดียว ไม่งั้นทุกจุดที่วาดป้ายต้องมี if ของตัวเอง
-    const badge = item.tab === 'approvals' ? approvalBadge
-      : item.tab === 'odoocontacts' ? odooContactBadge
-        : item.tab === 'odooproducts' ? odooProductBadge
-          : 0;
+    const badge = BADGE_SOURCES.some((b) => b.tab === item.tab) ? badgeCounts[item.tab as BadgeTab] : 0;
     const pendingLabel = badge > 0 ? `${item.label} (${badge} รายการ)` : item.label;
     // ความมนอยู่ในบรรทัดของแต่ละแบบ ไม่ใช่ในบรรทัดฐาน — `rounded-lg` กับ `rounded-xl` ที่อยู่
     // ในคลาสเดียวกัน ตัวที่ชนะคือตัวที่ Tailwind เรียงไว้ทีหลังใน CSS ไม่ใช่ตัวที่พิมพ์ทีหลัง

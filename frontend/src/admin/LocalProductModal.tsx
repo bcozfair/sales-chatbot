@@ -40,6 +40,7 @@ import { Plus, Pencil, Calculator, Loader2, Lock, Search, ChevronRight } from 'l
 import { Modal } from './Modal';
 import { Button } from './Button';
 import { describeApiError } from './apiError';
+import { notifyBadgesChanged } from './badgeRefresh';
 import type { PickedProduct } from './localProducts';
 
 interface ParentBrief {
@@ -514,6 +515,7 @@ export const LocalProductModal: React.FC<Props> = ({
         return;
       }
       const p = body.product;
+      notifyBadgesChanged();   // ตัวเลขข้างเมนู "สินค้าเพิ่มเอง"
       onSaved(
         { product_id: Number(p.product_template_id), model: String(p.model), name: String(p.name), price: Number(p.sales_price), stock: 0 },
         String(p.internal_reference ?? ''),
