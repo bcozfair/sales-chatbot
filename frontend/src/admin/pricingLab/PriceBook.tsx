@@ -4,7 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { PageHeader } from '../PageHeader';
 import { Button } from '../Button';
 import { TableCard, TableScroll, ErrorBox } from '../logs/ui';
-import { errMsg, formatDateTime } from '../logs/format';
+import { errMsg, formatDateTime, theadRowCls, thBaseCls } from '../logs/format';
 import { BookImportModal } from './BookImportModal';
 import { ModelPriceEditor } from './ModelPriceEditor';
 import { SheetEditor } from './SheetEditor';
@@ -335,14 +335,14 @@ export const PriceBook: React.FC<Props> = ({ canQuote, onOpenQuote, openAt }) =>
           <TableScroll>
             <table className="w-full text-xs hidden sm:table">
               <thead>
-                <tr className="text-left text-slate-500 border-b border-slate-100">
-                  <th className="px-4 py-2 font-semibold">ชีต</th>
-                  <th className="px-4 py-2 font-semibold">รุ่นในชีต</th>
-                  <th className="px-4 py-2 font-semibold">ใช้ราคาเดียวกัน</th>
-                  <th className="px-4 py-2 font-semibold text-right" title="จำนวนสินค้าในฐานที่หัวรหัสตกรุ่นในชีตนี้ — แก้ราคาชีตนี้แล้วกระทบรายการเหล่านี้">
+                <tr className={theadRowCls}>
+                  <th className={`${thBaseCls} px-4 py-3`}>ชีต</th>
+                  <th className={`${thBaseCls} px-4 py-3`}>รุ่นในชีต</th>
+                  <th className={`${thBaseCls} px-4 py-3`}>ใช้ราคาเดียวกัน</th>
+                  <th className={`${thBaseCls} px-4 py-3 text-right`} title="จำนวนสินค้าในฐานที่หัวรหัสตกรุ่นในชีตนี้ — แก้ราคาชีตนี้แล้วกระทบรายการเหล่านี้">
                     สินค้าที่ครอบ
                   </th>
-                  <th className="px-4 py-2" />
+                  <th className={`${thBaseCls} px-4 py-3 text-right`}>การจัดการ</th>
                 </tr>
               </thead>
               <tbody>

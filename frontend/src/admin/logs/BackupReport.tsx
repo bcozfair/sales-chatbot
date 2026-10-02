@@ -5,7 +5,7 @@ import { Button } from '../Button';
 import { DatabaseBackup, AlertTriangle, CheckCircle2, XCircle, RefreshCw } from 'lucide-react';
 import { useHashState } from './useHashState';
 import { TAB_SLUG } from '../navHash';
-import { errMsg, formatDateTime, relativeTime, formatBytes, formatMs, formatNumber, thCls, tdCls, numCls } from './format';
+import { errMsg, formatDateTime, relativeTime, formatBytes, formatMs, formatNumber, theadRowCls, thCls, tdCls, numCls } from './format';
 import { EmptyState, ErrorBox, Pagination, SkeletonRows, StatTile, TableCard, TableScroll } from './ui';
 
 /**
@@ -224,7 +224,7 @@ export const BackupReport: React.FC = () => {
         <TableScroll>
           <table className="w-full text-sm">
             <thead>
-              <tr>
+              <tr className={theadRowCls}>
                 <th className={thCls}>เวลา</th>
                 <th className={thCls}>ผล</th>
                 <th className={`${thCls} ${numCls}`}>ขนาด</th>

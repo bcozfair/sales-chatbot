@@ -5,6 +5,7 @@ import { PageHeader } from './PageHeader';
 import { Button } from './Button';
 import { SettingsStatus, SettingsSaveBar } from './SettingsSaveBar';
 import { ROLE_LABEL } from './roles';
+import { theadRowCls, thBaseCls } from './logs/format';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  สิทธิ์ตามบทบาท — จอเดียวที่ตั้งเมทริกซ์ role × ความสามารถ (docs/plan-role-permissions.md)
@@ -335,13 +336,13 @@ export function RolePermissions() {
         <div className="hidden sm:block overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 bg-slate-50/60">
-                <th className="px-3.5 py-2.5 text-left text-xs font-bold text-slate-600">ความสามารถ</th>
+              <tr className={theadRowCls}>
+                <th className={`${thBaseCls} px-3.5 py-3`}>ความสามารถ</th>
                 {dto.roles.map((role) => (
                   <th
                     key={role}
-                    className={`w-[132px] px-2 py-2.5 text-center text-xs font-bold ${
-                      role === LOCKED_ROLE ? 'text-slate-400' : 'text-slate-600'
+                    className={`${thBaseCls} w-[132px] px-2 py-3 text-center ${
+                      role === LOCKED_ROLE ? '!text-slate-400' : ''
                     }`}
                   >
                     <span className="inline-flex items-center gap-1">
@@ -350,7 +351,7 @@ export function RolePermissions() {
                     </span>
                   </th>
                 ))}
-                <th className="w-[92px] px-2 py-2.5" />
+                <th className={`${thBaseCls} w-[92px] px-2 py-3 text-right`}>การจัดการ</th>
               </tr>
             </thead>
             <tbody>

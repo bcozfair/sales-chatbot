@@ -21,19 +21,16 @@ import {
   Building2,
   Package,
   ShoppingCart,
-  ArrowUpDown,
-  ArrowUp,
-  ArrowDown,
   Download,
   Upload,
   Info,
   Filter,
-  ChevronLeft,
-  ChevronRight,
   FileSpreadsheet
 } from 'lucide-react';
 import { PageHeader } from './PageHeader';
 import { Button } from './Button';
+import { SortHeader, Pagination, RowAction, RowActions } from './logs/ui';
+import { theadRowCls, thBaseCls } from './logs/format';
 
 interface Promotion {
   id: number;
@@ -391,14 +388,6 @@ export const Promotions: React.FC = () => {
     setCurrentPage(1);
   };
 
-  const renderSortIcon = (field: string) => {
-    if (sortField !== field) {
-      return <ArrowUpDown className="w-3.5 h-3.5 text-slate-300 ml-1.5 inline-block" />;
-    }
-    return sortDirection === 'asc'
-      ? <ArrowUp className="w-3.5 h-3.5 text-[var(--brand-fg)] ml-1.5 inline-block font-bold" />
-      : <ArrowDown className="w-3.5 h-3.5 text-[var(--brand-fg)] ml-1.5 inline-block font-bold" />;
-  };
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -820,24 +809,6 @@ export const Promotions: React.FC = () => {
   const safePage = Math.min(currentPage, totalPages);
   const startIdx = (safePage - 1) * pageSize;
   const paginatedPromotions = sortedPromotions.slice(startIdx, startIdx + pageSize);
-  const rangeStart = totalItems === 0 ? 0 : startIdx + 1;
-  const rangeEnd = Math.min(startIdx + pageSize, totalItems);
-
-  const pageNumbers = React.useMemo(() => {
-    const pages: (number | 'ellipsis')[] = [];
-    if (totalPages <= 7) {
-      for (let i = 1; i <= totalPages; i++) pages.push(i);
-      return pages;
-    }
-    pages.push(1);
-    if (safePage > 3) pages.push('ellipsis');
-    const start = Math.max(2, safePage - 1);
-    const end = Math.min(totalPages - 1, safePage + 1);
-    for (let i = start; i <= end; i++) pages.push(i);
-    if (safePage < totalPages - 2) pages.push('ellipsis');
-    pages.push(totalPages);
-    return pages;
-  }, [totalPages, safePage]);
 
   // Helpers
   const formatDiscount = (type: string, val: number) => {
@@ -958,33 +929,13 @@ export const Promotions: React.FC = () => {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm border-collapse">
               <thead>
-                <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 text-[11px] font-semibold uppercase tracking-wider select-none">
-                  <th 
-                    onClick={() => handleSort('code')}
-                    className="px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors"
-                  >
-                    รหัส/โปรโมชัน {renderSortIcon('code')}
-                  </th>
-                  <th 
-                    onClick={() => handleSort('discount_value')}
-                    className="px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors"
-                  >
-                    ส่วนลด {renderSortIcon('discount_value')}
-                  </th>
-                  <th className="px-4 py-3">เงื่อนไข</th>
-                  <th 
-                    onClick={() => handleSort('start_date')}
-                    className="px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors"
-                  >
-                    ระยะเวลา {renderSortIcon('start_date')}
-                  </th>
-                  <th 
-                    onClick={() => handleSort('status')}
-                    className="px-4 py-3 text-center cursor-pointer hover:bg-slate-100 transition-colors"
-                  >
-                    สถานะ {renderSortIcon('status')}
-                  </th>
-                  <th className="px-4 py-3 text-right">การจัดการ</th>
+                <tr className={theadRowCls}>
+                  <SortHeader label="รหัส/โปรโมชัน" col="code" active={sortField} dir={sortDirection} onSort={handleSort} pad="px-4 py-3" />
+                  <SortHeader label="ส่วนลด" col="discount_value" active={sortField} dir={sortDirection} onSort={handleSort} pad="px-4 py-3" />
+                  <th className={`${thBaseCls} px-4 py-3`}>เงื่อนไข</th>
+                  <SortHeader label="ระยะเวลา" col="start_date" active={sortField} dir={sortDirection} onSort={handleSort} pad="px-4 py-3" />
+                  <SortHeader label="สถานะ" col="status" active={sortField} dir={sortDirection} onSort={handleSort} pad="px-4 py-3" align="center" />
+                  <th className={`${thBaseCls} px-4 py-3 text-right`}>การจัดการ</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -1103,29 +1054,11 @@ export const Promotions: React.FC = () => {
 
                     {/* Actions */}
                     <td className="py-2.5 px-4 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          onClick={() => handleExportCsv(promo.code)}
-                          className="p-1.5 bg-card hover:bg-slate-50 text-slate-500 hover:text-blue-600 border border-slate-200 rounded-lg transition-all active:scale-95 shadow-sm"
-                          title="ส่งออก csv แคมเปญนี้"
-                        >
-                          <Download className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => handleEditOpen(promo)}
-                          className="p-1.5 bg-card hover:bg-slate-50 text-slate-500 hover:text-slate-900 border border-slate-200 rounded-lg transition-all active:scale-95 shadow-sm"
-                          title="แก้ไขข้อมูล"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteOpen(promo)}
-                          className="p-1.5 bg-card hover:bg-red-50 text-slate-500 hover:text-red-600 border border-slate-200 hover:border-red-200 rounded-lg transition-all active:scale-95 shadow-sm"
-                          title="ลบโปรโมชัน"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                      <RowActions>
+                        <RowAction icon={Download} label="ส่งออก csv แคมเปญนี้" onClick={() => handleExportCsv(promo.code)} />
+                        <RowAction icon={Edit2} label="แก้ไขข้อมูล" onClick={() => handleEditOpen(promo)} />
+                        <RowAction icon={Trash2} label="ลบโปรโมชัน" tone="danger" onClick={() => handleDeleteOpen(promo)} />
+                      </RowActions>
                     </td>
                   </tr>
                 ))}
@@ -1133,63 +1066,15 @@ export const Promotions: React.FC = () => {
             </table>
           </div>
 
-          {/* ── Pagination Footer ── */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 border-t border-slate-100 bg-slate-50/60">
-            <div className="flex items-center gap-2 text-xs text-slate-500">
-              <span>
-                แสดง <span className="font-semibold text-slate-700">{rangeStart}-{rangeEnd}</span> จาก{' '}
-                <span className="font-semibold text-slate-700">{totalItems}</span> รายการ
-              </span>
-              <span className="text-slate-300">|</span>
-              <label className="flex items-center gap-1.5">
-                ต่อหน้า
-                <select
-                  value={pageSize}
-                  onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
-                  className="h-7 px-2 rounded-lg border border-slate-200 bg-card text-xs font-semibold outline-none focus:border-[var(--brand-fg)]"
-                >
-                  {PAGE_SIZE_OPTIONS.map(n => (
-                    <option key={n} value={n}>{n}</option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                disabled={safePage <= 1}
-                className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 bg-card text-slate-500 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                <ChevronLeft className="w-3.5 h-3.5" />
-              </button>
-
-              {pageNumbers.map((p, idx) =>
-                p === 'ellipsis' ? (
-                  <span key={`e-${idx}`} className="w-7 h-7 flex items-center justify-center text-xs text-slate-400">…</span>
-                ) : (
-                  <button
-                    key={p}
-                    onClick={() => setCurrentPage(p)}
-                    className={`w-7 h-7 flex items-center justify-center rounded-lg text-xs font-bold transition-colors ${p === safePage
-                      ? 'bg-[var(--brand)] text-white'
-                      : 'bg-card border border-slate-200 text-slate-600 hover:bg-slate-100'
-                      }`}
-                  >
-                    {p}
-                  </button>
-                )
-              )}
-
-              <button
-                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                disabled={safePage >= totalPages}
-                className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 bg-card text-slate-500 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                <ChevronRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
+          <Pagination
+            page={safePage}
+            pages={totalPages}
+            size={pageSize}
+            total={totalItems}
+            sizes={PAGE_SIZE_OPTIONS}
+            onPage={setCurrentPage}
+            onSize={n => { setPageSize(n); setCurrentPage(1); }}
+          />
         </div>
       )}
 

@@ -20,7 +20,8 @@ import {
 import { PageHeader } from './PageHeader';
 import { Button } from './Button';
 import { FilterBar, FilterSearch, FilterSelect } from './FilterBar';
-import { EmptyState, Pagination } from './logs/ui';
+import { EmptyState, Pagination, RowAction, RowActions } from './logs/ui';
+import { theadRowCls, thBaseCls } from './logs/format';
 import { ROLE_ORDER, ROLE_LABEL, ROLE_DESCRIPTION } from './roles';
 import { IssuerNameField, type IssuerNameOption } from './IssuerNameField';
 
@@ -249,11 +250,11 @@ export const Users: React.FC = () => {
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-left">
               <thead>
-                <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 text-[11px] font-semibold uppercase tracking-wider select-none">
-                  <th className="px-4 py-3">ชื่อผู้ใช้งาน</th>
-                  <th className="px-4 py-3">ชื่อ-นามสกุล</th>
-                  <th className="px-4 py-3 w-48">สิทธิ์</th>
-                  <th className="px-4 py-3 text-center w-32">จัดการ</th>
+                <tr className={theadRowCls}>
+                  <th className={`${thBaseCls} px-4 py-3`}>ชื่อผู้ใช้งาน</th>
+                  <th className={`${thBaseCls} px-4 py-3`}>ชื่อ-นามสกุล</th>
+                  <th className={`${thBaseCls} px-4 py-3 w-48`}>สิทธิ์</th>
+                  <th className={`${thBaseCls} px-4 py-3 text-right w-32`}>การจัดการ</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-sm text-slate-700">
@@ -285,30 +286,25 @@ export const Users: React.FC = () => {
                         </span>
                       </td>
                       <td className="px-4 py-2.5">
-                        <div className="flex items-center justify-center gap-1">
-                          <button
+                        <RowActions>
+                          <RowAction
+                            icon={Edit2}
+                            label="แก้ไขชื่อและสิทธิ์"
                             onClick={() => setFormMode({ kind: 'edit', target: row })}
-                            className="p-1.5 hover:bg-slate-100 text-slate-500 hover:text-slate-900 rounded-lg transition-colors"
-                            title="แก้ไขชื่อและสิทธิ์"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
+                          />
+                          <RowAction
+                            icon={KeyRound}
+                            label="ตั้งรหัสผ่านใหม่"
                             onClick={() => setPasswordTarget(row)}
-                            className="p-1.5 hover:bg-slate-100 text-slate-500 hover:text-slate-900 rounded-lg transition-colors"
-                            title="ตั้งรหัสผ่านใหม่"
-                          >
-                            <KeyRound className="w-3.5 h-3.5" />
-                          </button>
-                          <button
+                          />
+                          <RowAction
+                            icon={Trash2}
+                            label={isSelf ? 'ลบบัญชีของตัวเองไม่ได้' : 'ลบผู้ใช้'}
+                            tone="danger"
                             onClick={() => setDeleteTarget(row)}
                             disabled={isSelf}
-                            className="p-1.5 hover:bg-red-50 text-slate-500 hover:text-red-600 rounded-lg transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-500 disabled:cursor-not-allowed"
-                            title={isSelf ? 'ลบบัญชีของตัวเองไม่ได้' : 'ลบผู้ใช้'}
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                          />
+                        </RowActions>
                       </td>
                     </tr>
                   );

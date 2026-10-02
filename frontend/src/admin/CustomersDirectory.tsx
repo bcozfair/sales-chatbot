@@ -10,7 +10,7 @@ import { DataFilterBar, DataSearch, FilterCombo, type FilterOption } from './Dat
 import {
   TableCard, TableScroll, SortHeader, Pagination, EmptyState, SkeletonRows, ErrorBox,
 } from './logs/ui';
-import { errMsg, formatNumber, formatDate, thCls, tdCls, downloadCsv } from './logs/format';
+import { errMsg, formatNumber, formatDate, theadRowCls, thCls, tdCls, downloadCsv } from './logs/format';
 
 /**
  * หน้า "ข้อมูลลูกค้า & ผู้ติดต่อ" — อ่านอย่างเดียว ต้นทางคือ Odoo
@@ -363,7 +363,7 @@ export const CustomersDirectory: React.FC = () => {
               <TableScroll>
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-slate-100">
+                    <tr className={theadRowCls}>
                       {view === 'contact' && <SortHeader label="ผู้ติดต่อ" col="contact_name" active={sort} dir={dir} onSort={onSort} />}
                       <SortHeader label="บริษัท" col="customer_name" active={sort} dir={dir} onSort={onSort} />
                       <SortHeader label="ประเภท" col="customer_type" active={sort} dir={dir} onSort={onSort} className="hidden lg:table-cell" />

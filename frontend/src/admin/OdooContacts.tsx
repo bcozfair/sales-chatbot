@@ -3,8 +3,8 @@ import { UserPlus, Download, Pencil, Trash2, Phone, Mail, AlertTriangle, Info, C
 import { useAuth } from '../context/AuthContext';
 import { PageHeader } from './PageHeader';
 import { DataSearch } from './DataFilterBar';
-import { TableCard, TableScroll, Pagination, EmptyState, SkeletonRows, ErrorBox } from './logs/ui';
-import { errMsg, formatNumber, formatDate, thCls, tdCls, inputCls, downloadCsv } from './logs/format';
+import { TableCard, TableScroll, Pagination, EmptyState, SkeletonRows, ErrorBox, RowAction, RowActions } from './logs/ui';
+import { errMsg, formatNumber, formatDate, theadRowCls, thCls, tdCls, inputCls, downloadCsv } from './logs/format';
 import { LocalContactModal, DeleteContactModal, PickCompanyModal, type CompanyPick } from './LocalContactModal';
 import { Button } from './Button';
 
@@ -188,33 +188,26 @@ export const OdooContacts: React.FC = () => {
   const mismatches = rows.filter((r) => r.status === 'name_mismatch').length;
 
   /** ปุ่มแก้/ลบของแต่ละแถว — เหตุผลที่กดไม่ได้อยู่ใน title ไม่ใช่ปุ่มจาง ๆ ที่ไม่มีคำอธิบาย */
-  const RowActions: React.FC<{ r: Row }> = ({ r }) => (
-    <div className="inline-flex gap-1">
-      <button
+  const ContactActions: React.FC<{ r: Row }> = ({ r }) => (
+    <RowActions>
+      <RowAction
+        icon={Pencil}
+        label={r.can_edit_fields ? 'แก้ไขผู้ติดต่อ' : 'เข้า Odoo แล้ว — แก้ที่ Odoo แทน'}
+        aria-label={`แก้ไข ${r.contact_name}`}
         onClick={() => setEditRow(r)}
         disabled={!r.can_edit_fields}
-        aria-label={`แก้ไข ${r.contact_name}`}
-        title={r.can_edit_fields ? 'แก้ไขผู้ติดต่อ' : 'เข้า Odoo แล้ว — แก้ที่ Odoo แทน'}
-        className="w-7 h-7 rounded-lg border border-slate-200 bg-card text-slate-500 grid place-items-center
-                   hover:border-[var(--brand-border)] hover:text-[var(--brand-fg)] disabled:opacity-30
-                   disabled:cursor-not-allowed transition-colors"
-      >
-        <Pencil className="w-3.5 h-3.5" />
-      </button>
-      <button
-        onClick={() => { setDelError(null); setDelRow(r); }}
-        disabled={!r.can_delete}
-        aria-label={`ลบ ${r.contact_name}`}
-        title={r.can_delete
+      />
+      <RowAction
+        icon={Trash2}
+        tone="danger"
+        label={r.can_delete
           ? 'ลบผู้ติดต่อ'
           : r.status === 'matched' ? 'เข้า Odoo แล้ว — ลบไม่ได้' : `มีใบเสนอราคาอ้างอยู่ ${r.quote_count} ใบ`}
-        className="w-7 h-7 rounded-lg border border-slate-200 bg-card text-slate-500 grid place-items-center
-                   hover:border-red-200 hover:text-red-600 hover:bg-red-50 disabled:opacity-30
-                   disabled:cursor-not-allowed transition-colors"
-      >
-        <Trash2 className="w-3.5 h-3.5" />
-      </button>
-    </div>
+        aria-label={`ลบ ${r.contact_name}`}
+        onClick={() => { setDelError(null); setDelRow(r); }}
+        disabled={!r.can_delete}
+      />
+    </RowActions>
   );
 
   return (
@@ -312,7 +305,7 @@ export const OdooContacts: React.FC = () => {
               <TableScroll>
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-slate-100">
+                    <tr className={theadRowCls}>
                       {/* บริษัทเป็นคอลัมน์แรก · สถานะอยู่ชิดปุ่มจัดการ (เจ้าของสั่ง 2026-10-02) */}
                       <th className={thCls}>บริษัท</th>
                       <th className={thCls}>ผู้ติดต่อ</th>
@@ -320,7 +313,7 @@ export const OdooContacts: React.FC = () => {
                       <th className={`${thCls} hidden xl:table-cell`}>เพิ่มเมื่อ</th>
                       <th className={`${thCls} text-right`}>ใบที่อ้าง</th>
                       <th className={thCls}>สถานะ</th>
-                      <th className={`${thCls} text-right`}>จัดการ</th>
+                      <th className={`${thCls} text-right`}>การจัดการ</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -368,7 +361,7 @@ export const OdooContacts: React.FC = () => {
                             </div>
                           )}
                         </td>
-                        <td className={`${tdCls} text-right`}><RowActions r={r} /></td>
+                        <td className={`${tdCls} text-right`}><ContactActions r={r} /></td>
                       </tr>
                     ))}
                   </tbody>
@@ -410,7 +403,7 @@ export const OdooContacts: React.FC = () => {
                     <span className="text-[11px] text-slate-400">
                       {r.quote_count > 0 ? `มีใบอ้างอยู่ ${r.quote_count} ใบ` : 'ยังไม่มีใบอ้างถึง'}
                     </span>
-                    <RowActions r={r} />
+                    <ContactActions r={r} />
                   </div>
                 </div>
               ))}

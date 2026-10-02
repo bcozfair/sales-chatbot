@@ -8,7 +8,7 @@ import { useHashState } from './logs/useHashState';
 import { TAB_SLUG } from './navHash';
 import {
   errMsg, formatBytes, formatDateTime, formatMs, formatNumber,
-  inputCls, monoChipCls, numCls, tdCls, thCls,
+  inputCls, monoChipCls, numCls, tdCls, theadRowCls, thCls,
 } from './logs/format';
 import {
   CheckField, Duration, EmptyState, ErrorBox, FilterCard, FilterChip, FilterField,
@@ -489,8 +489,8 @@ export function ApiLogs() {
               >
                 <TableScroll>
                   <table className="w-full text-sm">
-                    <thead className="bg-slate-50">
-                      <tr>
+                    <thead>
+                      <tr className={theadRowCls}>
                         {([
                           ['endpoint', 'route', 'left'],
                           ['ครั้ง', 'count', 'right'],
@@ -549,8 +549,8 @@ export function ApiLogs() {
                          hint="กดแถวเพื่อกรองรายการข้างล่างให้เหลือเฉพาะ request นั้น">
                 <TableScroll>
                   <table className="w-full text-sm">
-                    <thead className="bg-slate-50">
-                      <tr>
+                    <thead>
+                      <tr className={theadRowCls}>
                         {([
                           ['เวลา', 'created_at', 'left'],
                           ['endpoint', 'path', 'left'],
@@ -732,8 +732,8 @@ export function ApiLogs() {
         {rows.length > 0 && (
           <TableScroll>
             <table className="w-full text-sm">
-              <thead className="bg-slate-50">
-                <tr>
+              <thead>
+                <tr className={theadRowCls}>
                   <SortHeader label="เวลา" col="created_at" active={state.sort} dir={listDir} onSort={sortList} />
                   <SortHeader label="endpoint" col="path" active={state.sort} dir={listDir} onSort={sortList} />
                   {/* "ผู้เรียก" เรียงไม่ได้โดยตั้งใจ — ค่าในช่องนี้มาจากสามแหล่ง (แอดมิน / LINE /

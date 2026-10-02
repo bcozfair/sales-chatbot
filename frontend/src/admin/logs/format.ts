@@ -223,9 +223,19 @@ export async function downloadCsv(url: string, token: string | null, filename: s
     จะทำให้ hot reload ตอน dev รีเซ็ต state ของทั้งหน้าทุกครั้งที่แก้)
    ───────────────────────────────────────────────────────────── */
 
-/** หัวคอลัมน์ตาราง — ตัวพิมพ์เล็กกว่าเนื้อและเว้นระยะอักษร ให้ตาแยกหัวออกจากข้อมูลโดยไม่ต้องใช้เส้น */
-export const thCls =
-  'text-left font-semibold text-[11px] uppercase tracking-wider text-slate-400 px-3 py-2.5 whitespace-nowrap';
+/**
+ * หัวตาราง — **แบบเดียวทั้งแอป** (เจ้าของสั่ง 2026-10-02 ชี้ตารางหน้าโปรโมชันเป็นต้นแบบ:
+ * "หัวตาราง ท้ายตาราง และปุ่มจัดการ ดีไซน์ไม่สม่ำเสมอกันทั้งแอป")
+ * · `theadRowCls` ใส่ที่ `<tr>` ของ `<thead>` — แถบพื้นเทาอ่อน + เส้นล่าง แยกหัวออกจากข้อมูล
+ * · `thCls` ใส่ที่ `<th>` ทุกช่อง · ช่องที่เรียงได้ใช้ `<SortHeader>` (logs/ui.tsx) ซึ่งใช้ชุดเดียวกัน
+ * · ระยะซ้ายขวาอยู่แยกใน `thPadCls` เพราะต้องเท่ากับ `tdCls` ของตารางนั้น ไม่งั้นหัวกับข้อมูลเยื้องกัน
+ *   (ตารางที่ช่องข้อมูลใช้ `px-4` ส่ง `pad="px-4 py-3"` ให้ SortHeader / ต่อ `thBaseCls` เอง)
+ */
+export const theadRowCls = 'bg-slate-50 border-b border-slate-200 select-none text-left';
+export const thBaseCls =
+  'font-semibold text-[11px] uppercase tracking-wider text-slate-500 whitespace-nowrap';
+export const thPadCls = 'px-3 py-3';
+export const thCls = `${thBaseCls} ${thPadCls}`;
 
 /** ช่องข้อมูลปกติ — ความสูงแถวคงที่ทุกหน้าเพื่อให้สลับแท็บแล้วตารางไม่กระตุก */
 export const tdCls = 'px-3 py-2.5 align-top';

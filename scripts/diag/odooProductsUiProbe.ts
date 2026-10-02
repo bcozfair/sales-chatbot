@@ -164,7 +164,7 @@ try {
   // หัวคอลัมน์
   const heads = await page.$$eval('table thead th', (ths) => ths.filter((t) => (t as HTMLElement).offsetParent !== null).map((t) => t.textContent?.trim()));
   ok('คอลัมน์แรก = รหัสสินค้า', heads[0] === 'รหัสสินค้า', heads.join(' | '));
-  ok('สถานะอยู่ก่อนจัดการ (สองคอลัมน์สุดท้าย)', heads.at(-2) === 'สถานะ' && heads.at(-1) === 'จัดการ');
+  ok('สถานะอยู่ก่อนจัดการ (สองคอลัมน์สุดท้าย)', heads.at(-2) === 'สถานะ' && heads.at(-1) === 'การจัดการ');
 
   // แถว
   const rows = await page.$$eval('table tbody tr', (trs) => trs.map((tr) => ({

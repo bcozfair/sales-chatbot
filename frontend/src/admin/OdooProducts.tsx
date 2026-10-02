@@ -3,8 +3,8 @@ import { PackageOpen, Download, RefreshCw, Trash2, AlertTriangle, Info, CheckCir
 import { useAuth } from '../context/AuthContext';
 import { PageHeader } from './PageHeader';
 import { DataSearch } from './DataFilterBar';
-import { TableCard, TableScroll, Pagination, EmptyState, SkeletonRows, ErrorBox } from './logs/ui';
-import { errMsg, formatNumber, formatDate, thCls, tdCls, inputCls, downloadCsv } from './logs/format';
+import { TableCard, TableScroll, Pagination, EmptyState, SkeletonRows, ErrorBox, RowAction, RowActions } from './logs/ui';
+import { errMsg, formatNumber, formatDate, thCls, theadRowCls, tdCls, inputCls, downloadCsv } from './logs/format';
 import { Modal } from './Modal';
 import { Button } from './Button';
 
@@ -210,35 +210,17 @@ export const OdooProducts: React.FC = () => {
   const conflicts = rows.filter((r) => conflictOf(r) !== null).length;
 
   /** ปุ่มของแต่ละแถว — เหตุผลที่กดไม่ได้อยู่ใน title (กติกาเดียวกับหน้าผู้ติดต่อ) · กติกาจริงอยู่ที่ server */
-  const RowActions: React.FC<{ r: Row }> = ({ r }) => {
+  const ProductActions: React.FC<{ r: Row }> = ({ r }) => {
     const locked = !!r.odoo_matched_at;
     const used = r.quotation_count > 0;
     const why = locked ? 'นำเข้าแล้ว — ' : used ? `มีใบเสนอราคาใช้สินค้านี้ ${r.quotation_count} ใบ — ` : '';
     return (
-      <div className="inline-flex gap-1">
-        <button
-          onClick={() => setReissueRow(r)}
-          disabled={locked || used}
-          aria-label={`ออกรหัสใหม่ ${r.model}`}
-          title={locked || used ? `${why}ออกรหัสใหม่ไม่ได้` : 'Odoo ไม่ยอมรับรหัสนี้ → ออกรหัสใหม่'}
-          className="w-7 h-7 rounded-lg border border-slate-200 bg-card text-slate-500 grid place-items-center
-                     hover:border-[var(--brand-border)] hover:text-[var(--brand-fg)] disabled:opacity-30
-                     disabled:cursor-not-allowed transition-colors"
-        >
-          <RefreshCw className="w-3.5 h-3.5" />
-        </button>
-        <button
-          onClick={() => { setDelError(null); setDelRow(r); }}
-          disabled={locked || used}
-          aria-label={`ลบ ${r.model}`}
-          title={locked || used ? `${why}ลบไม่ได้` : 'ลบสินค้า'}
-          className="w-7 h-7 rounded-lg border border-slate-200 bg-card text-slate-500 grid place-items-center
-                     hover:border-red-200 hover:text-red-600 hover:bg-red-50 disabled:opacity-30
-                     disabled:cursor-not-allowed transition-colors"
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-        </button>
-      </div>
+      <RowActions>
+        <RowAction icon={RefreshCw} label={`ออกรหัสใหม่ ${r.model}`} onClick={() => setReissueRow(r)} disabled={locked || used}
+                   title={locked || used ? `${why}ออกรหัสใหม่ไม่ได้` : 'Odoo ไม่ยอมรับรหัสนี้ → ออกรหัสใหม่'} />
+        <RowAction icon={Trash2} label={`ลบ ${r.model}`} tone="danger" onClick={() => { setDelError(null); setDelRow(r); }}
+                   disabled={locked || used} title={locked || used ? `${why}ลบไม่ได้` : 'ลบสินค้า'} />
+      </RowActions>
     );
   };
 
@@ -335,7 +317,7 @@ export const OdooProducts: React.FC = () => {
               <TableScroll>
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-slate-100">
+                    <tr className={theadRowCls}>
                       {/* รหัสสินค้าเป็นคอลัมน์แรก · สถานะอยู่ชิดปุ่มจัดการ (เจ้าของสั่ง 2026-10-02) */}
                       <th className={thCls}>รหัสสินค้า</th>
                       <th className={thCls}>สินค้า</th>
@@ -343,7 +325,7 @@ export const OdooProducts: React.FC = () => {
                       <th className={`${thCls} hidden xl:table-cell`}>เพิ่มเมื่อ</th>
                       <th className={`${thCls} text-right`}>ใบ</th>
                       <th className={thCls}>สถานะ</th>
-                      <th className={`${thCls} text-right`}>จัดการ</th>
+                      <th className={`${thCls} text-right`}>การจัดการ</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -376,7 +358,7 @@ export const OdooProducts: React.FC = () => {
                           <StatusTag s={r.status} />
                           <StatusLine2 r={r} />
                         </td>
-                        <td className={`${tdCls} text-right`}><RowActions r={r} /></td>
+                        <td className={`${tdCls} text-right`}><ProductActions r={r} /></td>
                       </tr>
                     ))}
                   </tbody>
@@ -403,7 +385,7 @@ export const OdooProducts: React.FC = () => {
                   <div className="truncate text-[13px] text-slate-800" title={r.name}>
                     {r.model} <span className="text-[11px] text-slate-400">· {baht(r.sales_price)}</span>
                   </div>
-                  <div className="text-right"><RowActions r={r} /></div>
+                  <div className="text-right"><ProductActions r={r} /></div>
                 </div>
               ))}
             </div>

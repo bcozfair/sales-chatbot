@@ -20,7 +20,10 @@ import { AlertCircle, Building2, Calendar, FileSpreadsheet, Filter, History, Loa
 import { Modal } from './Modal';
 import { FilterDateRange, FilterSearch, FilterSelect } from './FilterBar';
 import { EmptyState, ErrorBox, Pagination } from './logs/ui';
-import { errMsg } from './logs/format';
+import { errMsg, theadRowCls, thBaseCls } from './logs/format';
+
+/** หัวตารางติดบนสุดของกล่องเลื่อน — พื้นอยู่ที่ช่อง (พื้นของแถวไม่ติดตาม) */
+const stickyThCls = `${thBaseCls} px-4 py-3 sticky top-0 z-10 bg-slate-50 shadow-[inset_0_-1px_0_var(--c-line)]`;
 
 /** 1 ครั้งที่กดปุ่มส่งออก (GET /api/admin/quotations/export-batches) */
 interface ExportBatch {
@@ -239,14 +242,14 @@ export const ExportHistoryModal: React.FC<Props> = ({ token, formatTime, onClose
           <div className={`transition-opacity ${loading ? 'opacity-60' : ''}`}>
             <table className="hidden sm:table w-full text-left text-sm border-collapse">
               <thead>
-                <tr className="text-slate-500 text-[11px] font-semibold uppercase tracking-wider">
+                <tr className={theadRowCls}>
                   {/* เส้นใต้หัวเป็นเงาด้านใน ไม่ใช่ border — border ของแถวไม่เลื่อนตามหัวที่ติดอยู่ */}
-                  <th className="sticky top-0 z-10 bg-slate-50 shadow-[inset_0_-1px_0_var(--c-line)] px-4 py-3">เวลา</th>
-                  <th className="sticky top-0 z-10 bg-slate-50 shadow-[inset_0_-1px_0_var(--c-line)] px-4 py-3">ผู้ส่งออก</th>
-                  <th className="sticky top-0 z-10 bg-slate-50 shadow-[inset_0_-1px_0_var(--c-line)] px-4 py-3 text-center">บริษัท</th>
-                  <th className="sticky top-0 z-10 bg-slate-50 shadow-[inset_0_-1px_0_var(--c-line)] px-4 py-3 text-center">ไฟล์</th>
-                  <th className="sticky top-0 z-10 bg-slate-50 shadow-[inset_0_-1px_0_var(--c-line)] px-4 py-3 text-right">จำนวนใบ</th>
-                  <th className="sticky top-0 z-10 bg-slate-50 shadow-[inset_0_-1px_0_var(--c-line)] px-4 py-3 text-center">จัดการ</th>
+                  <th className={stickyThCls}>เวลา</th>
+                  <th className={stickyThCls}>ผู้ส่งออก</th>
+                  <th className={`${stickyThCls} text-center`}>บริษัท</th>
+                  <th className={`${stickyThCls} text-center`}>ไฟล์</th>
+                  <th className={`${stickyThCls} text-right`}>จำนวนใบ</th>
+                  <th className={`${stickyThCls} text-right`}>การจัดการ</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -268,7 +271,7 @@ export const ExportHistoryModal: React.FC<Props> = ({ token, formatTime, onClose
                       <BatchCount b={b} />
                       <span className="block text-[10px] text-slate-400">{b.row_count} แถว</span>
                     </td>
-                    <td className="px-4 py-2.5 text-center">
+                    <td className="px-4 py-2.5 text-right">
                       <UnmarkButton b={b} busy={unmarkingId === b.id} onClick={() => handleUnmark(b)} />
                     </td>
                   </tr>

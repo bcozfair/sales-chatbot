@@ -1,7 +1,7 @@
 import React from 'react';
-import { AlertCircle, ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Search, X } from 'lucide-react';
+import { AlertCircle, ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Search, X } from 'lucide-react';
 import { Button } from '../Button';
-import { formatMs, formatNumber, inputCls, PAGE_SIZE_OPTIONS, thCls } from './format';
+import { formatMs, formatNumber, inputCls, PAGE_SIZE_OPTIONS, thBaseCls, thPadCls } from './format';
 
 /**
  * ชิ้นส่วนหน้าตาที่ใช้ร่วมกันทั้งกลุ่ม "บันทึกและรายงาน"
@@ -203,7 +203,7 @@ export const TableCard: React.FC<{
   className?: string;
   children: React.ReactNode;
 }> = ({ title, hint, action, className = '', children }) => (
-  <div className={`bg-card border border-slate-200 rounded-2xl overflow-hidden ${className}`}>
+  <div className={`bg-card border border-slate-200 rounded-2xl overflow-hidden shadow-sm ${className}`}>
     {title && (
       <div className="px-4 py-3 border-b border-slate-100 flex items-start gap-3">
         <div className="min-w-0 flex-1">
@@ -218,10 +218,11 @@ export const TableCard: React.FC<{
 );
 
 /**
- * หัวคอลัมน์ที่กดเพื่อเรียงลำดับได้
+ * หัวคอลัมน์ที่กดเพื่อเรียงลำดับได้ — หน้าตาตามตารางหน้าโปรโมชัน (ต้นแบบที่เจ้าของชี้ 2026-10-02)
  *
- * ลูกศรของคอลัมน์ที่ "ไม่ได้เรียงอยู่" จะจางมากแต่ยังอยู่ ไม่ได้ซ่อนจนโผล่ตอน hover เท่านั้น
+ * ลูกศรของคอลัมน์ที่ "ไม่ได้เรียงอยู่" (⇅ จาง) ยังอยู่ ไม่ได้ซ่อนจนโผล่ตอน hover เท่านั้น
  * — บนจอสัมผัสไม่มี hover ถ้าซ่อนไว้ผู้ใช้จะไม่มีทางรู้เลยว่าหัวตารางกดได้
+ * · ทั้งช่องเป็นปุ่ม (ปุ่มยืดเต็มช่อง ระยะขอบอยู่ที่ปุ่ม) ⇒ กดตรงไหนของหัวก็เรียงได้ และกด Tab ถึง
  */
 export const SortHeader: React.FC<{
   label: string;
@@ -231,25 +232,29 @@ export const SortHeader: React.FC<{
   dir: 'asc' | 'desc';
   onSort: (col: string) => void;
   align?: 'left' | 'right' | 'center';
+  /** ระยะขอบ — ต้องเท่ากับช่องข้อมูลของตารางนั้น (ค่าตั้งต้นคู่กับ `tdCls`) */
+  pad?: string;
   className?: string;
   title?: string;
-}> = ({ label, col, active, dir, onSort, align = 'left', className = '', title }) => {
+}> = ({ label, col, active, dir, onSort, align = 'left', pad = thPadCls, className = '', title }) => {
   const on = active === col;
   const justify = align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : 'justify-start';
   return (
-    <th className={`${thCls} p-0 ${className}`} aria-sort={on ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+    <th className={`${thBaseCls} p-0 ${className}`} aria-sort={on ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
       <button
+        type="button"
         onClick={() => onSort(col)}
         title={title ?? `เรียงตาม ${label}`}
-        className={`w-full flex items-center gap-1 px-3 py-2.5 ${justify}
-                    hover:text-slate-700 transition-colors focus:outline-none
+        className={`w-full flex items-center gap-1.5 ${pad} ${justify} uppercase tracking-wider
+                    hover:bg-slate-100 transition-colors focus:outline-none
                     focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--brand-fg)]`}
-        style={on ? { color: 'var(--brand-fg)' } : undefined}
       >
         <span className="truncate">{label}</span>
         {on
-          ? (dir === 'asc' ? <ArrowUp className="w-3 h-3 shrink-0" /> : <ArrowDown className="w-3 h-3 shrink-0" />)
-          : <ArrowDown className="w-3 h-3 shrink-0 opacity-25" />}
+          ? (dir === 'asc'
+              ? <ArrowUp className="w-3.5 h-3.5 shrink-0 text-[var(--brand-fg)]" />
+              : <ArrowDown className="w-3.5 h-3.5 shrink-0 text-[var(--brand-fg)]" />)
+          : <ArrowUpDown className="w-3.5 h-3.5 shrink-0 text-slate-300" />}
       </button>
     </th>
   );
@@ -295,74 +300,122 @@ function pageWindow(total: number, current: number): (number | 'gap')[] {
 }
 
 /**
- * แถบแบ่งหน้าแบบเดียวของทั้งกลุ่ม
- * ซ้าย = กำลังดูช่วงไหนของทั้งหมด (ตัวเลขนี้สำคัญกว่าปุ่ม — คนใช้ดูว่าเหลืออีกเท่าไร)
- * ขวา = ปุ่มเดินหน้าถอยหลัง + เลขหน้า
+ * ท้ายตาราง (แถบแบ่งหน้า) — **แบบเดียวทั้งแอป** หน้าตาตามตารางหน้าโปรโมชัน (เจ้าของชี้ 2026-10-02)
+ * ซ้าย = กำลังดูช่วงไหนของทั้งหมด + จำนวนต่อหน้า (ตัวเลขนี้สำคัญกว่าปุ่ม — คนใช้ดูว่าเหลืออีกเท่าไร)
+ * ขวา = ปุ่มเดินหน้าถอยหลัง + เลขหน้า (กล่องมีขอบทุกปุ่ม หน้าปัจจุบันพื้นเขียวแบรนด์)
+ * · หน้าที่แบ่งหน้าเองฝั่ง client ก็ใช้ตัวนี้ — ห้ามเขียนแถบท้ายตารางเองอีก
  */
+const pagerBtnCls =
+  'w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 bg-card text-slate-500 ' +
+  'hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-card transition-colors';
+
 export const Pagination: React.FC<{
   page: number;
   pages: number;
   size: number;
   total: number;
   unit?: string;
-  /** ตัวเลือกจำนวนต่อหน้า — ไม่ส่ง = ชุดกลาง `PAGE_SIZE_OPTIONS` (กล่องประวัติการส่งออกใช้ชุดที่เริ่มจาก 10) */
+  /** ตัวเลือกจำนวนต่อหน้า — ไม่ส่ง = ชุดกลาง `PAGE_SIZE_OPTIONS` (หน้าที่แบ่งเองฝั่ง client ส่งชุดของตัวเองได้) */
   sizes?: readonly number[];
   onPage: (p: number) => void;
   onSize: (s: number) => void;
 }> = ({ page, pages, size, total, unit = 'รายการ', sizes = PAGE_SIZE_OPTIONS, onPage, onSize }) => (
-  <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-t border-slate-100">
-    <div className="flex items-center gap-2 text-xs text-slate-500">
+  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 border-t border-slate-100 bg-slate-50/60">
+    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
       <span className="tabular-nums">
-        {total === 0 ? 0 : (page - 1) * size + 1}–{Math.min(page * size, total)} จาก {formatNumber(total)} {unit}
+        แสดง <span className="font-semibold text-slate-700">
+          {total === 0 ? 0 : formatNumber((page - 1) * size + 1)}-{formatNumber(Math.min(page * size, total))}
+        </span> จาก <span className="font-semibold text-slate-700">{formatNumber(total)}</span> {unit}
       </span>
-      <select
-        aria-label="จำนวนต่อหน้า"
-        className="bg-card border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-600 cursor-pointer"
-        value={size}
-        onChange={(e) => onSize(Number(e.target.value))}
-      >
-        {sizes.map((n) => (
-          <option key={n} value={n}>{n} ต่อหน้า</option>
-        ))}
-      </select>
+      <span className="text-slate-300" aria-hidden>|</span>
+      <label className="flex items-center gap-1.5">
+        ต่อหน้า
+        <select
+          className="h-7 px-2 rounded-lg border border-slate-200 bg-card text-xs font-semibold text-slate-700 cursor-pointer outline-none focus:border-[var(--brand-fg)]"
+          value={size}
+          onChange={(e) => onSize(Number(e.target.value))}
+        >
+          {sizes.map((n) => (
+            <option key={n} value={n}>{n}</option>
+          ))}
+        </select>
+      </label>
     </div>
 
     <div className="flex items-center gap-1">
-      <button
-        disabled={page <= 1}
-        onClick={() => onPage(page - 1)}
-        className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent"
-        aria-label="หน้าก่อนหน้า"
-      >
-        <ChevronLeft className="w-4 h-4" />
+      <button type="button" disabled={page <= 1} onClick={() => onPage(page - 1)} className={pagerBtnCls} aria-label="หน้าก่อนหน้า">
+        <ChevronLeft className="w-3.5 h-3.5" />
       </button>
-      {pageWindow(pages, page).map((p, i) =>
+      {pageWindow(Math.max(1, pages), page).map((p, i) =>
         p === 'gap' ? (
-          <span key={'gap' + i} className="px-1.5 text-slate-300">…</span>
+          <span key={'gap' + i} className="w-7 h-7 flex items-center justify-center text-xs text-slate-400">…</span>
         ) : (
           <button
+            type="button"
             key={p}
             onClick={() => onPage(p)}
             aria-current={p === page ? 'page' : undefined}
-            className={`min-w-8 h-8 px-1.5 rounded-lg text-xs tabular-nums transition-colors ${
-              p === page ? 'text-white font-semibold' : 'text-slate-600 hover:bg-slate-100'
+            className={`min-w-7 h-7 px-1.5 flex items-center justify-center rounded-lg text-xs font-bold tabular-nums transition-colors ${
+              p === page
+                ? 'bg-[var(--brand)] text-white border border-[var(--brand)]'
+                : 'bg-card border border-slate-200 text-slate-600 hover:bg-slate-100'
             }`}
-            style={p === page ? { background: 'var(--brand)' } : undefined}
           >
             {p}
           </button>
         )
       )}
-      <button
-        disabled={page >= pages}
-        onClick={() => onPage(page + 1)}
-        className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent"
-        aria-label="หน้าถัดไป"
-      >
-        <ChevronRight className="w-4 h-4" />
+      <button type="button" disabled={page >= pages} onClick={() => onPage(page + 1)} className={pagerBtnCls} aria-label="หน้าถัดไป">
+        <ChevronRight className="w-3.5 h-3.5" />
       </button>
     </div>
   </div>
+);
+
+/* ── ปุ่มจัดการในแถว ─────────────────────────────────────────────────────── */
+
+/**
+ * ปุ่มไอคอนในคอลัมน์ "การจัดการ" — **แบบเดียวทั้งแอป** (ต้นแบบ: ส่งออก/แก้ไข/ลบ ของหน้าโปรโมชัน
+ * เจ้าของชี้ 2026-10-02) · กล่องขาวมีขอบ ไอคอนเทา ชี้แล้วเป็นเขียวแบรนด์ (`danger` ชี้แล้วเป็นแดง)
+ * ⇒ แถวยาว ๆ ไม่มีสีแย่งสายตา สีโผล่เฉพาะปุ่มที่กำลังจะกด
+ * · `label` บังคับ — ใช้เป็นทั้ง `title` (ชี้แล้วเห็น) และ `aria-label` (ปุ่มไม่มีข้อความ design.md ข้อ 8)
+ * · ปุ่มที่ต้องมีข้อความ (เช่น "อนุมัติ") ใช้ `<Button>` ปกติ ไม่ใช่ตัวนี้
+ */
+const rowActionCls = (tone: 'neutral' | 'danger') =>
+  'w-8 h-8 shrink-0 inline-flex items-center justify-center rounded-lg border border-slate-200 bg-card text-slate-500 ' +
+  'shadow-[var(--shadow-btn)] transition-all enabled:active:scale-95 ' +
+  'disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none ' +
+  (tone === 'danger'
+    ? 'enabled:hover:bg-red-50 enabled:hover:text-red-600 enabled:hover:border-red-200'
+    : 'enabled:hover:bg-[var(--brand-soft)] enabled:hover:text-[var(--brand-fg)] enabled:hover:border-[var(--brand-fg)]');
+
+export const RowAction: React.FC<Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'children'> & {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  tone?: 'neutral' | 'danger';
+}> = ({ icon: Icon, label, tone = 'neutral', className = '', type = 'button', ...rest }) => (
+  <button type={type} title={label} aria-label={label} className={`${rowActionCls(tone)} ${className}`} {...rest}>
+    <Icon className="w-3.5 h-3.5" />
+  </button>
+);
+
+/**
+ * ปุ่มจัดการที่เป็น "ลิงก์" (เปิดไฟล์/แท็บใหม่ เช่น PDF ของใบ) — หน้าตาเดียวกับ `RowAction` ทุกพิกเซล
+ * แยกตัวเพราะ `<a>` ไม่มีสถานะ `disabled` (`enabled:` ไม่ match) ⇒ ใช้ hover ตรง ๆ
+ */
+export const RowActionLink: React.FC<Omit<React.AnchorHTMLAttributes<HTMLAnchorElement>, 'children'> & {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+}> = ({ icon: Icon, label, className = '', ...rest }) => (
+  <a title={label} aria-label={label}
+     className={`${rowActionCls('neutral').replace(/enabled:/g, '')} ${className}`} {...rest}>
+    <Icon className="w-3.5 h-3.5" />
+  </a>
+);
+
+/** แถวปุ่มของคอลัมน์ "การจัดการ" — ชิดขวาเสมอ ระยะห่างเท่ากันทุกหน้า */
+export const RowActions: React.FC<{ children: React.ReactNode; className?: string }> = ({ children, className = '' }) => (
+  <div className={`flex items-center justify-end gap-1.5 ${className}`}>{children}</div>
 );
 
 /* ── ป้ายค่าในตาราง ──────────────────────────────────────────────────────── */
