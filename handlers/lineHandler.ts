@@ -377,6 +377,7 @@ export async function handleEvent(
       if (action === 'cancel') {
         const quoteIds = quoteIdParam.split(',').filter(Boolean);
         const replyMessages: any[] = [];
+        let cancelledAny = false;
         for (const qId of quoteIds) {
           const quoteRes = await pool.query(
             'SELECT status, quotation_no FROM quotations WHERE id = $1',
@@ -430,8 +431,13 @@ export async function handleEvent(
               text: `❌ ยกเลิกการออกใบเสนอราคาเรียบร้อยแล้ว`
             });
           }
+          cancelledAny = true;
+        }
 
-          // บันทึกลง messages เพื่อเคลียร์ประวัติในบอท
+        // บันทึกลง messages เพื่อเคลียร์ประวัติในบอท — ครั้งเดียวต่อการกด ไม่ใช่ต่อใบ
+        // (เดิมอยู่ในลูป ⇒ กดยกเลิกชุด PM+THT ได้แถว "ยกเลิก" ซ้ำ 2 แถวต่อ event เดียว · 13 กลุ่ม วัด 2026-10-02)
+        // ผลต่อประวัติของ LLM เท่าเดิม: ตัวตัดหน้าต่างใน quoteExtraction หยุดที่แถวยกเลิกตัวใหม่สุดอยู่แล้ว
+        if (cancelledAny) {
           try {
             await insertMessage({
               user_id: userId,
