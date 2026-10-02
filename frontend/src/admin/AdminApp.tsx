@@ -155,27 +155,6 @@ const NAV_GROUPS: { key: string; label: string; icon: typeof LayoutDashboard; it
     ],
   },
   {
-    // โปรโมชันส่วนลดอยู่กลุ่มนี้เพราะมันคือ "กฎส่วนลด" เรื่องเดียวกับ MOQ / บล็อกสินค้า /
-    // ค่าขนส่ง — เจ้าของเลือกให้ย้ายลงมาเมื่อ 2026-09-15 (เดิมอยู่แถวบนปนกับงานประจำวัน)
-    key: 'rules',
-    label: 'เงื่อนไข & กฎ',
-    icon: SlidersHorizontal,
-    items: [
-      { sub: 'quotation', label: 'เงื่อนไขหลัก', icon: Settings2, roles: ['admin'], cap: 'page.settings_quotation' },
-      { tab: 'promotions', label: 'จัดการโปรโมชันส่วนลด', icon: Tag, roles: ['admin'], cap: 'page.promotions' },
-      // สามหัวข้อที่เป็นกฎของ "ตัวสินค้า" ใช้ไอคอนตระกูล Package เดียวกัน (+ พ่วง · ✕ หมด · − ขั้นต่ำ)
-      { sub: 'optional', label: 'สินค้าพ่วงเสริม', icon: PackagePlus, roles: ['admin'], cap: 'page.settings_optional' },
-      { sub: 'stock', label: 'ระงับเมื่อหมดสต็อก', icon: PackageX, roles: ['admin'], cap: 'page.settings_stock' },
-      { sub: 'moq', label: 'ขั้นต่ำสั่งซื้อ', icon: PackageMinus, roles: ['admin'], cap: 'page.settings_moq' },
-      // ShieldBan ไม่ใช่ Ban เพราะ Ban ถูกใช้กับ "บัญชีห้ามเสนอราคา" ไปแล้ว — คนละเรื่องกัน
-      { sub: 'block', label: 'บล็อกสินค้า', icon: ShieldBan, roles: ['admin'], cap: 'page.settings_block' },
-      { sub: 'shipping', label: 'ค่าขนส่ง & เครดิต', icon: Truck, roles: ['admin'], cap: 'page.settings_shipping' },
-      // ราคาตั้งของสินค้าสั่งทำ = ค่าที่ร้านตั้งทิ้งไว้ให้ระบบใช้ ⇒ อยู่กลุ่มนี้ ไม่ใช่ข้าง "คิดราคาสินค้า"
-      // ซึ่งเป็นเครื่องมือตอนทำใบ · แยกหน้า+สิทธิ์จากหน้านั้นเมื่อ 2026-09-23 (เจ้าของสั่ง)
-      { tab: 'pricebook', label: 'สมุดราคา', icon: BookOpen, roles: ['admin'], cap: 'page.pricebook' },
-    ],
-  },
-  {
     // แยกจากกลุ่ม "จัดการข้อมูลผู้ใช้งาน" เมื่อ 2026-09-17 ตามที่เจ้าของสั่ง —
     // เส้นแบ่งคือ **ข้อมูลที่ระบบใช้ตัดสินใจ** (สินค้า/ลูกค้า/ใครห้ามเสนอราคา) อยู่กลุ่มนี้
     // ส่วน **คนที่ล็อกอินเข้าระบบ** อยู่อีกกลุ่ม — "บัญชีห้ามเสนอราคา" จึงอยู่ที่นี่ทั้งที่ชื่อ
@@ -208,6 +187,28 @@ const NAV_GROUPS: { key: string; label: string; icon: typeof LayoutDashboard; it
       { tab: 'users', label: 'จัดการผู้ใช้งานระบบ', icon: UsersIcon, roles: ['admin'], cap: 'page.users' },
       // ไม่มี cap โดยตั้งใจ — ความสามารถที่ปิดตัวเองได้ คือความสามารถที่ล็อกคนสุดท้ายออกจากระบบได้
       { tab: 'rolepermissions', label: 'สิทธิ์ตามบทบาท', icon: ShieldCheck, roles: ['admin'] },
+    ],
+  },
+  {
+    // โปรโมชันส่วนลดอยู่กลุ่มนี้เพราะมันคือ "กฎส่วนลด" เรื่องเดียวกับ MOQ / บล็อกสินค้า /
+    // ค่าขนส่ง — เจ้าของเลือกให้ย้ายลงมาเมื่อ 2026-09-15 (เดิมอยู่แถวบนปนกับงานประจำวัน)
+    // ทั้งกลุ่มย้ายลงมาอยู่ก่อน "ตรวจสอบระบบ" เมื่อ 2026-10-02 (เจ้าของสั่ง)
+    key: 'rules',
+    label: 'เงื่อนไข & กฎ',
+    icon: SlidersHorizontal,
+    items: [
+      { sub: 'quotation', label: 'เงื่อนไขหลัก', icon: Settings2, roles: ['admin'], cap: 'page.settings_quotation' },
+      { tab: 'promotions', label: 'จัดการโปรโมชันส่วนลด', icon: Tag, roles: ['admin'], cap: 'page.promotions' },
+      // สามหัวข้อที่เป็นกฎของ "ตัวสินค้า" ใช้ไอคอนตระกูล Package เดียวกัน (+ พ่วง · ✕ หมด · − ขั้นต่ำ)
+      { sub: 'optional', label: 'สินค้าพ่วงเสริม', icon: PackagePlus, roles: ['admin'], cap: 'page.settings_optional' },
+      { sub: 'stock', label: 'ระงับเมื่อหมดสต็อก', icon: PackageX, roles: ['admin'], cap: 'page.settings_stock' },
+      { sub: 'moq', label: 'ขั้นต่ำสั่งซื้อ', icon: PackageMinus, roles: ['admin'], cap: 'page.settings_moq' },
+      // ShieldBan ไม่ใช่ Ban เพราะ Ban ถูกใช้กับ "บัญชีห้ามเสนอราคา" ไปแล้ว — คนละเรื่องกัน
+      { sub: 'block', label: 'บล็อกสินค้า', icon: ShieldBan, roles: ['admin'], cap: 'page.settings_block' },
+      { sub: 'shipping', label: 'ค่าขนส่ง & เครดิต', icon: Truck, roles: ['admin'], cap: 'page.settings_shipping' },
+      // ราคาตั้งของสินค้าสั่งทำ = ค่าที่ร้านตั้งทิ้งไว้ให้ระบบใช้ ⇒ อยู่กลุ่มนี้ ไม่ใช่ข้าง "คิดราคาสินค้า"
+      // ซึ่งเป็นเครื่องมือตอนทำใบ · แยกหน้า+สิทธิ์จากหน้านั้นเมื่อ 2026-09-23 (เจ้าของสั่ง)
+      { tab: 'pricebook', label: 'สมุดราคา', icon: BookOpen, roles: ['admin'], cap: 'page.pricebook' },
     ],
   },
   {
