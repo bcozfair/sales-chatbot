@@ -316,6 +316,14 @@ function AdminContent() {
     if (!item.cap || caps === null) return item.roles.includes(user.role);
     return caps[item.cap] !== 'deny';
   };
+  /**
+   * ใครเพิ่ม/แก้สินค้าเพิ่มเองได้ (`quote.manage_products` · J6) — ช่องกลุ่ม quote ไม่มีเมนูของตัวเอง จึงถามตรงนี้
+   * แล้วส่งลงสองหน้าที่มีปุ่ม (ขอใบเสนอราคา · สินค้าเพิ่มเอง) · ค่าสำรองตอนยังถามไม่ได้ = `defaults` ของช่องนั้น
+   * ใน config/capabilities.ts (admin · approver · subadmin) · แค่ซ่อนปุ่ม ด่านจริงอยู่ที่ index.ts
+   */
+  const canManageProducts = !!user && (caps === null
+    ? (['admin', 'approver', 'subadmin'] as Role[]).includes(user.role)
+    : caps['quote.manage_products'] !== 'deny');
   const homeVisible = canSee(NAV_HOME);
   /** กลุ่มที่ไม่เหลือเมนูให้ผู้ใช้คนนี้เลย ต้องหายไปทั้งกลุ่ม — หัวข้อกลุ่มเปล่า ๆ อ่านว่า "พัง" */
   const visibleGroups = NAV_GROUPS
@@ -745,7 +753,7 @@ function AdminContent() {
             </div>
           ) : effectiveTab === 'quoterequest' ? (
             <div className="animate-fade-in">
-              <QuoteRequest />
+              <QuoteRequest canAddProduct={canManageProducts} />
             </div>
           ) : effectiveTab === 'approvals' ? (
             <div className="animate-fade-in">
@@ -882,7 +890,7 @@ function AdminContent() {
             </div>
           ) : effectiveTab === 'odooproducts' ? (
             <div className="animate-fade-in">
-              <OdooProducts />
+              <OdooProducts canManage={canManageProducts} />
             </div>
           ) : effectiveTab === 'quotepm' ? (
             <div className="animate-fade-in">

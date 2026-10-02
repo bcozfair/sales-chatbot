@@ -27,7 +27,7 @@ import {
 } from '../db/localProductsRepo.js';
 import { pool, withTransaction } from '../config/db.js';
 import { REF_SHAPE, nextReference, describeRef, type RefBoundary } from '../utils/productRefPattern.js';
-import { modelKeyBare, suggestParent, suggestName, isCustomModel } from '../utils/productNamePattern.js';
+import { modelKey, modelKeyBare, suggestParent, suggestName, isCustomModel } from '../utils/productNamePattern.js';
 import { slog, swarn } from '../scripts/sync/syncLog.js';
 
 /**
@@ -187,8 +187,9 @@ function refSuggestion(next: { ref: string; boundary: RefBoundary }): RefSuggest
     siblings: b.count,
     min: b.min,
     max: b.max,
+    // ข้อความขึ้นจอตรง ๆ ในหน้าต่างเพิ่มสินค้า (J6 · ภาษาคนตามที่เจ้าของสั่ง 2026-10-02) — กลุ่มที่นับต่ออยู่ใน title
     warning: b.tier === 'max_plus_one'
-      ? `นับต่อจากกลุ่ม ${next.ref.slice(0, b.prefixLength)} ให้เฉย ๆ (เลขท้ายของกลุ่มนี้อาจเป็นเลขรุ่น) — ตรวจก่อนบันทึก`
+      ? 'เลขท้ายของตระกูลนี้อาจเป็นเลขรุ่น ระบบแค่นับต่อจากตัวล่าสุดให้ — เทียบกับรหัสใน Odoo ก่อนบันทึก'
       : null,
   };
 }
@@ -265,11 +266,15 @@ export async function suggestLocalProduct(
     parent: parent ? parentView(parent) : null,
     parent_reason: reason,
     group_size: groupSize,
+    // คำนำหน้าที่ใช้หาต้นแบบ — จอบอก "เลือกให้จาก N สินค้าที่ขึ้นต้น <key>" (ไม่ต้องถอด regex ซ้ำที่จอ)
+    group_key: reason === 'key' ? modelKey(model) : reason === 'key_bare' ? modelKeyBare(model) : null,
     ref,
     ref_message: refMessage,
     name: suggestName(model, parent, family),
     inherited: inheritedOf(parent),
     minimum_sales_price: salesPrice !== null ? defaultMinimumPrice(salesPrice) : null,
+    // ค่าตั้งต้นของช่อง % ราคาขั้นต่ำ (เจ้าของสั่ง 2026-10-02 ให้เปลี่ยน % ได้) — ค่าคงที่อยู่ที่นี่ที่เดียว จอไม่ฝังเลข 70
+    min_price_ratio: MIN_PRICE_RATIO,
   };
 }
 
@@ -530,9 +535,13 @@ export async function getLocalProductForEdit(id: number, db: pg.PoolClient | typ
   if (!row) throw new LocalProductError('NOT_FOUND', 'ไม่พบสินค้านี้', 404);
   const n = await referencingCount(db, row);
   const conflicts = await findOdooModelConflicts(db, [{ id, ref: row.internal_reference, model: row.model }]);
+  // ต้นแบบ — หน้าต่างแก้ไขโชว์ชื่อ + รหัส (อ่านอย่างเดียว) · ต้นแบบถูกลบจาก Odoo ไปแล้ว = null
+  const parent = row.parent_reference ? await getProductByRef(db, row.parent_reference) : null;
   return {
     ...row, status: statusOf(row), quotation_count: n, ref_parts: describeRef(row.internal_reference),
     odoo_model_conflicts: conflicts.get(id) ?? [],
+    parent: parent ? parentView(parent) : null,
+    min_price_ratio: MIN_PRICE_RATIO,
   };
 }
 
