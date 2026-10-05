@@ -942,13 +942,13 @@ console.log('\n── 12. เกลียวที่อ่านไม่ออ
     check('  และไม่ใช่ราคาของเกลียวมาตรฐาน 1/4”', quarter.r.status !== 'priced' || quarter.r.unitPrice !== bare.r.unitPrice,
       `${why(bare)} vs ${why(quarter)}`);
     // บอกเกลียวมาแล้วแต่ตารางไม่มี ⇒ ห้ามเติมเกลียวมาตรฐานของรุ่น (1/4” · M5) แล้วคิดราคาของเกลียวคนละขนาด
-    // (TS_-01 เกลียวนอกแคตตาล็อก = "ต้องขอราคา" ตั้งแต่ 2026-09-29 — ด่าน diag:pricing-catalog-ts ข้อ 5 · ที่นี่ตรวจรุ่นที่ยังใช้กติกาเดิม)
+    // (TS_-01 เกลียวนอกแคตตาล็อก = "ต้องขอราคา" ตั้งแต่ 2026-09-29 · TS_-01-0 ตั้งแต่ 2026-10-05 — ด่าน diag:pricing-catalog-ts ข้อ 5)
     for (const code of ['TSK-01-0(M12)+2M', 'TSK-01-0(S1)+2M', 'TSK-01-0(15)+2M']) {
       const x = run(code);
-      const raw = code.match(/\([^)]*\)/)![0];
-      check(`${code} — ตารางไม่มีเกลียวนี้ ⇒ ไม่ได้ราคา และบอกว่า "อ่าน ${raw} ไม่ออก" ไม่ใช่ "รหัสไม่ได้ระบุ"`,
-        x.r.status !== 'priced' && x.r.violations.some((v) => v.missing && v.message.includes(`"${raw}"`))
-          && !x.r.breakdown.some((b) => /ค่ามาตรฐานของรุ่น/.test(b.detail ?? '')), why(x));
+      const raw = code.match(/\(([^)]*)\)/)![1]!;
+      check(`${code} — ตารางไม่มี Hold Size นี้ ⇒ ไม่ได้ราคา · "ต้องขอราคาจากฝ่ายผลิต" ของ ${raw} · ไม่เติม M5 มาตรฐาน`,
+        x.r.status === 'quoteOnRequest' && x.r.violations.some((v) => v.askPrice && v.message.includes(raw))
+          && !x.r.breakdown.some((b) => b.step === 'base' || /ค่ามาตรฐานของรุ่น/.test(b.detail ?? '')), why(x));
     }
     const plain = run('TSK-01+2M');
     const std = run('TSK-01(1/4”)+2M');

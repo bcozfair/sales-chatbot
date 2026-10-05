@@ -10,7 +10,9 @@
  *      ไม่ใช่ตัวเลขราคา (ไม่มี golden — CLAUDE.md): NTC = ฐาน K/J + กฎ NTC · T = แกนเปล่า + หุ้มเทปล่อนเต็ม L1 ·
  *      Spring P ราคาเท่ามีสปริง · F1/F2 = แถวเดียวกัน · หัก L เปิดกฎของชีต ฯลฯ
  *   5. **TS_-01 ค่านอกแคตตาล็อก = ต้องขอราคาจากฝ่ายผลิต** (เจ้าของเคาะ B#2–B#8 + UI แบบ A · 2026-09-29) — ค่าที่ตารางไม่มี
- *      ขึ้นขอราคา · แอดมินเพิ่มช่อง (`applySheetEdit` ตัวเดียวกับ API · ในหน่วยความจำ) แล้วคิดได้ทันที · TS_-01-0 ไม่เปลี่ยน
+ *      ขึ้นขอราคา · แอดมินเพิ่มช่อง (`applySheetEdit` ตัวเดียวกับ API · ในหน่วยความจำ) แล้วคิดได้ทันที · TS_-01-0 ขนาด Hold Size นอกแคตตาล็อกก็เหมือนกัน (เจ้าของสั่ง 2026-10-05)
+ *   7. **ท่อนที่ยังไม่รู้จัก** (`-S###` · `-L` หลังเลขรุ่น · `+MP` / `.` ท้ายสาย) ไม่คิดเงิน ตั้งราคาทีหลังที่ตารางรหัสย่อย และไม่ทำให้
+ *      ท่อนอื่นอ่านไม่ออก (เจ้าของสั่ง 2026-10-05)
  *
  * เล่มที่ใช้: เล่มปัจจุบันในฐาน (SELECT อย่างเดียว) + แถวรหัสย่อยจาก `catalog-subcodes.json` ที่ฐานยังไม่มี + ค่ามาตรฐาน
  * เมื่อรหัสไม่ระบุจากแมป (`axisDefaults` — ตัวเดียวกับ `importer.ts --extras-only`) — **ประกอบในหน่วยความจำ ไม่เขียนฐาน**
@@ -277,9 +279,11 @@ async function main(): Promise<void> {
     check(`หมายเหตุใต้ตาราง: ${alt} ราคาเท่า ${main} และได้ช่องกรอก (${alt})`, a.o?.status === 'priced'
       && a.o.unitPrice === price(`TSK-01(${main})6+1M`).o?.unitPrice && a.p.tsForm?.values.thread === alt);
   }
-  const t010 = price('TSK-01-0(M12)+1M');
-  check('TS_-01-0 ไม่เปลี่ยน: เกลียวที่ตารางไม่มียังเป็น "อ่านไม่ออก" ไม่ใช่ขอราคา',
-    t010.p.parts.some((x) => x.kind === 'unknown') && !t010.o?.violations.some((v) => v.askPrice));
+  const k010 = book.models['TSK-01-0']!;
+  const freeH = ['97', '93', '89'].find((h) => !axisValues(k010, 'thread').includes(h))!;
+  const t010 = price(`TSK-01-0(${freeH})+1M`);
+  check(`TS_-01-0 (2026-10-05): Hold Size ${freeH} ที่ตารางไม่มี → ต้องขอราคา ไม่ใช่ "อ่านไม่ออก" · ช่อง Hold ขึ้นป้าย ask`,
+    asked(t010.o) && !t010.p.parts.some((x) => x.kind === 'unknown') && t010.p.tsForm?.issues?.hold === 'ask');
 
   // แอดมินเพิ่มช่องเองจากหน้าชีต — ตัวรับเดียวกับ PUT /sheet (ในหน่วยความจำ ไม่เขียนฐาน)
   const cable = k01.axisDefaultsBy?.cable?.values ?? {};
@@ -309,9 +313,16 @@ async function main(): Promise<void> {
   check('ตัวรับปฏิเสธ: เกลียวที่ชนคอลัมน์เดิม (M8x1.25) · ค่าที่อยู่ในแคตตาล็อก (TSK · แกน 6) · รูปแบบผิด (m12)',
     rejects({ addValues: { thread: ['M8x1.25'] } }) && rejects({ addValues: { sensor: ['TSK'] } })
       && rejects({ adderRates: { len_l1: [{ value: '6.0', rate: 1 }] } }) && rejects({ addValues: { thread: ['m12'] } }));
-  check('ตัวรับปฏิเสธ: เพิ่มค่านอกแคตตาล็อกให้ TS_-01-0 (ยังไม่ได้ตั้ง)', (() => {
-    try { applySheetEdit(book, k01.sheet!, { 'TSK-01-0': { addValues: { thread: ['M12'] } } }); return false; } catch (e) { return e instanceof EditRejected; }
+  check('ตัวรับปฏิเสธ: Hold Size ที่อยู่ในแคตตาล็อกของ TS_-01-0 (M6) เพิ่มซ้ำไม่ได้', (() => {
+    try { applySheetEdit(book, k010.sheet!, { 'TSK-01-0': { addValues: { thread: ['M6'] } } }); return false; } catch (e) { return e instanceof EditRejected; }
   })());
+  const e010 = applySheetEdit(book, k010.sheet!, { 'TSK-01-0': { addValues: { thread: [freeH] }, cells: { [`TSK/TSJ | ${freeH}`]: 135 } } });
+  const book3: PriceBook = { ...book, models: e010.models };
+  const p3 = (code: string) => { const p = parseProductCode(code, book3); return { p, o: p.cfg ? computePrice(p.cfg, book3) : null }; };
+  const own010 = p3(`TSK-01-0(${freeH})+1M`);
+  check(`TS_-01-0: แอดมินเพิ่มคอลัมน์ ${freeH} + กรอก TSK/TSJ → คิดได้ทันที + เตือน · TST ช่องที่ยังว่าง = ยังขอราคา`,
+    checkPriceModel(e010.models['TSK-01-0'], 'TSK-01-0').length === 0 && own010.o?.status === 'priced' && own010.o.unitPrice === 135
+      && warned(own010.o) && asked(p3(`TST-01-0(${freeH})+1M`).o));
   const again = (body: unknown) => { try { return applySheetEdit(book2, k01.sheet!, { 'TSK-01': body }); } catch (e) { return e instanceof EditRejected ? null : undefined; } };
   check('เอาออก: คอลัมน์ที่ยังมีตัวเลขเอาออกไม่ได้ · ล้างตัวเลขพร้อมกันแล้วเอาออกได้',
     again({ removeValues: { thread: [freeT] } }) === null && !!again({ cells: { [`TSK/TSJ | ${freeT}`]: null }, removeValues: { thread: [freeT] } }));
@@ -344,12 +355,31 @@ async function main(): Promise<void> {
     tse.p.tsForm?.issues?.sensor === 'ask' && tse.o?.status === 'quoteOnRequest'
       && !tse.o.violations.some((v) => v.level === 'block'), tse.o?.violations.map((v) => `${v.level}:${v.message}`).join(' · '));
   const junk = f('TSK-01-L(M6)4.8+1M');
-  check('ตัวอย่าง 5: ท่อนที่อ่านไม่ออกหลังเลขรุ่น = ชิป · ช่องที่ตัวอ่านไม่ได้ใช้ = unread · ประกอบกลับที่ตำแหน่งเดิม',
-    junk.p.tsForm?.headJunk === '-L' && junk.p.tsForm.issues?.thread === 'unread' && junk.p.tsForm.issues?.d === 'unread'
-      && sameTsCode(buildTsCode(junk.p.tsForm), 'TSK-01-L(M6)4.8+1M'));
+  check('ตัวอย่าง 5 (2026-10-05): -L หลังเลขรุ่น = ท่อนไม่รู้จัก (ชิป) · เกลียว/แกนข้างหลังยังอ่านได้ · ราคาเท่ารหัสที่ไม่มี -L · ประกอบกลับที่ตำแหน่งเดิม',
+    junk.p.tsForm?.headJunk === '-L' && !junk.p.tsForm.issues && junk.p.tsForm.values.thread === 'M6' && junk.p.tsForm.values.d === '4.8'
+      && junk.p.parts.some((x) => x.kind === 'unknown' && x.text === '-L' && x.subCode === 'L')
+      && junk.o?.unitPrice === f('TSK-01(M6)4.8+1M').o?.unitPrice && sameTsCode(buildTsCode(junk.p.tsForm), 'TSK-01-L(M6)4.8+1M'));
   const h15 = f('TSK-01-0(15)+2M-S000');
-  check('ตัวอย่าง 6: TS_-01-0 เกลียวอ่านไม่ออก = ป้าย unread · คิดราคาไม่ได้เหมือนเดิม',
-    h15.p.tsForm?.issues?.hold === 'unread' && h15.o?.status === 'notManufacturable');
+  const h15sum = (h15.o?.breakdown ?? []).reduce((t, b) => t + (b.amount ?? 0), 0);
+  check('ตัวอย่าง 6 (2026-10-05): TS_-01-0 Hold Size นอกแคตตาล็อก = ป้าย ask · ขอราคา · ราคาเท่าที่คิดได้ = ค่าสาย',
+    h15.p.tsForm?.issues?.hold === 'ask' && h15.o?.status === 'quoteOnRequest' && h15sum > 0 && h15.o.unitPrice === h15sum
+      && !h15.o.breakdown.some((b) => b.step === 'base'), `${h15.o?.status} ${h15.o?.unitPrice}`);
+  // 7. ท่อนที่ยังไม่รู้จัก — ไม่คิดเงิน · มีชื่อให้ตั้งในตารางรหัสย่อย · ไม่ทำให้ท่อนอื่นหายจากราคา
+  const sx = f('TSK-01(M6)4.8+3M-S007');
+  check('-S### = ท่อนไม่รู้จัก (ตั้งได้ในตารางรหัสย่อย) · ราคาเท่ารหัสที่ไม่มี -S###',
+    sx.p.parts.some((x) => x.kind === 'unknown' && x.subCode === 'S007') && sx.o?.unitPrice === f('TSK-01(M6)4.8+3M').o?.unitPrice);
+  const mp = f('TSK-01(M6)4.8+1.8M+MP');
+  check('+MP ท้ายสาย = ท่อนไม่รู้จักแยกจากความยาวสาย · ค่าสายยังคิด (เท่ารหัสที่ไม่มี +MP) · ช่องสายไม่ขึ้น unread',
+    mp.p.parts.some((x) => x.kind === 'unknown' && x.text === '+MP' && x.subCode === 'MP') && mp.o?.unitPrice === f('TSK-01(M6)4.8+1.8M').o?.unitPrice
+      && !mp.p.tsForm?.issues?.cl && sameTsCode(buildTsCode(mp.p.tsForm!), 'TSK-01(M6)4.8+1.8M+MP'));
+  const dot = f('TSK-01(M6)4.8x9+3M.');
+  check('จุดท้ายรหัส = ท่อนไม่รู้จัก · ไม่ไปทับจุดของแกน 4.8 · ราคาเท่ารหัสที่ไม่มีจุด',
+    !dot.p.tsForm?.issues && dot.o?.unitPrice === f('TSK-01(M6)4.8x9+3M').o?.unitPrice);
+  const hs = f('TSK-01-0-S(4.2)+1M');
+  check('-S หลังเลขรุ่น TS_-01-0 = ท่อนไม่รู้จัก · Hold Size ข้างหลังยังอ่าน (ไม่ตกไปใช้ M5 มาตรฐานเงียบ ๆ)',
+    hs.p.parts.some((x) => x.kind === 'unknown' && x.text === '-S') && hs.p.tsForm?.issues?.hold === 'ask' && hs.o?.status === 'quoteOnRequest');
+  const sfx = f('TSP-08S(S4)5x160-U');
+  check('ตัวอักษรติดเลขรุ่น (TSP-08S) ไม่ไปทับช่องเกลียว (S4) / หัววัด', !sfx.p.tsForm?.issues?.thread && !sfx.p.tsForm?.issues?.probe);
   const exactForm = f('TSK-01(M6)4.8+1M');
   check('รหัสตรงแคตตาล็อก = ไม่มีของ "ตามที่เขียน" ติดมา (ช่องแบบเดิมทุกอย่าง)',
     !!exactForm.p.tsForm && !exactForm.p.tsForm.issues && !exactForm.p.tsForm.written && !exactForm.p.tsForm.tail && !exactForm.p.tsForm.omit);

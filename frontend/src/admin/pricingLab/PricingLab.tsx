@@ -239,7 +239,7 @@ export const PricingLab: React.FC<Props> = ({
     ? [
         ...(result.outcome?.violations ?? []).filter((v) => v.partial).map((v) => ({ text: v.message })),
         ...result.parsed.parts.filter((p) => notInPrice(p.kind))
-          .map((p) => ({ text: `${p.text} — ${p.reads}`, ...(isUnknown(p.kind) && canEditBook && p.text ? { add: p.text } : {}) })),
+          .map((p) => ({ text: `${p.text} — ${p.reads}`, ...(isUnknown(p.kind) && canEditBook && p.text ? { add: p.subCode || p.text } : {}) })),
       ]
     : [];
   const catalog = overview?.catalog ?? [];

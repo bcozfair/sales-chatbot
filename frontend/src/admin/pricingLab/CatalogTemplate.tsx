@@ -354,8 +354,6 @@ const tsOptions = (slot: TsSlot, values: Record<string, string>): CatalogOption[
 
 /** ค่าในช่องตามที่รหัสเขียนแต่ไม่อยู่ในรายการ — ใช้ค่านี้เป็นตัวเลือกพิเศษของ select ให้ค่าที่เลือกอยู่ถูกต้อง */
 const WRITTEN = '__written__';
-/** ท้ายรหัสแบบงานสั่งทำ (`-S000`) = ท่อนเสริมสีฟ้าแบบเดิม · ที่เหลือ = อ่านไม่ออก (เหลือง) */
-const isExtra = (t: string) => /^-[A-Z]+\d+$/i.test(t);
 
 export const TsCatalogTemplate: React.FC<TsProps> = ({ spec, families, form, onChange, onFamily, status }) => {
   /** ค่าใหม่ในช่อง = ทิ้งของ "ตามที่รหัสเขียน" ของช่องนั้น (ค่า · ป้ายเตือน · ช่องที่รหัสไม่ได้เขียน) */
@@ -455,25 +453,12 @@ export const TsCatalogTemplate: React.FC<TsProps> = ({ spec, families, form, onC
       </Slot>,
     );
   }
-  for (const [i, e] of (form.extras ?? []).entries()) {
-    items.push(<Sep key={`xs-${i}`} t="-" />);
-    items.push(
-      <Slot key={`x-${i}`} cap="นอกแคตตาล็อก">
-        <span className="h-9 inline-flex items-center gap-1 pl-2.5 pr-1 rounded-lg font-mono text-[14px] font-bold bg-sky-50 border border-sky-200 text-sky-800">
-          {e}
-          <button type="button" aria-label={`เอา ${e} ออก`} title="เอาออกจากรหัส" className="p-0.5 rounded hover:bg-sky-100"
-                  onClick={() => onChange({ ...form, extras: (form.extras ?? []).filter((_, j) => j !== i) }, true)}>
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </span>
-      </Slot>,
-    );
-  }
-  // ท่อนที่อ่านไม่ออก (หลังเลขรุ่น + ท้ายรหัส) ต่อท้ายแถวเป็นชิป · กด ✕ = เอาออกจากรหัส (mockup ตัวอย่างที่ 5)
-  const chip = (k: string, text: string, extra: boolean, remove: () => void) => (
-    <Slot key={k} cap={extra ? 'นอกแคตตาล็อก' : 'อ่านไม่ออก'} tone={extra ? undefined : 'warn'}>
-      <span className={`h-9 inline-flex items-center gap-1 pl-2.5 pr-1 rounded-lg font-mono text-[14px] font-bold ${
-        extra ? 'bg-sky-50 border border-sky-200 text-sky-800' : TONE_BOX.warn}`}>
+  // ท่อนที่ไม่รู้จัก (หลังเลขรุ่น + ท้ายรหัส รวม `-S###` ของงานสั่งทำ) ต่อท้ายแถวเป็นชิปเหลือง · กด ✕ = เอาออกจากรหัส
+  // (mockup ตัวอย่างที่ 5) — เจ้าของสั่ง 2026-10-05: `-S###` / `-L` / `+MP` = ท่อนไม่รู้จัก ไม่คิดเงิน ตั้งราคาทีหลังที่ตารางรหัสย่อย
+  // (เดิม `-S###` เป็นชิปฟ้า "นอกแคตตาล็อก" ซึ่งอ่านเหมือนระบบรู้จักแล้ว)
+  const chip = (k: string, text: string, remove: () => void) => (
+    <Slot key={k} cap="อ่านไม่ออก" tone="warn">
+      <span className={`h-9 inline-flex items-center gap-1 pl-2.5 pr-1 rounded-lg font-mono text-[14px] font-bold ${TONE_BOX.warn}`}>
         {text}
         <button type="button" aria-label={`เอา ${text} ออก`} title="เอาออกจากรหัส" className="p-0.5 rounded hover:opacity-70" onClick={remove}>
           <X className="h-3.5 w-3.5" />
@@ -482,11 +467,14 @@ export const TsCatalogTemplate: React.FC<TsProps> = ({ spec, families, form, onC
     </Slot>
   );
   const chips: React.ReactNode[] = [];
-  if (form.headJunk) chips.push(chip('hj', form.headJunk.replace(/^-/, ''), false, () => onChange({ ...form, headJunk: undefined }, true)));
+  if (form.headJunk) chips.push(chip('hj', form.headJunk.replace(/^-/, ''), () => onChange({ ...form, headJunk: undefined }, true)));
+  for (const [i, e] of (form.extras ?? []).entries()) {
+    chips.push(chip(`x-${i}`, e, () => onChange({ ...form, extras: (form.extras ?? []).filter((_, j) => j !== i) }, true)));
+  }
   for (const [i, t] of (form.tail ?? []).entries()) {
     const text = t.replace(/^-/, '');
     if (!text) continue;
-    chips.push(chip(`t-${i}`, text, isExtra(t), () => {
+    chips.push(chip(`t-${i}`, text, () => {
       const tail = (form.tail ?? []).filter((_, j) => j !== i);
       onChange({ ...form, tail: tail.length ? tail : undefined }, true);
     }));

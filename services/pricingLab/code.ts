@@ -36,7 +36,7 @@ import type { PriceBook, PriceModel, Predicate, ProductConfig } from './types.js
 import { resolveModel } from './engine.js';
 import { findSubCode, subCodeOption } from './subcodes.js';
 import { ADDONS, AMP, BH_CATALOG, SHAPE_AXIS, bhSpec, buildBhCode, sameBhCode, type BhFamily, type BhForm, type HoleSpec, type SizeKey } from './catalogBh.js';
-import { MODEL_SUFFIX, NTC_HEADS, NTC_NUMBERS, TS_ADDONS, TS_CATALOG, readTsForm, readTsFormLoose, tsFamilyOfModel, tsSpec, type TsFamily, type TsFamilySpec, type TsForm } from './catalogTs.js';
+import { MODEL_SUFFIX, NTC_HEADS, askSlotKey, NTC_NUMBERS, TS_ADDONS, TS_CATALOG, readTsForm, readTsFormLoose, tsFamilyOfModel, tsSpec, type TsFamily, type TsFamilySpec, type TsForm } from './catalogTs.js';
 
 /** หนึ่งรหัสย่อยในรหัสสินค้า พร้อมคำอธิบายว่าระบบอ่านมันว่าอะไร — ใช้โชว์ให้คนตรวจก่อนเชื่อราคา */
 export interface CodePart {
@@ -234,7 +234,7 @@ function catalogThreadCols(model: PriceModel, spec: TsFamilySpec): Map<string, s
   const axis = spec.askPrice?.thread ?? 'thread';
   const values = axisValues(model, axis);
   const out = new Map<string, string>();
-  for (const o of spec.slots.thread?.options ?? []) {
+  for (const o of spec.slots[askSlotKey(spec, 'thread')]?.options ?? []) {
     const col = o.code === '' ? model.axisDefaults?.[axis] : resolveThread(values, o.code);
     if (col && !out.has(col)) out.set(col, o.code);
   }
@@ -518,6 +518,9 @@ function leftovers(c: Ctx, rest: string): string[] {
     // 2 Element อยู่หน้าความยาวสายโดยไม่มีขีดคั่น (`x290-2+2MTSU` · แคตตาล็อก TS_-04 · 10 · 11 · 12) — แยกที่ `+ตัวเลข`
     // ไม่งั้นทั้งท่อน `2+2MTSU` ขึ้นแดงแล้วค่าสายหายไปด้วย (เจอ 2026-09-28 · 48 รหัสของ TS_-10)
     .flatMap((t) => t.split(/(?=\+\d)/))
+    // ท่อนที่ต่อท้ายสายด้วย `+` (`+1.8M+MP`) หรือจุดท้ายรหัส (`+3M.`) = ท่อนที่ยังไม่รู้จัก — แยกออกจากความยาวสาย
+    // ไม่งั้นทั้งท่อนขึ้นแดงแล้วค่าสายหายไปด้วย (เจ้าของสั่ง 2026-10-05: ไม่คิดเงิน · ตั้งราคาทีหลังที่ตารางรหัสย่อย)
+    .flatMap((t) => t.split(/(?=\+[A-Z])|(?=\.+$)/i))
     .map((t) => t.trim())
     .filter((t) => t !== '');
 }
@@ -702,6 +705,16 @@ function readTsGeneric(c: Ctx, rest: string, prefix: string, letter = ''): void 
   let threadText = '';
   /** อัตราความยาวแกนที่ใช้ (หลังปัดขึ้นเป็นขนาดที่มีอัตรา) */
   let dUsed: string | undefined;
+
+  // ตัวอักษรที่คั่นด้วยขีดระหว่างเลขรุ่นกับวงเล็บ/ขนาด (`TSJ-01-L(M6)` · `TSK-01-0-S(4.2)`) = ท่อนที่ยังไม่รู้จัก (เจ้าของสั่ง
+  // 2026-10-05: ไม่คิดเงิน · ตั้งราคาทีหลังที่ตารางรหัสย่อย) — ต้องตัดออกแล้วอ่านต่อ ไม่งั้นวงเล็บข้างหลังไม่ถูกอ่าน แล้ว
+  // engine ใช้เกลียวมาตรฐานของรุ่นแทนเกลียวที่รหัสบอกเงียบ ๆ (`TSK-01-0-S(4.2)` เคยได้ราคา M5)
+  const junk = rest.match(/^-([A-Z]{1,3})(?=[(0-9])/i);
+  if (junk) {
+    const raw = junk[1] ?? '';
+    if (!readFromTable(c, raw, junk[0])) add(c, { text: junk[0], reads: 'ยังไม่ได้ตั้งค่าว่าแปลว่าอะไร', kind: 'unknown', subCode: raw });
+    rest = rest.slice(junk[0].length);
+  }
 
   const paren = rest.match(/^\(([^)]*)\)/);
   if (paren && ask?.askPrice?.thread && canonicalAskValue('thread', paren[1] ?? '') !== undefined) {
@@ -1367,7 +1380,13 @@ function readTail(c: Ctx, rest: string, prefix: string): void {
     if (readCommonToken(c, token)) continue;
     // `-U` ของ TS-14 เคยเป็นเงื่อนไขฝังในโค้ดตรงนี้ ตอนนี้ย้ายไปเป็นแถวในตารางรหัสย่อยแล้ว
     // (มาจากรหัสมาตรฐานที่ชีตเขียนเอง `TS_- 14 D x100-U`) ⇒ แอดมินเห็นและแก้ได้
-    if (readFromTable(c, token)) continue;
+    // `+MP` (แยกจากความยาวสายใน `leftovers`) — ชื่อในตารางรหัสย่อยไม่มี `+` · จุดท้ายรหัสไม่มีชื่อให้ตั้ง
+    const key = token.replace(/^\+(?=[A-Z])/i, '');
+    if (/^\.+$/.test(token)) {
+      add(c, { text: token, reads: 'ตัวอักษรเกินท้ายรหัส — ไม่มีผลกับราคา', kind: 'unknown' });
+      continue;
+    }
+    if (readFromTable(c, key, token)) continue;
     // หลายช่องติดกันไม่มีตัวคั่น (`BU` = หัว B + Ground U ของ TS_-08) — ครบทุกตัวอักษรถึงจะใช้
     const split = splitKnown(c, token);
     if (split.pieces.length > 1 && !split.rest) {
@@ -1375,7 +1394,7 @@ function readTail(c: Ctx, rest: string, prefix: string): void {
       continue;
     }
 
-    add(c, { text: token, reads: 'ยังไม่ได้ตั้งค่าว่าแปลว่าอะไร', kind: 'unknown', subCode: token });
+    add(c, { text: token, reads: 'ยังไม่ได้ตั้งค่าว่าแปลว่าอะไร', kind: 'unknown', subCode: key });
   }
   void prefix;
 }
@@ -1579,18 +1598,39 @@ function tsFormOf(c: Ctx, input: string, family: TsFamily): TsForm {
   }
   const issues = { ...loose.form.issues };
   // ท่อนที่อ่านไม่ออก → ช่วงตัวอักษรในรหัส (ท่อนเดียวกันซ้ำกันได้ — จับทีละตำแหน่ง)
+  // ตัวอ่านเดินซ้ายไปขวา ⇒ หาต่อจากท่อนก่อนหน้าก่อน (จุดท้ายรหัส `.` ต้องไม่ไปจับจุดของ `4.8`) แล้วค่อยถอยไปหาจากต้นรหัส
+  // ตัวอักษรท้ายเลขรุ่น (`TSP-08S` → ท่อน `S`) อยู่ในข้อความของท่อนรุ่นเอง ⇒ ผูกกับท้ายท่อนรุ่น ไม่ใช่ไปจับ `S` ของ `(S4)`
   const spans: [number, number][] = [];
+  let cursor = 0;
+  let modelEnd = -1;
   for (const p of c.parts) {
-    if (p.kind !== 'unknown' || !p.text) continue;
+    if (!p.text) continue;
     const t = norm(p.text).toUpperCase();
-    let at = loose.canon.indexOf(t);
-    while (at >= 0 && spans.some(([a]) => a === at)) at = loose.canon.indexOf(t, at + 1);
-    if (at >= 0) spans.push([at, at + t.length]);
+    if (p.kind === 'model') {
+      const at = loose.canon.indexOf(t);
+      if (at >= 0) { cursor = at + t.length; modelEnd = cursor; }
+      continue;
+    }
+    if (p.kind === 'unknown' && modelEnd >= t.length && cursor === modelEnd && loose.canon.slice(modelEnd - t.length, modelEnd) === t) {
+      spans.push([modelEnd - t.length, modelEnd]);
+      continue;
+    }
+    const from = (start: number) => {
+      let at = loose.canon.indexOf(t, start);
+      while (at >= 0 && p.kind === 'unknown' && spans.some(([a]) => a === at)) at = loose.canon.indexOf(t, at + 1);
+      return at;
+    };
+    const ahead = from(cursor);
+    const at = ahead >= 0 ? ahead : from(0);
+    if (at < 0) continue;
+    if (p.kind === 'unknown') spans.push([at, at + t.length]);
+    if (ahead >= 0) cursor = at + t.length;
   }
   for (const [key, [a, b]] of Object.entries(loose.ranges)) {
     if (b > a && spans.some(([x, y]) => x < b && a < y)) issues[key] = 'unread';
   }
-  for (const [slot, axis] of Object.entries(spec.askPrice ?? {})) {
+  for (const [role, axis] of Object.entries(spec.askPrice ?? {})) {
+    const slot = askSlotKey(spec, role as 'sensor' | 'thread' | 'd');
     if (issues[slot] !== 'unread' && loose.form.written?.[slot] && c.cfg.askPrice?.[axis] !== undefined) issues[slot] = 'ask';
   }
   const has = Object.keys(issues).length > 0;

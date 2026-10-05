@@ -141,7 +141,11 @@ for (const width of [1280, 390]) {
   await openSheet();
 
   const boxes = await page.evaluate(() => [...document.querySelectorAll('[data-testid="ask-price"]')].map((x) => x.id));
-  ok('กล่อง "ต้องขอราคาจากฝ่ายผลิต" มีเฉพาะ TS_-01 (TS_-01-0 ไม่เปลี่ยน)', boxes.length === 1 && boxes[0] === 'ask-TSK-01', boxes.join(','));
+  // TS_-01-0 Hold Size ได้กล่องของตัวเองตั้งแต่ 2026-10-05 (เจ้าของสั่ง) — ชิปมาจาก /unread ของรุ่นนั้นเหมือน TS_-01
+  ok('กล่อง "ต้องขอราคาจากฝ่ายผลิต" มี TS_-01 และ TS_-01-0 (2026-10-05)', boxes.length === 2 && boxes.includes('ask-TSK-01') && boxes.includes('ask-TSK-01-0'), boxes.join(','));
+  const chips010 = await page.evaluate(() => [...document.querySelectorAll('[id="ask-TSK-01-0"] button.rounded-full')].length);
+  const found010 = found.filter((f) => f.model === 'TSK-01-0').length;
+  ok('ชิปของ TS_-01-0 ตรงกับที่ /unread นับจากรหัสจริง', chips010 === found010 && found010 > 0, `จอ ${chips010} · API ${found010}`);
   const chips = await page.evaluate(() => [...document.querySelectorAll('#ask-TSK-01 button.rounded-full')].map((b) => (b as HTMLElement).innerText.replace(/\s+/g, ' ')));
   ok('ชิปตรงกับที่ /unread นับจากรหัสจริง', chips.length === foundHere.length, `จอ ${chips.length} · API ${foundHere.length}`);
   const hscroll0 = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);

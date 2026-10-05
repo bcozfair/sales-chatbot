@@ -75,6 +75,7 @@ export interface TsFamilySpec {
    *   · `d` — ขนาดแกนที่ไม่อยู่ในรายการ ใช้อัตราความยาวแกนของ **ขนาดถัดขึ้นไปที่มีอัตรา** (4 → 4.8 · 5 → 6 · เจ้าของเคาะ B#2)
    *     ใหญ่กว่าทุกขนาดที่มีอัตรา = ขอราคา · แอดมินเพิ่มขนาดใหม่พร้อมอัตรา = ราคาตั้งของคอลัมน์เกลียว + อัตราใหม่
    * ไม่มีช่องนี้ = รุ่นนั้นใช้กติกาเดิมทุกอย่าง (ค่าที่ตารางไม่มี = อ่านไม่ออก)
+   * คีย์ `thread` = **ช่องเกลียวของตารางนั้น** ซึ่ง TS_-01-0 ชื่อ `hold` (Hold Size · 2026-10-05) — ชื่อช่องจริงถามที่ `askSlotKey`
    */
   askPrice?: { sensor?: string; thread?: string; d?: string };
   /**
@@ -200,6 +201,9 @@ export const TS_CATALOG: TsFamilySpec[] = [
       ground: ch('Ground', GROUND),
     },
     defaults: { sensor: 'K', hold: '', cl: '1', cable: '', ground: '' },
+    // ขนาด Hold Size นอกแคตตาล็อก (`(15)` · `(4.5)` · `(M12)` · 21 รหัสจริง) = ต้องขอราคาจากฝ่ายผลิต แบบเดียวกับเกลียวของ TS_-01
+    // — เจ้าของสั่ง 2026-10-05 · ช่อง Hold Size ของแคตตาล็อก = แกน `thread` ของตาราง (คอลัมน์ M4–M10) · หัววัด/แกนคงเดิม
+    askPrice: { thread: 'thread' },
   },
   {
     family: 'TS_-04', head: 'TS_-04', name: 'Thermocouple / NTC / PTC · Thread + Spring + Cable', model: 'TSK-04',
@@ -539,6 +543,11 @@ export function readTsForm(input: string, family: TsFamily): TsForm | undefined 
   const extras = (m.groups.extras ?? '').split('-').filter(Boolean);
   const form: TsForm = { family, values, ...(extras.length ? { extras } : {}) };
   return sameTsCode(buildTsCode(form), input) ? form : undefined;
+}
+
+/** ชื่อช่องบนจอของคีย์ใน `askPrice` — `thread` ของ TS_-01-0 คือช่อง `hold` (Hold Size) */
+export function askSlotKey(spec: TsFamilySpec, role: 'sensor' | 'thread' | 'd'): string {
+  return role === 'thread' && !spec.slots.thread && spec.slots.hold ? 'hold' : role;
 }
 
 /** ตารางของแคตตาล็อกที่รุ่นในสมุดราคานี้ใช้ — TS_-12 แยกตามชนิด Sensor (Thermocouple / RTD คนละหน้า) */
