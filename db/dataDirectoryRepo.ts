@@ -10,8 +10,9 @@
  * ── ตัวเลขที่ออกแบบ query ชุดนี้ (วัดบนฐาน dev 2026-09-17) ───────────────────
  *   products               51,665 แถว
  *   customers_data_view    82,721 แถว / 53,490 บริษัท
- *   sale_orders           320,090 แถว **และ 320,090 order_reference** ⇒ 1 แถว = 1 ใบจริง ๆ
- *                          (คอลัมน์ model/quantity ทำให้ดูเหมือนระดับบรรทัด แต่ไม่ใช่)
+ *   sale_orders           320,090 แถว **และ 320,090 order_reference** ⇒ 1 แถว = 1 ชื่อใบ
+ *                          (คอลัมน์ model/quantity ทำให้ดูเหมือนระดับบรรทัด แต่ไม่ใช่ · ยอดทั้งใบอยู่ที่ order_*
+ *                          ตั้งแต่ sync v3 · ใบที่ Odoo เปลี่ยนชื่อมีสองแถว — ดูหัว getCompanyDiscountHistory)
  *   ⇒ ต้องแบ่งหน้าฝั่ง server ทั้งคู่ ส่งทั้งก้อนไม่ได้
  */
 import { pool } from '../config/db.js';
@@ -438,10 +439,20 @@ export async function getCustomerFacets(): Promise<{
 export interface DiscountOrderRow {
   order_reference: string;
   order_date: string | null;
-  total_amount: string | null;
-  total_discount: string | null;
+  /** ยอดก่อนลดของ "ทั้งใบ" (sync v3) — ไม่ใช่ total_amount ซึ่งเป็นของบรรทัดแรก */
+  order_total_amount: string | null;
+  order_total_discount: string | null;
   invoice_status: string | null;
 }
+
+/**
+ * คอลัมน์และเงื่อนไขของ "ใบที่นับในประวัติส่วนลด" — สองคิวรีข้างล่างใช้ชุดเดียวกัน ⇒ หน้าตาราง (หลายบริษัท)
+ * กับแผงรายละเอียด/หน้าขอใบเสนอราคา (บริษัทเดียว) ไม่มีทางเลือกใบคนละชุด
+ */
+const DISCOUNT_ORDER_COLS = `s.order_reference,
+              to_char(s.order_date AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD') AS order_date,
+              s.order_total_amount, s.order_total_discount, s.invoice_status`;
+const DISCOUNT_ORDER_FILTER = `s.order_total_amount IS NOT NULL`;
 
 /**
  * ส่วนลดทั้งบิลของ N ใบล่าสุด ต่อ "รหัสลูกค้า" (company_id) หนึ่งราย
@@ -456,8 +467,17 @@ export interface DiscountOrderRow {
  *    ⇒ ตรงกับ idx_so_contact_latest พอดี ได้ **1 ms** · ถ้าสร้าง CTE DISTINCT ON
  *    คร่อมทั้ง 320,090 แถวก่อนค่อยกรอง planner ใช้ index ไม่ได้เลยและ **timeout เกิน 15 วินาที**
  *
- * ⚠️ ส่งค่า total_discount ตรง ๆ ห้ามคำนวณใหม่จาก total_amount - amount_after_discount
- *    เพราะมี 2,362 ใบ (0.7%) ที่สามช่องนั้นไม่ลงตัวกันเองจากต้นทาง
+ * ⚠️ ใช้ **ยอดทั้งใบ `order_*`** (ขั้น 5 ของ docs/plan-saleorder-v3.md · 2026-10-05) ไม่ใช่ `total_*`
+ *    ซึ่งเป็นของบรรทัดแรก — ใบหลายบรรทัดที่ % ทั้งใบต่างจาก % บรรทัดแรก 13,746 ใบ (วัด 2026-10-05)
+ *    · ส่งค่า order_total_discount ตรง ๆ ห้ามคำนวณใหม่จาก order_total_amount - order_amount_after_discount
+ *      เพราะมี 2,468 ใบที่สามช่องนั้นไม่ลงตัวกันเอง (บรรทัดจากต้นทางไม่ลงตัวอยู่แล้ว · วัด 2026-10-05)
+ *
+ * ⚠️ **ข้ามแถวที่ไม่มียอดทั้งใบ** (`order_total_amount IS NULL` · เจ้าของเลือก 2026-10-05) — คือแถวชื่อเก่า
+ *    (QP/QT/DP/DT) ที่ Odoo เปลี่ยนชื่อไปก่อนสลับ v3 + 16 ใบที่ v3 ไม่ส่งมา · ใน 3 ใบล่าสุดมี 2,256 แถว
+ *    ของ 2,220 บริษัท และ 2,178 แถวมีแถวชื่อใหม่ของใบเดียวกันอยู่ใน 3 ใบนั้นแล้ว ⇒ ข้อมูลไม่หาย
+ *    · **ไม่ได้ลบ/ซ่อนซากทั่วไป** — ซากที่เกิดหลังสลับ v3 มียอดทั้งใบ จึงยังโชว์ซ้ำกับแถวชื่อใหม่ได้
+ *      (เจ้าของ 2026-10-05: "ส่วนลดที่แสดงซ้ำกัน ไม่เป็นไร") · ไม่ต้องเพิ่ม index — แถว NULL มีแค่ ~7,000
+ *      ตัวกรองนี้ข้ามไม่กี่แถวบน idx_so_contact_latest
  *
  * ⚠️ คืน order_date เป็น **วันไทยแบบ YYYY-MM-DD** ไม่ใช่ timestamp เต็ม —
  *    `formatDate()` ฝั่งหน้าจอรับเฉพาะรูปแบบวันล้วน (มันต่อ 'T00:00:00+07:00' เอง)
@@ -487,11 +507,10 @@ export async function queryCompanyDiscountHistory(
   limit = 3,
 ): Promise<DiscountOrderRow[]> {
   const { rows } = await pool.query(
-    `SELECT s.order_reference,
-            to_char(s.order_date AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD') AS order_date,
-            s.total_amount, s.total_discount, s.invoice_status
+    `SELECT ${DISCOUNT_ORDER_COLS}
        FROM sale_orders s
       WHERE s.contact_id IN (SELECT contact_id FROM customers_data_view WHERE company_id = $1)
+        AND ${DISCOUNT_ORDER_FILTER}
       ORDER BY s.order_date DESC NULLS LAST, s.order_reference DESC
       LIMIT $2`,
     [companyId, Math.min(Math.max(1, limit), 20)],
@@ -508,14 +527,13 @@ export async function getDiscountHistoryForCompanies(
   if (!companyIds.length) return out;
   try {
     const { rows } = await pool.query(
-      `SELECT c.company_id, x.order_reference, x.order_date, x.total_amount, x.total_discount, x.invoice_status
+      `SELECT c.company_id, x.*
          FROM UNNEST($1::int[]) AS c(company_id)
          JOIN LATERAL (
-           SELECT s.order_reference,
-              to_char(s.order_date AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD') AS order_date,
-              s.total_amount, s.total_discount, s.invoice_status
+           SELECT ${DISCOUNT_ORDER_COLS}
              FROM sale_orders s
             WHERE s.contact_id IN (SELECT contact_id FROM customers_data_view WHERE company_id = c.company_id)
+              AND ${DISCOUNT_ORDER_FILTER}
             ORDER BY s.order_date DESC NULLS LAST, s.order_reference DESC
             LIMIT $2
          ) x ON true`,
@@ -525,7 +543,7 @@ export async function getDiscountHistoryForCompanies(
       const list = out.get(r.company_id);
       const item: DiscountOrderRow = {
         order_reference: r.order_reference, order_date: r.order_date,
-        total_amount: r.total_amount, total_discount: r.total_discount,
+        order_total_amount: r.order_total_amount, order_total_discount: r.order_total_discount,
         invoice_status: r.invoice_status,
       };
       if (list) list.push(item);
