@@ -1,7 +1,8 @@
 # รวมประวัติแชทให้ครบ — `messages` + `webhook_events`
 
-> สถานะ (2026-10-02): **เฟส 1 ลงโค้ดแล้วบน branch `msg-gap-capture` · ยังไม่ merge ยังไม่ deploy
-> migration `2026-10-02_01` ยังไม่ได้รันบนฐานจริง** · เฟส 2–3 ยังเป็นแบบที่เสนอ
+> สถานะ (2026-10-05): **เฟส 1 ลงโค้ดแล้ว (branch `msg-gap-capture` → QA ต่อบน `qa/msg-gap-capture` ·
+> merge `origin/main` 5f2d661 แล้ว) · ยังไม่ merge เข้า main ยังไม่ deploy · migration `2026-10-02_01` ยังไม่ได้รันบนฐานจริง**
+> · เฟส 2–3 ยังเป็นแบบที่เสนอ
 > เจ้าของอนุมัติทิศทาง 2026-10-02
 
 ## คำสั่งเจ้าของ (2026-10-02)
@@ -46,6 +47,10 @@
 | message text | `wh_text` | ข้อความดิบ | `message.id` |
 | message ชนิดอื่น (ไม่ใช่ image) | `wh_<ชนิด>` | `[Received <ชนิด> message]` | `message.id` |
 
+`webhook_events.reply_status` (คำนวณหลังงานจบหรือครบเพดาน 120 วิ · `replyStatusOf()` ลำดับเงื่อนไขคือความหมาย):
+`sent` มีรอบส่งสำเร็จ → `pending` งานยังไม่จบ หรือยังมีรอบค้าง (**แม้รอบที่จดได้จะล้มหมด** — งานที่ยังวิ่งยังส่ง
+ทางสำรองสำเร็จได้) → `failed` งานจบแล้วและล้มทุกรอบ → `none` งานจบแล้วไม่ได้เรียกส่งเลย
+
 `reply_content` = ข้อความที่ส่งสำเร็จ (text ตรงตัว · Flex = altText) · ไม่มีรอบไหนสำเร็จ = `[บอทไม่ได้ตอบ]`
 · `meta` NULL · `created_at` = เวลารับ webhook · เขียนเฉพาะ event ที่ handleEvent ไม่ได้เขียนแถวเอง
 
@@ -62,7 +67,8 @@ altText (น้อยกว่า summary ของแถว handler) · แถ�
 · การกันแถวซ้ำพึ่งสองเงื่อนไขนอกตัวมัน (insertMessage ใน lineHandler ถูก await ทุกจุด · handleImage เป็นทางเดียว
 ที่ไม่ผ่านตัวจด) — ด่านอ่านซอร์สคุม
 
-gate: `npm run diag:webhook-recorder` + `npm run diag:redelivery`
+gate: `npm run diag:webhook-recorder` + `npm run diag:redelivery` · ก่อน merge ใส่ `npm run diag:webhook-recorder -- --frozen-handler`
+(ข้อ 3ข: `handlers/lineHandler.ts` เทียบจุดแยกจาก main ต้องเปลี่ยนแค่คอมเมนต์) · ชุด 6 ข้ามเองจนกว่าจะรัน migration + deploy
 
 **ลำดับ deploy (รอเจ้าของสั่ง):** merge → `db:dump` + migration ผ่าน psql (`DEPLOY.md` ขั้น 4 · `we_reply` ต้องเป็น `t`)
 → `diag:redelivery` ข้อ 7 ไม่มี ⏭️ → build + up + prune → `diag:webhook-recorder` (ชุดหลัง deploy) + `diag:redelivery`

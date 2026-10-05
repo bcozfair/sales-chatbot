@@ -168,9 +168,11 @@ reply token ใช้ได้ครั้งเดียว ⇒ event ที่
 | `reply_error` | รอบที่ล้ม: HTTP status + `x-line-request-id` + body (≤1000) |
 | `reply_preview` | ข้อความที่ส่งถึงจริง ชั้นบนเท่านั้น (text / altText ของ Flex · ≤1000) |
 
-สี่คอลัมน์ล่างเขียนโดย `services/webhookRecorder.ts` หลังงานจบ (migration
-`2026-10-02_01_webhook_events_reply.sql`) · NULL ทุกช่อง = image · ตัวส่งซ้ำ · dropped ก่อนเริ่ม ·
-แถวก่อนวันนั้น · **`reply_status` ไม่ใช่ `outcome` — ห้ามใช้ตัดสินการส่งซ้ำ**
+สี่คอลัมน์ล่างเขียนโดย `services/webhookRecorder.ts` (migration `2026-10-02_01_webhook_events_reply.sql`)
+· `message_text` เขียน **ตอนรับ** ก่อนเข้าคิว ⇒ มีค่าแม้ event ถูก dropped หรือเป็นตัวส่งซ้ำ (NULL = ไม่ใช่ text)
+· `reply_*` เขียน **หลังงานในคิวจบ** (รอ ≤120 วิ) ⇒ NULL = ไม่ผ่านคิว (dropped ก่อนเริ่ม · ตัวส่งซ้ำที่รอบแรก
+ไม่เคยมาถึง — ดู `redelivery_action`) · image · ยังรองานอยู่ · ตัวส่งซ้ำของ event ที่รอบแรกผ่านคิว = ค่าของรอบแรก
+· แถวก่อนวันนั้น NULL ทุกช่อง · **`reply_status` ไม่ใช่ `outcome` — ห้ามใช้ตัดสินการส่งซ้ำ**
 ทำไมต้องมี `reply_preview` ทั้งที่ `messages.reply_content` มีอยู่แล้ว: แถวของ handler เขียน **ก่อนส่ง**
 จึงบอกไม่ได้ว่าอะไรถึงจริง · ทางสำรองของ handleEvent ส่งคนละข้อความ ("ระบบขัดข้อง") และกลืน error
 ของการส่งเอง ⇒ outcome ยังเป็น `replied` · และ event ที่ไม่มีแถวใน `messages` ต้องสอบได้จากตารางนี้ตารางเดียว
