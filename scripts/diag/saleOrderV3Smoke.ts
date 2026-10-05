@@ -157,6 +157,17 @@ function partA() {
   check('มีข้อมูล + ไม่มี next_cursor + has_more=false = จบ', d(10, false, null, 'c1') === 'complete');
   check('cursor ไม่ขยับ + has_more=true = retry แล้ว error', d(10, true, 'c1', 'c1', 0) === 'retry-stall' && d(10, true, 'c1', 'c1', 2) === 'error');
   check('cursor ไม่ขยับ + has_more=false = จบ', d(10, false, 'c1', 'c1') === 'complete');
+  // รอบ incremental: หน้าไม่เต็ม limit = จบรอบ (ไม่ยิงหน้าว่างยืนยัน) · การกวาดเต็มยังเดินจนเจอหน้าว่าง
+  const s = (orderCount: number | null | undefined, stopOnShortPage: boolean, nextCursor: string | null = 'c2', previousCursor = 'c1', hasMore = false, stallRetries = 0) =>
+    decideV3PageTransition({ rowCount: 10, hasMore, nextCursor, previousCursor, stallRetries, maxStallRetries: 2,
+      orderCount, pageLimit: 500, stopOnShortPage }).action;
+  check('incremental + หน้าไม่เต็ม (499) = จบรอบ แม้ has_more=true', s(499, true, 'c2', 'c1', true) === 'complete');
+  check('incremental + หน้าเต็ม (500) = ไปต่อ', s(500, true) === 'advance');
+  check('incremental + ไม่รู้จำนวนใบ = ไปต่อ (ถือว่าเต็ม)', s(null, true) === 'advance' && s(undefined, true) === 'advance');
+  check('กวาดเต็ม + หน้าไม่เต็ม = ไปต่อเหมือนเดิม', s(3, false) === 'advance');
+  check('incremental + หน้าไม่เต็มแต่ cursor ไม่ขยับ + has_more=true = ยัง retry/error',
+    s(3, true, 'c1', 'c1', true, 0) === 'retry-stall' && s(3, true, 'c1', 'c1', true, 2) === 'error');
+  check('incremental + หน้าไม่เต็มแต่ไม่มี next_cursor + has_more=true = ยัง error', s(3, true, null, 'c1', true) === 'error');
   check('หน้าแรก (since=) มีข้อมูล = ไปต่อ', d(10, true, 'c1', null) === 'advance');
 
   section('ก7 · สวิตช์เวอร์ชัน — ไม่ตั้ง = v3 ทันที · v2 = ทางถอย');
@@ -338,6 +349,40 @@ async function partC() {
     const r2 = await runSaleOrderV3Sweep({ label: 'diag-v3' }, { client: c, gatewayGet });
     check('1 หน้า (หน้าว่าง) · ไม่เขียนอะไร · cursor เดิม', r2.pages === 1 && r2.orders === 0 && calls.length === 1
       && calls[0].includes('cursor=c2') && (await state('sale_order_v3')).sync_cursor === 'c2');
+
+    section('ค2b · รอบ incremental: หน้าไม่เต็ม = จบรอบเลย · หน้าเต็ม = ไปต่อ');
+    // c2 → ได้ 1 ใบ (ไม่เต็ม 500) ⇒ จบที่หน้านี้ ไม่ยิง c2b · cursor = c2b · ใบถูกเขียน
+    pages.c2 = { data: orderA(91003006, 'ZZV3-3006', { 'V3 Updated At': T2 }), has_more: false,
+                 next_cursor: 'c2b', sale_order_count: 1, limit: 500, next_position: { updated_at: T2 } };
+    pages.c2b = { data: [], has_more: false, next_cursor: null, sale_order_count: 0 };
+    calls.length = 0;
+    const r2b = await runSaleOrderV3Sweep({ label: 'diag-v3' }, { client: c, gatewayGet });
+    const s2b = await state('sale_order_v3');
+    check('ยิง gateway ครั้งเดียว · 1 ใบใหม่ · cursor = c2b · ยังเป็น incremental',
+      calls.length === 1 && r2b.pages === 1 && r2b.write.inserted === 1 && s2b.sync_cursor === 'c2b' && s2b.sync_mode === 'incremental',
+      calls.map((x) => x.split('?')[1]).join(' | '));
+    // c2b → หน้าเต็ม (sale_order_count = limit · ใบที่ไม่มีบรรทัดนับแต่ไม่มีแถว) ⇒ ไปต่อ c2c ซึ่งไม่เต็ม ⇒ จบ
+    pages.c2b = { data: orderA(91003007, 'ZZV3-3007', { 'V3 Updated At': T2 }), has_more: true,
+                  next_cursor: 'c2c', sale_order_count: 500, limit: 500, next_position: { updated_at: T2 } };
+    pages.c2c = { data: orderA(91003008, 'ZZV3-3008', { 'V3 Updated At': T2 }), has_more: false,
+                  next_cursor: 'c2d', sale_order_count: 1, limit: 500, next_position: { updated_at: T2 } };
+    calls.length = 0;
+    const r2c = await runSaleOrderV3Sweep({ label: 'diag-v3' }, { client: c, gatewayGet });
+    check('หน้าเต็มแล้วหน้าไม่เต็ม = 2 ครั้ง ไม่มีหน้าว่าง · cursor = c2d',
+      calls.length === 2 && r2c.pages === 2 && r2c.write.inserted === 2 && (await state('sale_order_v3')).sync_cursor === 'c2d',
+      calls.map((x) => x.split('?')[1]).join(' | '));
+    // gateway ตัด limit ให้ต่ำกว่าที่ขอ (ตอบ limit=1) ⇒ หน้าที่ได้ 1 ใบ = เต็ม ⇒ ไปต่อ
+    pages.c2d = { data: orderA(91003009, 'ZZV3-3009', { 'V3 Updated At': T2 }), has_more: true,
+                  next_cursor: 'c2e', sale_order_count: 1, limit: 1, next_position: { updated_at: T2 } };
+    pages.c2e = { data: [], has_more: false, next_cursor: null, sale_order_count: 0 };
+    calls.length = 0;
+    const r2d = await runSaleOrderV3Sweep({ label: 'diag-v3' }, { client: c, gatewayGet });
+    check('ยึด limit ที่ gateway ตอบ — ได้ครบ limit ที่ตัดมา = ไปต่อจนหน้าว่าง', calls.length === 2 && r2d.pages === 2
+      && (await state('sale_order_v3')).sync_cursor === 'c2e', calls.map((x) => x.split('?')[1]).join(' | '));
+    // คืนสภาพให้ข้อถัดไป: เดินต่อจาก cursor c2 ด้วยชื่อเดิม (ค3 แก้ pages.c2 เอง)
+    await c.query(`UPDATE sync_state SET sync_cursor = 'c2' WHERE resource = 'sale_order_v3'`);
+    await c.query(`DELETE FROM sale_orders WHERE order_reference IN ('ZZV3-3006','ZZV3-3007','ZZV3-3008','ZZV3-3009')`);
+    await c.query(`DELETE FROM sale_order_details WHERE order_reference IN ('ZZV3-3006','ZZV3-3007','ZZV3-3008','ZZV3-3009')`);
 
     section('ค3 · หน้าผิดรูป = throw · rollback · cursor ไม่ขยับ');
     const A = orderA(91003004, 'ZZV3-3004');
