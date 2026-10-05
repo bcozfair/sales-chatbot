@@ -579,8 +579,11 @@ if (ts01 && ts01.base.kind === 'matrix') {
   check('  ไม่มีตัวอักษรต่อท้าย ⇒ ยังใช้สายตั้งต้นตาม TYPE (240)', plain.unitPrice === 240, String(plain.unitPrice));
 
   const realGap = q({ sensor: 'TSK/TSJ', thread: 'M99' }, 1);
-  check('ช่องที่ไม่มีจริงในตาราง ⇒ ยังเป็น "ไม่รับผลิต" (ไม่ใช่ missing)',
-    realGap.violations.some((v) => !v.missing && /ไม่รับผลิต/.test(v.message)));
+  // ช่องว่าง = ยังไม่มีราคา ⇒ ขอราคา + ราคาเท่าที่คิดได้ ไม่ใช่ "ไม่รับผลิต" (เจ้าของสั่ง 2026-10-05)
+  check('ช่องที่ไม่มีจริงในตาราง ⇒ "ยังไม่มีราคา" ต้องขอราคา (ไม่ใช่ missing · ไม่ใช่ไม่รับผลิต)',
+    realGap.status === 'quoteOnRequest' && realGap.violations.some((v) => !v.missing && v.noRate && /ยังไม่มีราคา/.test(v.message))
+      && !realGap.violations.some((v) => /ไม่รับผลิต/.test(v.message)),
+    `${realGap.status} ${realGap.violations.map((v) => v.message).join('|')}`);
 
   check('รุ่นที่มีค่าเริ่มต้นตาม TYPE ยังเปิดแบบชีต Excel ได้', excelReady(m8));
   check('ค่าเริ่มต้นที่ขึ้นกับแกนคอลัมน์ ⇒ ไม่เปิดแบบชีต (ไม่มีที่วาง)',
