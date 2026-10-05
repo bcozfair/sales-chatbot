@@ -408,6 +408,14 @@ async function main() {
   // จุด mount ของ router ลูก — ด่านไม่ได้อยู่บนบรรทัด app.get/app.post จึงต้องตรวจแยก
   ok('logsRouter บังคับด้วย page.traffic ที่จุด mount',
     /app\.use\('\/api\/admin\/logs',[^)]*requireCapability\('page\.traffic'\)/.test(indexSrc));
+  // page.traffic เปิดให้ role อื่นได้ แต่เนื้อแชท (เฟส 2 ของ plan-message-log-merge) เห็นเฉพาะ admin
+  //  ⇒ ทุกเส้นใน logsRouter ที่คืนบทสนทนาต้องผ่านตัวตัดตาม role ตัวเดียว (พิสูจน์ผลจริงที่ diag:log-chat ข้อ 2)
+  const logsSrc = readFileSync(new URL('../../routes/logs.ts', import.meta.url), 'utf-8');
+  const chatCalls = (logsSrc.match(/getChatForRequests\(/g) ?? []).length;
+  const chatWithRole = (logsSrc.match(/getChatForRequests\([^;()]*, viewerRole\(req\)\)/g) ?? []).length;
+  ok('  เส้นที่คืนบทสนทนาใน logsRouter ตัดเนื้อตาม role ของคนเรียกทุกเส้น (getChatForRequests + viewerRole)',
+    chatCalls > 0 && chatWithRole === chatCalls && !/listChatRowsForRequests/.test(logsSrc + indexSrc),
+    `${chatWithRole}/${chatCalls} เส้น`);
   ok('หน้าข้อมูลสินค้า/ลูกค้าเป็นด่าน **คนละตัว** ก่อนถึง router ตัวเดียวกัน',
     /app\.use\('\/api\/admin\/data\/products',[^)]*requireCapability\('page\.productsdata'\)/.test(indexSrc) &&
     /app\.use\('\/api\/admin\/data\/customers',[^)]*requireCapability\('page\.customersdata'\)/.test(indexSrc));

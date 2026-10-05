@@ -1595,7 +1595,8 @@ app.post('/api/quotation/:id/confirm', express.json(), async (req: any, res: any
   try {
     // ลำดับขั้นทั้งหมดอยู่ที่ services/quotationConfirm.ts ที่เดียว — คิวอนุมัติราคาเรียกตัวเดียวกันนี้
     // (ห้ามก๊อปไปไว้ฝั่งอนุมัติ ไม่งั้นใบที่ออกจากสองทางจะค่อย ๆ ต่างกันโดยไม่มีอะไรฟ้อง)
-    const result = await confirmQuotationById({ quoteId: req.params.id, userId: req.body?.userId });
+    // apiRequestId ลงแค่แถว web_confirm (เส้นนี้ LIFF ใช้ร่วม — ขา LINE ไม่เขียน messages อยู่แล้ว)
+    const result = await confirmQuotationById({ quoteId: req.params.id, userId: req.body?.userId, apiRequestId: getRequestId(req) });
     if (!result.ok) {
       const body: any = { error: result.error };
       if (result.violations) body.violations = result.violations;
@@ -3165,6 +3166,8 @@ app.post('/api/admin/webquote/propose', adminAuthMiddleware, requireCapability('
       role: req.admin.role,
       spUserId: req.body?.sp_user_id,
       text: req.body?.text,
+      // ผูกแถว web_propose เข้ากับ request นี้ในหน้าบันทึก (meta.api_request_id) — ห้ามจับคู่ด้วยเวลา
+      apiRequestId: getRequestId(req),
     }));
   } catch (err: any) {
     sendWebQuoteError(res, 'POST /api/admin/webquote/propose', err);
@@ -3289,6 +3292,7 @@ app.post('/api/admin/webquote/preview-pdf', adminAuthMiddleware, requireCapabili
 app.post('/api/admin/webquote/drafts', adminAuthMiddleware, requireCapability('quote.create'), express.json({ limit: '2mb' }), async (req: any, res: any) => {
   try {
     res.json(await createWebQuoteDraft({
+      apiRequestId: getRequestId(req),
       adminId: req.admin.id,
       // role ตัดสินว่ากฎข้อไหนทะลุได้ · ตั้งเครดิตทับได้ไหม · ออกใบในนามใครได้บ้าง
       role: req.admin.role,
@@ -3389,6 +3393,7 @@ app.put('/api/admin/approvals/:requestId/items', adminAuthMiddleware, requireCap
       requestId: req.params.requestId,
       actor: actorOf(req),
       quotes: req.body?.quotes ?? [],
+      apiRequestId: getRequestId(req),
     }));
   } catch (err: any) {
     sendApprovalError(res, 'PUT /api/admin/approvals/:requestId/items', err);
@@ -3398,7 +3403,7 @@ app.put('/api/admin/approvals/:requestId/items', adminAuthMiddleware, requireCap
 /** อนุมัติ แล้วออกใบทันที (เจ้าของเลือกไว้ — ไม่มีใบค้างเพราะคนลืมกลับมากด) */
 app.post('/api/admin/approvals/:requestId/approve', adminAuthMiddleware, requireCapability('page.approvals'), requireCapability('approval.decide'), express.json(), async (req: any, res: any) => {
   try {
-    res.json(await approveRequest({ requestId: req.params.requestId, actor: actorOf(req), note: req.body?.note ?? null }));
+    res.json(await approveRequest({ requestId: req.params.requestId, actor: actorOf(req), note: req.body?.note ?? null, apiRequestId: getRequestId(req) }));
   } catch (err: any) {
     sendApprovalError(res, 'POST /api/admin/approvals/:requestId/approve', err);
   }
@@ -3407,7 +3412,7 @@ app.post('/api/admin/approvals/:requestId/approve', adminAuthMiddleware, require
 /** ไม่อนุมัติ — ต้องมีเหตุผลเสมอ เพราะคนที่รับใบกลับไปต้องรู้ว่าจะแก้อะไร */
 app.post('/api/admin/approvals/:requestId/reject', adminAuthMiddleware, requireCapability('page.approvals'), requireCapability('approval.decide'), express.json(), async (req: any, res: any) => {
   try {
-    res.json(await rejectRequest({ requestId: req.params.requestId, actor: actorOf(req), reason: req.body?.reason }));
+    res.json(await rejectRequest({ requestId: req.params.requestId, actor: actorOf(req), reason: req.body?.reason, apiRequestId: getRequestId(req) }));
   } catch (err: any) {
     sendApprovalError(res, 'POST /api/admin/approvals/:requestId/reject', err);
   }
@@ -3416,7 +3421,7 @@ app.post('/api/admin/approvals/:requestId/reject', adminAuthMiddleware, requireC
 /** คนขอยกเลิกคำขอของตัวเอง (หรือ admin ยกเลิกให้) — ใบกลายเป็น cancelled ด้วยกลไกเดิม */
 app.post('/api/admin/approvals/:requestId/cancel', adminAuthMiddleware, requireCapability('page.approvals'), express.json(), async (req: any, res: any) => {
   try {
-    res.json(await cancelRequest({ requestId: req.params.requestId, actor: actorOf(req) }));
+    res.json(await cancelRequest({ requestId: req.params.requestId, actor: actorOf(req), apiRequestId: getRequestId(req) }));
   } catch (err: any) {
     sendApprovalError(res, 'POST /api/admin/approvals/:requestId/cancel', err);
   }
@@ -3453,6 +3458,7 @@ app.post('/api/admin/webquote/revise', adminAuthMiddleware, requireCapability('q
       role: req.admin.role,
       spUserId: req.body?.sp_user_id,
       quotationNo: req.body?.quotation_no,
+      apiRequestId: getRequestId(req),
     }));
   } catch (err: any) {
     sendWebQuoteError(res, 'POST /api/admin/webquote/revise', err);
@@ -5514,6 +5520,8 @@ app.get('/api/admin/api-logs', adminAuthMiddleware, requireCapability('page.traf
       lineUserId: q.lineUserId ? String(q.lineUserId) : undefined,
       ip: q.ip ? String(q.ip) : undefined,
       minDuration: q.minDuration ? parseInt(q.minDuration) : undefined,
+      // "เฉพาะที่บอทส่งไม่ถึง" — นับแค่สถานะ ไม่มีเนื้อแชท จึงเปิดให้ทุกคนที่เห็นหน้านี้ (ทาง ก ข้อ 3)
+      undelivered: q.undelivered === '1',
     };
 
     // sort/dir ถูกกรองด้วยรายชื่อขาวใน listApiLogs — ค่าที่ไม่รู้จักตกกลับ created_at DESC

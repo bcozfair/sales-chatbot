@@ -12,6 +12,7 @@ import {
   getBackupSummary, listBackupRuns, countBackupRuns,
   type Granularity,
 } from '../db/logRepositories.js';
+import { getChatForRequests, parseRequestIds, REQUEST_ID_RE } from '../services/chatLogService.js';
 
 /**
  * API ของหน้า "บันทึกและรายงาน" (รายงานการใช้งาน / บันทึกการแก้ไข / บันทึกระบบ)
@@ -21,6 +22,11 @@ import {
  *
  * สิทธิ์เข้าถึงถูกบังคับที่จุด mount ใน index.ts (adminAuthMiddleware + requireCapability('page.traffic'))
  * ไม่ใช่ในไฟล์นี้ ⇒ ไม่มีทางที่ route ใหม่จะหลุดออกไปโดยไม่มีการตรวจสิทธิ์
+ *
+ * ⚠️ เนื้อแชท (เฟส 2 · `/chat` และ `messages` ของ `/request/:id`) มีด่านชั้นที่สอง: ตัดตาม role
+ *   ใน services/chatLogService.ts — page.traffic เปิดให้ role อื่นได้ แต่เนื้อแชทเห็นได้เฉพาะ admin
+ *   ⇒ ทุก route ที่คืนบทสนทนาต้องเรียก `getChatForRequests(…, viewerRole(req))` เท่านั้น
+ *   (ด่าน diag:log-chat อ่านซอร์สไฟล์นี้ตรวจ) · **ห้ามใส่บทสนทนาใน /export** (CSV ส่งต่อออกนอกระบบได้)
  */
 export const logsRouter = Router();
 
@@ -88,6 +94,11 @@ function safe(name: string, fn: (req: Request, res: Response) => Promise<void>) 
       res.status(500).json({ error: err?.message ?? 'ผิดพลาดไม่ทราบสาเหตุ' });
     }
   };
+}
+
+/** role ของคนที่เรียก — ตัวเดียวที่ส่งให้ getChatForRequests ตัดสินว่าเห็นเนื้อแชทไหม */
+function viewerRole(req: Request): string | null {
+  return (req as AdminRequest).admin?.role ?? null;
 }
 
 // ── รายงานการใช้งาน (traffic) ───────────────────────────────────────────────
@@ -244,11 +255,42 @@ logsRouter.get('/backups', safe('GET /backups', async (req, res) => {
 
 logsRouter.get('/request/:requestId', safe('GET /request/:id', async (req, res) => {
   const id = String(req.params.requestId);
-  if (!/^[0-9a-f]{16}$/.test(id)) {
+  if (!REQUEST_ID_RE.test(id)) {
     res.status(400).json({ error: 'request id ต้องเป็นเลขฐานสิบหก 16 ตัว' });
     return;
   }
-  res.json({ requestId: id, data: await getRequestTimeline(id) });
+  // บทสนทนาเป็นของแถม — อ่านไม่ได้ต้องไม่ทำให้ไทม์ไลน์เดิมล้มตาม (ส่ง chat_error ให้จอบอกแทน)
+  const [data, chat] = await Promise.all([
+    getRequestTimeline(id),
+    getChatForRequests([id], viewerRole(req)).catch((err: unknown) => {
+      console.error('[logs] อ่านบทสนทนาของ request ไม่สำเร็จ:', err instanceof Error ? err.message : err);
+      return null;
+    }),
+  ]);
+  if (chat?.content && chat.count > 0) audit(req, 'log.view', 'message', `request ${id} · ${chat.count} ข้อความ`);
+  res.json({
+    requestId: id, data,
+    messages: chat?.byRequest[id] ?? [],
+    content: chat?.content ?? false,
+    chat_error: chat ? null : 'โหลดบทสนทนาไม่สำเร็จ',
+  });
+}));
+
+/**
+ * บทสนทนาของหลาย request ในรอบเดียว — ชิปในตาราง "บันทึกการเรียก API" (≤200 id = หนึ่งหน้า)
+ * `?ids=a,b,c` · คืน `{ content, data: { [requestId]: ChatExchange[] } }` · request ที่ไม่มีข้อความไม่มีคีย์
+ */
+logsRouter.get('/chat', safe('GET /chat', async (req, res) => {
+  const ids = parseRequestIds(req.query.ids);
+  if (ids === null) {
+    res.status(400).json({ error: 'ids ต้องเป็น request id (เลขฐานสิบหก 16 ตัว) คั่นด้วยจุลภาค ไม่เกิน 200 ตัว' });
+    return;
+  }
+  const chat = await getChatForRequests(ids, viewerRole(req));
+  if (chat.content && chat.count > 0) {
+    audit(req, 'log.view', 'message', `ตาราง API logs · ${chat.count} ข้อความ · ${Object.keys(chat.byRequest).length} request`);
+  }
+  res.json({ content: chat.content, data: chat.byRequest });
 }));
 
 // ── ส่งออก CSV ──────────────────────────────────────────────────────────────

@@ -264,6 +264,8 @@ async function logWebEvent(params: {
   content: string;
   replyContent: string;
   meta: Record<string, any>;
+  /** id ของ request ใน api_logs → `meta.api_request_id` (ตั้งแต่ 2026-10-05) · ไม่ใช่ `request_id` ซึ่งแถวอนุมัติราคาใช้เก็บเลขคำขอ */
+  apiRequestId?: string;
 }): Promise<number | null> {
   return insertMessage({
     user_id: params.webUserId,
@@ -273,7 +275,7 @@ async function logWebEvent(params: {
     // เว็บไม่มี replyToken และจะไม่มีวันมี — ไม่ใช่ "ยังไม่ได้ใส่"
     reply_token: null,
     reply_content: params.replyContent,
-    meta: params.meta,
+    meta: params.apiRequestId ? { ...params.meta, api_request_id: params.apiRequestId } : params.meta,
   });
 }
 
@@ -353,6 +355,11 @@ export async function proposeFromText(params: {
    */
   spUserId?: string | null;
   text: string;
+  /**
+   * id ของ request ใน api_logs (`getRequestId(req)`) — ลง `meta.api_request_id` ของแถวประวัติ
+   * ให้หน้าบันทึกผูกบทสนทนากับ request ได้ (docs/plan-message-log-merge.md เฟส 2) · ไม่ส่ง = ไม่มีคีย์ (ผลอื่นเท่าเดิม)
+   */
+  apiRequestId?: string;
 }): Promise<ProposeResult> {
   const text = String(params.text ?? '').trim();
   if (text === '') throw new WebQuoteError('BAD_REQUEST', 'ต้องมีข้อความที่จะสกัด (text)', 400);
@@ -395,6 +402,7 @@ export async function proposeFromText(params: {
     const finish = async (customerQuery: string, outcome: string): Promise<ProposeResult> => {
       base.propose_msg_id = await logWebEvent({
         webUserId,
+        apiRequestId: params.apiRequestId,
         type: 'web_propose',
         content: text,
         replyContent: buildProposeReplyText(base, customerQuery),
@@ -777,6 +785,11 @@ async function resolveItems(items: WebQuoteItemInput[]): Promise<any[]> {
 export async function createDraft(params: {
   adminId: number;
   /**
+   * id ของ request ใน api_logs (`getRequestId(req)`) — ลง `meta.api_request_id` ของแถวประวัติ
+   * ให้หน้าบันทึกผูกบทสนทนากับ request ได้ (docs/plan-message-log-merge.md เฟส 2) · ไม่ส่ง = ไม่มีคีย์ (ผลอื่นเท่าเดิม)
+   */
+  apiRequestId?: string;
+  /**
    * role ของคนที่กดออกใบ — **บังคับ** เพราะทุกอย่างที่ฟังก์ชันนี้ตัดสินใจ (กฎข้อไหนทะลุได้ ·
    * ตั้งเครดิตทับได้ไหม · ออกใบในนามใครได้บ้าง) ขึ้นกับมัน · ทำเป็น optional ไม่ได้ เพราะ
    * "ไม่ส่งมา = ใช้กติกาเดิม" จะกลายเป็นช่องที่เรียกแล้วข้ามสิทธิ์ได้ทั้งชุดโดยไม่มีอะไรฟ้อง
@@ -1048,6 +1061,7 @@ export async function createDraft(params: {
     // ระหว่างนั้นคือการเรียก pool.query ในทรานแซกชัน = ผิดกฎเหล็กของ CLAUDE.md
     await logWebEvent({
       webUserId,
+      apiRequestId: params.apiRequestId,
       type: 'web_draft',
       content: `เลือก ${customer.display_name} / ${contact.name}`,
       // รูปแบบเดียวกับสรุปร่างของ LINE (utils/flexTemplates.ts) — คง `📝 ร่างใบเสนอราคา`
@@ -1933,6 +1947,11 @@ export interface ReviseResult {
 export async function reviseQuotation(params: {
   adminId: number;
   /**
+   * id ของ request ใน api_logs (`getRequestId(req)`) — ลง `meta.api_request_id` ของแถวประวัติ
+   * ให้หน้าบันทึกผูกบทสนทนากับ request ได้ (docs/plan-message-log-merge.md เฟส 2) · ไม่ส่ง = ไม่มีคีย์ (ผลอื่นเท่าเดิม)
+   */
+  apiRequestId?: string;
+  /**
    * ไม่ส่งมา = กติกาเดิมของกฎ (กัน SYSTEM_ERROR อย่างเดียว) ผู้เรียกเก่าทุกตัวได้ผลเท่าเดิม
    * ⚠️ **ด่านออกใบในนามคนอื่น (assertMayActAs) ยังบังคับใช้เสมอไม่ว่าจะส่ง role มาหรือไม่**
    *    (§13.6 ข้อ 9) — ไม่ส่ง role มาจะตกไปที่ด่านที่เข้มที่สุด (ต้องเป็นรหัสของตัวเองเท่านั้น)
@@ -2035,6 +2054,7 @@ export async function reviseQuotation(params: {
     // นอกทรานแซกชันของ insertDraftQuotations แล้ว — เหตุผลเดียวกับใน createDraft()
     await logWebEvent({
       webUserId,
+      apiRequestId: params.apiRequestId,
       type: 'web_revise',
       content: `แก้ไข ${active.quotation_no}`,
       replyContent:
