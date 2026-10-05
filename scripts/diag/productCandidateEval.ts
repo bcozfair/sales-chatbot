@@ -29,6 +29,7 @@ import {
   CANDIDATE_LIMIT,
   type Product,
 } from '../../services/productService.js';
+import { excludeWebhookFillSql } from '../../db/messageKinds.js';
 
 const GREEN = '\x1b[32m', RED = '\x1b[31m', DIM = '\x1b[2m', BOLD = '\x1b[1m', RESET = '\x1b[0m';
 const PRINT = process.argv.includes('--print');
@@ -99,7 +100,7 @@ async function buildCorpus(): Promise<{ cases: Case[]; ambiguous: number; withFo
                          AND q2.status <> 'pending_product'
                        ORDER BY q2.created_at LIMIT 1)) AS models
     FROM messages a
-    WHERE a.reply_content LIKE 'พบหลายรุ่นใกล้เคียง%'
+    WHERE a.reply_content LIKE 'พบหลายรุ่นใกล้เคียง%' AND ${excludeWebhookFillSql('a')}
     ORDER BY a.created_at`);
 
   const cases: Case[] = [];

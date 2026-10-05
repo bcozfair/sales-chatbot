@@ -20,6 +20,7 @@
 //     CREATE INDEX CONCURRENTLY ของคนอื่นที่รออยู่ที่ wait_event = virtualxid
 // ─────────────────────────────────────────────────────────────────────────────
 import { pool } from '../../config/db.js';
+import { excludeWebhookFillSql } from '../../db/messageKinds.js';
 import { findProduct } from '../../services/productService.js';
 
 const DAYS  = Number(process.env.EVAL_DAYS ?? 7);
@@ -102,7 +103,7 @@ async function buildCorpus(): Promise<{ q: string; src: string }[]> {
   const b = await pool.query(
     `SELECT content FROM messages
      WHERE created_at > now() - ($1 || ' days')::interval
-       AND content IS NOT NULL AND content <> ''`,
+       AND content IS NOT NULL AND content <> '' AND ${excludeWebhookFillSql()}`,
     [String(DAYS)]);
   for (const r of b.rows as any[]) {
     for (const rawLine of String(r.content).split(/\r?\n/)) {

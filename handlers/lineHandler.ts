@@ -266,8 +266,8 @@ const DEADLINE_ABORT = Symbol.for('chatbot.deadlineAbort');
  * @param opts.signal ธงยกเลิกจาก index.ts — ถูก abort ตอน Promise.race ตัดเพราะหมดงบ
  *   ไม่ส่งมา = ไม่มีใครยกเลิก (เส้นทาง CLI/เทส)
  * @param opts.client ตัวตอบกลับที่จะใช้แทน lineClient — ช่องฉีดของเส้นทางเว็บ (เฟส A ของ
- *   docs/plan-web-quote-request.md) **ไม่ส่งมา = lineClient ตัวเดิมทุกบิต** เส้นทาง LINE
- *   จึงไม่ขยับ · ตัวที่ส่งเข้ามาจริงคือ createCaptureClient() ซึ่งเก็บข้อความแทนยิงออก LINE
+ *   docs/plan-web-quote-request.md) **ไม่ส่งมา = lineClient ตัวเดิมทุกบิต** · หน้าเว็บส่ง createCaptureClient()
+ *   (เก็บแทนยิงออก LINE) · คิว LINE ใน index.ts ส่ง createRecordingClient(lineClient) (ส่งจริงตามเดิม + จดผล)
  */
 export async function handleEvent(
   event: any,

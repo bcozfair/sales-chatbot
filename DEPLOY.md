@@ -380,7 +380,9 @@ SELECT to_regclass('public.customers_data_view')  AS matview,
        EXISTS(SELECT 1 FROM information_schema.columns
               WHERE table_name='customers_data_view' AND column_name='salesperson_id')        AS cdv_sp_id,
        (pg_get_functiondef('public.clean_text(text)'::regprocedure) LIKE '%nUlL%')           AS clean_text_fast,
-       (pg_get_viewdef('public.customers_data_build'::regclass) LIKE '%RECURSIVE names%')     AS cdv_sp_skipscan;"
+       (pg_get_viewdef('public.customers_data_build'::regclass) LIKE '%RECURSIVE names%')     AS cdv_sp_skipscan,
+       EXISTS(SELECT 1 FROM information_schema.columns
+              WHERE table_name='webhook_events' AND column_name='reply_status')               AS we_reply;"
 ```
 > ⚠️ **`sp_employee_qid` กับ `admin_maker` เป็นคนละตาราง ชื่อคอลัมน์บังเอิญเหมือนกัน** —
 > `salesperson.employee_quotation_id` (ใบจาก LINE) กับ `admin_users.employee_quotation_id`
@@ -475,6 +477,11 @@ done
     `npm run diag:web-sales-owner` ต้องเขียวหมด (ข้อ 2b เทียบ `salesperson_id` ทั้งตารางกับ `sale_orders`)
   · ถอยกลับ: รันท่อน `clean_text` + `customers_data_build` จาก `migrations/schema.sql` ของคอมมิตก่อนหน้า
     (ผลเท่ากันจึงไม่ต้อง refresh เช่นกัน)
+- **ข้อยกเว้น: `2026-10-02_01_webhook_events_reply.sql` รันได้ทุกเวลา และสลับลำดับกับ deploy ได้ (แนะนำรันก่อน)**
+  `ADD COLUMN` nullable ไม่มี DEFAULT 4 ตัว + CHECK บน `webhook_events` (~170 แถว/วัน) — แก้ catalog · `lock_timeout = 3s`
+  · โค้ดใหม่ที่เจอว่ายังไม่มีคอลัมน์ **พักเขียนเอง 10 นาที** (บรรทัด `[webhookEvents.…] พักเขียนคอลัมน์บันทึกผล`)
+  ใบรับ/การตัดสินการส่งซ้ำไม่เกี่ยว · แถวเติม `wh_*` ใน `messages` ไม่พึ่งไฟล์นี้ · รันหลัง deploy = event ช่วงก่อนรันไม่มีค่าในสี่คอลัมน์
+  · ตรวจ: `we_reply` ในคำสั่งข้างบนต้องเป็น `t` แล้ว `npm run diag:redelivery` ข้อ 7 ต้องไม่มีบรรทัด ⏭️ ของ 2026-10-02_01
 - **ข้อยกเว้น: `2026-09-02_03_quotations_odoo_import_link.sql` รันได้ทุกเวลา และรัน "ก่อน" deploy โค้ดใหม่ได้**
   เพิ่ม `quotations.odoo_imported_at` / `odoo_so_id` = สถานะ "นำเข้า Odoo แล้ว" ของหน้าประวัติใบเสนอราคา
   `ADD COLUMN` nullable ไม่มี DEFAULT บนตาราง ~1.3k แถว จบในไม่กี่ ms

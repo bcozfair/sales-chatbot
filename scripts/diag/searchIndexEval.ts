@@ -14,6 +14,7 @@
 //  (ต้องรัน scripts/diag/searchIndexEval.setup.sql ก่อน)
 // ─────────────────────────────────────────────────────────────────────────────
 import { pool } from '../../config/db.js';
+import { excludeWebhookFillSql } from '../../db/messageKinds.js';
 
 const BASE = 'perf_lab.p_base';
 const OPT  = 'perf_lab.p_opt';
@@ -138,7 +139,7 @@ async function buildCorpus(): Promise<{ q: string; src: string }[]> {
 
   // B) บรรทัดรหัสสินค้าที่เซลส์พิมพ์เข้ามาจริงในแชท (รวมพิมพ์ผิด/รูปแบบแปลก)
   const b = await pool.query(
-    `SELECT content FROM messages WHERE content IS NOT NULL AND content <> ''`);
+    `SELECT content FROM messages WHERE content IS NOT NULL AND content <> '' AND ${excludeWebhookFillSql()}`);
   for (const r of b.rows as any[]) {
     for (const rawLine of String(r.content).split(/\r?\n/)) {
       let line = rawLine.trim();
