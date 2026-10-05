@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { FilterDateRange } from './FilterBar';
+import { FilterCombo, type FilterOption } from './DataFilterBar';
 import { PageHeader } from './PageHeader';
 import { Button } from './Button';
 import { RequestTimeline } from './logs/RequestTimeline';
@@ -48,7 +49,7 @@ const BRAND = 'var(--brand-fg)';
 /** ค่าตั้งต้นของตัวกรอง — คีย์ที่ยังเป็นค่านี้จะไม่ถูกเขียนลง URL (ลิงก์ที่ส่งต่อจึงสั้นและอ่านออก) */
 const DEFAULTS = {
   q: '', method: '', status: '', minDuration: '', undelivered: '',
-  requestId: '', lineUserId: '', ip: '',
+  requestId: '', lineUserId: '', adminUserId: '', noCaller: '', ip: '',
   dateFrom: '', dateTo: '', page: '1', size: '50',
   sort: 'created_at', dir: 'desc',
 };
@@ -69,6 +70,8 @@ interface ApiLogBase {
   admin_user_id: number | null;
   admin_username: string | null;
   line_user_id: string | null;
+  /** ชื่อเซลส์ของไอดี LINE นั้น — null = ไอดีที่ไม่ได้ลงทะเบียนเป็นเซลส์ (แสดงไอดีย่อแทน) */
+  line_user_name: string | null;
   ip: string | null;
   /** เจ้าของใบเสนอราคาของลิงก์ /download-pdf — "ไม่ใช่" คนที่กดลิงก์ (ดูคำเตือนหัวไฟล์) */
   doc_owner_user_id: string | null;
@@ -104,6 +107,35 @@ function chatSide(r: { method: string; path: string }): 'in' | 'out' | 'web' {
   if (r.method === 'TASK') return 'out';
   if (r.path === '/callback') return 'in';
   return 'web';
+}
+
+/** ผลของ /api/admin/api-logs/callers — ผู้ที่เรียกจริงในช่วงวัน (none = ไม่มีผู้เรียก) */
+interface CallerRow {
+  kind: 'admin' | 'line' | 'none';
+  id: string | null;
+  name: string | null;
+  code: string | null;
+  count: number;
+}
+
+/**
+ * ตัวเลือกของช่อง "ผู้เรียก" — id ผูกชนิดไว้ข้างหน้าเพราะสามชนิดกรองคนละคอลัมน์
+ *   a:<admin_user_id> → adminUserId · l:<line_user_id> → lineUserId · none → noCaller
+ * ค่าใน URL ยังเป็นคีย์เดิมแยกกัน (ลิงก์ ?lineUserId= ที่ส่งต่อกันไว้ก่อนหน้านี้ยังใช้ได้)
+ */
+interface CallerOption extends FilterOption {
+  kind: CallerRow['kind'];
+  /** ไอดีดิบ — ใช้ค้น (วางไอดี LINE เต็มในช่องค้นก็เจอ) */
+  raw: string;
+  code: string | null;
+}
+
+const KIND_ORDER: Record<CallerRow['kind'], number> = { none: 0, admin: 1, line: 2 };
+
+function callerName(kind: CallerRow['kind'], id: string | null, name: string | null): string {
+  if (kind === 'none') return 'ไม่มีผู้เรียก';
+  if (kind === 'admin') return name ?? `#${id} (ถูกลบแล้ว)`;
+  return name ?? shortUser(id) ?? '-';
 }
 
 interface RouteStat {
@@ -181,6 +213,32 @@ function shortUser(id: string | null): string | null {
   return id.length > 14 ? `${id.slice(0, 8)}…${id.slice(-4)}` : id;
 }
 
+/** ป้าย "LINE" ต่อท้ายชื่อเซลส์ — บอกว่าชื่อนี้มาจากไอดี LINE ไม่ใช่บัญชีแอดมิน (คำ + สี ไม่ใช่สีอย่างเดียว) */
+const LineTag: React.FC = () => (
+  <span className="text-[10px] leading-4 px-1.5 rounded-md border border-emerald-200 bg-emerald-50 text-emerald-700 shrink-0">
+    LINE
+  </span>
+);
+
+/** ท้ายบรรทัดของตัวเลือกในช่อง "ผู้เรียก" — ชนิด + รหัสเซลส์ (ในช่องที่เลือกแล้วเหลือแค่ชนิด) */
+const CallerFacts: React.FC<{ opt: CallerOption; where: 'field' | 'list' }> = ({ opt, where }) => {
+  // "ทั้งหมด" ที่ FilterCombo เติมเองไม่มี kind — ไม่ใช่ผู้เรียก จึงไม่มีป้าย
+  if (!opt.kind) return null;
+  if (opt.kind === 'none') {
+    return where === 'list'
+      ? <span className="text-[11px] text-slate-400 shrink-0 ml-auto">ลิงก์สาธารณะ · ระบบ</span>
+      : null;
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 shrink-0 ml-auto">
+      {where === 'list' && opt.code && <span className="text-[11px] text-slate-400">{opt.code}</span>}
+      {opt.kind === 'line'
+        ? <LineTag />
+        : <span className="text-[10px] leading-4 px-1.5 rounded-md border border-sky-200 bg-sky-50 text-sky-700">แอดมิน</span>}
+    </span>
+  );
+};
+
 const METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'TASK'];
 
 /** คอลัมน์ที่เรียงได้ของตาราง "endpoint ที่กินเวลาเครื่องรวม" — total_ms มาเป็นสตริง (bigint) ต้องแปลงก่อนเทียบ */
@@ -199,7 +257,7 @@ const ROUTE_SORTS: SortAccessors<RouteStat> = {
 const SLOWEST_SORTS: SortAccessors<ApiLogBase> = {
   created_at: r => r.created_at,
   path: r => r.path,
-  caller: r => r.admin_username ?? r.line_user_id ?? null,
+  caller: r => r.admin_username ?? r.line_user_name ?? r.line_user_id ?? null,
   status_code: r => r.status_code,
   duration_ms: r => r.duration_ms,
 };
@@ -240,6 +298,53 @@ export function ApiLogs() {
     } catch (e: unknown) { setStatsError(errMsg(e)); } finally { setStatsLoading(false); }
   }, [authFetch, dateQs]);
 
+  // ── รายชื่อผู้เรียกของช่วงวันนี้ (ตัวเลือกของช่อง "ผู้เรียก") ─────────────────────
+  //  ล้มแล้วตารางยังใช้ได้ครบ — ช่องยังโชว์ค่าที่เลือกค้างไว้ แค่ไม่มีรายชื่อให้เลือกเพิ่ม
+  const [callers, setCallers] = useState<CallerRow[]>([]);
+  const [callersError, setCallersError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const t = setTimeout(() => {
+      void authFetch(`/api/admin/api-logs/callers?_=1${dateQs}`)
+        .then(async res => {
+          if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
+          return res.json() as Promise<{ data: CallerRow[] }>;
+        })
+        .then(j => { if (!cancelled) { setCallers(Array.isArray(j.data) ? j.data : []); setCallersError(null); } })
+        .catch((e: unknown) => { if (!cancelled) { setCallers([]); setCallersError(errMsg(e)); } });
+    }, 0);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [authFetch, dateQs]);
+
+  /** ค่าที่เลือกอยู่ในรูป id ของตัวเลือก — '' = ไม่กรองผู้เรียก */
+  const callerValue = state.noCaller ? 'none'
+    : state.adminUserId ? `a:${state.adminUserId}`
+    : state.lineUserId ? `l:${state.lineUserId}` : '';
+
+  const callerOptions = useMemo(() => {
+    const out: CallerOption[] = callers.map(c => ({
+      id: c.kind === 'none' ? 'none' : `${c.kind === 'admin' ? 'a' : 'l'}:${c.id}`,
+      name: callerName(c.kind, c.id, c.name),
+      kind: c.kind, raw: c.id ?? '', code: c.code, count: c.count,
+    }));
+    // ค่าที่ค้างอยู่แต่ไม่มีในช่วงวันนี้ (ลิงก์เก่า · เปลี่ยนช่วงวันทีหลัง) ต้องยังโชว์ในช่อง
+    // ไม่งั้นช่องดูเหมือนไม่ได้กรองทั้งที่ตารางถูกกรองอยู่
+    if (callerValue && !out.some(o => o.id === callerValue)) {
+      const kind: CallerRow['kind'] = callerValue === 'none' ? 'none' : callerValue[0] === 'a' ? 'admin' : 'line';
+      const raw = callerValue === 'none' ? '' : callerValue.slice(2);
+      out.push({ id: callerValue, name: callerName(kind, raw, null), kind, raw, code: null });
+    }
+    return out.sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || (b.count ?? 0) - (a.count ?? 0));
+  }, [callers, callerValue]);
+
+  const pickCaller = (id: string) => set({
+    adminUserId: id.startsWith('a:') ? id.slice(2) : '',
+    lineUserId: id.startsWith('l:') ? id.slice(2) : '',
+    noCaller: id === 'none' ? '1' : '',
+    page: '1',
+  });
+
   // ── รายการ ────────────────────────────────────────────────────────────────
   const [rows, setRows] = useState<ApiLogRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -264,6 +369,8 @@ export function ApiLogs() {
       if (state.undelivered) qs.set('undelivered', '1');
       if (state.requestId.trim()) qs.set('requestId', state.requestId.trim());
       if (state.lineUserId.trim()) qs.set('lineUserId', state.lineUserId.trim());
+      if (state.adminUserId) qs.set('adminUserId', state.adminUserId);
+      if (state.noCaller) qs.set('noCaller', '1');
       if (state.ip.trim()) qs.set('ip', state.ip.trim());
       // เรียงที่ SQL ไม่ใช่ที่หน้าจอ — ตารางนี้แบ่งหน้าจาก server การเรียงเฉพาะ 50 แถวที่เห็น
       // จะให้ลำดับที่ผิดโดยดูเหมือนถูก (แถวที่ช้าที่สุดจริง ๆ อาจอยู่หน้า 7)
@@ -277,7 +384,7 @@ export function ApiLogs() {
     } catch (e: unknown) { setListError(errMsg(e)); } finally { setListLoading(false); }
   }, [authFetch, page, size, state.dateFrom, state.dateTo, state.q, state.method,
       state.status, state.minDuration, state.undelivered, state.requestId, state.lineUserId, state.ip,
-      state.sort, state.dir]);
+      state.adminUserId, state.noCaller, state.sort, state.dir]);
 
   // ── ข้อความแชทของหน้านี้ — ยิงครั้งเดียวต่อหน้า (≤200 request id) ไม่ยิงทีละแถว ──────────
   //  ล้มแล้วตารางยังใช้ได้ครบ แค่ไม่มีชิป ⇒ บอกด้วยบรรทัดเล็ก ไม่ใช่กล่อง error ใหญ่
@@ -378,12 +485,17 @@ export function ApiLogs() {
     if (state.minDuration) out.push({ key: 'minDuration', label: 'ช้ากว่า', value: `${state.minDuration} ms` });
     if (state.undelivered) out.push({ key: 'undelivered', label: 'ผลการส่ง', value: 'บอทส่งไม่ถึง' });
     if (state.requestId) out.push({ key: 'requestId', label: 'Request ID', value: state.requestId });
-    if (state.lineUserId) out.push({ key: 'lineUserId', label: 'LINE User', value: state.lineUserId });
+    // ชิปผู้เรียกใช้ชื่อเดียวกับในช่อง — ล้างแล้วเหลือแค่คีย์ของตัวมันเอง (ค่าอื่นของช่องว่างอยู่แล้ว)
+    const callerKey = state.noCaller ? 'noCaller' : state.adminUserId ? 'adminUserId' : state.lineUserId ? 'lineUserId' : null;
+    if (callerKey) {
+      out.push({ key: callerKey, label: 'ผู้เรียก',
+                 value: callerOptions.find(o => o.id === callerValue)?.name ?? callerValue });
+    }
     if (state.ip) out.push({ key: 'ip', label: 'IP', value: state.ip });
     return out;
-  }, [state]);
+  }, [state, callerOptions, callerValue]);
 
-  const advancedActive = !!(state.requestId || state.lineUserId || state.ip);
+  const advancedActive = !!(state.requestId || state.lineUserId || state.adminUserId || state.noCaller || state.ip);
 
   return (
     <div className="space-y-4">
@@ -617,7 +729,7 @@ export function ApiLogs() {
                             </div>
                           </td>
                           <td className={`${tdCls} text-xs text-slate-500`}>
-                            {r.admin_username ?? shortUser(r.line_user_id) ?? '-'}
+                            {r.admin_username ?? r.line_user_name ?? shortUser(r.line_user_id) ?? '-'}
                           </td>
                           <td className={`${tdCls} text-center`}><StatusPill code={r.status_code} /></td>
                           <td className={`${tdCls} ${numCls}`}>
@@ -711,10 +823,27 @@ export function ApiLogs() {
                 placeholder="ค้นได้โดยไม่ต้องรู้วันที่"
                 className={`${inputCls} font-mono text-xs`} />
             </FilterField>
-            <FilterField label="LINE User ID" grow>
-              <input value={state.lineUserId} onChange={(e) => set({ lineUserId: e.target.value, page: '1' })}
-                placeholder="U1234…"
-                className={`${inputCls} font-mono text-xs`} />
+            {/* แทนช่อง LINE User ID เดิม (เจ้าของเลือกแบบ B · mockup log-caller-filter 2026-10-05)
+                — เลือกจากรายชื่อแทนการพิมพ์ไอดี · กรองแอดมินได้ด้วย · วางไอดี LINE เต็มในช่องค้นก็เจอ */}
+            <FilterField label="ผู้เรียก" grow>
+              <div className="flex">
+                <FilterCombo
+                  label="ผู้เรียก"
+                  value={callerValue}
+                  options={callerOptions}
+                  onChange={pickCaller}
+                  searchPlaceholder="พิมพ์ชื่อ · รหัส · username · ไอดี LINE"
+                  searchText={(o) => {
+                    const c = o as CallerOption;
+                    return `${c.name} ${c.code ?? ''} ${c.raw ?? ''}`;
+                  }}
+                  emptyText="ไม่มีผู้เรียกที่ตรงกับคำค้นในช่วงวันนี้"
+                  footer={callersError
+                    ? <span className="text-amber-700">โหลดรายชื่อไม่สำเร็จ — {callersError}</span>
+                    : 'ผู้ที่เรียกจริงในช่วงวันที่เลือก · ตัวเลข = จำนวนครั้ง'}
+                  facts={(o, where) => <CallerFacts opt={o as CallerOption} where={where} />}
+                />
+              </div>
             </FilterField>
             {/* กรองด้วย IP = ดูว่า "เครื่องเดียวกันนี้" เรียกอะไรไปบ้างในช่วงเวลานั้น ซึ่งเป็นวิธีเดียว
                 ที่พอจะบอกได้ว่าคนที่กดลิงก์ PDF สาธารณะเป็นเซลล์เจ้าของใบเองหรือคนอื่น */}
@@ -826,20 +955,32 @@ export function ApiLogs() {
                         {r.admin_username
                           ? <span className="text-slate-700">{r.admin_username}</span>
                           : r.line_user_id
-                            ? <span className="font-mono text-slate-500">{shortUser(r.line_user_id)}</span>
+                            ? r.line_user_name
+                              // ชื่อเซลส์ตรงกับที่เลือกในช่องผู้เรียก · ไอดีย่ออยู่บรรทัดล่างคู่กับ IP
+                              ? <span className="inline-flex items-center gap-1.5">
+                                  <span className="text-slate-700">{r.line_user_name}</span>
+                                  <LineTag />
+                                </span>
+                              : <span className="font-mono text-slate-500">{shortUser(r.line_user_id)}</span>
                             : r.doc_owner_user_id
                               // ลิงก์สาธารณะ ไม่มีล็อกอิน = ไม่รู้ว่าใครกด บอกได้แค่ว่าเอกสารของใคร
                               ? <span className="text-slate-400" title="เอกสารของเซลล์คนนี้ — ไม่ได้แปลว่าเป็นคนกดลิงก์ ลิงก์นี้เปิดได้โดยไม่ต้องล็อกอิน">
                                   เอกสารของ {r.doc_owner_name ?? shortUser(r.doc_owner_user_id)}
                                 </span>
                               : <span className="text-slate-300">-</span>}
-                        {r.ip && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); set({ ip: r.ip!, page: '1' }); setShowAdvanced(true); }}
-                            title="กรองเฉพาะ request ที่มาจาก IP นี้"
-                            className="font-mono text-[11px] text-slate-400 hover:text-slate-700 hover:underline mt-0.5 block">
-                            {r.ip}
-                          </button>
+                        {(r.ip || r.line_user_name) && (
+                          <div className="flex flex-wrap items-baseline gap-x-1 mt-0.5 font-mono text-[11px] text-slate-400">
+                            {r.line_user_name && <span title={r.line_user_id ?? undefined}>{shortUser(r.line_user_id)}</span>}
+                            {r.line_user_name && r.ip && <span aria-hidden>·</span>}
+                            {r.ip && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); set({ ip: r.ip!, page: '1' }); setShowAdvanced(true); }}
+                                title="กรองเฉพาะ request ที่มาจาก IP นี้"
+                                className="hover:text-slate-700 hover:underline">
+                                {r.ip}
+                              </button>
+                            )}
+                          </div>
                         )}
                       </td>
                       <td className={`${tdCls} text-center`}><StatusPill code={r.status_code} /></td>
@@ -903,6 +1044,7 @@ export function ApiLogs() {
                                         : '0'}
                                   </Field>
                                   <Field label="LINE User ID">
+                                    {detail.line_user_name && <span>{detail.line_user_name} · </span>}
                                     <span className="font-mono break-all">{detail.line_user_id ?? '-'}</span>
                                   </Field>
                                   <Field label="ผู้ใช้ระบบ">

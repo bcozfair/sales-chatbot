@@ -58,6 +58,7 @@
     "diag:redelivery": "tsx scripts/diag/redelivery.ts",
     "diag:webhook-recorder": "tsx scripts/diag/webhookRecorder.ts",
     "diag:log-chat": "tsx scripts/diag/logChatView.ts",
+    "diag:log-caller-ui": "tsx scripts/diag/logCallerUi.ts",
     "diag:log-chat-ui": "tsx scripts/diag/logChatUi.ts",
     "diag:llm-timing": "tsx scripts/diag/llmTimingSmoke.ts",
     "diag:block-parity": "tsx scripts/diag/blockParity.ts",
