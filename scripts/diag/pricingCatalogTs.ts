@@ -484,6 +484,17 @@ async function main(): Promise<void> {
     check('สาย +400mm = 0.4 เมตร ไม่บวกค่าสาย · ช่องกรอกจำหน่วย mm · ประกอบกลับเป็นรหัสเดิม',
       mm02.p.cfg?.dims?.cable_m === 0.4 && !line(mm02.o, /สาย/) && mm02.p.tsForm?.clUnit === 'mm' && sameTsCode(buildTsCode(mm02.p.tsForm!), 'TSP-02(12)5x11+400mm.-TSU'),
       `${mm02.o?.unitPrice}`);
+    // เครื่องหมายคูณ `×` = `x` (เจ้าของสั่ง 2026-10-05 · 12 รหัสจริง เดิมความยาวแกนหายเงียบ ๆ แล้วได้ราคาต่ำไป)
+    const tx = price('TSP-02-SI(12.7)5×100+2MTSU');
+    const xx = price('TSP-02-SI(12.7)5x100+2MTSU');
+    check('`5×100` = `5x100`: ราคาเท่ากัน · อ่านความยาวแกน 100 · ได้ช่องตามแคตตาล็อก TS_-02-SI · รหัสที่พิมพ์คงเดิม',
+      tx.o?.status === 'priced' && tx.o.unitPrice === xx.o?.unitPrice && tx.p.cfg?.dims?.L1 === 100
+        && tx.p.tsForm?.family === 'TS_-02-SI' && !tx.p.tsForm.issues && !tx.p.parts.some((x) => x.kind === 'unknown') && tx.p.input === 'TSP-02-SI(12.7)5×100+2MTSU',
+      `${tx.o?.unitPrice} / ${xx.o?.unitPrice}`);
+    const t11 = price('TSP-11 6×200+4M-PU');
+    const x11 = price('TSP-11 6x200+4M-PU');
+    check('`×` ใช้ได้ทุกตระกูล: TSP-11 6×200 = 6x200 (รวมค่าความยาวแกน)',
+      t11.o?.status === 'priced' && t11.o.unitPrice === x11.o?.unitPrice && t11.p.cfg?.dims?.L1 === 200, `${t11.o?.unitPrice} / ${x11.o?.unitPrice}`);
     const si8 = price('TSK-02-SI(15.5)8x10+1M');
     check('TS_-02-SI แกน 8 (ชีตเว้นว่าง) = ต้องขอราคา ไม่ใช่ไม่รับผลิต', si8.o?.status === 'quoteOnRequest' && !!si8.o.violations.some((v) => v.noRate));
     const none02 = price('TSP-02(12)5x10+3M');

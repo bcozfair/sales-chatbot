@@ -315,10 +315,10 @@ export function buildBhCode(form: BhForm): string {
 }
 
 /**
- * รหัสสองตัวเป็นรหัสเดียวกันไหม **ตามที่คนอ่าน** — ไม่สนช่องว่าง ตัวพิมพ์ และขีด/ช่องว่างหลังหัวรหัส
+ * รหัสสองตัวเป็นรหัสเดียวกันไหม **ตามที่คนอ่าน** — ไม่สนช่องว่าง ตัวพิมพ์ (`x` = `×`) และขีด/ช่องว่างหลังหัวรหัส
  * (`BH-01-600x150` = `BH-01 600x150` — รหัสจริงเขียนทั้งสองแบบ ตัวอ่านรับทั้งคู่)
  */
 export function sameBhCode(a: string, b: string): boolean {
-  const canon = (s: string) => s.toUpperCase().replace(/\s+/g, '').replace(/^(BH-0\d[A-Z]?)-/, '$1');
+  const canon = (s: string) => s.toUpperCase().replace(/\s+/g, '').replace(/×/g, 'X').replace(/^(BH-0\d[A-Z]?)-/, '$1');
   return canon(a) === canon(b);
 }

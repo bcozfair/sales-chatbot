@@ -293,9 +293,12 @@ function invalidCells(models: EditorView[], drafts: Record<string, Draft>): stri
       if (a.rates) {
         for (const k of rateKeys(v, a, d)) bad(`${v.title} ${a.label} ${k}`, d.rates[a.id]?.[k]);
       } else {
+        // ว่างไม่ได้เฉพาะกฎที่เคยมีราคา — กฎที่ยังไม่เคยมีราคา (PL-5 ของ BH) ว่างต่อได้ = ยังไม่มีราคา
+        // (เดิมนับทุกช่องว่าง ⇒ ชีต BH ทั้งหน้ากด "ตรวจก่อนบันทึก" ไม่ได้ตั้งแต่โหลดหน้า · แก้ 2026-10-05)
         const s = d.prices[a.id] ?? '';
-        if (parse(s) === null) out.push(`${v.title} ${a.label} — ราคาว่างไม่ได้ (จะเลิกคิดรายการนี้ ให้ปิดกฎที่ปุ่ม “กฎและเงื่อนไข”)`);
-        else bad(`${v.title} ${a.label}`, s);
+        if (parse(s) === null) {
+          if (priceOf(a) !== null) out.push(`${v.title} ${a.label} — ราคาว่างไม่ได้ (จะเลิกคิดรายการนี้ ให้ปิดกฎที่ปุ่ม “กฎและเงื่อนไข”)`);
+        } else bad(`${v.title} ${a.label}`, s);
         if (v.variant) bad(`${v.title} ${a.label} รุ่น ${v.variant.suffix}`, d.variantPrices[a.id]);
       }
     }

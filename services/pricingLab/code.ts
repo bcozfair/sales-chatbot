@@ -101,9 +101,18 @@ export interface CodePicks {
 
 // ── ตัวช่วยเล็ก ๆ ────────────────────────────────────────────────────────────
 
-/** ทำให้เครื่องหมายนิ้วทุกแบบ (” “ ″ ') เทียบกันได้ และตัดช่องว่างทิ้งทั้งหมด */
+/**
+ * เครื่องหมายคูณ `×` = ตัว `x` ของรหัส (`5×100` = `5x100` · เจ้าของสั่ง 2026-10-05) — รหัสจริงเขียนแบบนี้ 12 รหัส
+ * เดิมตัวอ่านไม่รู้จัก `×` ⇒ ความยาวแกนหายเงียบ ๆ แล้วได้ราคาต่ำไป (`TSP-02-SI(12.7)5×100+2MTSU` 1,490 แทน 2,030)
+ * ใช้กับรหัสก่อนตัวอ่านทุกตัว (`norm` · ช่องตามแคตตาล็อก · BH) — อักขระต่ออักขระ ตำแหน่งในรหัสจึงไม่เลื่อน
+ */
+export function timesAsX(s: string): string {
+  return s.replace(/×/g, 'x');
+}
+
+/** ทำให้เครื่องหมายนิ้วทุกแบบ (” “ ″ ') เทียบกันได้ `×` เป็น `x` และตัดช่องว่างทิ้งทั้งหมด */
 function norm(s: string): string {
-  return s
+  return timesAsX(s)
     .replace(/[\u201C\u201D\u2033\u00A0]/g, '"')
     .replace(/[\u2018\u2019\u2032]/g, "'")
     .replace(/\s+/g, '')
@@ -1618,9 +1627,11 @@ export function modelOfCode(input: string, book: PriceBook): PriceModel | undefi
 }
 
 export function parseProductCode(input: string, book: PriceBook, picks: CodePicks = {}): ParsedCode {
+  // `×` → `x` ก่อนตัวอ่านทุกตัว (ช่องตามแคตตาล็อกอ่านจากรหัสเดิม ไม่ได้ผ่าน `norm`) · `out.input` คงตามที่พิมพ์
+  const typed = timesAsX(input);
   // BH: ช่องว่างระหว่างตัวเลขสองตัวคือตัวคั่นท่อน (`BH-01 101x150 220-2000W`) — `norm` ลบช่องว่างทิ้งหมด
   // ทำให้ขนาดกับแรงดันติดกันเป็น "101x150220" แล้วได้ราคาของความสูง 150,220 mm เงียบ ๆ (เจอ 2026-09-28 · 23 รหัสจริง)
-  const prepared = /^\s*BH/i.test(input) ? input.replace(/(\d)\s+(?=\d)/g, '$1-') : input;
+  const prepared = /^\s*BH/i.test(typed) ? typed.replace(/(\d)\s+(?=\d)/g, '$1-') : typed;
   const normalized = norm(prepared);
   const out: ParsedCode = { input, normalized, parts: [], problems: [], warnings: [] };
   if (normalized === '') {
@@ -1687,7 +1698,7 @@ export function parseProductCode(input: string, book: PriceBook, picks: CodePick
     readTsAddons(c, picks);
     // รุ่นย่อยที่อ่านได้เลือกหน้าแคตตาล็อก (`TSK-02-SI…` → ตาราง TS_-02-SI ของรุ่น TSK-02 เดียวกัน)
     const family = tsFamilyOfModel(model.code, c.cfg.axes?.submodel);
-    const tsForm = family ? tsFormOf(c, input, family) : undefined;
+    const tsForm = family ? tsFormOf(c, typed, family) : undefined;
     if (tsForm) {
       const on = (picks.addons ?? []).filter((a) => TS_ADDONS.some((x) => x.code === a) && hasOptionAdder(model, a));
       out.tsForm = on.length ? { ...tsForm, addons: on } : tsForm;

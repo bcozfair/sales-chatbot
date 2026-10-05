@@ -950,8 +950,13 @@ export function applyModelEdit(original: PriceModel, body: unknown, book?: Price
     adders = adders.map((a) => {
       if (!(a.id in prices)) return a;
       const v = prices[a.id];
-      // ว่าง ≠ 0 และไม่ใช่ "ปิดกฎ" — หน้าชีตไม่มีสวิตช์ จึงไม่ยอมให้ช่องว่างแปลว่าอะไรเงียบ ๆ
-      if (v === null || v === undefined || v === '') reject(`${a.label}: ราคาว่างไม่ได้ — ถ้าจะเลิกคิดรายการนี้ ให้ปิดกฎที่ปุ่ม “กฎและเงื่อนไข”`);
+      // ว่าง ≠ 0 และไม่ใช่ "ปิดกฎ" — หน้าชีตไม่มีสวิตช์ จึงไม่ยอมให้ลบราคาที่เคยมีจนว่างเงียบ ๆ
+      // กฎที่ยังไม่เคยมีราคา (PL-5 ของ BH) ว่างต่อ = คงเดิม (ยังไม่มีราคา) ไม่ใช่ข้อผิด
+      if (v === null || v === undefined || v === '') {
+        const had = a.kind === 'flat' ? a.amount : a.kind === 'percent' ? a.percent : a.rate;
+        if (had === undefined) return a;
+        reject(`${a.label}: ราคาว่างไม่ได้ — ถ้าจะเลิกคิดรายการนี้ ให้ปิดกฎที่ปุ่ม “กฎและเงื่อนไข”`);
+      }
       const n = money(v, a.label);
       return a.kind === 'flat' ? { ...a, amount: n } : a.kind === 'percent' ? { ...a, percent: n } : { ...a, rate: n };
     });
