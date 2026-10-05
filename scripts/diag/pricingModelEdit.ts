@@ -58,6 +58,13 @@ function priceOfCode(code: string, b: PriceBook = book!): number {
   return computePrice(parsed.cfg, b).unitPrice;
 }
 
+// ข้อของหัวข้อ 9 และ 11 ทดสอบทาง "สายที่ยังไม่มีราคา" โดยใช้ซิลิโคนเป็นตัวอย่าง — ฐานใส่ราคาซิลิโคนไปแล้ว (r17 · 2026-10-01)
+// ⇒ ถอดราคาซิลิโคนออกจากเล่มทดสอบเสมอ ด่านจึงไม่เน่าตามข้อมูลในฐาน (เคยตกค้าง 7 ข้อจนถึง 2026-10-05)
+const noSilicone = (a: Adder): Adder => {
+  if (a.id !== 'cable_over_1m' || !a.rates || !('สายซิลิโคน' in a.rates)) return a;
+  const { ['สายซิลิโคน']: _si, ...rest } = a.rates;
+  return { ...a, rates: rest };
+};
 const withModel = (m: PriceModel): PriceBook => ({ ...book!, models: { ...book!.models, [m.code]: m } });
 
 console.log('\n── 1. ตัวเลือกท้ายรหัสคิดราคาถูก และครอบรหัสที่ขายจริง ─────────────────\n');
@@ -645,14 +652,16 @@ if (ts01 && ts010) {
     const needLen = m.code === 'TSK-01' && !m.adders.some((a) => a.id === 'len_l1');
     return { ...m, axisDefaults: { thread },
       ...(needLen ? { standard: { ...m.standard, L1: 5 } } : {}),
-      adders: [...(needLen ? [LEN_L1] : []), ...m.adders.map((a) => (a.id === 'cable_over_1m'
+      adders: [...(needLen ? [LEN_L1] : []), ...m.adders.map(noSilicone).map((a) => (a.id === 'cable_over_1m'
         ? { ...a, rates: { ...a.rates, 'สายเทปล่อนหุ้มชีลด์': a.rates?.['สายเทปล่อนหุ้มชีลด์'] ?? TS_RATE } } : a))],
       axisDefaultsBy: { cable: { ...STD.cable, values: Object.fromEntries(rows.map((r) => [r, 'สายสแตนเลสถัก'])) } } };
   };
   const cat = loadCatalogSubcodes();
   const b9: PriceBook = {
     ...book,
-    models: { ...book.models, 'TSK-01': withStd(ts01, '1/4”'), 'TSK-01-0': withStd(ts010, 'M5') },
+    // ทุกรุ่น ไม่ใช่แค่ TSK-01 — จอของรุ่นแบบชีตดึงชื่อสายจากรุ่นอื่นในเล่มด้วย (`knownRateKeys`)
+    models: { ...Object.fromEntries(Object.entries(book.models).map(([k, m]) => [k, { ...m, adders: m.adders.map(noSilicone) }])),
+      'TSK-01': withStd(ts01, '1/4”'), 'TSK-01-0': withStd(ts010, 'M5') },
     subCodes: [...(book.subCodes ?? []), ...cat],
   };
   const run = (code: string) => { const p = parseProductCode(code, b9); return { p, r: computePrice(p.cfg!, b9) }; };
@@ -718,7 +727,8 @@ if (ts01 && ts010) {
       r.some((x) => x.value === 'สายซิลิโคน' && x.rate === null) && r.some((x) => x.value === 'สายเทปล่อนหุ้มชีลด์' && x.rate === 160),
       JSON.stringify(r));
   }
-  const noSc: PriceBook = { ...b9, subCodes: book.subCodes ?? [] };
+  // ฐานมีแถวรหัสย่อย C = ซิลิโคนแล้ว (ลงพร้อมแคตตาล็อก) ⇒ ตัดแถวที่ตั้งสายซิลิโคนออกด้วย ไม่งั้นข้อนี้วัดข้อมูลในฐาน ไม่ใช่โค้ด
+  const noSc: PriceBook = { ...b9, subCodes: (book.subCodes ?? []).filter((x) => !(x.effect === 'setAxis' && x.value === 'สายซิลิโคน')) };
   check('  ไม่มีแถวรหัสย่อย ⇒ ไม่มีช่องซิลิโคน (ช่องมาจากตารางรหัสย่อยจริง ไม่ได้ฝังชื่อสายไว้)',
     !rowsOf(noSc, 'TSK-01').some((x) => x.value === 'สายซิลิโคน'));
   const tsk04 = Object.values(b9.models).find((m) => !excelReady(m) && m.adders.some((a) => a.byAxis === 'cable'));
@@ -811,7 +821,7 @@ if (!ts08 || !ts10) {
   const b11: PriceBook = {
     ...book,
     models: { ...book.models, 'TSP-10': { ...ts10, axisDefaults: { ...ts10.axisDefaults, cable: 'สายพีวีซี' },
-      adders: ts10.adders.map((a) => (a.id === 'cable_over_1m'
+      adders: ts10.adders.map(noSilicone).map((a) => (a.id === 'cable_over_1m'
         ? { ...a, round: 'ceil' as const, rates: { ...a.rates, 'สายเทปล่อนหุ้มชีลด์': a.rates?.['สายเทปล่อนหุ้มชีลด์'] ?? 160 } } : a)) } },
     subCodes: [...(book.subCodes ?? []).filter((x) => !cat.some((c) => same(c, x))), ...cat],
   };
