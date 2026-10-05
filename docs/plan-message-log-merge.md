@@ -86,6 +86,17 @@ gate: `npm run diag:webhook-recorder` + `npm run diag:redelivery` · ก่อ�
 
 **ไม่ทำ:** แท็บ C (บทสนทนาของเซลส์หนึ่งคน) — ก้อนบทสนทนาเป็นของร่วมไว้รอแล้ว
 
+**เจ้าของตัดสิน 2026-10-05: พักแท็บ C (บทสนทนา)** — เหตุผล: A (ก้อนในกล่อง "ทุกอย่างของ request นี้") + B (ชิปในตาราง
+API logs) + ตัวกรอง LINE user ที่มีอยู่แล้ว ตอบงานหลักได้ (ไล่ว่าเซลส์คนหนึ่งพิมพ์อะไร/บอทตอบอะไร/ส่งถึงไหม) ·
+**ช่องว่างที่ A+B ไม่ครอบ** (ทั้งหมดเพราะ A+B เริ่มจากแถวใน `api_logs` แล้วค่อยไปหาข้อความ):
+1. ข้อความที่เก่ากว่า retention ของ `api_logs` (`API_LOG_RETENTION_DAYS=120` ตาม `DEPLOY.md`) — แถวใน `messages`
+   ยังอยู่ แต่ไม่มีแถว `api_logs` ให้เปิดถึง
+2. แถวหน้าเว็บ (`web_*`) ที่เกิดก่อนวันขึ้นจอ — ไม่มี `meta.api_request_id` จึงผูกกับ request ไม่ได้
+3. ข้อความ LINE ก่อน 23/9 — ก่อนมี `webhook_events.request_id`
+⇒ **ทำ C เมื่อพบว่าต้องไล่ย้อนหลังบ่อย** · ตอนนั้นใช้ก้อนบทสนทนา (`ChatExchange` · `services/chatLogService.ts` ·
+`frontend/src/admin/logs/ChatExchange.tsx`) ซ้ำได้เลย แต่ต้องมีทางอ่าน `messages` ที่ไม่เริ่มจาก `api_logs`
+และต้องผ่าน `canReadChatContent()` ตัวเดียวกัน (ด่าน `diag:log-chat` ข้อ 2 · 5a)
+
 ### การผูกข้อความกับ request — ห้ามจับคู่ด้วยเวลา
 
 - **LINE** = `webhook_events.request_id` → `reply_token` → `messages.reply_token` (+ `user_id` เดียวกัน · ช่วงเวลา
@@ -106,6 +117,11 @@ gate: `npm run diag:webhook-recorder` + `npm run diag:redelivery` · ก่อ�
 - เนื้อ = ข้อความที่พิมพ์ · data ปุ่ม + คำแปล · คำตอบบอท · สิ่งที่ LINE รับไป · ข้อความในหน้าเว็บ ·
   ไม่ใช่เนื้อ (ทุกคนเห็น) = ชนิด · ผลการส่ง · `reply_error` / note ของ `warn_failed` · ชื่อ/รหัสเซลส์ · เวลา
 - **ไม่ใส่เนื้อแชทในไฟล์ CSV ที่ส่งออก** (`/export` ไม่แตะบทสนทนาเลย)
+- ⚠️ **การตัดนี้ครอบแค่ `webhook_events` / `messages` ไม่ครอบ `system_logs`** (พบตอน QA 2026-10-05 · มีมาก่อนเฟส 2) —
+  `system_logs` คือ stdout ของแอป และบางบรรทัดพิมพ์ชิ้นของเนื้อแชทเอง เช่น บรรทัด "LINE ส่งซ้ำ … แจ้งเซลส์ไม่สำเร็จ"
+  ใน `handleRedelivery` (`index.ts`) พิมพ์ `data=<postback data>` · `[findProduct] … text='…'` พิมพ์คำค้นที่ตัดจากข้อความ
+  ⇒ role อื่นที่มี `page.traffic` เห็นชิ้นเหล่านี้ได้ทางหน้า "บันทึกระบบ" · `/export/system` · แถว `system` ในกล่อง request
+  (พิสูจน์ด้วยการยิง route จริงบนฐานทิ้งได้) · จะปิดต้องตัดสินใจแยก: ตัด `message` ของ `system_logs` ตาม role หรือเลิกพิมพ์เนื้อลง log
 - เปิดดูเนื้อ (admin และมีอย่างน้อยหนึ่งก้อน) เขียน audit `log.view` entity `message` — ทั้ง `/chat` และ `/request/:id`
   (ตาราง API logs = 1 แถว audit ต่อการโหลดหนึ่งหน้า เหมือน `/audit` · `/system`)
 
