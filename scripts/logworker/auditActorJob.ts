@@ -146,7 +146,7 @@ UPDATE audit_logs a
        note         = CASE
          WHEN h.admins > 1 THEN 'ช่วงเวลานั้นมีแอดมินมากกว่า 1 คนยิงคำสั่งเขียนพร้อมกัน — แยกไม่ออก'
          WHEN h.admins = 0 AND h.line_hits > 0
-           THEN 'เจ้าของข้อมูลแก้เองผ่าน LINE — จับคู่จาก request ของผู้ใช้คนนี้ที่ครอบเวลาที่แก้พอดี'
+           THEN 'เจ้าตัวทำเองผ่าน LINE — จับคู่จาก request ของผู้ใช้คนนี้ที่ครอบเวลานั้นพอดี'
          WHEN h.admins = 0 THEN 'ไม่พบ request ของแอดมินหรือของเจ้าของข้อมูลเองที่ครอบเวลานี้ — น่าจะแก้จาก psql หรือ script ตรง ๆ'
          ELSE a.note
        END

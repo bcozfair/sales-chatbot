@@ -10,8 +10,9 @@ import { useHashState } from './useHashState';
 import { TAB_SLUG } from '../navHash';
 import {
   errMsg, formatDateTime, relativeTime, formatNumber, actorStyle, entityLabel,
-  actionLabel, displayValue, downloadCsv, isBulk,
+  displayValue, downloadCsv, isBulk,
 } from './format';
+import { colLabel, describeAudit, valueLabel } from './auditMeaning';
 import {
   CheckField, EmptyState, ErrorBox, FilterCard, FilterField, FilterFooter, FilterRow,
   Pagination, SearchField, SelectField, SkeletonRows, TimeSortToggle,
@@ -24,7 +25,7 @@ import { RequestTimeline } from './RequestTimeline';
  * ⚠️ กติกาที่ห้ามผ่อน: ชื่อคนทำต้องแสดง "ที่มา" ควบคู่เสมอ
  *   'ยืนยันแล้ว'    = แอปบอกมาตรง ๆ (SET LOCAL app.actor) — แม่นยำ 100%
  *   'จับคู่จากเวลา' = logworker หาจาก api_logs ที่ครอบเวลานั้น — แม่นสูงแต่ไม่ใช่ 100%
- *   'เจ้าตัวผ่าน LINE' = เจ้าของข้อมูลแก้เองผ่านบอท/LIFF (ไม่มีแอดมินเกี่ยวข้อง) — จับคู่จากเวลาเช่นกัน
+ *   'เจ้าตัวผ่าน LINE' = เจ้าตัวทำเองผ่านบอท/LIFF (ไม่มีแอดมินเกี่ยวข้อง) — จับคู่จากเวลาเช่นกัน
  *   'ไม่ทราบ'      = แก้จาก psql/script ตรง ๆ ← เป็นคำตอบที่ถูกต้อง ไม่ใช่ความล้มเหลว
  * ถ้าแสดงแต่ชื่อเฉย ๆ เท่ากับหน้าจอโกหกว่ารู้แน่กว่าที่รู้จริง
  *
@@ -44,6 +45,8 @@ interface AuditRow {
   entity_type: string | null;
   entity_id: string | null;
   entity_label: string | null;
+  /** ชื่อที่ server หาให้ (ชื่อบริษัทของบัญชีเสนอในนาม PM / บัญชีห้ามเสนอราคา) */
+  entity_display: string | null;
   changed_cols: string[] | null;
   before: Record<string, unknown> | null;
   after: Record<string, unknown> | null;
@@ -87,7 +90,7 @@ const BulkSummary: React.FC<{ row: AuditRow }> = ({ row }) => {
           <div className="text-slate-400 mb-1">ช่องที่เปลี่ยน</div>
           <div className="flex flex-wrap gap-1.5">
             {row.changed_cols!.map(c => (
-              <span key={c} className="font-mono bg-slate-100 text-slate-600 rounded px-1.5 py-0.5">{c}</span>
+              <span key={c} title={c} className="bg-slate-100 text-slate-600 rounded px-1.5 py-0.5">{colLabel(c)}</span>
             ))}
           </div>
         </div>
@@ -134,10 +137,11 @@ const DiffTable: React.FC<{ row: AuditRow }> = ({ row }) => {
         <tbody className="divide-y divide-slate-100">
           {cols.map(c => (
             <tr key={c}>
-              <td className="py-1.5 pr-4 font-mono text-slate-500 align-top">{c}</td>
+              {/* ชื่อช่องเป็นภาษาไทยเมื่อรู้จัก · ชื่อในระบบอยู่ใน title สำหรับคนที่ต้องไปไล่ในฐาน */}
+              <td className="py-1.5 pr-4 text-slate-500 align-top" title={c}>{colLabel(c)}</td>
               {!isCreate && (
                 <td className="py-1.5 pr-4 text-slate-500 align-top break-all">
-                  {displayValue(row.before?.[c])}
+                  {valueLabel(row.entity_type, c, row.before?.[c]) ?? displayValue(row.before?.[c])}
                 </td>
               )}
               {!isCreate && !isDelete && (
@@ -145,7 +149,7 @@ const DiffTable: React.FC<{ row: AuditRow }> = ({ row }) => {
               )}
               {!isDelete && (
                 <td className="py-1.5 text-slate-800 font-medium align-top break-all">
-                  {displayValue(row.after?.[c])}
+                  {valueLabel(row.entity_type, c, row.after?.[c]) ?? displayValue(row.after?.[c])}
                 </td>
               )}
             </tr>
@@ -299,7 +303,7 @@ export const AuditLogs: React.FC = () => {
             <SelectField value={state.actorType} onChange={v => set({ actorType: v, page: '1' })}>
               <option value="">ทั้งหมด</option>
               <option value="admin">รู้ตัวคนทำ</option>
-              <option value="line_user">เจ้าตัวแก้เองผ่าน LINE</option>
+              <option value="line_user">เจ้าตัวทำเองผ่าน LINE</option>
               <option value="unknown">ไม่ทราบ (แก้จาก psql/script)</option>
               <option value="ambiguous">แยกไม่ออก</option>
               <option value="pending">กำลังหา</option>
@@ -341,6 +345,7 @@ export const AuditLogs: React.FC = () => {
           <div className="divide-y divide-slate-100">
             {rows.map(r => {
               const a = actorStyle(r.actor_type, r.actor_source);
+              const m = describeAudit(r);
               const open = expanded === r.id;
               return (
                 <div key={r.id}>
@@ -372,24 +377,28 @@ export const AuditLogs: React.FC = () => {
                       {r.actor_name ?? '—'}
                     </span>
 
-                    <span className="shrink-0 text-xs font-medium text-slate-800">{actionLabel(r.action)}</span>
+                    {/* ถ้อยคำมาจาก describeAudit (auditMeaning.ts) ที่เดียว — แปลจากค่าที่เปลี่ยนจริง ไม่ใช่ชื่อตาราง */}
+                    <span className="shrink-0 text-xs font-medium text-slate-800">{m.title}</span>
 
-                    {r.entity_label && (
-                      <span className="min-w-0 flex-1 text-xs text-slate-500 truncate" title={r.entity_label}>
-                        {r.entity_label}
+                    {(m.label || m.note) && (
+                      <span className="min-w-0 flex-1 text-xs text-slate-500 truncate"
+                            title={[m.label, m.note].filter(Boolean).join(' · ')}>
+                        {m.label}
+                        {m.note && <span className="text-slate-400">{m.label ? ' · ' : ''}{m.note}</span>}
                       </span>
                     )}
 
                     {/* ดันของที่เหลือไปชิดขวาเมื่อไม่มีชื่อรายการมายืดแทน */}
-                    {!r.entity_label && <span className="flex-1" />}
+                    {!m.label && !m.note && <span className="flex-1" />}
 
                     {r.changed_cols && r.changed_cols.length > 0 && r.before && r.after && (
                       <span className="shrink-0 text-[11px] text-slate-400 hidden sm:inline"
                             title={r.changed_cols.join(', ')}>
-                        {/* ช่องน้อย ๆ บอกชื่อช่องไปเลย มีประโยชน์กว่าการบอกแค่จำนวน */}
-                        {r.changed_cols.length <= 2
-                          ? r.changed_cols.join(', ')
-                          : `${r.changed_cols.length} ช่อง`}
+                        {/* ช่องน้อย ๆ บอกชื่อช่องไปเลย มีประโยชน์กว่าการบอกแค่จำนวน · ไม่นับเวลาแก้ล่าสุด */}
+                        {(() => {
+                          const cols = r.changed_cols.filter(c => c !== 'updated_at');
+                          return cols.length <= 2 ? cols.map(colLabel).join(', ') : `${cols.length} ช่อง`;
+                        })()}
                       </span>
                     )}
 

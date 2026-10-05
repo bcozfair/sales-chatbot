@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '../../context/AuthContext';
 import { X, Loader2, AlertCircle, Globe, History, Terminal, MessageSquare, Send, Clock, Info, Lock } from 'lucide-react';
-import { errMsg, formatDateTime, formatMs, levelStyle, actionLabel } from './format';
+import { errMsg, formatDateTime, formatMs, levelStyle } from './format';
+import { describeAudit, type AuditFacts } from './auditMeaning';
 import { AdminOnlyBadge, ChatExchangeCard } from './ChatExchange';
 import { deliveryMeta, inSummary, kindMeta, oneLine, type ChatExchange } from './chatFormat';
 
@@ -25,6 +26,8 @@ interface TimelineRow {
   title: string;
   detail: string | null;
   duration_ms: number | null;
+  /** แถว audit เท่านั้น — พอให้ describeAudit แปลถ้อยคำได้ (server ส่งเฉพาะช่องที่การแปลต้องใช้) */
+  audit?: Omit<AuditFacts, 'action'> | null;
 }
 
 interface TimelineResponse {
@@ -219,6 +222,15 @@ export const RequestTimeline: React.FC<{ requestId: string; onClose: () => void 
                   const Icon = m.icon;
                   // แถว system ใช้สีตามระดับความรุนแรง ส่วนแถวอื่นใช้สีประจำชนิด
                   const lvl = r.kind === 'system' ? levelStyle(r.title.split(' ')[0]) : null;
+                  // แถว audit แปลด้วยตัวเดียวกับหน้าบันทึกการแก้ไข (auditMeaning.ts) — server เก่าที่ยังไม่ส่ง
+                  // ก้อน audit มา ยังได้ชื่อการกระทำแบบเดิม (describeAudit ถอยไปใช้ชื่อชนิดเอง)
+                  const am = r.kind === 'audit'
+                    ? describeAudit({
+                        action: r.title, entity_type: null, entity_id: null, entity_label: r.detail,
+                        changed_cols: null, before: null, after: null, ...(r.audit ?? {}),
+                      })
+                    : null;
+                  const detail = am ? [am.label, am.note].filter(Boolean).join(' · ') : r.detail;
                   return (
                     <li key={`${r.kind}-${r.id}`} className="ml-5">
                       <span className="absolute -left-[9px] flex items-center justify-center w-[18px] h-[18px]
@@ -230,14 +242,14 @@ export const RequestTimeline: React.FC<{ requestId: string; onClose: () => void 
                           {lvl?.label ?? m.label}
                         </span>
                         <span className="text-sm text-slate-800 break-all">
-                          {r.kind === 'audit' ? actionLabel(r.title) : r.title}
+                          {am ? am.title : r.title}
                         </span>
                         {r.duration_ms !== null && (
                           <span className="text-xs text-slate-400 tabular-nums">{formatMs(r.duration_ms)}</span>
                         )}
                       </div>
-                      {r.detail && (
-                        <div className="mt-0.5 text-xs text-slate-500 break-all whitespace-pre-wrap">{r.detail}</div>
+                      {detail && (
+                        <div className="mt-0.5 text-xs text-slate-500 break-all whitespace-pre-wrap">{detail}</div>
                       )}
                       <div className="mt-0.5 text-[11px] text-slate-400 tabular-nums">
                         {formatDateTime(r.at)}

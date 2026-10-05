@@ -428,6 +428,11 @@ npm run logworker                                          # worker เขีย
   ในขอบเขต ให้แก้ view อย่าเติมเงื่อนไขใน query ของ `creditHoldService.ts`
   · ด่านกฎเป็น **fail-closed**: DB ล่มต้องกลายเป็น "ตรวจไม่สำเร็จ ห้ามออกใบ" ไม่ใช่ "ไม่โดนบล็อก"
 
+- **แถว `salesperson` ไม่ได้เป็นพนักงานขายทุกแถว และไม่ได้ทุกการ UPDATE ที่เป็นการแก้ข้อมูลเซลส์** — บอทใช้
+  `status` จำว่า "กดเมนูแก้ใบแล้ว รอเลขที่ใบ" (`edit_quote_number` ↔ `active`) และหน้าเว็บสร้างแถวพร็อกซี `web:<admin>:<sales>`
+  (วัด 2026-10-05: 76 + 166 จาก 1,159 แถวของบันทึกการแก้ไข) ⇒ ใครนับ/แสดงบันทึกการแก้ไขต้องผ่าน `realAuditChangeSql()`
+  (`db/auditKinds.ts`) หรือ `describeAudit()` (`frontend/src/admin/logs/auditMeaning.ts`) ซึ่งด่าน `diag:audit-wording` เทียบให้ตรงกันทุกแถว
+
 - **`district`/`ตำบล` ยังไม่ครบ ~26,730 แถว** ที่มี zip แต่ไม่มีอำเภอ (distinct zip 1,009) —
   อำเภอเติมจาก zip ได้ถ้า import postal table ส่วน **ตำบลเติมจาก zip ไม่ได้** (1 zip หลายตำบล)
 

@@ -1,5 +1,6 @@
 import { pool, log } from './config.js';
 import { markOk, markError } from './state.js';
+import { realAuditChangeSql } from '../../db/auditKinds.js';
 
 /**
  * งานที่ 3 ของ logworker — สรุป traffic รายวันลง traffic_daily
@@ -21,7 +22,7 @@ import { markOk, markError } from './state.js';
 /** ⚠️ ข้อบังคับของโปรเจกต์: query วิเคราะห์ต้องมี statement_timeout เสมอ */
 const STATEMENT_TIMEOUT_MS = 60_000;
 
-const SQL = `
+export const SQL = `
 WITH bound AS (
   SELECT ($1::date)::timestamp AT TIME ZONE 'Asia/Bangkok'                        AS lo,
          (($1::date + 1))::timestamp AT TIME ZONE 'Asia/Bangkok'                  AS hi
@@ -62,7 +63,10 @@ SELECT
   (SELECT count(*)                       FROM l    WHERE db_waiting > 0),
   (SELECT count(*) FROM quotations, bound WHERE created_at >= lo AND created_at < hi),
   (SELECT count(*) FROM messages,   bound WHERE created_at >= lo AND created_at < hi),
-  (SELECT count(*) FROM audit_logs, bound WHERE occurred_at >= lo AND occurred_at < hi),
+  -- "การแก้ไข" = เฉพาะการแก้ข้อมูลจริง (ไม่นับเข้าดู log · แถวพร็อกซีหน้าเว็บ · สถานะการคุยของบอท)
+  -- กติกาอยู่ที่ db/auditKinds.ts · เจ้าของเคาะ 2026-10-05 · digest ข้างล่างยังคิดจากทุกแถวเหมือนเดิม
+  (SELECT count(*) FROM audit_logs, bound
+    WHERE occurred_at >= lo AND occurred_at < hi AND ${realAuditChangeSql()}),
   (SELECT count(*) FROM system_logs, bound
     WHERE created_at >= lo AND created_at < hi AND level IN ('error', 'fatal')),
   -- ── ตัวเลข LLM (แผน G/G#2) — ยกขึ้นมาเก็บถาวรเพราะ api_logs ลบทิ้งที่ 120 วัน ──
