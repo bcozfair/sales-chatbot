@@ -111,8 +111,10 @@ type AskSlot = NonNullable<EditorView['askPrice']>['slots'][number];
 function canonAsk(slot: AskSlot['slot'], raw: string): string | undefined {
   const s = raw.replace(/[\u201C\u201D\u2033\u00A0]/g, '"').replace(/[\u2018\u2019\u2032]/g, "'").replace(/\s+/g, '');
   if (slot === 'd') {
-    if (!/^\d+(\.\d+)?$/.test(s) || Number(s) <= 0 || Number(s) >= 1000) return undefined;
-    return String(Number(s));
+    // ตัวอักษรวัสดุต่อท้ายได้ (`2.5A` ของ TS_-02 ที่ขนาดแกนเป็นแถวของตาราง) — เซิร์ฟเวอร์ตรวจว่าตารางนั้นรับตัวอักษรไหน
+    const m = s.match(/^(\d+(?:\.\d+)?)([A-Za-z]{0,2})$/);
+    if (!m || Number(m[1]) <= 0 || Number(m[1]) >= 1000) return undefined;
+    return `${Number(m[1])}${m[2]!.toUpperCase()}`;
   }
   if (slot === 'sensor') {
     const u = s.toUpperCase();
@@ -795,7 +797,9 @@ const MatrixGrid: React.FC<{
   const colSlot = slotOfAxis(v, cA);
   /** ✕ ได้เมื่อยังไม่มีตัวเลขสักช่อง (ค่าที่เพิ่งเพิ่มเอาออกได้เสมอ — ยังไม่ได้บันทึก) */
   const emptyCol = (j: number) => d.cells.every((row) => !(row[j] ?? '').trim());
-  const emptyRow = (i: number) => (d.cells[i] ?? []).every((x) => !x.trim());
+  // อัตราในคอลัมน์บวกเพิ่มของแถว (ความยาวแกนของแถวขนาดที่เพิ่มเอง · TS_-02) ก็นับเป็นตัวเลข — เซิร์ฟเวอร์ปฏิเสธแบบเดียวกัน
+  const emptyRow = (i: number, r: string) =>
+    (d.cells[i] ?? []).every((x) => !x.trim()) && [...left, ...right].every((a) => !(d.rates[a.id]?.[r] ?? '').trim());
   const xBtn = (what: string, onClick: () => void) => (
     <button type="button" onClick={onClick} aria-label={`เอา${what} ออก`} title={`เอา${what} ออก (ยังไม่มีตัวเลขในช่อง)`}
             className="ml-1 font-normal text-slate-500 hover:text-red-600">✕</button>
@@ -919,7 +923,7 @@ const MatrixGrid: React.FC<{
                       className={`sticky left-0 z-10 border border-slate-200 px-3 py-2 text-left font-bold whitespace-nowrap ${
                         offRow ? 'bg-orange-50 text-orange-800' : `bg-emerald-50 ${only ? 'text-red-600' : 'text-emerald-800'}`}`}>
                     {r}
-                    {offRow && (fresh || emptyRow(i)) && xBtn(`${rowSlot!.axisTh} ${r}`, () => patch((x) => removeAsk(v, x, rowSlot!, r)))}
+                    {offRow && (fresh || emptyRow(i, r)) && xBtn(`${rowSlot!.axisTh} ${r}`, () => patch((x) => removeAsk(v, x, rowSlot!, r)))}
                     {offRow && <span className="block text-[10px] font-normal">นอกแคตตาล็อก</span>}
                   </th>
                   {left.map((a) => (fresh ? <NoCell key={a.id} /> : rateCell(a, r, true)))}
@@ -1191,7 +1195,7 @@ const AskCard: React.FC<{
             </select>
             <input aria-label="ค่าที่จะเพิ่ม" value={text} onChange={(e) => { setText(e.target.value); setWhy(''); }}
                    onKeyDown={(e) => { if (e.key === 'Enter' && text.trim()) addOwn(); }}
-                   placeholder={slots.find((x) => x.axis === slotAxis)?.slot === 'd' ? 'เช่น 8' : slots.find((x) => x.axis === slotAxis)?.slot === 'sensor' ? 'เช่น TSE' : 'เช่น M12'}
+                   placeholder={slots.find((x) => x.axis === slotAxis)?.slot === 'd' ? (slots.find((x) => x.axis === slotAxis)?.place === 'row' ? 'เช่น 3.2' : 'เช่น 8') : slots.find((x) => x.axis === slotAxis)?.slot === 'sensor' ? 'เช่น TSE' : 'เช่น M12'}
                    className="w-[110px] rounded-lg border border-slate-200 bg-card px-2 py-1 font-mono text-[12px] text-slate-900" />
             <Button size="sm" icon={Plus} disabled={!text.trim()} onClick={addOwn}>เพิ่ม</Button>
           </div>
@@ -1200,7 +1204,9 @@ const AskCard: React.FC<{
       </div>
       <p className="border-t border-red-100 bg-card px-4 py-2 text-[11.5px] leading-relaxed text-slate-500">
         ช่องสีส้มที่ปล่อยว่าง = <b>ยังขอราคาอยู่</b> (ไม่ใช่ราคา 0 และไม่ใช่ไม่รับผลิต) ·
-        ขนาดแกนที่เพิ่มต้องกรอกอัตราพร้อมกัน (ว่าง = ไม่ถูกเพิ่ม) · เอาคอลัมน์/แถวที่เพิ่มออกได้ด้วยปุ่ม ✕ ถ้ายังไม่มีตัวเลขในช่องนั้น
+        {slots.some((s) => s.slot === 'd' && s.place === 'rate') && <>ขนาดแกนที่เพิ่มต้องกรอกอัตราพร้อมกัน (ว่าง = ไม่ถูกเพิ่ม) · </>}
+        {slots.some((s) => s.slot === 'd' && s.place === 'row') && <>แถวขนาดแกนที่เพิ่มกรอกอัตราความยาวแกนได้หลังบันทึก · </>}
+        เอาคอลัมน์/แถวที่เพิ่มออกได้ด้วยปุ่ม ✕ ถ้ายังไม่มีตัวเลขในช่องนั้น
       </p>
     </div>
   );

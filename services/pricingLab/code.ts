@@ -36,7 +36,7 @@ import type { PriceBook, PriceModel, Predicate, ProductConfig } from './types.js
 import { resolveModel } from './engine.js';
 import { findSubCode, subCodeOption } from './subcodes.js';
 import { ADDONS, AMP, BH_CATALOG, SHAPE_AXIS, bhSpec, buildBhCode, sameBhCode, type BhFamily, type BhForm, type HoleSpec, type SizeKey } from './catalogBh.js';
-import { MODEL_SUFFIX, NTC_HEADS, askSlotKey, NTC_NUMBERS, TS_ADDONS, TS_CATALOG, readTsForm, readTsFormLoose, tsFamilyOfModel, tsSpec, type TsFamily, type TsFamilySpec, type TsForm } from './catalogTs.js';
+import { MODEL_SUFFIX, NTC_HEADS, OFF_CATALOG_SUFFIX, askSlotKey, NTC_NUMBERS, TS_ADDONS, TS_CATALOG, readTsForm, readTsFormLoose, tsFamilyOfModel, tsSpec, type TsFamily, type TsFamilySpec, type TsForm } from './catalogTs.js';
 
 /** หนึ่งรหัสย่อยในรหัสสินค้า พร้อมคำอธิบายว่าระบบอ่านมันว่าอะไร — ใช้โชว์ให้คนตรวจก่อนเชื่อราคา */
 export interface CodePart {
@@ -221,11 +221,31 @@ export function askSpecOf(model: PriceModel): TsFamilySpec | undefined {
   return spec?.askPrice ? spec : undefined;
 }
 
-/** แคตตาล็อกของรุ่นนี้ ถ้าวงเล็บของมันคือขนาดเขี้ยวล็อค (TS_-02 · ไม่มีผลกับราคา) — ดู `TsFamilySpec.connector` */
-function connectorSpecOf(model: PriceModel): TsFamilySpec | undefined {
-  const fam = tsFamilyOfModel(model.code);
+/**
+ * แคตตาล็อกของรุ่นนี้ ถ้าวงเล็บของมันคือขนาดเขี้ยวล็อค (TS_-02 · ไม่มีผลกับราคา) — ดู `TsFamilySpec.connector`
+ * `submodel` เลือกหน้าแคตตาล็อก (TS-02-SI = หน้า TS_-02-SI ซึ่งมีเขี้ยวล็อค 11.5) — คำเตือนต้องพูดถึงหน้าที่รหัสนั้นใช้
+ */
+function connectorSpecOf(model: PriceModel, submodel?: string): TsFamilySpec | undefined {
+  const fam = tsFamilyOfModel(model.code, submodel);
   const spec = fam ? tsSpec(fam) : undefined;
   return spec?.connector ? spec : undefined;
+}
+
+/** ตัวอักษรวัสดุของแคตตาล็อก (`A` = SUS 316L) — ขนาดแกนของ TS_-02 เป็นแถวของตาราง เขียนติดวัสดุ (`4.8A`) */
+const matCodes = (spec: TsFamilySpec) => (spec.slots.mat?.options ?? []).map((o) => o.code).filter(Boolean);
+
+/** ขนาดแกนเป็นแถวของตารางราคาตั้ง (TS_-02) ไม่ใช่แค่ขนาดในกฎความยาวแกน (TS_-01) — ดู `TsFamilySpec.askPrice` */
+const dIsRow = (model: PriceModel, spec: TsFamilySpec) => !!spec.askPrice?.d && axisValues(model, spec.askPrice.d).length > 0;
+
+/**
+ * แถวขนาดแกนนี้อยู่ในแคตตาล็อกไหม — ตัวเลขอยู่ในรายการขนาด **และ** ตัวอักษรต่อท้าย (ถ้ามี) อยู่ในรายการวัสดุ
+ * (`6.35A` ✓ · `4A` ✓ · `3.2` ✗ · `2.5A` ✗) — ตัวอ่านรหัส · ช่องสีส้ม · ตัวรับค่าที่แอดมินเพิ่ม ใช้ตัวเดียวกัน
+ */
+function catalogDRow(spec: TsFamilySpec, value: string): boolean {
+  const m = value.match(/^(\d+(?:\.\d+)?)([A-Z]*)$/i);
+  if (!m) return false;
+  const listed = (spec.slots.d?.options ?? []).some((o) => o.code !== '' && Number(o.code) === Number(m[1]));
+  return listed && (m[2] === '' || matCodes(spec).includes(m[2]!.toUpperCase()));
 }
 
 /** เกลียวในรหัส → คอลัมน์ของตาราง (ตรงตัว → นิ้วไม่มีเครื่องหมาย → มิลตามเลขหลัง M) — **ไม่แปลงหุน** (ดู `TsFamilySpec.askPrice`) */
@@ -255,13 +275,16 @@ const catalogSensorHeads = (spec: TsFamilySpec) => (spec.slots.sensor?.options ?
  * ค่านอกแคตตาล็อกในรูปที่ใช้เป็นชื่อช่องของตาราง — ตัวอ่านรหัส · ชิปบนหน้าสมุดราคา · ตัวรับค่าที่แอดมินเพิ่ม ใช้ตัวเดียวกัน
  * (หน้าจอพิมพ์ค่าเองได้ ⇒ ตัวรับปฏิเสธค่าที่ไม่ใช่รูปนี้ ไม่ใช่แปลงให้เงียบ ๆ แล้วช่องที่กรอกไว้หลุดคีย์)
  *   เกลียว: `1/8` → `1/8”` (แบบหัวคอลัมน์เดิม) · `m12x1.5` → `M12x1.5` · อื่น ๆ ตัวพิมพ์ใหญ่ · ชนิด Sensor: `E` / `tse` → `TSE`
- *   ขนาดแกน: ตัวเลขล้วน (`5.0` → `5`)
+ *   ขนาดแกน: ตัวเลขล้วน (`5.0` → `5`) · ตารางที่ขนาดแกนเขียนติดวัสดุ (TS_-02) ต่อตัวอักษรวัสดุของแคตตาล็อกได้ (`2.5a` → `2.5A`)
+ *   — `mats` = ตัวอักษรวัสดุที่รับ (`matCodes`) · ไม่ส่ง = ตัวเลขล้วนเหมือนเดิม
  */
-export function canonicalAskValue(slot: 'sensor' | 'thread' | 'd', raw: string): string | undefined {
+export function canonicalAskValue(slot: 'sensor' | 'thread' | 'd', raw: string, mats: string[] = []): string | undefined {
   const s = norm(raw);
   if (slot === 'd') {
-    if (!/^\d+(\.\d+)?$/.test(s) || Number(s) <= 0 || Number(s) >= 1000) return undefined;
-    return String(Number(s));
+    const m = s.match(/^(\d+(?:\.\d+)?)([A-Z]{0,2})$/i);
+    const mat = (m?.[2] ?? '').toUpperCase();
+    if (!m || Number(m[1]) <= 0 || Number(m[1]) >= 1000 || (mat !== '' && !mats.includes(mat))) return undefined;
+    return `${Number(m[1])}${mat}`;
   }
   if (slot === 'sensor') {
     const u = s.toUpperCase();
@@ -284,13 +307,18 @@ export function askValueProblem(model: PriceModel, slot: 'sensor' | 'thread' | '
   const spec = askSpecOf(model);
   const axis = spec?.askPrice?.[slot];
   if (!spec || !axis) return `${model.code} ไม่ได้ตั้งให้เพิ่มค่านอกแคตตาล็อกของช่องนี้`;
-  if (canonicalAskValue(slot, value) !== value) return `"${value}" ไม่ใช่รูปแบบที่ใช้ได้`;
+  const row = slot === 'd' && dIsRow(model, spec);
+  if (canonicalAskValue(slot, value, row ? matCodes(spec) : []) !== value) return `"${value}" ไม่ใช่รูปแบบที่ใช้ได้`;
   if (slot === 'thread') {
     const hit = resolveThread(axisValues(model, axis), value);
     if (hit) return `เกลียว ${value} คิดราคาตามคอลัมน์ ${hit} อยู่แล้ว`;
   } else if (slot === 'sensor') {
     if (catalogSensorHeads(spec).includes(value)) return `${value} อยู่ในแคตตาล็อกแล้ว`;
     if (axisValues(model, axis).some((v) => v.toUpperCase() === value)) return `มีแถว ${value} อยู่แล้ว`;
+  } else if (row) {
+    // แถวของตารางราคาตั้ง (TS_-02) — ขนาดในแคตตาล็อกที่ตารางยังไม่มีแถว (`5A`) เพิ่มทางแม่แบบ Excel ไม่ใช่ช่องสีส้ม
+    if (catalogDRow(spec, value)) return `แกน ${value} mm อยู่ในแคตตาล็อกแล้ว — เพิ่มแถวนี้ทางแม่แบบ Excel`;
+    if (axisValues(model, axis).some((v) => v.toUpperCase() === value)) return `มีแถวแกน ${value} mm อยู่แล้ว`;
   } else {
     if ((spec.slots.d?.options ?? []).some((o) => Number(o.code) === Number(value))) return `แกน ${value} mm อยู่ในแคตตาล็อกแล้ว`;
     const keys = model.adders.filter((a) => a.byAxis === axis).flatMap((a) => Object.keys(a.rates ?? {}));
@@ -320,9 +348,9 @@ export function offCatalogValues(model: PriceModel): Record<string, string[]> {
     if (off.length) out[sensor] = off;
   }
   if (d) {
-    const cat = (spec.slots.d?.options ?? []).map((o) => Number(o.code));
-    const keys = [...new Set(model.adders.filter((a) => a.byAxis === d).flatMap((a) => Object.keys(a.rates ?? {})))];
-    const off = keys.filter((k) => !cat.includes(Number(k)));
+    // แถวของตารางราคาตั้ง (TS_-02) + ขนาดในกฎที่แยกตามแกน (TS_-01) — `4.8A` ของ TS_-02 อยู่ในแคตตาล็อก (ขนาด + วัสดุ A)
+    const keys = [...new Set([...axisValues(model, d), ...model.adders.filter((a) => a.byAxis === d).flatMap((a) => Object.keys(a.rates ?? {}))])];
+    const off = keys.filter((k) => !catalogDRow(spec, k));
     if (off.length) out[d] = off;
   }
   return out;
@@ -553,12 +581,13 @@ function leftovers(c: Ctx, rest: string): string[] {
  *   แล้ว (`cfg.unread`) ไม่งั้นมันเติมสายตั้งต้นให้แล้วคิดเงินผิดชนิดเงียบ ๆ (เกือบหลุดมาแล้ว 2026-09-24)
  */
 function readCable(c: Ctx, token: string): boolean {
-  const m = token.match(/^\+?(\d+(?:\.\d+)?)(M|CM)([A-Z]*)$/i);
+  // `MM` ก่อน `M` — `+400mm` = 0.4 เมตร · เดิมอ่านเป็น 400 เมตร + ท่อน `m` ที่ไม่รู้จัก ได้ค่าสาย 63,840 บาท (เจอ 2026-10-05 · 2 รหัสจริง)
+  const m = token.match(/^\+?(\d+(?:\.\d+)?)(MM|CM|M)([A-Z]*)$/i);
   if (!m) return false;
   const n = Number(m[1]);
   const unit = m[2]!.toUpperCase();
   const tail = m[3] ?? '';
-  const meters = unit === 'M' ? n : n / 100;
+  const meters = unit === 'M' ? n : unit === 'CM' ? n / 100 : n / 1000;
   c.cfg.dims = { ...c.cfg.dims, cable_m: meters };
   add(c, {
     text: m[0].replace(tail, ''),
@@ -739,7 +768,8 @@ function readTsGeneric(c: Ctx, rest: string, prefix: string, letter = ''): void 
   }
 
   // วงเล็บของ TS_-02 = ขนาดเขี้ยวล็อค (ตัวเลข mm) ไม่มีผลกับราคา — เตือนอย่างเดียว (เจ้าของเคาะ 2026-10-05) · ตรวจคู่กับแกนหลังอ่านแกน
-  const conn = connectorSpecOf(c.model);
+  // หน้าแคตตาล็อกตามรุ่นย่อยที่อ่านได้ข้างบน (`-SI` = หน้า TS_-02-SI ที่มีเขี้ยวล็อค 11.5)
+  const conn = connectorSpecOf(c.model, c.cfg.axes?.submodel);
   let connText: string | undefined;
 
   const paren = rest.match(/^\(([^)]*)\)/);
@@ -747,12 +777,17 @@ function readTsGeneric(c: Ctx, rest: string, prefix: string, letter = ''): void 
     connText = paren[1]!;
     const opts = conn.slots[conn.connector!.slot]?.options ?? [];
     const hit = opts.find((x) => x.code !== '' && Number(x.code) === Number(connText));
+    // ขนาดที่ทำได้เฉพาะรุ่นย่อยอื่น (11.5 กับ TS_-02 ธรรมดา) — คำเตือน "ทำได้เฉพาะ …" ข้างล่างบอกครบแล้ว ไม่เตือนซ้ำว่านอกแคตตาล็อก
+    const elsewhere = !hit ? Object.keys(conn.connector!.only ?? {}).find((k) => Number(k) === Number(connText)) : undefined;
     add(c, {
       text: paren[0],
-      reads: hit ? `ขนาดเขี้ยวล็อค ${hit.code} mm — ไม่มีผลกับราคา` : `ขนาดเขี้ยวล็อค ${connText} mm — นอกแคตตาล็อก ${conn.head} (ไม่มีผลกับราคา)`,
+      reads: hit ? `ขนาดเขี้ยวล็อค ${hit.code} mm — ไม่มีผลกับราคา`
+        : elsewhere ? `ขนาดเขี้ยวล็อค ${elsewhere} mm — มีเฉพาะ ${conn.connector!.only![elsewhere]!.submodel} (ไม่มีผลกับราคา)`
+        : `ขนาดเขี้ยวล็อค ${connText} mm — นอกแคตตาล็อก ${conn.head} (ไม่มีผลกับราคา)`,
       kind: 'noPrice',
     });
     if (hit) connText = hit.code;
+    else if (elsewhere) connText = elsewhere;
     else c.warnings.push(`ขนาดเขี้ยวล็อค ${connText} mm ไม่อยู่ในแคตตาล็อก ${conn.head} (${opts.map((x) => x.code).join(' · ')} mm) — ราคาคิดตามขนาดแกน`);
     rest = rest.slice(paren[0].length);
   } else if (paren && ask?.askPrice?.thread && canonicalAskValue('thread', paren[1] ?? '') !== undefined) {
@@ -824,9 +859,16 @@ function readTsGeneric(c: Ctx, rest: string, prefix: string, letter = ''): void 
       const coatBase = coat ? matchValue(dValues, coat[1] ?? '') : undefined;
       // ตัวอักษรวัสดุที่ Excel ยังไม่มีราคาตั้ง (TN · AL) — ตั้งในตารางรหัสย่อยเป็นแกน D ที่ยังไม่มีค่า ⇒ "ยังไม่มีราคา"
       const mat = !dHit && !coatBase ? dText.match(/^([0-9.]+)([A-Z]+)$/i) : null;
+      // ขนาดแกนเป็นแถวของตารางราคาตั้งและรุ่นตั้งให้ "ขนาดนอกแคตตาล็อก = ขอราคา" (TS_-02 · เจ้าของสั่ง 2026-10-05)
+      const askRow = ask && dIsRow(c.model, ask) ? ask : undefined;
+      /** หน้าแคตตาล็อกที่รหัสนี้ใช้ (TS_-02-SI สำหรับรหัส -SI) — ข้อความพูดถึงหน้านั้น */
+      const page = askRow ? tsSpec(tsFamilyOfModel(c.model.code, c.cfg.axes?.submodel) ?? '') ?? askRow : undefined;
       if (dHit) {
         c.cfg.axes = { ...c.cfg.axes, D: dHit };
-        add(c, { text: dText, reads: `แกน D = ${dHit} mm`, kind: 'axis' });
+        // แถวที่แอดมินเพิ่มเองจากหน้าชีต (นอกแคตตาล็อก) — engine เตือนว่าใช้ราคาที่แอดมินใส่ · ช่องยังว่าง = ขอราคา
+        const own = !!askRow && !catalogDRow(askRow, dHit);
+        if (own) c.cfg.askPrice = { ...c.cfg.askPrice, D: dHit };
+        add(c, { text: dText, reads: own ? `แกน D = ${dHit} mm — นอกแคตตาล็อก ${page!.head} ใช้ราคาที่เพิ่มไว้ในสมุดราคา` : `แกน D = ${dHit} mm`, kind: 'axis' });
         if (/for type k/i.test(dHit) && letter === 'J') c.warnings.push(`แคตตาล็อก: แกน ${dText} mm ทำได้เฉพาะ Type K`);
         if (/for type j/i.test(dHit) && letter === 'K') c.warnings.push(`แคตตาล็อก: แกน ${dText} mm ทำได้เฉพาะ Type J`);
       } else if (coatBase) {
@@ -844,6 +886,19 @@ function readTsGeneric(c: Ctx, rest: string, prefix: string, letter = ''): void 
         c.cfg.axes = { ...c.cfg.axes, D: dText };
         c.cfg.catalogOnly = { ...c.cfg.catalogOnly, D: dText };
         add(c, { text: dText, reads: `แกน D = ${dText} mm — แคตตาล็อกมีขนาดนี้ แต่ตารางราคา ${c.model.sheet ?? c.model.code} ยังไม่มีแถว`, kind: 'axis' });
+      } else if (askRow && canonicalAskValue('d', dText, matCodes(askRow)) !== undefined) {
+        // ขนาดที่ตารางไม่มีแถว — ไม่ปัดขึ้นแบบ TS_-01 เพราะราคาตั้งต่างกันทุกขนาด · เดิมขึ้น "รหัสไม่ได้บอกขนาดแกน" ทั้งที่รหัสบอกแล้ว
+        const v = canonicalAskValue('d', dText, matCodes(askRow))!;
+        c.cfg.axes = { ...c.cfg.axes, D: v };
+        if (catalogDRow(askRow, v)) {
+          // ขนาด + วัสดุที่แคตตาล็อกมีแต่ชีตไม่มีแถว (`6.35` ไม่มี A) = ยังไม่มีราคา แบบเดียวกับขนาดของ TS_-18 ที่ชีตไม่มี
+          c.cfg.catalogOnly = { ...c.cfg.catalogOnly, D: v };
+          add(c, { text: dText, reads: `แกน D = ${v} mm — แคตตาล็อกมีขนาดนี้ แต่ตารางราคา ${c.model.sheet ?? c.model.code} ยังไม่มีแถว`, kind: 'axis' });
+        } else {
+          c.cfg.askPrice = { ...c.cfg.askPrice, D: v };
+          const listed = (page!.slots.d?.options ?? []).map((o) => o.code).filter(Boolean).join(' · ');
+          add(c, { text: dText, reads: `แกน ${v} mm — ไม่อยู่ในแคตตาล็อก ${page!.head} (มี ${listed} mm) ⇒ ต้องขอราคาจากฝ่ายผลิต`, kind: 'axis' });
+        }
       } else {
         add(c, { text: dText, reads: `ไม่มีแกน ${dText} ในตารางราคา ${c.model.sheet ?? c.model.code}`, kind: 'unknown' });
       }
@@ -909,7 +964,9 @@ function readTsGeneric(c: Ctx, rest: string, prefix: string, letter = ''): void 
     const d = c.cfg.axes?.D;
     const fits = spec.fits[connText];
     const dBare = d?.replace(/[A-Z]+$/i, '');
-    if (fits && dBare && !fits.includes(dBare)) {
+    // ขนาดแกนนอกแคตตาล็อก/ที่ตารางไม่มีแถว — ขึ้น "ต้องขอราคา" อยู่แล้ว ไม่ต้องเตือนซ้ำว่าไม่คู่กับเขี้ยวล็อค
+    const offD = c.cfg.askPrice?.D !== undefined || c.cfg.catalogOnly?.D !== undefined;
+    if (fits && dBare && !offD && !fits.includes(dBare)) {
       c.warnings.push(`แคตตาล็อก ${conn.head}: เขี้ยวล็อค ${connText} mm ใช้กับแกน ${fits.join(' · ')} mm — รหัสนี้แกน ${d} mm (ราคาคิดตามขนาดแกน)`);
     }
     const only = spec.only?.[connText];
@@ -1395,6 +1452,15 @@ function readModelSuffix(c: Ctx, suffix: string, quiet = false): string | undefi
   } else if (suffix !== '' && MODEL_SUFFIX[model.code]?.[suffix] && !quiet) {
     // ตัวอักษรท้ายเลขรุ่นที่แคตตาล็อกบอกความหมาย (TS_-11 Spring P = None Spring) — `catalogTs.ts`
     add(c, { text: suffix, reads: MODEL_SUFFIX[model.code]![suffix]!, kind: 'noPrice' });
+  } else if (suffix !== '' && OFF_CATALOG_SUFFIX[model.code]?.letters.includes(suffix) && !quiet) {
+    // ตัวอักษรที่แคตตาล็อกไม่มีแต่ขายจริง (`TSJ-02S` · เจ้าของเคาะ 2026-10-05) — คิดตามรุ่นฐาน + เตือน · ตั้งราคาทีหลังที่ตารางรหัสย่อย
+    // ชื่อ `02S` (เลขรุ่น + ตัวอักษร) ไม่ใช่ `S` — `S` ท้ายสายของรุ่นเดียวกันเป็นคนละเรื่อง (ดู `OFF_CATALOG_SUFFIX`)
+    const { num, head } = OFF_CATALOG_SUFFIX[model.code]!;
+    const key = `${num}${suffix}`;
+    if (!readFromTable(c, key, suffix)) {
+      add(c, { text: suffix, reads: `ตัว ${suffix} ต่อท้ายเลขรุ่น ${num} — นอกแคตตาล็อก ${head} ยังไม่ได้คิดเงินส่วนนี้ (ตั้งราคาได้ที่ตารางรหัสย่อย ชื่อ ${key})`, kind: 'unknown', subCode: key });
+      c.warnings.push(`ตัว ${suffix} ต่อท้ายเลขรุ่น ${num} ไม่อยู่ในแคตตาล็อก ${head} — ราคานี้คิดเท่ารุ่นที่ไม่มีตัว ${suffix} ยังไม่รวมส่วนของตัว ${suffix}`);
+    }
   } else if (suffix !== '' && !model.code.toUpperCase().endsWith(suffix) && !quiet) {
     add(c, {
       text: suffix,
@@ -1619,7 +1685,8 @@ export function parseProductCode(input: string, book: PriceBook, picks: CodePick
 
   if (prefix !== 'BH') {
     readTsAddons(c, picks);
-    const family = tsFamilyOfModel(model.code);
+    // รุ่นย่อยที่อ่านได้เลือกหน้าแคตตาล็อก (`TSK-02-SI…` → ตาราง TS_-02-SI ของรุ่น TSK-02 เดียวกัน)
+    const family = tsFamilyOfModel(model.code, c.cfg.axes?.submodel);
     const tsForm = family ? tsFormOf(c, input, family) : undefined;
     if (tsForm) {
       const on = (picks.addons ?? []).filter((a) => TS_ADDONS.some((x) => x.code === a) && hasOptionAdder(model, a));

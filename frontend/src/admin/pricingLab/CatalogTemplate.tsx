@@ -387,14 +387,15 @@ export const TsCatalogTemplate: React.FC<TsProps> = ({ spec, families, form, onC
     if (issue === 'missing') return 'ไม่ได้ระบุ';
     return label;
   };
-  const cm = form.clUnit === 'cm';
+  /** หน่วยความยาวสายตามที่รหัสเขียน (`+30cm` · `+400mm`) — ไม่มี = M ของแคตตาล็อก */
+  const clu = form.clUnit;
   const items: React.ReactNode[] = [<FamilySlot key="head" families={families} value={form.family} onFamily={onFamily} />];
   // ตัวคั่นวาดก่อนช่องถัดไปเสมอ แม้ช่องนั้นเป็น None — แผนผังแคตตาล็อกโชว์ทุกช่อง (รหัสจริงไม่เขียนท่อน None)
   for (const [i, it] of spec.layout.entries()) {
     if ('sep' in it) {
-      // หน่วยของความยาวสายตามที่รหัสเขียน (`+30cm`) · TS_-11 ที่เขียนสายติดกับ M (`+5MPU`)
+      // หน่วยของความยาวสายตามที่รหัสเขียน (`+30cm` · `+400mm`) · TS_-11 ที่เขียนสายติดกับ M (`+5MPU`)
       let t = it.sep === ' ' ? '␣' : it.sep;
-      if (t === 'M' || t === 'M-') t = `${cm ? 'cm' : 'M'}${t === 'M-' && !form.cableNoDash ? '-' : ''}`;
+      if (t === 'M' || t === 'M-') t = `${clu ?? 'M'}${t === 'M-' && !form.cableNoDash ? '-' : ''}`;
       items.push(<Sep key={`sep-${i}`} t={t} />);
       continue;
     }
@@ -411,7 +412,7 @@ export const TsCatalogTemplate: React.FC<TsProps> = ({ spec, families, form, onC
     const tone = toneOf(key);
     if (slot.kind === 'number') {
       const ch = Math.max(5, (slot.placeholder?.length ?? 0) + 3, value.length + 3);
-      const unit = key === 'cl' && cm ? 'cm' : slot.unit;
+      const unit = key === 'cl' && clu ? clu : slot.unit;
       items.push(
         <Slot key={key} cap={capOf(key, `${slot.label}${unit ? ` (${unit})` : ''}`)} hint={slot.hint} tone={tone}>
           <input

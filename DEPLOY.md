@@ -932,6 +932,9 @@ npx tsx scripts/pricebook/seedCatalogSubcodes.ts --apply --by admin
 TS-02 จริง 997: ได้ราคา 967 · ขอราคา 3 · คิดไม่ได้ 25 · ไม่มีรุ่น 2
 ⚠️ **ช่วงก่อน deploy** prod (`d5431e3`) อ่าน `-SI` ไม่เป็น ⇒ 300 รหัส SI ได้ราคาคอลัมน์ TS-02 (ต่ำไป 20–40) พร้อมป้าย "-SI ยังไม่ได้ตั้งค่า" ·
 TSP/TSPA ยังไม่มีราคา · deploy แล้วหายเอง (`docs/pricing-code-ts-catalog.md` หัวข้อ TS_-02)
+**ตามมาในวันเดียวกัน (โค้ดอย่างเดียว ไม่มีงานฐาน):** หน้า TS_-02-SI แยกตารางตามแคตตาล็อกของมันเอง · ขนาดแกนที่ตารางไม่มีแถว = ขอราคา +
+แถวสีส้มที่หน้าชีต · ตัว S/L หลังเลขรุ่น = นอกแคตตาล็อก + เตือน · สาย `+400mm` = 0.4 ม. — ขึ้นพร้อมกันได้ใน deploy เดียว ·
+ตรวจหลังขึ้น: `diag:pricing-catalog-ts` · `diag:pricing-catalog-ui` (ช่อง "รุ่น" กลุ่ม TS 13) · `diag:pricebook-ask-ui` ขั้น TS_-02 ไม่ข้าม
 
 **ถอยกลับ** (หลัง dump): `TRUNCATE pricing_model_history, pricing_models, pricing_book_revisions;` — หน้าจอกลับไปขึ้น
 "ยังไม่มีสมุดราคาในระบบ" เท่ากับก่อนนำเข้า · ⚠️ `db:restore` / `pg_restore` ของ dump เก่าก็พาราคาย้อนไปตามวันของ dump ด้วย

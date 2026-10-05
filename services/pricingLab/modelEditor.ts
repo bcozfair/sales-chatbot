@@ -863,6 +863,10 @@ function removeAskValues(before: PriceModel, next: PriceModel, raw: unknown): Pr
     for (const v of list as unknown[]) {
       if (typeof v !== 'string' || !(off[axis] ?? []).includes(v)) reject(`เอา${axisLabel(axis)} ${String(v)} ออกไม่ได้ — ไม่ใช่ค่านอกแคตตาล็อกที่เพิ่มไว้`);
       if (Object.keys(base.cells).some((k) => k.split(SEP)[i] === v)) reject(`${axisLabel(axis)} ${v as string}: ลบตัวเลขในช่องของค่านี้ให้หมดก่อน แล้วค่อยเอาออก`);
+      // อัตราของกฎที่แยกตามแกนนี้ (ความยาวแกนของแถวขนาดที่เพิ่มเอง · TS_-02) ก็เป็นตัวเลขที่แอดมินใส่ — กติกาเดียวกัน
+      if (next.adders.some((a) => a.byAxis === axis && a.rates && (v as string) in a.rates)) {
+        reject(`${axisLabel(axis)} ${v as string}: ลบอัตราในคอลัมน์บวกเพิ่มของแถวนี้ให้หมดก่อน แล้วค่อยเอาออก`);
+      }
       const left = (base.unpriced?.[axis] ?? []).filter((x) => x !== v);
       const { [axis]: _drop, ...rest } = base.unpriced ?? {};
       base = { ...base, unpriced: left.length ? { ...rest, [axis]: left } : rest };

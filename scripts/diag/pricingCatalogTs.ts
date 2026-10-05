@@ -13,6 +13,8 @@
  *      ขึ้นขอราคา · แอดมินเพิ่มช่อง (`applySheetEdit` ตัวเดียวกับ API · ในหน่วยความจำ) แล้วคิดได้ทันที · TS_-01-0 ขนาด Hold Size นอกแคตตาล็อกก็เหมือนกัน (เจ้าของสั่ง 2026-10-05)
  *   7. **ท่อนที่ยังไม่รู้จัก** (`-S###` · `-L` หลังเลขรุ่น · `+MP` / `.` ท้ายสาย) ไม่คิดเงิน ตั้งราคาทีหลังที่ตารางรหัสย่อย และไม่ทำให้
  *      ท่อนอื่นอ่านไม่ออก (เจ้าของสั่ง 2026-10-05)
+ *   8. **TS_-02 / TS_-02-SI** (เจ้าของตอบ 2026-10-05) — ราคาตั้งที่แกน 10 · เขี้ยวล็อคไม่มีผลกับราคา · หน้า TS_-02-SI แยกตาราง ·
+ *      แกนที่ตารางไม่มีแถว = ขอราคา + แอดมินเพิ่มแถวสีส้มได้ · ตัว S/L หลังเลขรุ่น = นอกแคตตาล็อก + เตือน · สาย `+400mm` = 0.4 เมตร
  *
  * เล่มที่ใช้: เล่มปัจจุบันในฐาน (SELECT อย่างเดียว) + แถวรหัสย่อยจาก `catalog-subcodes.json` ที่ฐานยังไม่มี + ค่ามาตรฐาน
  * เมื่อรหัสไม่ระบุจากแมป (`axisDefaults` — ตัวเดียวกับ `importer.ts --extras-only`) — **ประกอบในหน่วยความจำ ไม่เขียนฐาน**
@@ -25,7 +27,7 @@ import { catalogRulesFromMaps } from '../pricebook/catalogRules.js';
 import { loadCatalogSubcodes } from '../pricebook/seedCatalogSubcodes.js';
 import { listSubCodes } from '../../db/pricingLabRepo.js';
 import { withSubCodes } from '../../services/pricingLab/bookStore.js';
-import { modelOfCode, parseProductCode, type CodePicks } from '../../services/pricingLab/code.js';
+import { askValueProblem, modelOfCode, offCatalogValues, parseProductCode, type CodePicks } from '../../services/pricingLab/code.js';
 import { computePrice } from '../../services/pricingLab/engine.js';
 import { TS_CATALOG, buildTsCode, readTsForm, sameTsCode, slotOptions, tsFamilyOfModel, type TsForm } from '../../services/pricingLab/catalogTs.js';
 import { EditRejected, applySheetEdit } from '../../services/pricingLab/modelEditor.js';
@@ -71,10 +73,11 @@ async function main(): Promise<void> {
   const book = withSubCodes(withDefaults.book, mergeSeed(dbSubs, loadCatalogSubcodes()));
   console.log(`สมุดราคาที่ใช้: ${loaded.label} + รหัสย่อยจากแคตตาล็อก${withDefaults.filled.length ? ` + ค่ามาตรฐานจากแมป (${withDefaults.filled.join(', ')})` : ''} (ในหน่วยความจำ)`);
 
-  const price = (code: string, picks: CodePicks = {}) => {
-    const p = parseProductCode(code, book, picks);
-    return { p, o: p.cfg ? computePrice(p.cfg, book) : null };
+  const priceIn = (b: PriceBook, code: string, picks: CodePicks = {}) => {
+    const p = parseProductCode(code, b, picks);
+    return { p, o: p.cfg ? computePrice(p.cfg, b) : null };
   };
+  const price = (code: string, picks: CodePicks = {}) => priceIn(book, code, picks);
   const sig = (r: ReturnType<typeof price>) =>
     JSON.stringify([r.p.model, r.o?.status, r.o?.unitPrice, r.o?.breakdown.map((b) => [b.label, b.amount]), r.o?.violations.map((v) => v.message)]);
 
@@ -118,7 +121,8 @@ async function main(): Promise<void> {
     if (!r.p.tsForm) noForm.push(model);
     else {
       stat.form++;
-      const strict = !!readTsForm(model, fam);
+      // ตารางที่ตัวอ่านเลือก (รหัส `-SI` = TS_-02-SI ของรุ่น TSK-02 เดียวกัน) — ไม่ใช่ตารางหลักของรุ่น
+      const strict = !!readTsForm(model, r.p.tsForm.family);
       if (strict) stat.exact++;
       const back = buildTsCode(r.p.tsForm);
       if (!sameTsCode(back, model)) (strict ? bad : looseBad).push(`${model}  →  ${back}`);
@@ -435,6 +439,51 @@ async function main(): Promise<void> {
         && sameTsCode(buildTsCode(bare.p.tsForm), 'TSJ-02 5x50+2M'));
     check('เขี้ยวล็อคไม่คู่กับแกน (14.5 กับแกน 5) = ราคาเท่าเดิม + เตือน',
       price('TSK-02(14.5)5x10+1M').o?.unitPrice === price('TSK-02(12)5x10+1M').o?.unitPrice && price('TSK-02(14.5)5x10+1M').p.warnings.some((w) => /ใช้กับแกน/.test(w)));
+    // แคตตาล็อก TS_-02-SI แยกหน้า (เจ้าของส่งมา 2026-10-05) — รหัส -SI ได้ตารางของตัวเอง รุ่นในสมุดเดิม
+    check('TS_-02-SI: รหัส -SI ได้ช่องของหน้า TS_-02-SI (ไม่มีช่องรุ่นย่อย) · ประกอบกลับเป็นรหัสเดิม · ราคาคอลัมน์ TS-02-SI',
+      si115.p.tsForm?.family === 'TS_-02-SI' && !('sub' in (si115.p.tsForm?.values ?? {})) && sameTsCode(buildTsCode(si115.p.tsForm!), 'TSK-02-SI(11.5)4.8x10+1M')
+        && p10.p.tsForm?.family === 'TS_-02', `${si115.p.tsForm?.family} · ${p10.p.tsForm?.family}`);
+    // ขนาดแกนที่ตารางไม่มีแถว = ขอราคา (เจ้าของสั่ง 2026-10-05) — เดิม "รหัสไม่ได้บอกขนาดแกน" (บล็อก) ทั้งที่รหัสบอกแล้ว
+    const d32 = price('TSK-02(12.7)3.2x200+5M');
+    const d25a = price('TSK-02-SI(12)2.5Ax25+1.5M');
+    check('แกน 3.2 · 2.5A (นอกแคตตาล็อก) = ต้องขอราคาจากฝ่ายผลิต + ราคาเท่าที่คิดได้ · ช่องกรอกขึ้น ask · ไม่ใช่ "รหัสไม่ได้บอก"',
+      [d32, d25a].every((x) => x.o?.status === 'quoteOnRequest' && x.o.violations.some((v) => v.askPrice && /ขอราคา/.test(v.message))
+        && !x.o.violations.some((v) => v.missing) && x.p.tsForm?.issues?.d === 'ask' && x.p.cfg?.askPrice?.D !== undefined)
+        && d32.p.cfg?.askPrice?.D === '3.2' && d25a.p.cfg?.askPrice?.D === '2.5A', `${d32.o?.status} · ${d25a.o?.status}`);
+    // แอดมินเพิ่มแถว 3.2 ที่หน้าชีต (ช่องสีส้ม) แล้วกรอก — ตัวรับเดียวกับ PUT /sheet (ในหน่วยความจำ ไม่เขียนฐาน)
+    const sheet02 = (b: PriceBook, body: unknown) => applySheetEdit(b, k02.sheet!, { 'TSK-02': body }).models;
+    const bookE: PriceBook = { ...book, models: sheet02(book, { addValues: { D: ['3.2'] } }) };
+    const empty32 = priceIn(bookE, 'TSK-02(12.7)3.2x200+5M');
+    const bookF: PriceBook = { ...book, models: sheet02(bookE, { cells: { '3.2 | Type K/J | TS-02': 700 }, adderRates: { len_l1: [{ value: '3.2', rate: 20 }] } }) };
+    const set32 = priceIn(bookF, 'TSK-02(12.7)3.2x200+5M');
+    const si32 = priceIn(bookF, 'TSK-02-SI(12.7)3.2x200+5M');
+    check('แอดมินเพิ่มแถวแกน 3.2: ยังว่าง = ขอราคา · กรอกแล้ว = ราคาตั้ง 700 + ความยาว 38 ช่วง × 20 + สาย · เตือนว่าใช้ราคาที่แอดมินใส่ · ช่อง SI ที่ยังว่าง = ขอราคา',
+      empty32.o?.status === 'quoteOnRequest' && set32.o?.status === 'priced'
+        && set32.o.unitPrice === 700 + 38 * 20 + (line(set32.o, /สาย/) ?? NaN)
+        && set32.o.violations.some((v) => v.level === 'warn' && v.askPrice) && si32.o?.status === 'quoteOnRequest'
+        && checkPriceModel(bookF.models['TSK-02'], 'TSK-02').length === 0, `${empty32.o?.status} · ${set32.o?.unitPrice} · SI ${si32.o?.status}`);
+    const a02 = bookF.models['TSK-02']!;
+    check('ช่องสีส้มของหน้าสมุดราคา: แถว 3.2 ที่เพิ่ม = นอกแคตตาล็อก · แถว 4A/6.35A ของ Excel ไม่ใช่',
+      JSON.stringify(offCatalogValues(a02).D) === JSON.stringify(['3.2']) && offCatalogValues(k02).D === undefined, JSON.stringify(offCatalogValues(a02)));
+    const again02 = (body: unknown) => { try { return sheet02(bookF, body); } catch (e) { return e instanceof EditRejected ? null : undefined; } };
+    check('เอาแถว 3.2 ออก: ยังมีราคาตั้งหรืออัตราความยาวแกนอยู่ = ไม่ได้ · ล้างทั้งสองพร้อมกันแล้วเอาออกได้',
+      again02({ removeValues: { D: ['3.2'] } }) === null
+        && again02({ cells: { '3.2 | Type K/J | TS-02': null }, removeValues: { D: ['3.2'] } }) === null
+        && !!again02({ cells: { '3.2 | Type K/J | TS-02': null }, adderRates: { len_l1: [{ value: '3.2', rate: null }] }, removeValues: { D: ['3.2'] } }));
+    check('เพิ่มแถวจากจอ: 3.2 / 2.5A ได้ · 6 / 4.8A (แคตตาล็อก) / 2.5X (วัสดุนอกรายการ) ไม่ได้',
+      askValueProblem(k02, 'd', '3.2') === undefined && askValueProblem(k02, 'd', '2.5A') === undefined
+        && !!askValueProblem(k02, 'd', '6') && !!askValueProblem(k02, 'd', '4.8A') && !!askValueProblem(k02, 'd', '2.5X'));
+    // ตัว S / L หลังเลขรุ่น = นอกแคตตาล็อก คิดตามรุ่นฐาน + เตือน · ตั้งราคาทีหลังที่ตารางรหัสย่อยชื่อ 02S (เจ้าของเคาะ 2026-10-05)
+    const s02 = price('TSJ-02S(12)5x10+1.5M');
+    const plain02 = price('TSJ-02(12)5x10+1.5M');
+    check('TSJ-02S = ราคาเท่า TSJ-02 + เตือนบนจอ "ยังไม่รวมส่วนของตัว S" · ท่อน S ตั้งได้ที่ตารางรหัสย่อยชื่อ 02S',
+      s02.o?.status === 'priced' && s02.o.unitPrice === plain02.o?.unitPrice && s02.p.warnings.some((w) => /ยังไม่รวมส่วนของตัว S/.test(w))
+        && s02.p.parts.some((x) => x.kind === 'unknown' && x.subCode === '02S'), s02.p.warnings.join(' · '));
+    // สายเขียนเป็น mm — `+400mm` = 0.4 เมตร (เดิม 400 เมตร ได้ราคา 65,160 บาท · 2026-10-05)
+    const mm02 = price('TSP-02(12)5x11+400mm.-TSU');
+    check('สาย +400mm = 0.4 เมตร ไม่บวกค่าสาย · ช่องกรอกจำหน่วย mm · ประกอบกลับเป็นรหัสเดิม',
+      mm02.p.cfg?.dims?.cable_m === 0.4 && !line(mm02.o, /สาย/) && mm02.p.tsForm?.clUnit === 'mm' && sameTsCode(buildTsCode(mm02.p.tsForm!), 'TSP-02(12)5x11+400mm.-TSU'),
+      `${mm02.o?.unitPrice}`);
     const si8 = price('TSK-02-SI(15.5)8x10+1M');
     check('TS_-02-SI แกน 8 (ชีตเว้นว่าง) = ต้องขอราคา ไม่ใช่ไม่รับผลิต', si8.o?.status === 'quoteOnRequest' && !!si8.o.violations.some((v) => v.noRate));
     const none02 = price('TSP-02(12)5x10+3M');

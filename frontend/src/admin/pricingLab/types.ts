@@ -126,7 +126,7 @@ export interface BhForm {
 }
 
 // ── แคตตาล็อก TS (สำเนาชนิดข้อมูลของ services/pricingLab/catalogTs.ts) ──────────────────────────
-export type TsFamily = 'TS_-01' | 'TS_-01-0' | 'TS_-02' | 'TS_-04' | 'TS_-06' | 'TS_-08' | 'TS_-10' | 'TS_-11' | 'TS_-12' | 'TS_-12R' | 'TS_-14' | 'TS_-18';
+export type TsFamily = 'TS_-01' | 'TS_-01-0' | 'TS_-02' | 'TS_-02-SI' | 'TS_-04' | 'TS_-06' | 'TS_-08' | 'TS_-10' | 'TS_-11' | 'TS_-12' | 'TS_-12R' | 'TS_-14' | 'TS_-18';
 export interface TsSlot {
   label: string;
   kind: 'choice' | 'number';
@@ -144,6 +144,8 @@ export interface TsFamilySpec {
   head: string;
   name: string;
   model: string;
+  /** ตารางที่ใช้รุ่นร่วมกับตารางอื่น (TS_-02-SI = รุ่นย่อย TS-02-SI ของ TSK-02) */
+  submodel?: string;
   layout: TsLayoutItem[];
   slots: Record<string, TsSlot>;
   defaults: Record<string, string>;
@@ -159,8 +161,8 @@ export interface TsForm {
   // ── รหัสนอกรูปแบบ (`readTsFormLoose` ของเซิร์ฟเวอร์ · 2026-10-01) — ค่าตามที่รหัสเดิมเขียน ส่งกลับไปตอนแก้ช่อง ──
   /** ช่อง → ข้อความตามที่รหัสเขียน (ค่านอกแคตตาล็อก · ค่ามาตรฐานที่เขียนออกมา) — ลบทิ้งเมื่อคนเลือกค่าใหม่ในช่องนั้น */
   written?: Record<string, string>;
-  /** ความยาวสายเขียนเป็นเซนติเมตร */
-  clUnit?: 'cm';
+  /** ความยาวสายเขียนเป็นเซนติเมตร / มิลลิเมตร (`+400mm`) */
+  clUnit?: 'cm' | 'mm';
   cableNoDash?: boolean;
   /** ท่อนที่อ่านไม่ออกหลังเลขรุ่น (`-L`) */
   headJunk?: string;
