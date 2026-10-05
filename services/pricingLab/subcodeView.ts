@@ -167,7 +167,7 @@ export async function unreadBySheet(state: BookState, book: PriceBook): Promise<
       return value;
     })
     .catch((e: unknown) => {
-      console.warn('[pricebook] นับรหัสที่อ่านไม่ออกไม่สำเร็จ:', e instanceof Error ? e.message : e);
+      console.warn('[pricebook] นับท่อนที่ยังไม่ได้กำหนดไม่สำเร็จ:', e instanceof Error ? e.message : e);
       return null;
     })
     .finally(() => {

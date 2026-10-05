@@ -377,7 +377,7 @@ function importSheet(
     const prices: Record<string, number> = {};
     for (const [id, cell] of Object.entries(adderPricesFrom ?? {})) {
       const m = cell.match(/^([A-Z]+)(\d+)$/);
-      if (!m) throw new Error(`${map.code} ตัวเลือก ${rest.suffix}: อ่านเซลล์ "${cell}" ไม่ออก`);
+      if (!m) throw new Error(`${map.code} ตัวเลือก ${rest.suffix}: เซลล์ "${cell}" ไม่ใช่รูปแบบที่ใช้ได้`);
       countNoise(Number(m[2]), m[1]!);
       const v = cellMoney(ws, Number(m[2]), m[1]!);
       // ช่องว่างในชีต = ไม่รับทำ ไม่ใช่ราคา 0 ⇒ ปล่อยให้ไม่มีค่า = คิดเท่ารุ่นหลัก

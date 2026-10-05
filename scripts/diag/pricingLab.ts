@@ -15,6 +15,8 @@
  *
  * ถอนโมดูลออก = ลบไฟล์นี้ + 1 บรรทัดใน package.json ด้วย
  */
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { pool } from '../../config/db.js';
 import { withSubCodes } from '../../services/pricingLab/bookStore.js';
 import { NoBook, loadBookFrom } from '../pricebook/bookSource.js';
@@ -179,6 +181,26 @@ async function main() {
   const leftover = after.filter((r) => r.reads.includes('diag:pricing'));
   ok('หลัง ROLLBACK ไม่มีแถวทดสอบค้าง และจำนวนแถวเท่าเดิม', leftover.length === 0 && after.length === rowsBefore,
     `ค้าง ${leftover.length} · ${rowsBefore} → ${after.length} แถว`);
+
+  // เจ้าของสั่ง 2026-10-05: เลิกใช้คำว่า "อ่านไม่ออก" ในทุกข้อความที่คนเห็น (ดูไม่เป็นภาษาคน) — ใช้ "ยังไม่ได้กำหนด" /
+  // "ไม่รู้จัก" / "ไม่รู้ว่า…" ตามบริบท · ตรวจซอร์สหลังตัดคอมเมนต์ทิ้ง (คอมเมนต์ใช้คำนี้ได้ — คนเห็นแค่คนแก้โค้ด)
+  console.log('\n── ข้อความที่คนเห็นต้องไม่มีคำว่า "อ่านไม่ออก" ──');
+  {
+    const roots = ['frontend/src', 'services', 'routes', 'utils', 'handlers', 'liff_pages', 'scripts/pricebook', 'index.ts', 'pdfGenerator.ts'];
+    const files: string[] = [];
+    const walk = (p: string) => {
+      if (!existsSync(p)) return;
+      if (statSync(p).isDirectory()) { for (const f of readdirSync(p)) walk(join(p, f)); return; }
+      if (/\.(ts|tsx|html|js)$/.test(p)) files.push(p);
+    };
+    roots.forEach(walk);
+    const hits: string[] = [];
+    for (const f of files) {
+      const src = readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/<!--[\s\S]*?-->/g, '').replace(/(^|\s)\/\/.*$/gm, '$1');
+      for (const m of src.matchAll(/อ่าน[^\n'"`]{0,40}ไม่ออก/g)) hits.push(`${f}: ${m[0]}`);
+    }
+    ok(`ไม่มี "อ่าน…ไม่ออก" ในข้อความของ ${files.length} ไฟล์`, files.length > 100 && hits.length === 0, hits.slice(0, 5).join(' · '));
+  }
 
   console.log(`\n${BOLD}สรุป:${RESET} ${GREEN}ผ่าน ${pass}${RESET}${fail ? ` · ${RED}ล้ม ${fail}${RESET}` : ''}\n`);
   if (fail) process.exitCode = 1;

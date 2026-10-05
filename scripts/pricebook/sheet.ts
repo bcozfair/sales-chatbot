@@ -277,7 +277,7 @@ export function parsePredicate(raw: string): ParseResult {
   return {
     ok: false,
     reason:
-      `อ่านเงื่อนไข "${s}" ไม่ออก — ใช้ได้แค่: ทุกกรณี · ติ๊ก[ชื่อตัวเลือก] · ` +
+      `ไม่รู้จักเงื่อนไข "${s}" — ใช้ได้แค่: ทุกกรณี · ติ๊ก[ชื่อตัวเลือก] · ` +
       `แกน[ชื่อแกน]=ค่า1|ค่า2 · แกน[ชื่อแกน]≠ค่า · ขนาด[ชื่อขนาด]>ตัวเลข · และ( ) · หรือ( ) · ไม่( )`
   };
 }
@@ -931,7 +931,7 @@ function readLayout(grid: CellValue[][] | undefined, models: Record<string, Pric
     } else if (part === LAYOUT_PART.highlight && key) {
       L.highlightCols = [...(L.highlightCols ?? []), key];
     } else {
-      R.warn(name, `แถวนี้อ่านไม่ออก (ส่วน "${part}") — ข้ามไป · ใช้ได้แค่ ${Object.values(LAYOUT_PART).join(' · ')}`, line);
+      R.warn(name, `ไม่รู้จักแถวนี้ (ส่วน "${part}") — ข้ามไป · ใช้ได้แค่ ${Object.values(LAYOUT_PART).join(' · ')}`, line);
     }
   }
 }
@@ -1321,7 +1321,7 @@ function readBase(model: PriceModel, name: string, grid: CellValue[][], R: Reade
   const rowAxis = parts[0] ?? '';
   const colAxes = parts.slice(1).filter((p) => p !== '');
   if (rowAxis === '') {
-    R.err(name, 'อ่านชื่อแกนจากช่องซ้ายบนไม่ออก', headAt + 1);
+    R.err(name, 'หาชื่อแกนในช่องซ้ายบนไม่เจอ', headAt + 1);
     return;
   }
 

@@ -758,7 +758,7 @@ function readTsGeneric(c: Ctx, rest: string, prefix: string, letter = ''): void 
       // บอกมาแล้วแต่อ่านไม่ออก ≠ ไม่ได้บอก — ต้องจำไว้ ไม่งั้น engine เติมเกลียวมาตรฐานของรุ่น (1/4” · M5)
       // แล้วคิดราคาของเกลียวคนละขนาดโดยบรรทัดราคาเขียนว่า "รหัสไม่ได้ระบุ" (เจอ 81 รหัสจริง · 2026-09-25)
       c.cfg.unread = { ...c.cfg.unread, thread: `(${raw})` };
-      add(c, { text: `(${raw})`, reads: 'อ่านไม่ออกว่าเป็นเกลียวขนาดไหน', kind: 'unknown', subCode: raw });
+      add(c, { text: `(${raw})`, reads: 'ยังไม่ได้กำหนดว่าเป็นเกลียวขนาดไหน', kind: 'unknown', subCode: raw });
     }
     rest = rest.slice(paren[0].length);
   } else if (hasThread && !c.model.axisDefaults?.thread) {
@@ -1509,7 +1509,7 @@ export function parseProductCode(input: string, book: PriceBook, picks: CodePick
 
   const head = readHead(normalized);
   if (!head) {
-    out.problems.push('อ่านไม่ออกว่ารหัสนี้เป็นรุ่นอะไร — รหัสต้องขึ้นต้นด้วยตระกูลและเลขรุ่น เช่น TSK-04 หรือ BH-01');
+    out.problems.push('ไม่รู้ว่ารหัสนี้เป็นรุ่นอะไร — รหัสต้องขึ้นต้นด้วยตระกูลและเลขรุ่น เช่น TSK-04 หรือ BH-01');
     return out;
   }
 

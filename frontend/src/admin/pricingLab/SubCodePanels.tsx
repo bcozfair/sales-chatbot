@@ -257,12 +257,12 @@ export const SheetSubCodes: React.FC<Api & {
 
       <Section
         testId="sheet-unread"
-        title={<>ยังอ่านไม่ออกในชีตนี้{unread && <Count n={unread.unread} />}</>}
+        title={<>ท่อนที่ยังไม่ได้กำหนดในชีตนี้{unread && <Count n={unread.unread} />}</>}
         hint={unread === undefined
           ? 'กำลังนับจากรหัสสินค้าจริง…'
           : unread === null
             ? 'นับไม่สำเร็จ — ลองเปิดหน้านี้ใหม่'
-            : <>นับสดจากรหัสสินค้าจริง {unread.codes.toLocaleString('en-US')} รหัสของรุ่นในชีตนี้ — {unread.unread.toLocaleString('en-US')} รหัสยังมีท่อนที่ระบบอ่านไม่ออก ·
+            : <>นับสดจากรหัสสินค้าจริง {unread.codes.toLocaleString('en-US')} รหัสของรุ่นในชีตนี้ — {unread.unread.toLocaleString('en-US')} รหัสยังมีท่อนที่ยังไม่ได้กำหนด ·
                 กดตัวอักษรเพื่อตั้งความหมาย</>}
       >
         {unread === undefined && (
@@ -286,7 +286,7 @@ export const SheetSubCodes: React.FC<Api & {
         )}
         {others.length > 0 && (
           <div className="px-4 py-2.5 border-t border-slate-100 text-[11.5px] text-slate-500 leading-relaxed">
-            ท่อนอื่นที่อ่านไม่ออก — ส่วนใหญ่เป็นขนาด/ความยาวที่ตารางยังไม่มี (แก้ที่ตารางหรือแม่แบบ Excel ไม่ใช่รหัสย่อย):{' '}
+            ท่อนอื่นที่ยังไม่ได้กำหนด — ส่วนใหญ่เป็นขนาด/ความยาวที่ตารางยังไม่มี (แก้ที่ตารางหรือแม่แบบ Excel ไม่ใช่รหัสย่อย):{' '}
             {others.map((t) => (
               <span key={t.text} className={`${chip} mr-1 mb-0.5`} title={`${t.reads} · เช่น ${t.example}`}>{t.text} ×{t.count}</span>
             ))}
@@ -366,7 +366,7 @@ export const SubCodeHome: React.FC<Api & {
         </div>
         {q.trim() && hits.length === 0 && (
           <p className="px-4 pb-3 text-xs text-slate-500">
-            ยังไม่มีรุ่นไหนตั้ง “{q.trim().toUpperCase()}” ไว้ — ตั้งได้จากหน้าชีตของรุ่นนั้น (ส่วน “ยังอ่านไม่ออกในชีตนี้”)
+            ยังไม่มีรุ่นไหนตั้ง “{q.trim().toUpperCase()}” ไว้ — ตั้งได้จากหน้าชีตของรุ่นนั้น (ส่วน “ท่อนที่ยังไม่ได้กำหนดในชีตนี้”)
           </p>
         )}
         {hits.map((list) => {
@@ -428,7 +428,7 @@ export const SubCodeHome: React.FC<Api & {
 
       <Section
         testId="subcode-unread"
-        title={<>ยังอ่านไม่ออก{unread && <><Count n={unread.unread} /><span className="text-xs font-normal text-slate-400">จาก {unread.codes.toLocaleString('en-US')} รหัส</span></>}</>}
+        title={<>ท่อนที่ยังไม่ได้กำหนด{unread && <><Count n={unread.unread} /><span className="text-xs font-normal text-slate-400">จาก {unread.codes.toLocaleString('en-US')} รหัส</span></>}</>}
         hint="นับสดจากรหัสสินค้าจริงด้วยตัวอ่านรหัสปัจจุบัน แยกตามชีต — กดเพื่อไปตั้งค่าในชีตนั้น"
       >
         {unread === undefined && (

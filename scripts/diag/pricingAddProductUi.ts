@@ -77,7 +77,7 @@ function quoteFor(code: string) {
       outcome: outcome('notManufacturable', 0, [], [{ id: 'w', level: 'block', message: 'ความกว้างต่ำสุดของ BH-01 คือ 25 mm' }]) };
     case C.dupOdoo: return { ...base, parsed: parsed(code), outcome: outcome('priced', 1050, [line('ราคาตั้ง BH-01', 1050)]) };
     case C.dupLocal: return { ...base, parsed: parsed(code), outcome: outcome('priced', 1420, [line('ราคาตั้ง CH-02', 1420)]) };
-    default: return { ...base, parsed: parsed(code, { problems: ['อ่านไม่ออกว่ารหัสนี้เป็นรุ่นอะไร'] }), outcome: null };
+    default: return { ...base, parsed: parsed(code, { problems: ['ไม่รู้ว่ารหัสนี้เป็นรุ่นอะไร'] }), outcome: null };
   }
 }
 

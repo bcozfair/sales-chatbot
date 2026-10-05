@@ -333,7 +333,7 @@ export const BookImportModal: React.FC<Props> = ({ authHeaders, onClose }) => {
           <div className="flex gap-2 items-start rounded-xl px-3 py-2.5 text-xs leading-relaxed bg-red-50 text-red-700 border border-red-200">
             <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
             <span>
-              <b>ไฟล์นี้บันทึกไม่ได้</b> — {stops.length} จุดข้างล่างระบบอ่านไม่ออก
+              <b>ไฟล์นี้บันทึกไม่ได้</b> — {stops.length} จุดข้างล่างระบบไม่รู้ว่าหมายถึงอะไร
               ถ้าปล่อยผ่าน ราคาของช่องนั้นจะหายไปเงียบ ๆ โดยไม่มีอะไรฟ้อง
             </span>
           </div>

@@ -48,7 +48,7 @@ if (codeArg) {
   console.log('');
   for (const part of parsed.parts) {
     const tag =
-      part.kind === 'unknown' ? 'อ่านไม่ออก' : part.kind === 'noPrice' ? 'ไม่มีผลกับราคา' : part.guess ? 'ตีความเอง' : 'อ่านได้';
+      part.kind === 'unknown' ? 'ยังไม่ได้กำหนด' : part.kind === 'noPrice' ? 'ไม่มีผลกับราคา' : part.guess ? 'ตีความเอง' : 'อ่านได้';
     console.log(`  ${part.text.padEnd(14)} ${`[${tag}]`.padEnd(16)} ${part.reads}`);
   }
   for (const w of parsed.warnings) console.log(`  ⚠ ${w}`);

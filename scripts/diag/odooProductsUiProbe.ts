@@ -192,7 +192,7 @@ async function route(req: HTTPRequest) {
   if (path === `${P}/parents`) return json(req, { items: [P_PICKED] });
   if (path === `${P}/price`) {
     const code = JSON.parse(req.postData() ?? '{}').code;
-    return json(req, code === PRICED.code ? PRICED : { code, parsed: { problems: ['อ่านไม่ออกว่ารหัสนี้เป็นรุ่นอะไร'] }, outcome: null, revision: 17 });
+    return json(req, code === PRICED.code ? PRICED : { code, parsed: { problems: ['ไม่รู้ว่ารหัสนี้เป็นรุ่นอะไร'] }, outcome: null, revision: 17 });
   }
   if (path === P && req.method() === 'POST') {
     const b = JSON.parse(req.postData() ?? '{}');

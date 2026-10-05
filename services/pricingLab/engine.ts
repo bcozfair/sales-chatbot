@@ -243,7 +243,7 @@ function computeBase(
       const unreadable = unknown.filter((a) => unread[a] !== undefined);
       if (unreadable.length) {
         const unsaid = unknown.filter((a) => unread[a] === undefined);
-        const said = unreadable.map((a) => `อ่าน "${unread[a]}" ในรหัสไม่ออกว่าเป็น${axisLabel(a)}อะไร`);
+        const said = unreadable.map((a) => `รหัสเขียนว่า "${unread[a]}" แต่ยังไม่ได้กำหนดว่าเป็น${axisLabel(a)}อะไร`);
         const notSaid = unsaid.length ? [`รหัสไม่ได้บอก${unsaid.map(axisLabel).join(' และ ')}`] : [];
         return {
           ok: false,
@@ -441,7 +441,7 @@ function computeAdder(
       // รหัสบอกมาแต่อ่านไม่ออก ⇒ ข้ามกฎนี้แล้วคิดส่วนที่เหลือต่อ พร้อมเตือนว่ายังไม่รวม (เจ้าของสั่ง 2026-09-25:
       // "รหัสที่อ่านไม่ออกให้ขึ้นเตือนไว้ แต่คำนวณเฉพาะส่วนที่คำนวณได้ไปก่อน") · ห้ามเติมค่าตั้งต้นแทน — นั่นคือการเดา
       if (!axisValue && unread[a.byAxis] !== undefined) {
-        return { amount: 0, partial: `${a.label} — ยังไม่รวม: อ่าน "${unread[a.byAxis]}" ในรหัสไม่ออกว่าเป็น${axisLabel(a.byAxis)}อะไร`, steps };
+        return { amount: 0, partial: `${a.label} — ยังไม่รวม: รหัสเขียนว่า "${unread[a.byAxis]}" แต่ยังไม่ได้กำหนดว่าเป็น${axisLabel(a.byAxis)}อะไร`, steps };
       }
       if (!axisValue) return { amount: 0, missing: true, blocked: `${a.label}: รหัสไม่ได้บอก${axisLabel(a.byAxis)}`, steps };
       return { amount: 0, noRate: true, blocked: `${a.label}: ยังไม่มีราคาสำหรับ ${axisLabel(a.byAxis)} ${axisValue}`, steps };
@@ -654,7 +654,7 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
       kind: 'axis',
       key: k,
       label: axisLabel(k),
-      value: waiting ? 'ยังไม่กำหนด' : axes[k] ?? (unreadText !== undefined ? `อ่าน "${unreadText}" ไม่ออก` : 'ไม่ได้ระบุ'),
+      value: waiting ? 'ยังไม่กำหนด' : axes[k] ?? (unreadText !== undefined ? `"${unreadText}" — ยังไม่ได้กำหนด` : 'ไม่ได้ระบุ'),
       from: waiting
         ? `รหัสย่อย ${waiting.subCode} — ยังไม่ได้กำหนดว่าเท่ากับค่าไหน`
         : setBy[k]
@@ -663,7 +663,7 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
             ? cfg.askPrice?.[k] !== undefined && cfg.askPrice[k] === axes[k] ? 'ระบุในรหัส — นอกแคตตาล็อก' : 'ระบุในรหัส'
             : defaultedBy[k]
               ? `${defaultedBy[k]} — รหัสไม่ได้ระบุ`
-              : unreadText !== undefined ? 'รหัสบอกมาแต่ระบบอ่านไม่ออก' : 'รหัสไม่ได้ระบุ',
+              : unreadText !== undefined ? 'รหัสเขียนมาแต่ยังไม่ได้กำหนดว่าหมายถึงอะไร' : 'รหัสไม่ได้ระบุ',
     });
   }
   for (const [k, v] of Object.entries(dims)) {

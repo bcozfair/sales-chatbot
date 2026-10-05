@@ -597,7 +597,7 @@ function readWhen(raw: unknown, depth = 0): Predicate | undefined {
     if (!inner) reject('เงื่อนไข: "ไม่ใช่" ต้องมีเงื่อนไขข้างใน');
     return { not: inner! };
   }
-  reject('เงื่อนไข: อ่านไม่ออกว่าเป็นแบบไหน');
+  reject('เงื่อนไข: ไม่รู้จักรูปแบบเงื่อนไขนี้');
   return undefined;
 }
 

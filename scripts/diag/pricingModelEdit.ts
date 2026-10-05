@@ -568,7 +568,7 @@ if (ts01 && ts01.base.kind === 'matrix') {
     const r = byCode(code);
     check(`${code} ⇒ ได้ ${base} (เฉพาะราคาตั้ง) + เตือนว่ายังไม่รวมค่าสาย · ไม่ได้สายตั้งต้น`,
       r.status === 'priced' && r.unitPrice === base
-        && r.violations.some((v) => v.partial && v.level === 'warn' && /ยังไม่รวม: อ่าน ".+" ในรหัสไม่ออก/.test(v.message))
+        && r.violations.some((v) => v.partial && v.level === 'warn' && /ยังไม่รวม: รหัสเขียนว่า ".+" แต่ยังไม่ได้กำหนด/.test(v.message))
         && !r.breakdown.some((l) => /รหัสไม่ได้ระบุ/.test(l.detail ?? '')),
       `${r.status} ${r.unitPrice} ${r.violations.map((v) => v.message).join('|')}`);
   }
@@ -958,7 +958,7 @@ console.log('\n── 12. เกลียวที่อ่านไม่ออ
   const ts04 = Object.keys(book.models).find((k) => k === 'TSJ-04' || k === 'TSK-04');
   if (ts04) {
     const both = run('TSJ-04(20G)7.8x5.56+1M');
-    check('TSJ-04(20G)… — ขาดสองแกน ⇒ ข้อความบอกครบทั้ง "อ่านเกลียวไม่ออก" และ "ไม่ได้บอกขนาดแกน"',
+    check('TSJ-04(20G)… — ขาดสองแกน ⇒ ข้อความบอกครบทั้ง "เกลียวยังไม่ได้กำหนด" และ "ไม่ได้บอกขนาดแกน"',
       both.r.violations.some((v) => v.message.includes('"(20G)"') && /ไม่ได้บอกขนาดแกน/.test(v.message)), why(both));
   }
   if (Object.keys(book.models).some((k) => /^TS.-11$/.test(k))) {

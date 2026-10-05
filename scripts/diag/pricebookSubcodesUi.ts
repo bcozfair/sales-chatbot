@@ -59,7 +59,7 @@ if (!state) throw new Error('ยังไม่มีสมุดราคาใ
 const dbRows = await listSubCodes();
 
 /* ── ก. ตัวนับ ─────────────────────────────────────────────────────────── */
-console.log('── ตัวนับ "ยังอ่านไม่ออก" ──────────────────────────────');
+console.log('── ตัวนับ "ท่อนที่ยังไม่ได้กำหนด" ──────────────────────────────');
 {
   const book = withSubCodes(state.book, dbRows);
   let last = performance.now();
@@ -171,7 +171,7 @@ console.log('\n── หน้าแรก ────────────
   for (const id of ['subcode-search', 'subcode-wide', 'subcode-unread']) ok(`มีการ์ด ${id}`, (await sectionText(id)) !== '');
   await page.waitForFunction(() => !/กำลังนับ/.test((document.querySelector('[data-testid="subcode-unread"]') as HTMLElement)?.innerText ?? ''), { timeout: 20000 }).catch(() => {});
   const chips = await page.$$eval('[data-testid="subcode-unread"] button', (b) => b.length);
-  ok('สรุปที่อ่านไม่ออกมีปุ่มต่อชีต ครบตาม API', chips === (unread?.sheets.filter((s) => s.unread > 0).length ?? -1), `${chips} ชีต`);
+  ok('สรุปท่อนที่ยังไม่ได้กำหนดมีปุ่มต่อชีต ครบตาม API', chips === (unread?.sheets.filter((s) => s.unread > 0).length ?? -1), `${chips} ชีต`);
   const wideRows = allRows.filter((r) => wide(r) || (r.models ?? []).length === 0);
   ok('การ์ดหลายรุ่นมีครบทุกแถวที่ขอบเขตกว้าง/ไม่ตรงรุ่น', (await shown('subcode-wide')).length === new Set(wideRows.map((r) => `${r.subCode}|${r.scope}`)).size, `${wideRows.length} แถว`);
 
@@ -218,7 +218,7 @@ for (const sheet of sheets) {
 
   const u = unread?.sheets.find((s) => s.sheet === sheet);
   const head = await sectionText('sheet-unread');
-  ok(`${sheet}: ตัวเลขในหัว "ยังอ่านไม่ออก" ตรงกับ API`, !!u && head.includes(u.unread.toLocaleString('en-US')), `${u?.unread ?? '—'}`);
+  ok(`${sheet}: ตัวเลขในหัว "ท่อนที่ยังไม่ได้กำหนด" ตรงกับ API`, !!u && head.includes(u.unread.toLocaleString('en-US')), `${u?.unread ?? '—'}`);
   const sizeChips = await page.$$eval('[data-testid="sheet-unread"] button b', (bs) => bs.map((b) => (b as HTMLElement).innerText).filter((t) => /x\d/i.test(t)));
   ok(`${sheet}: ชิปตัวอักษรไม่มีหน้าตาขนาด`, sizeChips.length === 0, sizeChips.join(' '));
 

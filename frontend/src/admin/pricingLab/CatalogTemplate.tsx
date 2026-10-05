@@ -382,8 +382,8 @@ export const TsCatalogTemplate: React.FC<TsProps> = ({ spec, families, form, onC
     const issue = form.issues?.[key];
     if (issue === 'ask') return status === 'quoteOnRequest' ? 'ขอราคาฝ่ายผลิต' : 'นอกแคตตาล็อก';
     if (issue === 'off') return 'ไม่อยู่ในแคตตาล็อก';
-    // เจ้าของสั่ง 2026-10-05: ใช้คำว่า "นอกแคตตาล็อก" แทน "อ่านไม่ออก" บนช่องกรอก
-    if (issue === 'unread') return 'นอกแคตตาล็อก';
+    // เจ้าของสั่ง 2026-10-05: เลิกใช้คำว่า "อ่านไม่ออก" ทั้งระบบ — ใช้ "ยังไม่ได้กำหนด" (รอแอดมินตั้งค่า/ราคาทีหลัง)
+    if (issue === 'unread') return 'ยังไม่ได้กำหนด';
     if (issue === 'missing') return 'ไม่ได้ระบุ';
     return label;
   };
@@ -454,11 +454,11 @@ export const TsCatalogTemplate: React.FC<TsProps> = ({ spec, families, form, onC
       </Slot>,
     );
   }
-  // ท่อนที่ไม่รู้จัก (หลังเลขรุ่น + ท้ายรหัส รวม `-S###` ของงานสั่งทำ) ต่อท้ายแถวเป็นชิปเหลือง "นอกแคตตาล็อก" · กด ✕ = เอาออกจากรหัส
+  // ท่อนที่ไม่รู้จัก (หลังเลขรุ่น + ท้ายรหัส รวม `-S###` ของงานสั่งทำ) ต่อท้ายแถวเป็นชิปเหลือง "ยังไม่ได้กำหนด" · กด ✕ = เอาออกจากรหัส
   // (mockup ตัวอย่างที่ 5) — เจ้าของสั่ง 2026-10-05: `-S###` / `-L` / `+MP` = ท่อนไม่รู้จัก ไม่คิดเงิน ตั้งราคาทีหลังที่ตารางรหัสย่อย
   // (เดิม `-S###` เป็นชิปฟ้า "นอกแคตตาล็อก" ซึ่งอ่านเหมือนระบบรู้จักแล้ว)
   const chip = (k: string, text: string, remove: () => void) => (
-    <Slot key={k} cap="นอกแคตตาล็อก" tone="warn">
+    <Slot key={k} cap="ยังไม่ได้กำหนด" tone="warn">
       <span className={`h-9 inline-flex items-center gap-1 pl-2.5 pr-1 rounded-lg font-mono text-[14px] font-bold ${TONE_BOX.warn}`}>
         {text}
         <button type="button" aria-label={`เอา ${text} ออก`} title="เอาออกจากรหัส" className="p-0.5 rounded hover:opacity-70" onClick={remove}>
