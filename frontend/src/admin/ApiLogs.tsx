@@ -4,6 +4,8 @@ import { FilterDateRange } from './FilterBar';
 import { PageHeader } from './PageHeader';
 import { Button } from './Button';
 import { RequestTimeline } from './logs/RequestTimeline';
+import { AdminOnlyBadge, ChatChip, ChatExchangeCard } from './logs/ChatExchange';
+import type { ChatExchange } from './logs/chatFormat';
 import { useHashState } from './logs/useHashState';
 import { TAB_SLUG } from './navHash';
 import {
@@ -20,7 +22,7 @@ import type { SortAccessors } from './logs/useTableSort';
 import { AreaChart, ChartLegend, Donut } from './logs/charts';
 import {
   Activity, AlertTriangle, Check, ChevronDown, ChevronUp, Copy, Info, Link2,
-  Loader2, RefreshCw, SlidersHorizontal, CalendarDays } from 'lucide-react';
+  Loader2, MessageSquare, RefreshCw, SlidersHorizontal, CalendarDays } from 'lucide-react';
 
 /**
  * หน้าดูบันทึกการเรียก API — ใครเรียกอะไร เมื่อไหร่ ได้ status อะไร และช้าตรงไหน
@@ -33,7 +35,8 @@ import {
  *   เพราะเป็นงานที่ทำเดือนละครั้งตอนจะ optimize ไม่ใช่ของที่ต้องเห็นทุกครั้งที่เปิดหน้า
  *
  * ตารางนี้ไม่เก็บ request body โดยตั้งใจ (ดูเหตุผลใน migrations/changes/2026-08-10_01_api_logs.sql)
- * จึงไม่มีอะไรให้กางดูนอกจากข้อมูลของ request เอง
+ * ข้อความแชทที่เห็นในชิป/แถวที่กาง (เฟส 2 · 2026-10-05) มาจากประวัติแชทซึ่งเก็บแยก — โหลดทีเดียวต่อหน้า
+ * ที่ `/api/admin/logs/chat` · เนื้อเห็นเฉพาะ admin (server ตัด ไม่ใช่จอซ่อน) · คนอื่นเห็นแม่กุญแจ + ผลการส่ง
  *
  * ⚠️ "เจ้าของเอกสาร" ไม่ใช่ "ผู้เรียก" — ลิงก์ /download-pdf เป็นลิงก์สาธารณะที่เซลล์ forward
  *    ต่อให้ลูกค้าได้ จึงไม่มีทางรู้ว่าใครกด · ที่แสดงได้คือ "เอกสารนี้เป็นของเซลล์คนไหน"
@@ -44,7 +47,7 @@ const BRAND = 'var(--brand-fg)';
 
 /** ค่าตั้งต้นของตัวกรอง — คีย์ที่ยังเป็นค่านี้จะไม่ถูกเขียนลง URL (ลิงก์ที่ส่งต่อจึงสั้นและอ่านออก) */
 const DEFAULTS = {
-  q: '', method: '', status: '', minDuration: '',
+  q: '', method: '', status: '', minDuration: '', undelivered: '',
   requestId: '', lineUserId: '', ip: '',
   dateFrom: '', dateTo: '', page: '1', size: '50',
   sort: 'created_at', dir: 'desc',
@@ -88,6 +91,19 @@ interface RelatedRow {
 
 interface ApiLogDetail extends ApiLogBase {
   related: RelatedRow[];
+}
+
+/** ผลของ /api/admin/logs/chat — request ที่ไม่มีข้อความไม่มีคีย์ · content = ผู้ดูเห็นเนื้อ (admin) */
+interface ChatPage {
+  content: boolean;
+  data: Record<string, ChatExchange[]>;
+}
+
+/** แถวนี้ทำหน้าที่อะไรของบทสนทนา (ทาง ก ข้อ 2): /callback = ขาเข้า · TASK = คำตอบ + ผลการส่ง · อื่น = หน้าเว็บ */
+function chatSide(r: { method: string; path: string }): 'in' | 'out' | 'web' {
+  if (r.method === 'TASK') return 'out';
+  if (r.path === '/callback') return 'in';
+  return 'web';
 }
 
 interface RouteStat {
@@ -245,6 +261,7 @@ export function ApiLogs() {
       if (state.method) qs.set('method', state.method);
       if (state.status) qs.set('status', state.status);
       if (state.minDuration) qs.set('minDuration', state.minDuration);
+      if (state.undelivered) qs.set('undelivered', '1');
       if (state.requestId.trim()) qs.set('requestId', state.requestId.trim());
       if (state.lineUserId.trim()) qs.set('lineUserId', state.lineUserId.trim());
       if (state.ip.trim()) qs.set('ip', state.ip.trim());
@@ -259,8 +276,29 @@ export function ApiLogs() {
       setRows(json.data); setTotal(json.total);
     } catch (e: unknown) { setListError(errMsg(e)); } finally { setListLoading(false); }
   }, [authFetch, page, size, state.dateFrom, state.dateTo, state.q, state.method,
-      state.status, state.minDuration, state.requestId, state.lineUserId, state.ip,
+      state.status, state.minDuration, state.undelivered, state.requestId, state.lineUserId, state.ip,
       state.sort, state.dir]);
+
+  // ── ข้อความแชทของหน้านี้ — ยิงครั้งเดียวต่อหน้า (≤200 request id) ไม่ยิงทีละแถว ──────────
+  //  ล้มแล้วตารางยังใช้ได้ครบ แค่ไม่มีชิป ⇒ บอกด้วยบรรทัดเล็ก ไม่ใช่กล่อง error ใหญ่
+  const [chat, setChat] = useState<ChatPage | null>(null);
+  const [chatError, setChatError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const ids = [...new Set(rows.map(r => r.request_id).filter(Boolean))];
+    const t = setTimeout(() => {
+      if (ids.length === 0) { setChat(null); setChatError(null); return; }
+      void authFetch(`/api/admin/logs/chat?ids=${ids.join(',')}`)
+        .then(async res => {
+          if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
+          return res.json() as Promise<ChatPage>;
+        })
+        .then(j => { if (!cancelled) { setChat(j); setChatError(null); } })
+        .catch((e: unknown) => { if (!cancelled) { setChat(null); setChatError(errMsg(e)); } });
+    }, 0);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [rows, authFetch]);
 
   // ทั้งสองตัวยิงผ่าน setTimeout ไม่เรียก setState ตรง ๆ ในตัว effect
   // (loadStats/loadList เซ็ต loading ทันทีที่ถูกเรียก ซึ่งกฎ react-hooks/set-state-in-effect ห้ามไว้
@@ -338,6 +376,7 @@ export function ApiLogs() {
     if (state.method) out.push({ key: 'method', label: 'method', value: state.method });
     if (state.status) out.push({ key: 'status', label: 'status', value: state.status });
     if (state.minDuration) out.push({ key: 'minDuration', label: 'ช้ากว่า', value: `${state.minDuration} ms` });
+    if (state.undelivered) out.push({ key: 'undelivered', label: 'ผลการส่ง', value: 'บอทส่งไม่ถึง' });
     if (state.requestId) out.push({ key: 'requestId', label: 'Request ID', value: state.requestId });
     if (state.lineUserId) out.push({ key: 'lineUserId', label: 'LINE User', value: state.lineUserId });
     if (state.ip) out.push({ key: 'ip', label: 'IP', value: state.ip });
@@ -653,6 +692,16 @@ export function ApiLogs() {
               hint={`เฉพาะ request ที่ใช้เวลาตั้งแต่ ${SLOW_MS} ms ขึ้นไป (ตั้งค่าละเอียดได้ในตัวกรองขั้นสูง)`}
             />
           </div>
+          {/* ทาง ก ข้อ 4 — หาเคสที่เซลส์ไม่ได้คำตอบโดยไม่ต้องไล่ทีละหน้า · นับจากผลการส่งเท่านั้น
+              (ไม่มีเนื้อแชท ⇒ ทุกคนที่เปิดหน้านี้ได้ใช้ได้) · เหลือแถว TASK ของ request นั้น */}
+          <div className="pb-px">
+            <CheckField
+              checked={!!state.undelivered}
+              onChange={(v) => set({ undelivered: v ? '1' : '', page: '1' })}
+              label="เฉพาะที่บอทส่งไม่ถึง"
+              hint="แถวงาน (TASK) ที่บอทส่งคำตอบไม่ถึงเซลส์ · ยังไม่รู้ผล · ไม่ได้ตอบ · แจ้งเซลส์ให้ส่งใหม่ไม่สำเร็จ"
+            />
+          </div>
         </FilterRow>
 
         {showAdvanced && (
@@ -710,6 +759,11 @@ export function ApiLogs() {
           {state.requestId && (
             <span className="text-slate-400">ค้นด้วย Request ID จะข้ามเงื่อนไขช่วงวันทั้งหมด</span>
           )}
+          {chatError && (
+            <span className="inline-flex items-center gap-1 text-amber-700" title={chatError}>
+              <AlertTriangle className="w-3.5 h-3.5" /> โหลดข้อความแชทไม่สำเร็จ — ตารางยังครบ
+            </span>
+          )}
         </FilterFooter>
       </FilterCard>
 
@@ -766,6 +820,7 @@ export function ApiLogs() {
                             {decodePath(r.route_group)}
                           </div>
                         )}
+                        <ChatChip list={chat?.data[r.request_id] ?? []} side={chatSide(r)} />
                       </td>
                       <td className={`${tdCls} text-xs`}>
                         {r.admin_username
@@ -809,11 +864,24 @@ export function ApiLogs() {
 
                     {expandedId === r.id && (
                       <tr>
-                        <td colSpan={7} className="bg-slate-50/70 px-4 py-4">
+                        <td colSpan={7} className="bg-slate-50/70 p-0">
+                          {/* มือถือ: ตารางเลื่อนแนวนอน ⇒ แผงต้องติดขอบซ้ายและกว้างเท่าจอ (34 = ขอบหน้า 16×2 + เส้นการ์ด)
+                              ไม่งั้นบทสนทนาไหลออกไปทางขวาพร้อมตาราง */}
+                          <div className="px-4 py-4 max-sm:sticky max-sm:left-0 max-sm:w-[calc(100vw_-_34px)]">
                           {!detail
                             ? <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
                             : (
                               <div className="space-y-3">
+                                {(chat?.data[detail.request_id]?.length ?? 0) > 0 && (
+                                  <div className="space-y-2">
+                                    <div className="flex items-center gap-2 text-xs text-slate-400">
+                                      <MessageSquare className="w-3 h-3" />
+                                      <b className="text-slate-600 font-semibold">บทสนทนาของ request นี้</b>
+                                      {chat?.content && <AdminOnlyBadge />}
+                                    </div>
+                                    {chat?.data[detail.request_id]?.map(ex => <ChatExchangeCard key={ex.key} ex={ex} />)}
+                                  </div>
+                                )}
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
                                   <Field label="Request ID">
                                     <button onClick={() => copy(detail.request_id)}
@@ -892,15 +960,19 @@ export function ApiLogs() {
                                     style={{ color: BRAND }}
                                   >
                                     <Link2 className="w-3.5 h-3.5" />
-                                    ดูทุกอย่างของ request นี้ (รวมการแก้ไข + บันทึกระบบ)
+                                    {(chat?.data[detail.request_id]?.length ?? 0) > 0
+                                      ? 'ดูทุกอย่างของ request นี้ (รวมข้อความ · การแก้ไข · บันทึกระบบ)'
+                                      : 'ดูทุกอย่างของ request นี้ (รวมการแก้ไข + บันทึกระบบ)'}
                                   </button>
                                   <span>
-                                    ระบบไม่เก็บเนื้อหาที่ส่งมากับ request (ทั้ง body และ query) โดยตั้งใจ
-                                    เพื่อให้ log เบาและไม่มีข้อมูลส่วนบุคคลของลูกค้า
+                                    {chat?.content && (chat.data[detail.request_id]?.length ?? 0) > 0
+                                      ? 'บันทึกการเรียก API ไม่เก็บ body/query โดยตั้งใจ — ข้อความข้างบนมาจากประวัติแชท ซึ่งเก็บแยกและดูได้เฉพาะ admin'
+                                      : 'ระบบไม่เก็บเนื้อหาที่ส่งมากับ request (ทั้ง body และ query) โดยตั้งใจ เพื่อให้ log เบาและไม่มีข้อมูลส่วนบุคคลของลูกค้า'}
                                   </span>
                                 </div>
                               </div>
                             )}
+                          </div>
                         </td>
                       </tr>
                     )}

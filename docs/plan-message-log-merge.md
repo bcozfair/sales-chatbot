@@ -1,8 +1,8 @@
 # รวมประวัติแชทให้ครบ — `messages` + `webhook_events`
 
-> สถานะ (2026-10-05): **เฟส 1 ลงโค้ดแล้ว (branch `msg-gap-capture` → QA ต่อบน `qa/msg-gap-capture` ·
-> merge `origin/main` 5f2d661 แล้ว) · ยังไม่ merge เข้า main ยังไม่ deploy · migration `2026-10-02_01` ยังไม่ได้รันบนฐานจริง**
-> · เฟส 2–3 ยังเป็นแบบที่เสนอ
+> สถานะ (2026-10-05): **เฟส 1 อยู่ใน main แล้ว (merge `b2d7aa3`) · migration `2026-10-02_01` ลงฐานจริงแล้ว
+> 2026-10-05 · โค้ดตัวบันทึกยังไม่ deploy** (วัด 2026-10-05: `reply_status` / `message_text` ยังว่างทุกแถว · แถว `wh_*` = 0)
+> · **เฟส 2 ลงโค้ดแล้วบน branch `log-chat-ui`** (ยังไม่ merge ยังไม่ deploy) · เฟส 3 ยังเป็นแบบที่เสนอ
 > เจ้าของอนุมัติทิศทาง 2026-10-02
 
 ## คำสั่งเจ้าของ (2026-10-02)
@@ -73,25 +73,87 @@ gate: `npm run diag:webhook-recorder` + `npm run diag:redelivery` · ก่อ�
 **ลำดับ deploy (รอเจ้าของสั่ง):** merge → `db:dump` + migration ผ่าน psql (`DEPLOY.md` ขั้น 4 · `we_reply` ต้องเป็น `t`)
 → `diag:redelivery` ข้อ 7 ไม่มี ⏭️ → build + up + prune → `diag:webhook-recorder` (ชุดหลัง deploy) + `diag:redelivery`
 
-## เฟส 2 — หน้าจอ (ยังไม่เริ่ม)
+## เฟส 2 — หน้าจอ (ลงโค้ดแล้ว 2026-10-05 · branch `log-chat-ui` · ยังไม่ deploy)
 
-- **A · ไทม์ไลน์ของ request** — ในหน้าบันทึกระบบ เปิด request หนึ่งแล้วเห็น event · ข้อความที่พิมพ์ · คำตอบที่ส่งถึง
-  (`webhook_events` ผูกกับ `api_logs` ด้วย `request_id`)
-- **B · ชิป 💬 ในตาราง API logs** — แถว `/callback` ที่มีข้อความ กดแล้วเปิด A
-- **C · แท็บบทสนทนา** (ภายหลัง) — ไล่แชทของเซลส์หนึ่งคนตามเวลา รวม `messages` ทุกชนิด
-- ตัวแสดง postback เป็นชื่อ **ฟังก์ชันเดียว** ใช้ร่วมกับเฟส 3
+แบบ: mockup `mockups/log-chat-messages.html` (gitignore) — **เจ้าของเลือกทาง ก ทั้ง 4 ข้อ ("ตามที่แนะนำ" 2026-10-05)**
 
-กติกาสิทธิ์ (ต้องจริงก่อนมีหน้าจอแรก):
-- ทุก route ที่คืนเนื้อแชท (`messages.content` / `reply_content` · `webhook_events.message_text` / `reply_preview` /
-  `postback_data`) = `adminAuthMiddleware` + `requireCapability('page.traffic')` + `requireRole('admin')` **ที่ `index.ts`**
-  (บรรทัดที่มี `requireCapability` ผ่านด่าน `diag:role-permissions` ข้อ 12 อยู่แล้ว)
-- **ไม่ใส่เนื้อแชทในไฟล์ CSV ที่ส่งออก**
-- การเปิดดูเนื้อแชทเขียน audit `log.view` แบบเดียวกับหน้าบันทึกระบบ
+| ข้อ | ที่เลือก | ลงที่ |
+| --- | --- | --- |
+| 1 · กล่อง "ทุกอย่างของ request นี้" | ก้อนบทสนทนา **ปักบนสุด** + หมุดสั้น "รับข้อความ" / "ส่งคำตอบ" ในเส้นเวลาตามเวลาจริง (หมุดส่ง = `handled_at`) ไม่พิมพ์เนื้อซ้ำ | `frontend/src/admin/logs/RequestTimeline.tsx` |
+| 2 · ชิปในตาราง API logs | แยกตามหน้าที่ของแถว: `/callback` = ขาเข้า · `TASK` = คำตอบ + ผลการส่ง · แถวหน้าเว็บ = ก้อนของ request นั้น · โหลด **ครั้งเดียวต่อหน้า** (`GET /api/admin/logs/chat?ids=` ≤200 id) | `ApiLogs.tsx` · `logs/ChatExchange.tsx` |
+| 3 · คนไม่ใช่ admin | เห็นแม่กุญแจ + ชนิดข้อความ + ผลการส่ง + `reply_error` · **server ไม่ส่งเนื้อเลย** | `services/chatLogService.ts` |
+| 4 · ตัวกรอง | ติ๊ก "เฉพาะที่บอทส่งไม่ถึง" ข้าง "เฉพาะที่ช้า" → `?undelivered=1` = แถว `TASK` ของ request ที่มี event `failed`/`pending`/`none` หรือ `warn_failed` | `buildApiLogWhere` + `UNDELIVERED_EVENT_SQL` (`db/logRepositories.ts`) |
+
+**ไม่ทำ:** แท็บ C (บทสนทนาของเซลส์หนึ่งคน) — ก้อนบทสนทนาเป็นของร่วมไว้รอแล้ว
+
+**เจ้าของตัดสิน 2026-10-05: พักแท็บ C (บทสนทนา)** — เหตุผล: A (ก้อนในกล่อง "ทุกอย่างของ request นี้") + B (ชิปในตาราง
+API logs) + ตัวกรอง LINE user ที่มีอยู่แล้ว ตอบงานหลักได้ (ไล่ว่าเซลส์คนหนึ่งพิมพ์อะไร/บอทตอบอะไร/ส่งถึงไหม) ·
+**ช่องว่างที่ A+B ไม่ครอบ** (ทั้งหมดเพราะ A+B เริ่มจากแถวใน `api_logs` แล้วค่อยไปหาข้อความ):
+1. ข้อความที่เก่ากว่า retention ของ `api_logs` (`API_LOG_RETENTION_DAYS=120` ตาม `DEPLOY.md`) — แถวใน `messages`
+   ยังอยู่ แต่ไม่มีแถว `api_logs` ให้เปิดถึง
+2. แถวหน้าเว็บ (`web_*`) ที่เกิดก่อนวันขึ้นจอ — ไม่มี `meta.api_request_id` จึงผูกกับ request ไม่ได้
+3. ข้อความ LINE ก่อน 23/9 — ก่อนมี `webhook_events.request_id`
+⇒ **ทำ C เมื่อพบว่าต้องไล่ย้อนหลังบ่อย** · ตอนนั้นใช้ก้อนบทสนทนา (`ChatExchange` · `services/chatLogService.ts` ·
+`frontend/src/admin/logs/ChatExchange.tsx`) ซ้ำได้เลย แต่ต้องมีทางอ่าน `messages` ที่ไม่เริ่มจาก `api_logs`
+และต้องผ่าน `canReadChatContent()` ตัวเดียวกัน (ด่าน `diag:log-chat` ข้อ 2 · 5a)
+
+### การผูกข้อความกับ request — ห้ามจับคู่ด้วยเวลา
+
+- **LINE** = `webhook_events.request_id` → `reply_token` → `messages.reply_token` (+ `user_id` เดียวกัน · ช่วงเวลา
+  −10 นาที…+1 ชม. จากรับ webhook มีไว้ให้ใช้ index ได้ ไม่ใช่ตัวจับคู่) · ตรวจแล้ว 100% ของแถวตั้งแต่ 23/9 มี `request_id`
+  · วัด 2026-10-05: แถวของ handler ลงหลังรับ 0.004–9.0 วิ
+- **หน้าเว็บ** = `messages.meta->>'api_request_id'` **เริ่มเขียน 2026-10-05 (วันที่ขึ้นจอ · เจ้าของสั่ง)** ที่ทุกจุดเขียนแถว
+  `web_*`: `logWebEvent` (propose · draft · revise) · `confirmQuotationById` (web_confirm) · `logApprovalEvent` (4 ชนิด)
+  — id มาจาก `getRequestId(req)` ส่งลงไปทางพารามิเตอร์ `apiRequestId` · **แถวเว็บที่เกิดก่อนหน้านั้นไม่ขึ้น (ยอมรับ)**
+  · ชื่อคีย์ **ไม่ใช่ `request_id`** เพราะแถว `web_approval_*` ใช้คีย์นั้นเก็บเลขคำขออนุมัติราคาอยู่แล้ว
+  (ใช้ชื่อเดียวกัน = คีย์เดียวสองความหมาย และแถวอนุมัติจะผูกกับ request ไม่ได้)
+
+### สิทธิ์ (เปลี่ยนจากแบบเดิมที่เขียนไว้ว่า `requireRole('admin')` ที่ index.ts — ทาง ก ข้อ 3 ให้ role อื่นเห็น metadata)
+
+- route อยู่ใน `logsRouter` ซึ่ง mount ด้วย `adminAuthMiddleware` + `requireCapability('page.traffic')` ที่ `index.ts` อยู่แล้ว
+- **ตัดเนื้อตาม role ที่ server ที่เดียว**: `canReadChatContent(role)` = `role === 'admin'` ·
+  `getChatForRequests(ids, viewerRole(req))` → ไม่ใช่ admin = repository **ไม่ SELECT** `message_text` / `postback_data` /
+  `reply_preview` / `content` / `reply_content` และไม่อ่านแถวของ LINE ใน `messages` เลย · ก้อนไม่มีคีย์ `content`
+- เนื้อ = ข้อความที่พิมพ์ · data ปุ่ม + คำแปล · คำตอบบอท · สิ่งที่ LINE รับไป · ข้อความในหน้าเว็บ ·
+  ไม่ใช่เนื้อ (ทุกคนเห็น) = ชนิด · ผลการส่ง · `reply_error` / note ของ `warn_failed` · ชื่อ/รหัสเซลส์ · เวลา
+- **ไม่ใส่เนื้อแชทในไฟล์ CSV ที่ส่งออก** (`/export` ไม่แตะบทสนทนาเลย)
+- ⚠️ **การตัดนี้ครอบแค่ `webhook_events` / `messages` ไม่ครอบ `system_logs`** (พบตอน QA 2026-10-05 · มีมาก่อนเฟส 2) —
+  `system_logs` คือ stdout ของแอป และบางบรรทัดพิมพ์ชิ้นของเนื้อแชทเอง เช่น บรรทัด "LINE ส่งซ้ำ … แจ้งเซลส์ไม่สำเร็จ"
+  ใน `handleRedelivery` (`index.ts`) พิมพ์ `data=<postback data>` · `[findProduct] … text='…'` พิมพ์คำค้นที่ตัดจากข้อความ
+  ⇒ role อื่นที่มี `page.traffic` เห็นชิ้นเหล่านี้ได้ทางหน้า "บันทึกระบบ" · `/export/system` · แถว `system` ในกล่อง request
+  (พิสูจน์ด้วยการยิง route จริงบนฐานทิ้งได้) · จะปิดต้องตัดสินใจแยก: ตัด `message` ของ `system_logs` ตาม role หรือเลิกพิมพ์เนื้อลง log
+- เปิดดูเนื้อ (admin และมีอย่างน้อยหนึ่งก้อน) เขียน audit `log.view` entity `message` — ทั้ง `/chat` และ `/request/:id`
+  (ตาราง API logs = 1 แถว audit ต่อการโหลดหนึ่งหน้า เหมือน `/audit` · `/system`)
+
+### ผลการส่ง — `deliveryOf()` ลำดับเงื่อนไขคือความหมาย
+
+`warn_failed` (redelivery_action) → `reply_status` (sent/failed/pending/none) → `warned` → `nodata` ·
+**ไม่อ่าน `outcome`** (`replied` ≠ ส่งถึง) · แถวของ handler = "คำตอบที่บอทเตรียมไว้ · บันทึกก่อนส่ง" ·
+แถวเติม = "สิ่งที่ส่งถึงจริง" (การ์ด = altText) · `[บอทไม่ได้ตอบ]` แสดงเป็นประโยค · คำแปลปุ่ม = `utils/postbackLabel.ts`
+ฟังก์ชันเดียว (เฟส 3 ต้องเรียกตัวนี้)
+
+### ตัวเลข (ฐานจริง · READ ONLY · วัด 2026-10-05)
+
+| query | แผน | เวลา |
+| --- | --- | --- |
+| event ของ 200 request (`webhook_events` 1,380 แถว) | Seq Scan + Hash Left Join `salesperson` | 0.7 ms |
+| ข้อความ LINE ของ 200 event (`messages` 8,994 แถว · ได้ 177 แถว) | Hash Join · Seq Scan `messages` | 3.7–8.8 ms |
+| แถวหน้าเว็บด้วย `meta->>'api_request_id'` | Seq Scan `messages` (กรอง `web:%`) | 2.8 ms |
+| ตัวกรองส่งไม่ถึง (7 วัน) | Seq Scan `webhook_events` → Index Scan `idx_api_logs_request_id` | 0.4 ms |
+| `getChatForRequests` 200 id ครบวง (admin / subadmin) | 3 / 2 คำสั่งใน READ ONLY เดียว | 40 / 12 ms |
+
+**ยังไม่ต้องสร้าง index** — โตเชิงเส้นตาม `messages` (~150 แถว/วัน + แถวเติม ~17%) ⇒ ราว 60k แถวในหนึ่งปี ≈ 30–50 ms
+ถ้าวันหนึ่งช้า ตัวเลือกคือ `messages (reply_token)` และ partial `messages ((meta->>'api_request_id')) WHERE meta ? 'api_request_id'`
+(query เขียน `meta ? 'api_request_id'` ไว้แล้วให้ planner ใช้ partial index ได้) · `webhook_events (request_id)` ยังไม่จำเป็น
+
+gate: `npm run diag:log-chat` (ข้อ 2 = การรั่วของเนื้อแชท ห้ามล้ม) + `npm run diag:log-chat-ui` (จอจริง · API จำลอง) +
+`diag:role-permissions` (ข้อ 12 ตรวจว่าทุกเส้นใน logsRouter ที่คืนบทสนทนาผ่านตัวตัดตาม role)
 
 ## เฟส 3 — ทดลองให้บอทจำปุ่ม (หลังสะสม 3–4 สัปดาห์)
 
 - เปิดแถว `wh_*` ให้ประวัติของ LLM ใน **ทางทดลอง** ไม่ใช่ทาง production ก่อน
 - วัดด้วย `extractionEval` + ชุดเฉลย "งานหลายขั้น" ที่เจ้าของเคาะ (ผลสำรวจ 2026-10-02: corpus เดิมมีเคสที่ prompt
   เปลี่ยนแค่ 4/384 ⇒ ชุดเดิมวัดผลของเรื่องนี้ไม่ได้ ต้องมีชุดใหม่)
+- คำแปลปุ่มใช้ `utils/postbackLabel.ts` ตัวเดียวกับหน้าจอเฟส 2
 - ระวัง: หน้าต่าง 10 แถวจะเปลี่ยน · แถวปุ่มอาจชนคำตัดประวัติใน `quoteExtraction` ("ยืนยันสำเร็จ" / "ยกเลิก…")
   ⇒ เป็นงานแยก ต้องผ่าน `diag:line-parity` (prompt เปลี่ยน = golden เปลี่ยน ต้องให้เจ้าของเคาะ)

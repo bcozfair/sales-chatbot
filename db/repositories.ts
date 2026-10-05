@@ -11,6 +11,7 @@
 import { pool, withTransaction, type DbExecutor } from '../config/db.js';
 import { companyKeysSql, matchesKeysSql } from './companyIdentity.js';
 import { excludeWebhookFillSql, isWebhookFillType } from './messageKinds.js';
+import { UNDELIVERED_REQUEST_IDS_SQL } from './logRepositories.js';
 
 function logErr(fn: string, err: any): void {
   console.error(`[repo.${fn}]`, err?.message || err);
@@ -1588,6 +1589,8 @@ export interface ApiLogFilters {
   dateFrom?: string; dateTo?: string; method?: string; status?: string;
   path?: string; route?: string; adminUserId?: number; lineUserId?: string;
   ip?: string; minDuration?: number; requestId?: string;
+  /** เฉพาะแถว TASK ของ request ที่บอทส่งไม่ถึง (หน้าบันทึก เฟส 2) — นิยามอยู่ที่ db/logRepositories.ts */
+  undelivered?: boolean;
 }
 
 /** แปลงตัวกรองเป็น WHERE + params — ใช้ร่วมกันระหว่าง list กับ count ให้ผลตรงกันเสมอ */
@@ -1616,6 +1619,8 @@ function buildApiLogWhere(f: ApiLogFilters): { where: string; params: any[] } {
   // เหมือนตัวกรอง path ที่ใช้ ILIKE อยู่แล้ว · ถ้าวันหน้าช้าค่อยเพิ่ม CREATE INDEX CONCURRENTLY
   if (f.ip) add(i => `ip = $${i}`, f.ip);
   if (typeof f.minDuration === 'number') add(i => `duration_ms >= $${i}`, f.minDuration);
+  // แถว TASK = งานจริงของ event (แถว /callback คือขารับ) · ค่าคงที่ไม่มี input ⇒ ต่อสตริงได้
+  if (f.undelivered) conds.push(`method = 'TASK' AND request_id IN (${UNDELIVERED_REQUEST_IDS_SQL})`);
 
   if (f.status && f.status !== 'all') {
     if (/^[1-5]xx$/.test(f.status)) {

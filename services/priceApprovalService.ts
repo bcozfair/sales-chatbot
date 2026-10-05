@@ -342,6 +342,8 @@ export async function updateRequestItems(params: {
   requestId: string;
   actor: ApprovalActor;
   quotes: ApprovalQuoteEdit[];
+  /** id ของ request ใน api_logs (`getRequestId(req)`) — ลงประวัติให้หน้าบันทึกผูกได้ · ไม่ใช่ `requestId` (= เลขคำขออนุมัติ) */
+  apiRequestId?: string;
 }): Promise<{ request_id: string; violations: Violation[]; items: ApprovalItem[]; total_sum: number }> {
   if (!(await canDecideApproval(params.actor))) {
     throw new PriceApprovalError('FORBIDDEN', 'ไม่มีสิทธิ์แก้ไขร่างที่รออนุมัติ', 403);
@@ -454,7 +456,7 @@ export async function updateRequestItems(params: {
     edited_by: params.actor.username,
     items: approvalItems,
     total_sum: grandTotal,
-  }, `✏️ ผู้อนุมัติแก้ตัวเลขในร่าง (ยอดรวมใหม่ ฿${grandTotal.toFixed(2)})`);
+  }, `✏️ ผู้อนุมัติแก้ตัวเลขในร่าง (ยอดรวมใหม่ ฿${grandTotal.toFixed(2)})`, params.apiRequestId);
 
   return { request_id: String(params.requestId), violations: allViolations, items: approvalItems, total_sum: grandTotal };
 }
@@ -478,6 +480,8 @@ export async function approveRequest(params: {
   requestId: string;
   actor: ApprovalActor;
   note?: string | null;
+  /** id ของ request ใน api_logs (`getRequestId(req)`) — ลงประวัติให้หน้าบันทึกผูกได้ · ไม่ใช่ `requestId` (= เลขคำขออนุมัติ) */
+  apiRequestId?: string;
 }): Promise<ApproveResult> {
   if (!(await canDecideApproval(params.actor))) {
     throw new PriceApprovalError('FORBIDDEN', 'ไม่มีสิทธิ์อนุมัติราคา', 403);
@@ -509,6 +513,7 @@ export async function approveRequest(params: {
       quoteId: String(row.id),
       userId: row.user_id,
       skipOwnerCheck: true,
+      apiRequestId: params.apiRequestId,
     });
     if (result.ok) {
       issued.push({ quote_id: String(row.id), quotation_no: result.quotationNo, pdf_link: result.pdfLink });
@@ -525,7 +530,7 @@ export async function approveRequest(params: {
     failed: failed.map((f) => f.quote_id),
   }, issued.length > 0
     ? `✅ อนุมัติราคาแล้ว\n📄 ใบเสนอราคาเลขที่: ${issued.map((i) => i.quotation_no).join(', ')}`
-    : '✅ อนุมัติราคาแล้ว แต่ยังออกใบไม่สำเร็จ');
+    : '✅ อนุมัติราคาแล้ว แต่ยังออกใบไม่สำเร็จ', params.apiRequestId);
 
   return { request_id: String(params.requestId), issued, failed };
 }
@@ -535,6 +540,8 @@ export async function rejectRequest(params: {
   requestId: string;
   actor: ApprovalActor;
   reason: string;
+  /** id ของ request ใน api_logs (`getRequestId(req)`) — ลงประวัติให้หน้าบันทึกผูกได้ · ไม่ใช่ `requestId` (= เลขคำขออนุมัติ) */
+  apiRequestId?: string;
 }): Promise<{ request_id: string; quote_ids: string[] }> {
   if (!(await canDecideApproval(params.actor))) {
     throw new PriceApprovalError('FORBIDDEN', 'ไม่มีสิทธิ์อนุมัติราคา', 403);
@@ -567,7 +574,7 @@ export async function rejectRequest(params: {
     decided_by: params.actor.username,
     decision_note: reason,
     quote_ids: touched,
-  }, `❌ ไม่อนุมัติราคา\n📝 เหตุผล: ${reason}`);
+  }, `❌ ไม่อนุมัติราคา\n📝 เหตุผล: ${reason}`, params.apiRequestId);
 
   return { request_id: String(params.requestId), quote_ids: touched };
 }
@@ -576,6 +583,8 @@ export async function rejectRequest(params: {
 export async function cancelRequest(params: {
   requestId: string;
   actor: ApprovalActor;
+  /** id ของ request ใน api_logs (`getRequestId(req)`) — ลงประวัติให้หน้าบันทึกผูกได้ · ไม่ใช่ `requestId` (= เลขคำขออนุมัติ) */
+  apiRequestId?: string;
 }): Promise<{ request_id: string; quote_ids: string[] }> {
   const rows = await loadRequestRows(params.requestId, params.actor);
   const pa = rows[0]?.price_approval || {};
@@ -595,7 +604,7 @@ export async function cancelRequest(params: {
     request_id: String(params.requestId),
     cancelled_by: params.actor.username,
     quote_ids: ids,
-  }, '🗑️ ยกเลิกคำขออนุมัติราคา');
+  }, '🗑️ ยกเลิกคำขออนุมัติราคา', params.apiRequestId);
 
   return { request_id: String(params.requestId), quote_ids: ids };
 }
@@ -670,7 +679,9 @@ export async function loadRequestIntoForm(params: {
  * เพราะใบออกไปแล้วจริง การโยน error ที่นี่จะทำให้หน้าจอบอกว่าไม่สำเร็จทั้งที่สำเร็จ
  */
 async function logApprovalEvent(
-  webUserId: string | null | undefined, type: string, meta: Record<string, unknown>, replyContent: string
+  webUserId: string | null | undefined, type: string, meta: Record<string, unknown>, replyContent: string,
+  /** id ของ request ใน api_logs → `meta.api_request_id` (หน้าบันทึก เฟส 2) — คนละตัวกับ `meta.request_id` = เลขคำขออนุมัติ */
+  apiRequestId?: string,
 ): Promise<void> {
   if (!webUserId || !parseWebUserId(webUserId)) return;
   try {
@@ -681,7 +692,7 @@ async function logApprovalEvent(
       content: 'อนุมัติราคา',
       reply_token: null,
       reply_content: replyContent,
-      meta,
+      meta: apiRequestId ? { ...meta, api_request_id: apiRequestId } : meta,
     });
   } catch (err) {
     console.error(`[priceApproval] เขียนประวัติ ${type} ไม่สำเร็จ:`, err);

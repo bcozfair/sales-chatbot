@@ -90,6 +90,11 @@ push ซึ่งมีโควตารายเดือนและมีค
 · ประวัติที่ป้อน LLM กันด้วย `excludeWebhookFillSql()` (`db/messageKinds.ts`) ⇒ **ผู้อ่าน `messages`
 ตัวใหม่ต้องตัดสินเองว่ากรองไหม** · `webhook_events.reply_status` = ส่งถึงจริงไหม **ไม่ใช่ `outcome`
 ห้ามใช้ตัดสินการส่งซ้ำ** · gate: `npm run diag:webhook-recorder` · แผน: `docs/plan-message-log-merge.md`
+· **หน้าบันทึกโชว์บทสนทนา (เฟส 2 · 2026-10-05) แต่เนื้อแชทเห็นเฉพาะ admin — ตัดที่ server ไม่ใช่ที่จอ**
+(`page.traffic` เปิดให้ role อื่นได้ ⇒ ทุกเส้นที่คืนบทสนทนาต้องผ่าน `getChatForRequests(…, viewerRole(req))`
+ใน `services/chatLogService.ts` · ไม่ใช่ admin = ไม่ SELECT คอลัมน์เนื้อเลย) · แถว `web_*` ผูกกับ request ด้วย
+`meta.api_request_id` (ไม่ใช่ `request_id` ซึ่งแถวอนุมัติราคาใช้อยู่แล้ว · ห้ามจับคู่ด้วยเวลา) · gate: `npm run diag:log-chat`
++ `diag:log-chat-ui`
 
 **`express.json()` แบบ global คือสิ่งที่ห้ามเติมตลอดกาล** — `line.middleware()` ที่ `POST /callback`
 ต้องได้ raw body ไปคำนวณ HMAC ของ `x-line-signature` ถ้ามีใคร parse ก่อน ลายเซ็นไม่ผ่าน =
@@ -538,7 +543,7 @@ chatbot/
 - **`README.md`** — โครงสร้างละเอียด: endpoint ทั้งหมด, schema, business logic รายบริการ
 - **`docs/SYNC_API.md`** — API ให้ระบบภายนอกดึงข้อมูล (3 โหมด sync และเกณฑ์เลือก)
 - **`docs/line-webhook-redelivery.md`** — LINE ส่ง webhook ซ้ำ: สวิตช์ที่เปิดไว้ · อายุ replyToken ที่วัดเอง · สองกลุ่มที่คนละเรื่อง · สิ่งที่ยังไม่รู้
-- **`docs/plan-message-log-merge.md`** — รวมประวัติแชทให้ครบ: เฟส 1 เก็บส่วนที่ขาด (`wh_*` · คอลัมน์บันทึกผลของ `webhook_events`) · เฟส 2 หน้าจอ (เนื้อแชทเฉพาะ admin) · เฟส 3 ทดลองให้บอทจำปุ่ม
+- **`docs/plan-message-log-merge.md`** — รวมประวัติแชทให้ครบ: เฟส 1 เก็บส่วนที่ขาด (`wh_*` · คอลัมน์บันทึกผลของ `webhook_events`) · เฟส 2 หน้าจอ (เนื้อแชทเฉพาะ admin · ลงโค้ดบน branch `log-chat-ui` 2026-10-05) · เฟส 3 ทดลองให้บอทจำปุ่ม
 - **`docs/plan-web-quote-request.md`** — หน้าเว็บขอใบเสนอราคา เฟส A–D (แผนยาว อ่านเฉพาะหัวข้อที่ตรงงาน)
 - **`docs/plan-local-contacts.md`** — เพิ่มผู้ติดต่อใหม่ (`local_contacts` + Arm 3) เฟส I · แบบของโมดูล
 - **`docs/plan-local-products.md`** — เพิ่มสินค้าใหม่ (`local_products`) เฟส J · **รูปแบบ `internal_reference` ถอดจากข้อมูลจริง + อัลกอริทึมออกรหัสต่อจากรหัสเดิม** (ชั้น 2 ห้ามทำให้อักขระ 9–10 เปลี่ยน ⇒ 21 รหัส TGM ให้คนพิมพ์เอง) · **§13 (2026-10-01):** เพิ่มได้กลางหน้าขอใบเสนอราคา · ต้นแบบ/ชื่อ (= คำนำหน้าของต้นแบบ + model)/ราคาขั้นต่ำ 70% ตั้งให้เอง · ปุ่มคิดราคา = `pricingQuoteHandler` ตัวเดียวกับหน้าคำนวณราคา (ห้าม import pricingLab) · **"เข้า Odoo แล้ว" = `internal_reference` ตรงกับ `products` เท่านั้น · ไม่ตรง = ยังไม่นำเข้า · model ซ้ำกับ Odoo รหัสอื่น = ป้ายเตือนตอนอ่าน · ห้ามแปลง/ทับรหัสในทะเบียนหรือใบ** (เจ้าของ 2026-10-01 §8.4) · **J1+J2 ลงโค้ดแล้ว · J3 (ธง `is_local_product` ใน snapshot สองชั้น → `custom_product` · `to_jsonb` กันฐานที่ไม่มีคอลัมน์ `source`) 2026-10-02 ขึ้น prod `612550c` 12:58 · J4 หน้า/เมนู "สินค้าเพิ่มเอง" + `page.odooproducts` (ด่านชั้นที่สองแบบเดียวกับผู้ติดต่อ) 2026-10-02 ขึ้น prod `612550c` 12:58 · ตัวกรองสี่กลุ่มไม่ทับกัน ตั้งต้น `pending` (กลุ่มซ้ำ = SQL เดียวกับป้ายเตือน) · **J6 หน้าต่าง `LocalProductModal` ตัวเดียวสองทางเข้า (ท้ายผลค้นในใบ · หน้าสินค้าเพิ่มเอง) · ไม่แน่ใจรหัส = ต้องติ๊กก่อนบันทึก · % ราคาขั้นต่ำแก้ได้** 2026-10-02 ขึ้น prod `612550c` 12:58 · gate UI `diag:op-ui` (API จำลอง ไม่แตะฐาน) · **ทางเข้าที่สาม = ปุ่ม "เพิ่มเป็นสินค้าใหม่" ใต้ราคาหน้าคำนวณราคา (§13.8 · 2026-10-02 ยังไม่ขึ้น prod) — รหัสที่มีแล้วเตือน + ปิดปุ่มก่อนเปิดหน้าต่าง** · gate `diag:pricing-add-ui` · migration `2026-10-01_01` ลงฐานจริงแล้ว และยุบเข้า `schema.sql` แล้ว (J5 2026-10-02) (ตรวจคอลัมน์/constraint/index ตรงไฟล์ครบ 2026-10-01) · โค้ดขึ้น prod กับ deploy `184e417` 2026-10-01 17:01** · gate `diag:local-products` (ตารางชั่วคราวสร้างจากไฟล์ migration + ROLLBACK · SQL ใน repo ห้ามใส่ `public.`)

@@ -2,6 +2,7 @@ import { pool, type DbExecutor } from '../config/db.js';
 
 /**
  * คำสั่งอ่านของหน้า "บันทึกและรายงาน" (traffic_daily / audit_logs / system_logs)
+ * + บทสนทนาของ request (webhook_events / messages · เฟส 2 ของ docs/plan-message-log-merge.md)
  *
  * ⚠️ ไฟล์ใหม่แยกจาก db/repositories.ts โดยเจตนา — ไฟล์นั้นเป็นเส้นทางที่ระบบหลักใช้ทุกวินาที
  * การไปแทรกโค้ดใหม่ในไฟล์เดียวกันคือความเสี่ยงที่ไม่มีใครได้อะไรกลับมา
@@ -367,6 +368,153 @@ export function getRequestTimeline(requestId: string) {
        FROM system_logs WHERE request_id = $1
      ORDER BY at, kind`,
     [requestId]);
+}
+
+// ═══════════════════════════ ข้อความแชทของ request (เฟส 2) ═══════════════════════════
+//
+// หน้าบันทึกโชว์ "บทสนทนา" ของ request — แผน: docs/plan-message-log-merge.md เฟส 2
+// ประกอบเป็นก้อนที่ services/chatLogService.ts · ไฟล์นี้แค่อ่านแถวดิบ
+//
+// การผูกกับ request (ห้ามจับคู่ด้วยเวลา — แอดมินคนเดียวกดสองแท็บพร้อมกันได้):
+//   · LINE    = webhook_events.request_id → reply_token → messages.reply_token
+//   · หน้าเว็บ = messages.meta->>'api_request_id' (เริ่มเขียน 2026-10-05 · แถวเก่ากว่านั้นไม่มีคีย์ ⇒ ไม่ขึ้น)
+//
+// ⚠️ withContent = false ต้อง **ไม่ SELECT คอลัมน์เนื้อแชทเลย** ไม่ใช่ SELECT แล้วให้ชั้นบนทิ้ง —
+//   เนื้อที่ไม่เคยออกจากฐานคือเนื้อที่หลุดไปถึงคนไม่ใช่ admin ไม่ได้ (ด่าน diag:log-chat ข้อ 2)
+// ⚠️ ไม่กรองแถวเติม (wh_*) ออก — หน้านี้ต้องเห็นทุกแถว และไม่ป้อน LLM (KNOWN_READERS ของ diag:webhook-recorder)
+
+/** ค่าที่หน้าจอนับว่า "บอทส่งไม่ถึง" — คู่กับ isDeliveryProblem() ใน chatLogService (ด่านเทียบสองฝั่ง) */
+export const UNDELIVERED_EVENT_SQL =
+  `(reply_status IN ('failed', 'pending', 'none') OR redelivery_action = 'warn_failed')`;
+
+/** request_id ที่มีอย่างน้อยหนึ่ง event ส่งไม่ถึง — ตัวกรอง "เฉพาะที่บอทส่งไม่ถึง" ของ api_logs */
+export const UNDELIVERED_REQUEST_IDS_SQL =
+  `SELECT request_id FROM webhook_events WHERE request_id IS NOT NULL AND ${UNDELIVERED_EVENT_SQL}`;
+
+/** แถวของ webhook_events ที่หน้าจอใช้ · ช่อง `?` = มีเฉพาะ withContent */
+export interface ChatEventRow {
+  request_id: string;
+  webhook_event_id: string;
+  first_seen_at: Date;
+  handled_at: Date | null;
+  event_type: string;
+  message_type: string | null;
+  line_user_id: string | null;
+  delivery_count: number;
+  last_delay_ms: number | null;
+  redelivery_action: string | null;
+  outcome: string | null;
+  reply_status: string | null;
+  reply_error: string | null;
+  warn_error: string | null;
+  sender_name: string | null;
+  sender_code: string | null;
+  message_text?: string | null;
+  postback_data?: string | null;
+  reply_preview?: string | null;
+}
+
+/** แถวของ messages ที่ผูกกับ event ของ LINE ผ่าน reply_token — มีเฉพาะ withContent */
+export interface ChatLineMessageRow {
+  webhook_event_id: string;
+  id: string;
+  created_at: Date;
+  type: string | null;
+  content: string | null;
+  reply_content: string | null;
+}
+
+/** แถว web_* ของหน้าเว็บ · `content`/`reply_content` มีเฉพาะ withContent */
+export interface ChatWebMessageRow {
+  request_id: string;
+  id: string;
+  created_at: Date;
+  type: string | null;
+  admin_username: string | null;
+  sender_name: string | null;
+  sender_code: string | null;
+  content?: string | null;
+  reply_content?: string | null;
+}
+
+export interface ChatRows {
+  events: ChatEventRow[];
+  lineMessages: ChatLineMessageRow[];
+  webMessages: ChatWebMessageRow[];
+}
+
+/**
+ * อ่านแถวดิบของบทสนทนาของหลาย request ในรอบเดียว (≤200 id = หนึ่งหน้าของตาราง API logs)
+ *
+ * สามคำสั่งในทรานแซกชัน READ ONLY เดียว ไม่ยิงทีละแถว · ไม่ส่ง `db` = ใช้ connection ของตัวเอง
+ * (READ ONLY + statement_timeout) · ส่ง `db` = รันบน executor นั้น (ด่านใช้กับตารางชั่วคราวที่ ROLLBACK)
+ *
+ * ช่วงเวลาบน messages ไม่ใช่การจับคู่ด้วยเวลา — คู่จริงคือ reply_token · ช่วงเวลามีไว้ให้ใช้
+ * idx_messages_user_created ได้ (แถวของ handler ลงหลังรับ ≤ 9 วิ วัด 2026-10-05 · งานผีถูกตัดที่ 120 วิ)
+ */
+export async function listChatRowsForRequests(
+  requestIds: readonly string[], withContent: boolean, db?: DbExecutor,
+): Promise<ChatRows> {
+  const ids = [...new Set(requestIds)];
+  if (ids.length === 0) return { events: [], lineMessages: [], webMessages: [] };
+
+  const run = async (ex: DbExecutor): Promise<ChatRows> => {
+    const events = (await ex.query(
+      `SELECT we.request_id, we.webhook_event_id, we.first_seen_at, we.handled_at,
+              we.event_type, we.message_type, we.line_user_id,
+              we.delivery_count::int AS delivery_count, we.last_delay_ms,
+              we.redelivery_action, we.outcome, we.reply_status, we.reply_error,
+              CASE WHEN we.redelivery_action = 'warn_failed' THEN we.note END AS warn_error,
+              sp.name AS sender_name, sp.salesperson_id AS sender_code
+              ${withContent ? ', we.message_text, we.postback_data, we.reply_preview' : ''}
+         FROM webhook_events we
+         LEFT JOIN salesperson sp ON sp.user_id = we.line_user_id
+        WHERE we.request_id = ANY($1::text[])
+        ORDER BY we.first_seen_at, we.webhook_event_id`, [ids])).rows as ChatEventRow[];
+
+    // ข้อความ/คำตอบของ LINE เป็นเนื้อแชทล้วน ⇒ ไม่ใช่ admin ไม่ต้องอ่านเลย
+    const lineMessages = withContent && events.length > 0
+      ? (await ex.query(
+          `SELECT we.webhook_event_id, m.id::text AS id, m.created_at, m.type, m.content, m.reply_content
+             FROM webhook_events we
+             JOIN messages m
+               ON m.user_id = we.line_user_id
+              AND m.reply_token = we.reply_token
+              AND m.created_at >= we.first_seen_at - interval '10 minutes'
+              AND m.created_at <  we.first_seen_at + interval '1 hour'
+            WHERE we.request_id = ANY($1::text[])
+            ORDER BY m.created_at, m.id`, [ids])).rows as ChatLineMessageRow[]
+      : [];
+
+    const webMessages = (await ex.query(
+      `SELECT m.meta->>'api_request_id' AS request_id, m.id::text AS id, m.created_at, m.type,
+              au.username AS admin_username, sp.name AS sender_name, sp.salesperson_id AS sender_code
+              ${withContent ? ', m.content, m.reply_content' : ''}
+         FROM messages m
+         LEFT JOIN admin_users au ON au.id = (substring(m.user_id from '^web:(\\d+):'))::int
+         LEFT JOIN salesperson sp ON sp.user_id = substring(m.user_id from '^web:\\d+:(.+)$')
+        WHERE m.user_id LIKE 'web:%'
+          AND m.meta ? 'api_request_id'
+          AND m.meta->>'api_request_id' = ANY($1::text[])
+        ORDER BY m.created_at, m.id`, [ids])).rows as ChatWebMessageRow[];
+
+    return { events, lineMessages, webMessages };
+  };
+
+  if (db) return run(db);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN READ ONLY');
+    await client.query(`SET LOCAL statement_timeout = ${READ_TIMEOUT_MS}`);
+    const out = await run(client);
+    await client.query('COMMIT');
+    return out;
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* connection ตายแล้ว */ }
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 // ═══════════════════════════ สถานะ logworker ═══════════════════════════

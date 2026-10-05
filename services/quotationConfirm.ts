@@ -80,6 +80,8 @@ export async function confirmQuotationById(params: {
   userId?: string;
   /** ผู้เรียกตรวจสิทธิ์มาแล้วด้วยวิธีอื่น (คิวอนุมัติ) — ข้ามการเทียบเจ้าของใบ */
   skipOwnerCheck?: boolean;
+  /** id ของ request ใน api_logs → `meta.api_request_id` ของแถว web_confirm (หน้าบันทึก เฟส 2) · ไม่มีผลกับการออกใบ */
+  apiRequestId?: string;
 }): Promise<ConfirmQuotationResult> {
   const { quoteId, userId } = params;
 
@@ -199,6 +201,7 @@ export async function confirmQuotationById(params: {
         quotation_no: confirmResult.quotationNo,
         quotation_id: String(quoteId),
         outcome: confirmResult.outcome,
+        ...(params.apiRequestId ? { api_request_id: params.apiRequestId } : {}),
       },
     });
   }
