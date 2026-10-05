@@ -307,10 +307,12 @@ function computeBase(
         ok: false,
         amount: 0,
         label: 'ฐานราคา',
-        // ชีตเว้นช่องนี้ไว้ = ไม่รับผลิต ไม่ใช่ราคา 0
+        // ชีตเว้นช่องนี้ไว้ = ยังไม่มีราคา ไม่ใช่ราคา 0 และ **ไม่ใช่ "ไม่รับผลิต"** (เจ้าของสั่ง 2026-10-05: "ถ้าไม่มีราคา
+        // ให้แสดงเฉพาะเท่าที่คิดราคาได้ ไม่ต้องแจ้งว่าไม่รับผลิต") ⇒ กฎบวกเพิ่มคิดต่อเป็นราคาเท่าที่คิดได้
         // คนอ่านบรรทัดนี้คือแอดมินที่กำลังจะตอบลูกค้า ไม่ใช่คนที่เปิดชีตราคาอยู่
-        reason: `ไม่มีราคาสำหรับ ${base.axes.map((a) => `${axisLabel(a)} ${axes[a] ?? '-'}`).join(' · ')} — ไม่รับผลิตขนาดนี้`,
-        steps: [...steps, 'ช่องนี้ในตารางว่าง = ไม่รับผลิต (ไม่ใช่ราคา 0)'],
+        noRate: true,
+        reason: `ยังไม่มีราคาสำหรับ ${base.axes.map((a) => `${axisLabel(a)} ${axes[a] ?? '-'}`).join(' · ')} — ต้องขอราคาจากฝ่ายผลิต`,
+        steps: [...steps, 'ช่องนี้ในตารางว่าง = ยังไม่มีราคา (ไม่ใช่ราคา 0)'],
       };
     }
     return {
@@ -334,7 +336,9 @@ function computeBase(
       ok: false,
       amount: 0,
       label: 'ฐานราคา',
-      reason: `${base.quantity} = ${fmt(q)} อยู่นอกทุกช่วงราคาของ ${model.code}`,
+      // นอกทุกช่วง = ยังไม่มีราคา ไม่ใช่ไม่รับผลิต (เจ้าของสั่ง 2026-10-05 · ดูช่องว่างของตารางข้างบน)
+      noRate: true,
+      reason: `${dimLabel(base.quantity)} ${fmt(q)} อยู่นอกทุกช่วงราคาของ ${model.code} — ต้องขอราคาจากฝ่ายผลิต`,
       steps: [],
     };
   }
@@ -686,9 +690,10 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
     inputs.push({ kind: 'option', key: o, label: optionLabel(o), value: 'มี', from: by ? `รหัสย่อย ${by.subCode}` : cfg.offCode?.includes(o) ? OFF_CODE : 'ระบุในรหัส' });
   }
 
+  // ยังไม่มีราคา = ต้องขอราคา ไม่ใช่บล็อก — ราคาที่เหลือยังคิดต่อ (เจ้าของสั่ง 2026-10-05)
   const violations: Violation[] = pending.map((s) => ({
     id: 'SUBCODE_PENDING:' + s.subCode,
-    level: 'block' as const,
+    level: 'quoteOnRequest' as const,
     noRate: true,
     message: `${s.reads || s.subCode} (${s.subCode}): ยังไม่มีราคา — ${
       s.effect === 'setAxis' ? `ยังไม่ได้กำหนดว่าคิดราคาเท่า${axisLabel(s.axis ?? '')}ไหน` : 'ยังไม่ได้ใส่จำนวนเงิน'
@@ -751,7 +756,7 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
     traceBase.steps.push(`หาราคาตั้งไม่ได้: ${base.reason ?? 'ไม่มีราคาฐาน'}`);
     violations.push({
       id: base.quote ? 'ASK_PRICE' : 'NO_BASE_PRICE',
-      level: base.quote ? 'quoteOnRequest' : 'block',
+      level: base.quote || base.noRate ? 'quoteOnRequest' : 'block',
       message: base.reason ?? 'ไม่มีราคาฐาน',
       ...(base.missing ? { missing: true } : {}),
       ...(base.noRate ? { noRate: true } : {}),
@@ -793,8 +798,8 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
 
   // ราคาตั้งต้องขอจากฝ่ายผลิต (ค่านอกแคตตาล็อก) — กฎบวกเพิ่มยังคิดต่อ ให้หน้าจอแสดง "ราคาเท่าที่คิดได้" ไปก่อน
   // (เจ้าของสั่ง 2026-10-01) · สถานะยังเป็น `quoteOnRequest` · กฎแบบ % รอราคาตั้ง (คิดจากยอดสะสมไม่ได้)
-  // ราคาตั้งที่หาไม่ได้ด้วยเหตุอื่น (ไม่รับผลิต · รหัสบอกไม่ครบ) ยังไม่คิดกฎเหมือนเดิม
-  const askBase = !base.ok && !!base.quote;
+  // ตารางยังไม่มีราคา (`noRate`) ก็ทางเดียวกัน (เจ้าของสั่ง 2026-10-05) · รหัสบอกไม่ครบ ยังไม่คิดกฎเหมือนเดิม
+  const askBase = !base.ok && (!!base.quote || !!base.noRate) && !base.missing;
   if (base.ok || askBase) {
     // `disabled` ถูกกรองทิ้งตรงนี้ ไม่ใช่ตอนโหลดสมุดราคา — เพื่อให้กฎที่ปิดไว้ยังอยู่ในสมุด
     // (ส่งออกไป Excel แล้วยังเห็น เปิดกลับมาใช้ได้) แค่ไม่มีผลกับราคา
@@ -858,6 +863,13 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
       // เดิมกฎไม่ถูกคิดเลยในกรณีนี้ ⇒ เหลือแค่บอกว่ายังไม่รวม
       if (r.blocked && askBase) {
         violations.push({ id: a.id, level: 'warn', message: r.blocked, partial: true });
+        tr.status = 'waiting';
+        tr.reason = r.blocked;
+        continue;
+      }
+      // กฎนี้ยังไม่มีอัตรา/จำนวนเงิน = ต้องขอราคา ไม่ใช่บล็อก — ข้ามข้อนี้แล้วคิดข้อที่เหลือต่อ (เจ้าของสั่ง 2026-10-05)
+      if (r.blocked && r.noRate) {
+        violations.push({ id: a.id, level: 'quoteOnRequest', message: r.blocked, noRate: true });
         tr.status = 'waiting';
         tr.reason = r.blocked;
         continue;

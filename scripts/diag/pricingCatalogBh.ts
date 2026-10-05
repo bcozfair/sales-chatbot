@@ -182,7 +182,7 @@ async function main(): Promise<void> {
   check('1/2/3 = สายยาว 1/2/3 M เข้ากฎ "สายยาวเกิน 30 CM"', ['1', '2', '3'].every((n) =>
     rule(price(`BH-01 180x110-240-2540W-${n}`).o, 'cable_over_30cm')?.status === 'applied'));
   const pl5 = price('BH-01 180x110-240-2540W-PL5');
-  check('PL5 = อ่านออก แต่ "ยังไม่มีราคา" (ไม่ใช่ +0)', pl5.o?.status === 'notManufacturable' && pl5.o.violations.some((v) => v.id === 'conn_pl5' && v.noRate)
+  check('PL5 = อ่านออก แต่ "ยังไม่มีราคา" (ไม่ใช่ +0) · ขอราคา + ราคาเท่าที่คิดได้ (2026-10-05)', pl5.o?.status === 'quoteOnRequest' && pl5.o.unitPrice > 0 && pl5.o.violations.some((v) => v.id === 'conn_pl5' && v.noRate)
     && !pl5.p.parts.some((x) => x.kind === 'unknown'));
   const z = price('BH-01C-600x150-380-4950W-SE-PL2-Z');
   check('SE / Z = อ่านออก ไม่มีผลกับราคา', z.p.parts.filter((x) => x.text === 'SE' || x.text === 'Z').every((x) => x.kind === 'noPrice')
@@ -251,7 +251,7 @@ async function main(): Promise<void> {
     return a?.kind === 'flat' && a.amount === undefined && a.when !== undefined && 'option' in a.when && a.when.option === 'conn:pl5';
   }));
   const pl5b3 = price('BH-03 114x110-230-900W-PL5');
-  check('PL-5 ของ BH-03 = "ยังไม่มีราคา" (ไม่ใช่ +0)', pl5b3.o?.status === 'notManufacturable' && pl5b3.o.violations.some((v) => v.id === 'conn_pl5' && v.noRate));
+  check('PL-5 ของ BH-03 = "ยังไม่มีราคา" (ไม่ใช่ +0) · ขอราคา', pl5b3.o?.status === 'quoteOnRequest' && pl5b3.o.unitPrice > 0 && pl5b3.o.violations.some((v) => v.id === 'conn_pl5' && v.noRate));
   // กรอกราคาแล้ว (จำลองในหน่วยความจำ) — รุ่นปกติได้ราคานั้น · รุ่น C ที่ว่าง = เท่ารุ่นหลัก (กติกาเดิมของช่อง C) · กรอก C = ใช้ของ C
   const typed = (pl5: number, pl5C?: number) => ({
     ...book,

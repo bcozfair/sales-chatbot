@@ -127,9 +127,12 @@ async function main(): Promise<void> {
   check('ไม่เกินมาตรฐาน ⇒ ขึ้น "ไม่คิด" ไม่ใช่หายไป', within.trace!.rules.find((r) => r.id === 'len')?.reason?.includes('ไม่เกินมาตรฐาน') === true);
   const tooLong = computePrice({ model: 'TOY-1', axes: { D: '6' }, dims: { L1: 2000 } }, toy);
   check('ข้อห้ามที่ติด ⇒ ขึ้น "ติด"', tooLong.trace!.checks[0]?.hit === true && inconsistency(tooLong) === '', inconsistency(tooLong));
-  const noCell = computePrice({ model: 'TOY-1', axes: { D: '9' } }, toy);
-  check('หาราคาตั้งไม่ได้ ⇒ บอกเหตุผลและไม่ตรวจกฎต่อ', !noCell.trace!.base.ok && noCell.trace!.rules.length === 0
-    && noCell.trace!.base.steps.some((s) => s.includes('ไม่รับผลิต')));
+  // ช่องว่าง = ยังไม่มีราคา ⇒ กฎคิดต่อเป็นราคาเท่าที่คิดได้ ไม่ใช่ไม่รับผลิต (เจ้าของสั่ง 2026-10-05)
+  const noCell = computePrice({ model: 'TOY-1', axes: { D: '9' }, dims: { L1: 200, L2: 150, cable_m: 2.5 } }, toy);
+  check('หาราคาตั้งไม่ได้ (ช่องว่าง) ⇒ บอกเหตุผล · ขอราคา · คิดกฎต่อ = 900 + 100', !noCell.trace!.base.ok
+    && noCell.trace!.base.steps.some((s) => s.includes('ยังไม่มีราคา')) && !noCell.trace!.base.steps.some((s) => s.includes('ไม่รับผลิต'))
+    && noCell.status === 'quoteOnRequest' && noCell.unitPrice === 1000 && inconsistency(noCell) === '',
+    `${noCell.status} ${noCell.unitPrice} ${inconsistency(noCell)}`);
 
   section('2. ชุดควบคุมกลับด้าน — trace ที่ถูกแก้ตัวเลขต้องถูกจับได้');
   const tamper = (f: (x: PriceOutcome) => void): string => {
