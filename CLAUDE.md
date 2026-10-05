@@ -547,7 +547,7 @@ chatbot/
 - **`README.md`** — โครงสร้างละเอียด: endpoint ทั้งหมด, schema, business logic รายบริการ
 - **`docs/SYNC_API.md`** — API ให้ระบบภายนอกดึงข้อมูล (3 โหมด sync และเกณฑ์เลือก)
 - **`docs/line-webhook-redelivery.md`** — LINE ส่ง webhook ซ้ำ: สวิตช์ที่เปิดไว้ · อายุ replyToken ที่วัดเอง · สองกลุ่มที่คนละเรื่อง · สิ่งที่ยังไม่รู้
-- **`docs/plan-saleorder-v3.md`** — ย้าย sync ใบสั่งขายไป `_v3`: ยอดทั้งใบ `order_*` + jsonb `sale_order_details` · สวิตช์ `SALEORDER_API_VERSION` (`auto` = v3 เมื่อ backfill จบ) · วันตัด 2022 + ใบเดิมคงไว้ · runbook ขึ้นระบบ · gate `diag:saleorder-v3` + `sync:saleorders -- --v3-dry-run` (อ่านอย่างเดียว)
+- **`docs/plan-saleorder-v3.md`** — ย้าย sync ใบสั่งขายไป `_v3`: ยอดทั้งใบ `order_*` + jsonb `sale_order_details` · **โค้ดเป็น v3 ทันทีที่ขึ้นกล่อง** (`SALEORDER_API_VERSION=v2` = ทางถอย) ⇒ **deploy ครั้งถัดไปของ main = วันสลับ: migration ก่อน + กวาดรอบแรกระหว่าง `build` กับ `up` (ข้อ 6)** · ปุ่ม Full sync ใบสั่งขาย = กวาด v3 ใหม่ ~1.5–2 ชม. (ถือคิว sync ของแอป) · วันตัด 2022 + ใบเดิมคงไว้ · gate `diag:saleorder-v3` + `sync:saleorders -- --v3-dry-run` (อ่านอย่างเดียว)
 - **`docs/plan-message-log-merge.md`** — รวมประวัติแชทให้ครบ: เฟส 1 เก็บส่วนที่ขาด (`wh_*` · คอลัมน์บันทึกผลของ `webhook_events`) · เฟส 2 หน้าจอ (เนื้อแชทเฉพาะ admin) · **ทั้งสองเฟสขึ้น prod `d5431e3` 2026-10-05** · ท้ายไฟล์มีหัวข้อส่งต่อ · เฟส 3 ทดลองให้บอทจำปุ่ม
 - **`docs/plan-web-quote-request.md`** — หน้าเว็บขอใบเสนอราคา เฟส A–D (แผนยาว อ่านเฉพาะหัวข้อที่ตรงงาน)
 - **`docs/plan-local-contacts.md`** — เพิ่มผู้ติดต่อใหม่ (`local_contacts` + Arm 3) เฟส I · แบบของโมดูล

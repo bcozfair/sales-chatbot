@@ -5,7 +5,7 @@ import { createGatewayGet, sleep } from './gatewayClient.js';
 import { decidePageTransition, MAX_STALL_RETRIES } from './syncPagination.js';
 import { createPageTicker, logResourceDone, serr, setSyncCtx, slog, vlog } from './syncLog.js';
 import { reconcileQuotationOdooLinks } from '../../services/quotationOdooLink.js';
-import { dryRunSaleOrderV3, resolveSaleOrderApiVersion, runSaleOrderV3Sweep } from './syncSaleordersV3.js';
+import { dryRunSaleOrderV3, resolveSaleOrderApiVersion, runSaleOrderV3Sweep, type V3SweepDeps } from './syncSaleordersV3.js';
 
 const INITIAL_SINCE = '1970-01-01T00:00:00.000Z';
 const PAGE_LIMIT = 500;
@@ -284,17 +284,15 @@ function buildRecordsPath(cursorToken: string | null) {
 
 // ============================================================
 // ทางเข้าของแอปและ CLI — เลือกเวอร์ชันของ endpoint ก่อน (docs/plan-saleorder-v3.md ข้อ 4.7)
-// ค่าเริ่มต้น auto = v2 ทุกประการจนกว่า backfill ของ v3 จะจบ แล้วรอบถัดไปเปลี่ยนเป็น v3 เอง
-// ทางของ v2 ข้างล่าง (syncSaleOrdersV2) คงไว้ครบเป็นทางถอย — ตั้ง SALEORDER_API_VERSION=v2
+// ค่าเริ่มต้น = v3 · ทางของ v2 ข้างล่าง (syncSaleOrdersV2) คงไว้ครบเป็นทางถอย — ตั้ง SALEORDER_API_VERSION=v2
+// forceFull (ปุ่ม Full sync ใบสั่งขาย · --full) = ล้าง cursor ของ v3 แล้วกวาดใหม่ตั้งแต่ V3_SWEEP_SINCE_ISO
+// เหมือนที่ v2 ล้างแล้วกวาดจาก 1970 (เจ้าของสั่งให้คงปุ่มไว้ 2026-10-05) — ต่างแค่เวลา: ~1.5–2 ชม. แทนไม่กี่นาที
+// และตลอดเวลานั้นรอบอัตโนมัติของสินค้า/ลูกค้าต้องรอ (mutex ของ syncService) ⇒ กดนอกเวลางาน
+// deps = ของที่ด่านฉีดแทน (diag:saleorder-v3 ส่วน ค) — แอปกับ CLI ไม่ส่ง
 // ============================================================
-export async function syncSaleOrders(opts?: { forceFull?: boolean }) {
-  if ((await resolveSaleOrderApiVersion()) === 'v2') return syncSaleOrdersV2(opts);
-
-  if (opts?.forceFull) {
-    // กวาดใหม่ทั้งฐานด้วย v3 ใช้ ~2 ชม. — ถ้าทำในรอบของแอปจะถือ mutex ของ sync ทั้งระบบไว้ตลอดเวลานั้น
-    throw new Error('ใบสั่งขายใช้ v3 แล้ว — กวาดใหม่ทั้งฐานให้สั่ง CLI: npm run sync:saleorders -- --v3-backfill --restart');
-  }
-  return runSaleOrderV3Sweep({ mirrorStatus: true, label: 'saleorders' });
+export async function syncSaleOrders(opts?: { forceFull?: boolean }, deps?: V3SweepDeps) {
+  if (resolveSaleOrderApiVersion() === 'v2') return syncSaleOrdersV2(opts);
+  return runSaleOrderV3Sweep({ restart: !!opts?.forceFull, mirrorStatus: true, label: 'saleorders' }, deps);
 }
 
 // ============================================================
@@ -481,7 +479,8 @@ async function syncSaleOrdersV2(opts?: { forceFull?: boolean }) {
 // รันเป็น CLI เฉพาะเมื่อถูกเรียกตรง ๆ (npm run sync:saleorders) — ไม่รันเมื่อถูก import จาก backend
 //   (ไม่ใส่อะไร) / --full   รอบปกติตามเวอร์ชันที่เลือก (เหมือนที่แอปรัน)
 //   --v3-dry-run [--since=ISO] [--pages=N]   อ่าน v3 แล้วเทียบกับฐาน ไม่เขียนอะไรเลย (--pages=0 = จนสุด)
-//   --v3-backfill [--restart]                กวาด v3 ตั้งแต่ปี 2021 ทำต่อจากจุดค้างได้ · จบแล้วแอปสลับเป็น v3 เอง
+//   --v3-backfill [--restart]                กวาด v3 ตั้งแต่ 2021-12-01 แบบอดทน (รอ gateway นานกว่า) ทำต่อจากจุดค้างได้
+//                                            ใช้กวาดรอบแรกด้วยกล่องใหม่ก่อนสลับกล่อง (แผนข้อ 6) — ไม่ถือคิว sync ของแอป
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const argv = process.argv.slice(2);
   const opt = (name: string) => argv.find((a) => a.startsWith(`${name}=`))?.slice(name.length + 1);

@@ -24,7 +24,10 @@ import {
   type OrderSnapshot, type V3Row,
 } from '../sync/saleOrderV3.js';
 import { decideV3PageTransition } from '../sync/syncPagination.js';
-import { LEGACY_COLS, runSaleOrderV3Sweep, selectStorable, writeV3Orders } from '../sync/syncSaleordersV3.js';
+import {
+  LEGACY_COLS, resolveSaleOrderApiVersion, runSaleOrderV3Sweep, selectStorable, writeV3Orders,
+} from '../sync/syncSaleordersV3.js';
+import { syncSaleOrders } from '../sync/syncSaleorders.js';
 
 let pass = 0;
 let fail = 0;
@@ -155,6 +158,18 @@ function partA() {
   check('cursor ไม่ขยับ + has_more=true = retry แล้ว error', d(10, true, 'c1', 'c1', 0) === 'retry-stall' && d(10, true, 'c1', 'c1', 2) === 'error');
   check('cursor ไม่ขยับ + has_more=false = จบ', d(10, false, 'c1', 'c1') === 'complete');
   check('หน้าแรก (since=) มีข้อมูล = ไปต่อ', d(10, true, 'c1', null) === 'advance');
+
+  section('ก7 · สวิตช์เวอร์ชัน — ไม่ตั้ง = v3 ทันที · v2 = ทางถอย');
+  const version = (v: string | undefined): string => {
+    const saved = process.env.SALEORDER_API_VERSION;
+    if (v === undefined) delete process.env.SALEORDER_API_VERSION; else process.env.SALEORDER_API_VERSION = v;
+    try { return resolveSaleOrderApiVersion(); } catch { return 'throw'; } finally {
+      if (saved === undefined) delete process.env.SALEORDER_API_VERSION; else process.env.SALEORDER_API_VERSION = saved;
+    }
+  };
+  check('ไม่ตั้ง / ค่าว่าง = v3 (ไม่ถามฐาน ไม่รอ backfill)', version(undefined) === 'v3' && version('') === 'v3');
+  check('v2 = ทางถอย · ตัวพิมพ์/ช่องว่างไม่มีผล', version('v2') === 'v2' && version(' V2 ') === 'v2' && version('V3') === 'v3');
+  check('ค่าที่ไม่รู้จัก (รวม auto ของร่างแรก) = throw ไม่ใช่เดา', version('auto') === 'throw' && version('3') === 'throw');
 }
 
 // ── ส่วน ข ─────────────────────────────────────────────────────────────────────
@@ -312,7 +327,7 @@ async function partC() {
     check('หน้าแรกถามด้วย since=2021-12-01 แล้วตาม cursor', calls[0].includes('since=2021-12-01') && calls[1].includes('cursor=c1') && calls[2].includes('cursor=c2'),
       calls.map((x) => x.split('?')[1]).join(' | '));
     const s1 = await state('sale_order_v3');
-    check('state ของ v3: cursor หน้าสุดท้าย · เวลา · เปลี่ยนเป็น incremental (= auto สลับเป็น v3)',
+    check('state ของ v3: cursor หน้าสุดท้าย · เวลา · เปลี่ยนเป็น incremental',
       s1.sync_cursor === 'c2' && s1.sync_cursor_timestamp === T2 && s1.sync_mode === 'incremental', JSON.stringify(s1));
     const v2s = await state('sale_order');
     check('แถวของ v2: cursor ไม่ถูกแตะ · เวลาสำเร็จล่าสุดถูกอัปเดตให้หน้าสถานะ',
@@ -351,6 +366,26 @@ async function partC() {
     check('กลับไปเริ่มที่ since · 3 หน้า · ค่าเท่าเดิม = ไม่เขียนซ้ำ', calls[0].includes('since=') && r5.pages === 3
       && r5.write.untouched === 3 && r5.write.inserted === 0, JSON.stringify(r5.write));
     check('cursor ของ v2 ยังเป็นค่าเดิม', (await state('sale_order')).sync_cursor === 'v2-cursor');
+
+    // ทางเดียวกับที่ syncService เรียก (fn({ forceFull })) — ปุ่ม Full sync ใบสั่งขายต้องยังใช้ได้เมื่อเป็น v3
+    section('ค6 · ปุ่ม Full sync ใบสั่งขาย (forceFull) ผ่านตัวเลือกเวอร์ชัน = กวาดใหม่ด้วย v3');
+    const savedVer = process.env.SALEORDER_API_VERSION;
+    delete process.env.SALEORDER_API_VERSION;
+    try {
+      calls.length = 0;
+      const r6 = await syncSaleOrders({ forceFull: true }, { client: c, gatewayGet }) as Awaited<ReturnType<typeof runSaleOrderV3Sweep>>;
+      check('ไม่ throw · กลับไปเริ่มที่ since · 3 หน้า · จบเป็น incremental', calls[0]?.includes('since=2021-12-01') && r6?.pages === 3
+        && (await state('sale_order_v3')).sync_mode === 'incremental', calls.map((x) => x.split('?')[1]).join(' | '));
+      const v2f = await state('sale_order');
+      check('cursor ของ v2 ไม่ถูกล้าง · หน้าสถานะได้จำนวนหน้าของรอบนี้', v2f.sync_cursor === 'v2-cursor' && v2f.pages_synced === 3,
+        JSON.stringify(v2f));
+      calls.length = 0;
+      const r7 = await syncSaleOrders({}, { client: c, gatewayGet }) as Awaited<ReturnType<typeof runSaleOrderV3Sweep>>;
+      check('รอบอัตโนมัติ (ไม่มี forceFull) = เดินต่อจาก cursor ไม่เริ่มใหม่', r7?.pages === 1 && calls.length === 1
+        && calls[0].includes('cursor=c2'), calls.map((x) => x.split('?')[1]).join(' | '));
+    } finally {
+      if (savedVer === undefined) delete process.env.SALEORDER_API_VERSION; else process.env.SALEORDER_API_VERSION = savedVer;
+    }
     const lk = await c.query(`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND pid = pg_backend_pid()`);
     check('จบแล้วไม่เหลือ advisory lock ค้างบน connection', Number(lk.rows[0].count) === 0);
   } finally {
