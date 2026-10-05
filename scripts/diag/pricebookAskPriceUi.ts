@@ -1,5 +1,6 @@
 /* ─────────────────────────────────────────────────────────────────────────────
    "ต้องขอราคาจากฝ่ายผลิต" ของ TS_-01 — เปิดหน้าจริงแล้วกดจริง (เจ้าของเคาะ mockup `ts01-ask-price` แบบ A 2026-09-29)
+   + ขนาดแกนนอกตารางของ TS_-02 = แถวสีส้มของตารางสามแกน (เจ้าของสั่ง 2026-10-05)
 
    เครื่องมือของสมุดราคา — ดู services/pricingLab/README.md · docs/pricing-code-ts-01.md §7
 
@@ -68,10 +69,16 @@ const freeD = ['97', '93', '89'].find((d) => !dKeys.includes(d))!;
 const shots = mkdtempSync(join(tmpdir(), 'pb-ask-'));
 console.log(`ใช้บัญชี ${admin.username} · เซิร์ฟเวอร์ ${BASE} · สมุด ${state.token} · ค่าทดสอบ ${freeThread} / ${freeSensor} / ${freeD} mm · ภาพ ${shots}\n`);
 
+// TS_-02 (2026-10-05): ขนาดแกนเป็นแถวของตารางราคาตั้ง — แกนที่ตารางไม่มี = ขอราคา + แถวสีส้ม (เจ้าของสั่ง)
+const SHEET02 = 'TS-02,02-SI';
+const k02 = state.book.models['TSK-02'];
+const freeD02 = ['97', '93', '89'].find((d) => !axisValues(k02 ?? model, 'D').includes(d))!;
+
 const unreadRes = await fetch(`${BASE}/api/admin/pricebook/unread`, { headers: { Authorization: `Bearer ${token}` } });
 const unread = (await unreadRes.json())?.summary;
 const found = ((unread?.sheets ?? []).find((s: { sheet: string }) => s.sheet === SHEET)?.askPrice ?? []) as { model: string; axis: string; value: string }[];
 const foundHere = found.filter((f) => f.model === MODEL);
+const found02 = ((unread?.sheets ?? []).find((s: { sheet: string }) => s.sheet === SHEET02)?.askPrice ?? []) as { model: string; axis: string; value: string }[];
 
 const browser = await puppeteer.launch({ args: ['--no-sandbox'] });
 const page = await browser.newPage();
@@ -120,13 +127,13 @@ const typeCode = async (code: string) => {
   await page.type('#pl-code', code);
   await page.keyboard.press('Enter');
 };
-const openSheet = async () => {
+const openSheet = async (sheetName = SHEET) => {
   await page.goto(`${BASE}/admin.html#pricebook`, { waitUntil: 'networkidle0' });
   await wait(400);
   await page.evaluate((sheet: string) => {
     const row = [...document.querySelectorAll('tr')].find((tr) => (tr as HTMLElement).innerText.includes(sheet));
     ([...(row?.querySelectorAll('button') ?? [])].find((b) => b.innerText.trim() === 'เปิดชีต') as HTMLButtonElement | undefined)?.click();
-  }, SHEET);
+  }, sheetName);
   await page.waitForNetworkIdle({ idleTime: 400, timeout: 10000 }).catch(() => {});
   await wait(300);
 };
@@ -233,6 +240,44 @@ for (const width of [1280, 390]) {
     return { h, inView: !!box && box.top < window.innerHeight && box.bottom > 0 };
   });
   ok('กดปุ่ม → เปิดชีตนั้นและเลื่อนมาที่กล่องขอราคา', landed.h.includes(SHEET) && landed.inView, `${landed.h} · ${landed.inView ? 'เห็นกล่อง' : 'ไม่เห็นกล่อง'}`);
+
+  // ── TS_-02: ขนาดแกนนอกตาราง = แถวสีส้มของตารางสามแกน (ไม่บันทึก) ──
+  if (!k02) {
+    console.log(`  ${DIM}… เล่มยังไม่มี TSK-02 — ข้ามขั้น TS_-02${RESET}`);
+  } else {
+    // โหลดหน้าใหม่ทั้งหน้า — ขั้นก่อนหน้าค้างอยู่ที่ชีต TS-01 และการเปลี่ยนแค่ hash ไม่พากลับไปหน้ารายการชีต
+    await page.goto(`${BASE}/admin.html?reload=ts02`, { waitUntil: 'networkidle0' });
+    await openSheet(SHEET02);
+    const box02 = await page.$('#ask-TSK-02');
+    const chips02 = await page.evaluate(() => [...document.querySelectorAll('#ask-TSK-02 button.rounded-full')].map((b) => b.querySelector('b')?.textContent ?? ''));
+    ok(`ชีต ${SHEET02} มีกล่องขอราคา · ชิปขนาดแกนตรงกับ /unread (เช่น 3.2 mm)`, !!box02 && chips02.length === found02.length && chips02.some((c) => c.startsWith('3.2')),
+      `จอ ${chips02.join(' ')} · API ${found02.length}`);
+    const rowHead = (n: string) => page.evaluate((v: string) => [...document.querySelectorAll('section th')]
+      .some((th) => th.className.includes('orange') && (th as HTMLElement).innerText.split('\n')[0]!.replace('✕', '').trim() === v), n);
+    await page.evaluate(() => ([...document.querySelectorAll('#ask-TSK-02 button.rounded-full')].find((b) => b.querySelector('b')?.textContent?.startsWith('3.2') && !(b as HTMLButtonElement).disabled) as HTMLButtonElement | undefined)?.click());
+    await wait(150);
+    const ask32 = await page.evaluate(() => [...document.querySelectorAll('input[placeholder="ขอราคา"]')].some((el) => (el.getAttribute('aria-label') ?? '').includes('ราคาตั้ง 3.2 ×')));
+    ok('กดชิป 3.2 → แถวส้ม 3.2 ทุกคอลัมน์ (TS-02 · TS-02-SI) ช่องว่าง = "ขอราคา"', (await rowHead('3.2')) && ask32);
+    await page.select('#ask-TSK-02 select[aria-label="ช่องที่จะเพิ่ม"]', 'D');
+    await page.type('#ask-TSK-02 input[aria-label="ค่าที่จะเพิ่ม"]', `${freeD02}a`);
+    await clickButton(/^เพิ่ม$/, '#ask-TSK-02');
+    ok(`พิมพ์ "${freeD02}a" → แถวส้ม ${freeD02}A (ขนาด + วัสดุ SUS 316L)`, await rowHead(`${freeD02}A`));
+    await page.evaluate(() => { for (const w of ['3.2']) (document.querySelector(`button[aria-label="เอาขนาดแกน ${w} ออก"]`) as HTMLButtonElement | null)?.click(); });
+    await page.evaluate((w: string) => (document.querySelector(`button[aria-label="เอาขนาดแกน ${w} ออก"]`) as HTMLButtonElement | null)?.click(), `${freeD02}A`);
+    await wait(150);
+    ok('✕ แถวที่เพิ่ม → หาย · ไม่มีอะไรรอบันทึก', !(await rowHead('3.2')) && !(await rowHead(`${freeD02}A`)) && (await reviewCount()) === 0);
+    const hscroll02 = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+    ok(`ชีต ${SHEET02} ไม่เลื่อนซ้ายขวาทั้งหน้า`, !hscroll02);
+    await clickButton(/^ย้อนการแก้$/);
+    await page.goto(`${BASE}/admin.html#pricing`, { waitUntil: 'networkidle0' });
+    await wait(300);
+    await typeCode('TSK-02(12.7)3.2x200+5M');
+    await page.waitForNetworkIdle({ idleTime: 300, timeout: 8000 }).catch(() => {});
+    await wait(200);
+    const calc02 = await text();
+    ok('คำนวณ TSK-02(12.7)3.2x200+5M → "ต้องขอราคาจากฝ่ายผลิต" + ปุ่มไปใส่ราคาที่ชีต TS-02,02-SI',
+      calc02.includes('ต้องขอราคาจากฝ่ายผลิต') && calc02.includes(`สมุดราคา › ${SHEET02} › ต้องขอราคา`) && !calc02.includes('รหัสไม่ได้บอกขนาดแกน'));
+  }
 
   // ช่องขนาดเกลียวมี M8 x 1.25 / M10 x 1.5 (หมายเหตุใต้ตาราง)
   await page.goto(`${BASE}/admin.html#pricing`, { waitUntil: 'networkidle0' });

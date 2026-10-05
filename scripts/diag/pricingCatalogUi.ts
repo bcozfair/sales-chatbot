@@ -171,9 +171,9 @@ for (const width of [1280, 390]) {
   ok('ลบแถวสุดท้าย → ไม่มีค่าเจาะรู ราคากลับเท่าเดิม', (await page.$('input[aria-label="ขนาดรู (mm) แถว 1"]')) === null && !(await text()).includes('รวม 40 mm'));
 
   // ช่อง "รุ่น" ช่องเดียวรวม BH กับ TS แบ่งกลุ่ม (เจ้าของเคาะข้อ 9 · 2026-09-29) — TS 11 ตาราง (TS_-12 สองหน้า) + BH 4 รุ่น
-  // + TS_-02 เมื่อเล่มในฐานมี TSK-02 แล้ว (ฐาน PMSV เขียน 2026-10-05) — เงื่อนไขเดียวกับขั้น TS_-02 ข้างล่าง
+  // + TS_-02 กับ TS_-02-SI (แคตตาล็อกคนละหน้า · รุ่นเดียวกัน) เมื่อเล่มในฐานมี TSK-02 แล้ว (ฐาน PMSV เขียน 2026-10-05) — เงื่อนไขเดียวกับขั้น TS_-02 ข้างล่าง
   const groups = await page.$$eval('select[aria-label="รุ่น"] optgroup', (gs) => gs.map((g) => `${(g as HTMLOptGroupElement).label}:${g.children.length}`));
-  const tsTables = (await page.$eval('select[aria-label="รุ่น"]', (el) => [...(el as HTMLSelectElement).options].some((x) => x.value === 'TS_-02'))) ? 12 : 11;
+  const tsTables = (await page.$eval('select[aria-label="รุ่น"]', (el) => [...(el as HTMLSelectElement).options].some((x) => x.value === 'TS_-02'))) ? 13 : 11;
   ok(`เลือกรุ่นจาก dropdown ในช่อง "รุ่น" (ไม่มีการ์ดแยกแล้ว) · กลุ่ม TS ${tsTables} + BH 4`,
     JSON.stringify(groups) === JSON.stringify([`TS — Temperature Sensor:${tsTables}`, 'BH — Heater:4'])
       && (await page.$$('xpath/.//button[.//b[text()="BH-03"]]')).length === 0, groups.join(' · '));
@@ -242,16 +242,33 @@ for (const width of [1280, 390]) {
   if (!has02) {
     console.log(`  ${DIM}… ช่อง "รุ่น" ยังไม่มี TS_-02 — เล่มในฐานยังไม่มี TSK-02 (ยังไม่ได้เติมลงฐาน) · ข้าม${RESET}`);
   } else {
+    // แคตตาล็อก TS_-02-SI เป็นหน้าของตัวเอง (เจ้าของส่งมา 2026-10-05 "แก้ไข pattern ให้ตรงตามเอกสาร") — `-02-SI(` เป็นตัวอักษรตายตัว ไม่ใช่ช่องเลือก
     await typeCode('TSK-02-SI(11.5)5x10+2M');
-    ok('TS_-02-SI ช่องได้ค่าจากรหัส (รุ่นย่อย -SI · เขี้ยวล็อค 11.5 · แกน 5)',
-      (await val('รุ่นย่อย')) === '-SI' && (await val('ขนาดเขี้ยวล็อค')) === '11.5' && (await val('ขนาดแกน')) === '5' && (await shown('รุ่น')).face === 'TS_-02');
+    ok('TS_-02-SI เป็นรุ่นของตัวเองในช่อง "รุ่น" · ช่องได้ค่าจากรหัส (เขี้ยวล็อค 11.5 · แกน 5) · ไม่มีช่องรุ่นย่อย',
+      (await shown('รุ่น')).face === 'TS_-02-SI' && (await val('ขนาดเขี้ยวล็อค')) === '11.5' && (await val('ขนาดแกน')) === '5'
+        && (await page.$('select[aria-label="รุ่นย่อย"]')) === null && (await text()).includes('-02-SI('));
     const priceSi = await text();
-    await choose('รุ่นย่อย', '');
+    await choose('รุ่น', 'TS_-02');
     body = await text();
-    ok('เปลี่ยนเป็น TS_-02 ธรรมดา → รหัสไม่มี -SI · ราคาเปลี่ยน · เตือนว่า 11.5 ทำได้เฉพาะ TS-02-SI',
-      (await codeValue()) === 'TSK-02(11.5)5x10+2M' && body !== priceSi && body.includes('เฉพาะ TS-02-SI'), await codeValue());
-    await choose('ขนาดเขี้ยวล็อค', '12');
-    ok('เลือกเขี้ยวล็อค 12 → รหัสเปลี่ยนตาม · คำเตือนหาย', (await codeValue()) === 'TSK-02(12)5x10+2M' && !(await text()).includes('เฉพาะ TS-02-SI'), await codeValue());
+    ok('สลับเป็น TS_-02 → รหัสไม่มี -SI · เขี้ยวล็อค 11.5 (ไม่มีในหน้า TS_-02) กลับเป็นค่าตั้งต้น 12 · ราคาเปลี่ยน',
+      (await codeValue()) === 'TSK-02(12)5x10+2M' && body !== priceSi && !body.includes('เฉพาะ TS-02-SI'), await codeValue());
+    await typeCode('TSK-02(11.5)5x10+2M');
+    ok('พิมพ์ TS_-02 ธรรมดากับเขี้ยวล็อค 11.5 → เตือนว่าทำได้เฉพาะ TS-02-SI (ราคาเท่าเดิม)',
+      (await shown('รุ่น')).face === 'TS_-02' && (await text()).includes('เฉพาะ TS-02-SI'));
+    // ขนาดแกนที่ตารางไม่มีแถว = ขอราคา + ช่องสีส้มบนหน้าสมุดราคา (เจ้าของสั่ง 2026-10-05) — เดิมขึ้น "รหัสไม่ได้บอกขนาดแกน"
+    await typeCode('TSK-02(12.7)3.2x200+5M');
+    body = await text();
+    ok('แกน 3.2 (นอกแคตตาล็อก) → ต้องขอราคาจากฝ่ายผลิต · ไม่ขึ้น "รหัสไม่ได้บอกขนาดแกน"',
+      body.includes('ต้องขอราคาจากฝ่ายผลิต') && !body.includes('รหัสไม่ได้บอกขนาดแกน') && body.includes('ขอราคาฝ่ายผลิต'));
+    // ตัว S หลังเลขรุ่น = นอกแคตตาล็อก คิดตามรุ่นฐาน + เตือนบนจอ (เจ้าของเคาะ 2026-10-05)
+    await typeCode('TSJ-02S(12)5x10+1.5M');
+    ok('TSJ-02S → คิดราคาได้ + เตือนว่าตัว S นอกแคตตาล็อก ยังไม่รวมส่วนนี้', (await text()).includes('ยังไม่รวมส่วนของตัว S'));
+    // สายเขียนเป็น mm (`+400mm` = 0.4 เมตร) — เดิมอ่านเป็น 400 เมตร ได้ราคา 65,160 บาท
+    await typeCode('TSP-02(12)5x11+400mm.-TSU');
+    body = await text();
+    // ตัวอ่านรหัสพิสูจน์ 0.4 เมตรแล้วใน diag:pricing-catalog-ts — ที่นี่ดูแค่ที่จอแสดง: หน่วย mm ของช่องสาย · ไม่มีเลขหลักหมื่นเดิม
+    ok('สาย +400mm → ช่องความยาวสายขึ้นหน่วย mm · ไม่มีค่าสาย 63,840 / ราคา 65,160 แบบเดิม',
+      !body.includes('63,840') && !body.includes('65,160') && body.includes('ความยาวสาย (mm)') && (await codeValue()) === 'TSP-02(12)5x11+400mm.-TSU', await codeValue());
   }
   await choose('รุ่น', 'BH-01');
   ok('สลับจาก TS กลับไป BH ได้จากช่องเดียวกัน', (await page.$('select[aria-label="การออกขั้วไฟ"]')) !== null && (await codeValue()).startsWith('BH-01 '), await codeValue());

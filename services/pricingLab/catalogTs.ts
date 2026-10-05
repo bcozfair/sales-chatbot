@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-//  "การสั่งซื้อ" ของแคตตาล็อก TS — ลำดับท่อนของรหัส + ตัวเลือกของแต่ละท่อน (12 ตารางที่มีในสมุดราคา)
+//  "การสั่งซื้อ" ของแคตตาล็อก TS — ลำดับท่อนของรหัส + ตัวเลือกของแต่ละท่อน (13 ตาราง · TS_-02 กับ TS_-02-SI ใช้รุ่นเดียวกัน)
 //
 //  โมดูล "คิดราคาสินค้า" — ถอดออกได้ทั้งก้อน ดู services/pricingLab/README.md · docs/pricing-code-ts-catalog.md
 //
@@ -27,7 +27,7 @@
 
 import type { CatalogOption } from './catalogBh.js';
 
-export type TsFamily = 'TS_-01' | 'TS_-01-0' | 'TS_-02' | 'TS_-04' | 'TS_-06' | 'TS_-08' | 'TS_-10' | 'TS_-11' | 'TS_-12' | 'TS_-12R' | 'TS_-14' | 'TS_-18';
+export type TsFamily = 'TS_-01' | 'TS_-01-0' | 'TS_-02' | 'TS_-02-SI' | 'TS_-04' | 'TS_-06' | 'TS_-08' | 'TS_-10' | 'TS_-11' | 'TS_-12' | 'TS_-12R' | 'TS_-14' | 'TS_-18';
 
 export interface TsSlot {
   label: string;
@@ -59,6 +59,12 @@ export interface TsFamilySpec {
   name: string;
   /** รุ่นในสมุดราคาที่ตารางนี้คิดราคา (รหัสในฐาน — ประวัติราคาผูกกับชื่อนี้) */
   model: string;
+  /**
+   * ตารางของแคตตาล็อกที่ใช้รุ่นในสมุดราคาร่วมกับตารางอื่น — ค่าของแกน `submodel` ของรุ่นนั้นที่ตารางนี้คิด
+   * (TS_-02-SI = คอลัมน์ `TS-02-SI` ของ `TSK-02` · แคตตาล็อกคนละหน้ากับ TS_-02 · เจ้าของส่งมา 2026-10-05) —
+   * ไม่มี = ตารางหลักของรุ่น (รหัสที่ไม่บอกรุ่นย่อย) · ใช้ที่ `tsFamilyOfModel` ตัวเดียว
+   */
+  submodel?: string;
   layout: TsLayoutItem[];
   slots: Record<string, TsSlot>;
   /** ค่าเริ่มต้นตอนสลับมารุ่นนี้ — รหัสจริงที่พบบ่อยของตารางนั้น */
@@ -74,6 +80,8 @@ export interface TsFamilySpec {
    *     (`S2` = 1/4” **NPT** ไม่ใช่ 1/4” ของตาราง — เจ้าของเคาะ B#7)
    *   · `d` — ขนาดแกนที่ไม่อยู่ในรายการ ใช้อัตราความยาวแกนของ **ขนาดถัดขึ้นไปที่มีอัตรา** (4 → 4.8 · 5 → 6 · เจ้าของเคาะ B#2)
    *     ใหญ่กว่าทุกขนาดที่มีอัตรา = ขอราคา · แอดมินเพิ่มขนาดใหม่พร้อมอัตรา = ราคาตั้งของคอลัมน์เกลียว + อัตราใหม่
+   *     **ตารางที่ขนาดแกนเป็นแถวของตารางราคาตั้งเอง** (TS_-02 · เจ้าของสั่ง 2026-10-05) ไม่ปัดขึ้น — ราคาตั้งต่างกันทุกขนาด ⇒
+   *     ขนาด (+ ตัวอักษรวัสดุในรายการ เช่น `2.5A`) ที่ตารางไม่มี = แถวของตัวเอง "ต้องขอราคา" · แอดมินเพิ่มแถวแล้วกรอก = คิดได้ + เตือน
    * ไม่มีช่องนี้ = รุ่นนั้นใช้กติกาเดิมทุกอย่าง (ค่าที่ตารางไม่มี = อ่านไม่ออก)
    * คีย์ `thread` = **ช่องเกลียวของตารางนั้น** ซึ่ง TS_-01-0 ชื่อ `hold` (Hold Size · 2026-10-05) — ชื่อช่องจริงถามที่ `askSlotKey`
    */
@@ -110,8 +118,8 @@ export interface TsForm {
    * หน้าจอลบช่องนี้ทิ้งเมื่อคนเลือกค่าใหม่ในช่องนั้น
    */
   written?: Record<string, string>;
-  /** ความยาวสายเขียนเป็นเซนติเมตร (`+30cm`) — `values.cl` เป็นตัวเลขตามที่เขียน (30) ไม่แปลงเป็นเมตร */
-  clUnit?: 'cm';
+  /** ความยาวสายเขียนเป็นเซนติเมตร (`+30cm`) / มิลลิเมตร (`+400mm`) — `values.cl` เป็นตัวเลขตามที่เขียน ไม่แปลงเป็นเมตร */
+  clUnit?: 'cm' | 'mm';
   /** TS_-11 เขียนสายติดกับ M (`+5MPU`) แทน `+5M-PU` ของแคตตาล็อก */
   cableNoDash?: boolean;
   /** ท่อนที่อ่านไม่ออกหลังเลขรุ่น (`-L` ของ `TSK-01-L(M6)` · `S` ของ `TSK-01S`) — ประกอบกลับที่ตำแหน่งเดิม */
@@ -176,6 +184,38 @@ export const MODEL_SUFFIX: Record<string, Record<string, string>> = {
   'TSK-11': { P: 'None Spring (ไม่มีสปริง) — ไม่มีผลกับราคา' },
 };
 
+/**
+ * ตัวอักษรท้ายเลขรุ่นที่ **ไม่อยู่ในแคตตาล็อก** แต่มีรหัสขายจริง — เจ้าของเคาะ 2026-10-05 (`TSJ-02S` 7 รหัส · `TSJ-02L` 2):
+ * *"นอกแคตตาล็อก และสามารถเพิ่มราคาทีหลังได้ ยังไม่บวก และขึ้นเตือนบนจอ"* ⇒ คิดตามรุ่นฐาน + เตือนว่ายังไม่รวมส่วนนี้
+ * · ตั้งราคาทีหลังที่ตารางรหัสย่อยด้วยชื่อ **`<เลขรุ่น><ตัวอักษร>`** (`02S`) ไม่ใช่ `S` เปล่า ๆ — `S` ท้ายสายของรุ่นเดียวกัน
+ *   (`+2MS` · `+2MSP`) เป็นคนละเรื่อง ตารางเดียวแยกตำแหน่งไม่ได้ (เหตุผลเดียวกับ `MODEL_SUFFIX`)
+ * รุ่น → { เลขรุ่น · ตารางของแคตตาล็อกที่พูดถึง · ตัวอักษร }
+ */
+export const OFF_CATALOG_SUFFIX: Record<string, { num: string; head: string; letters: string[] }> = {
+  'TSK-02': { num: '02', head: 'TS_-02', letters: ['S', 'L'] },
+};
+
+/**
+ * ช่องที่แคตตาล็อก TS_-02 กับ TS_-02-SI เขียนเหมือนกัน (สองหน้า ตารางชุดเดียวกัน) — ขนาดแกนของ TS_-02 อยู่ที่นี่ด้วย
+ * เพราะ "ขนาดนี้อยู่ในแคตตาล็อกไหม" ของรุ่น `TSK-02` (ขอราคา · ช่องสีส้มบนหน้าสมุดราคา) ถามตารางหลักของรุ่น
+ * ⇒ ตัวเลขของสองหน้าต้องเป็นชุดเดียวกัน (ป้ายต่างกันได้)
+ */
+const TS02 = {
+  sensor: ch('ชนิด Sensor', [...TC_KJT, ...RTD]),
+  d: ch('ขนาดแกน', [...mm(['4', '4.8', '5', '6'], { '5': '(Standard)' }), o('6.35', '6.35 mm (Excel · SUS 316L เท่านั้น)'), o('8', '8 mm')],
+    'PT100 ตามแคตตาล็อก 4.8 · 5 · 6 mm'),
+  mat: ch('วัสดุ', [o('', 'SUS 304'), o('A', 'SUS 316L')]),
+  l1: { ...L1, placeholder: '25', hint: 'แคตตาล็อก Standard 25 mm · ราคาตั้งที่ 10 mm แล้วบวกทุก 5 mm (Excel) · สั้นกว่า 10 mm = ราคาตั้ง' } as TsSlot,
+  cable: ch('ชนิดสาย', [o('', 'สแตนเลสถัก (Standard)'), o('C', 'ซิลิโคน'), o('F', 'ไฟเบอร์กลาส'), o('P', 'พีวีซี'), o('T', 'เทปล่อน'), o('TS', 'เทปล่อนหุ้มชีลด์')],
+    'Type T มีเฉพาะสแตนเลสถักและเทปล่อน'),
+  ground: ch('Ground', GROUND),
+  connector: {
+    slot: 'id',
+    fits: { '11.5': ['4.8', '5', '6'], '12': ['4', '4.8', '5', '6'], '12.7': ['4', '4.8', '5', '6'], '14.5': ['6', '6.35', '8'], '15.5': ['6', '6.35', '8'] },
+    only: { '11.5': { submodel: 'TS-02-SI', source: 'แคตตาล็อก TS_-02-SI · ชีต TS-02,02-SI (H8)' } },
+  } as NonNullable<TsFamilySpec['connector']>,
+};
+
 export const TS_CATALOG: TsFamilySpec[] = [
   {
     family: 'TS_-01', head: 'TS_-01', name: 'Thermocouple / RTD · Thread + Spring + Cable', model: 'TSK-01',
@@ -214,31 +254,41 @@ export const TS_CATALOG: TsFamilySpec[] = [
     askPrice: { thread: 'thread' },
   },
   {
-    // แคตตาล็อก `Catalogue_Thermocouple_TS_-02.pdf` + ชีต `TS-02,02-SI` (เจ้าของสั่ง 2026-10-05) — รุ่นย่อย `-SI` มีแต่ใน Excel
-    // ราคาตั้งของ Excel อยู่ที่แกนยาว 10 mm (แคตตาล็อก Standard 25 mm) · ตัวเลือก = แคตตาล็อก ∪ Excel (เขี้ยวล็อค 11.5 · แกน 6.35A)
+    // แคตตาล็อก `Catalogue_Thermocouple_TS_-02.pdf` + ชีต `TS-02,02-SI` (เจ้าของสั่ง 2026-10-05) — รหัสที่ไม่มี `-SI` = คอลัมน์ TS-02 ของชีต
+    // ราคาตั้งของ Excel อยู่ที่แกนยาว 10 mm (แคตตาล็อก Standard 25 mm) · ตัวเลือก = แคตตาล็อก ∪ Excel (แกน 6.35A)
+    // TS_-02-SI = แคตตาล็อกอีกหน้า (ตารางถัดไป) แต่คิดจากรุ่น `TSK-02` ตัวเดียวกัน
     family: 'TS_-02', head: 'TS_-02', name: 'Thermocouple / RTD · เขี้ยวล็อค (Connector) + Cable', model: 'TSK-02',
-    layout: [{ fixed: 'TS' }, { slot: 'sensor' }, { sep: '-02' }, { slot: 'sub' }, { sep: '(' }, { slot: 'id' }, { sep: ')' }, { slot: 'd' }, { slot: 'mat' },
+    layout: [{ fixed: 'TS' }, { slot: 'sensor' }, { sep: '-02(' }, { slot: 'id' }, { sep: ')' }, { slot: 'd' }, { slot: 'mat' },
       { sep: 'x' }, { slot: 'l1' }, { sep: '+' }, { slot: 'cl' }, { sep: 'M' }, { slot: 'cable' }, { slot: 'ground' }],
     slots: {
-      sensor: ch('ชนิด Sensor', [...TC_KJT, ...RTD]),
-      sub: ch('รุ่นย่อย', [o('', 'TS_-02 (Standard)'), o('-SI', 'TS_-02-SI (ชีต Excel · แคตตาล็อกไม่มี)')]),
-      id: ch('ขนาดเขี้ยวล็อค', [o('11.5', '11.5 mm (Excel · เฉพาะ TS_-02-SI · แกน 4.8–6)'), o('12', '12 mm (แกน 4–6)'), o('12.7', '12.7 mm (แกน 4–6)'),
+      sensor: TS02.sensor,
+      id: ch('ขนาดเขี้ยวล็อค', [o('12', '12 mm (แกน 4–6)'), o('12.7', '12.7 mm (แกน 4–6)'), o('14.5', '14.5 mm (แกน 6–8)'), o('15.5', '15.5 mm (แกน 6–8)')],
+        'ไม่มีผลกับราคา · 11.5 mm มีเฉพาะ TS_-02-SI'),
+      d: TS02.d, mat: TS02.mat, l1: TS02.l1, cl: CL, cable: TS02.cable, ground: TS02.ground,
+    },
+    defaults: { sensor: 'K', id: '12', d: '4.8', mat: '', l1: '25', cl: '1', cable: '', ground: '' },
+    askPrice: { d: 'D' },
+    connector: TS02.connector,
+  },
+  {
+    // แคตตาล็อก `Catalogue_Thermocouple_TS_-02-SI.pdf` (เจ้าของส่งมา 2026-10-05 · "แก้ไข pattern ให้ตรงตามเอกสาร") —
+    // รูปแบบ `TS□-02-SI(□)□□X□+□M□□` = TS_-02 ทุกช่อง + เขี้ยวล็อค 11.5 · Lock Spring 300 mm · คอลัมน์ TS-02-SI ของชีตเดียวกัน
+    // ตาราง Diameter Tube ของหน้านี้เขียน 4 · 4.8 · 5 แต่ตารางเขี้ยวล็อค 14.5/15.5 ใช้แกน 6–8 และ Excel มีราคาแกน 6 · 6.35A · 8
+    // ⇒ ตัวเลือกแกนเท่า TS_-02 (เขียนที่มาไว้บนตัวเลือก) — ตัดออกเมื่อไหร่ รหัส SI แกน 6 ที่ขายจริงจะกลายเป็น "นอกแคตตาล็อก"
+    family: 'TS_-02-SI', head: 'TS_-02-SI', name: 'Thermocouple / RTD · เขี้ยวล็อค (Connector) + Lock Spring + Cable', model: 'TSK-02', submodel: 'TS-02-SI',
+    layout: [{ fixed: 'TS' }, { slot: 'sensor' }, { sep: '-02-SI(' }, { slot: 'id' }, { sep: ')' }, { slot: 'd' }, { slot: 'mat' },
+      { sep: 'x' }, { slot: 'l1' }, { sep: '+' }, { slot: 'cl' }, { sep: 'M' }, { slot: 'cable' }, { slot: 'ground' }],
+    slots: {
+      sensor: TS02.sensor,
+      id: ch('ขนาดเขี้ยวล็อค', [o('11.5', '11.5 mm (แกน 4.8–6)'), o('12', '12 mm (แกน 4.8–6)'), o('12.7', '12.7 mm (แกน 4.8–6)'),
         o('14.5', '14.5 mm (แกน 6–8)'), o('15.5', '15.5 mm (แกน 6–8)')], 'ไม่มีผลกับราคา'),
-      d: ch('ขนาดแกน', [...mm(['4', '4.8', '5', '6'], { '5': '(Standard)' }), o('6.35', '6.35 mm (Excel · SUS 316L เท่านั้น)'), o('8', '8 mm')],
-        'PT100 ตามแคตตาล็อก 4.8 · 5 · 6 mm'),
-      mat: ch('วัสดุ', [o('', 'SUS 304'), o('A', 'SUS 316L')]),
-      l1: { ...L1, placeholder: '25', hint: 'แคตตาล็อก Standard 25 mm · ราคาตั้งที่ 10 mm แล้วบวกทุก 5 mm (Excel) · สั้นกว่า 10 mm = ราคาตั้ง' },
-      cl: CL,
-      cable: ch('ชนิดสาย', [o('', 'สแตนเลสถัก (Standard)'), o('C', 'ซิลิโคน'), o('F', 'ไฟเบอร์กลาส'), o('P', 'พีวีซี'), o('T', 'เทปล่อน'), o('TS', 'เทปล่อนหุ้มชีลด์')],
-        'Type T มีเฉพาะสแตนเลสถักและเทปล่อน'),
-      ground: ch('Ground', GROUND),
+      d: ch('ขนาดแกน', [...mm(['4', '4.8', '5'], { '5': '(Standard)' }), o('6', '6 mm (เขี้ยวล็อค 14.5 · 15.5)'),
+        o('6.35', '6.35 mm (Excel · SUS 316L เท่านั้น)'), o('8', '8 mm (เขี้ยวล็อค 14.5 · 15.5)')], 'PT100 ตามแคตตาล็อก 4.8 · 5 · 6 mm'),
+      mat: TS02.mat, l1: TS02.l1, cl: CL, cable: TS02.cable, ground: TS02.ground,
     },
-    defaults: { sensor: 'K', sub: '', id: '12', d: '4.8', mat: '', l1: '25', cl: '1', cable: '', ground: '' },
-    connector: {
-      slot: 'id',
-      fits: { '11.5': ['4.8', '5', '6'], '12': ['4', '4.8', '5', '6'], '12.7': ['4', '4.8', '5', '6'], '14.5': ['6', '6.35', '8'], '15.5': ['6', '6.35', '8'] },
-      only: { '11.5': { submodel: 'TS-02-SI', source: 'ชีต TS-02,02-SI (H8)' } },
-    },
+    defaults: { sensor: 'K', id: '12', d: '4.8', mat: '', l1: '25', cl: '1', cable: '', ground: '' },
+    askPrice: { d: 'D' },
+    connector: TS02.connector,
   },
   {
     family: 'TS_-04', head: 'TS_-04', name: 'Thermocouple / NTC / PTC · Thread + Spring + Cable', model: 'TSK-04',
@@ -417,7 +467,7 @@ export function buildTsCode(form: TsForm): string {
   const s = (k: string) => v[k] ?? '';
   const elem = s('elem') ? `-${s('elem')}` : '';
   const headGround = s('hd') || s('ground') ? `-${s('hd')}${s('ground')}` : '';
-  const M = form.clUnit === 'cm' ? 'cm' : 'M';
+  const M = form.clUnit ?? 'M';
   const hj = form.headJunk ?? '';
   const omit = new Set(form.omit ?? []);
   const cable = omit.has('cl') ? `${s('cable')}${s('ground')}` : `+${n('cl')}${M}${s('cable')}${s('ground')}`;
@@ -436,8 +486,9 @@ export function buildTsCode(form: TsForm): string {
       code = `TS${s('sensor')}-01-0${hj}${s('hold') ? `(${s('hold')})` : ''}${cable}`;
       break;
     case 'TS_-02':
+    case 'TS_-02-SI':
       // ไม่มีวงเล็บเขี้ยวล็อค = เว้นวรรคแบบรหัสจริง (`TSJ-02 5x50+2M`)
-      code = `TS${s('sensor')}-02${s('sub')}${hj}${omit.has('id') ? ' ' : `(${s('id')})`}${s('d')}${s('mat')}${xl1}${cable}`;
+      code = `TS${s('sensor')}-02${spec.family === 'TS_-02-SI' ? '-SI' : ''}${hj}${omit.has('id') ? ' ' : `(${s('id')})`}${s('d')}${s('mat')}${xl1}${cable}`;
       break;
     case 'TS_-04':
       code = `${headOf(v)}-04${hj}${par('thread')}${s('d')}${s('mat')}${xl1}${elem}${cable}`;
@@ -518,7 +569,8 @@ function grammar(spec: TsFamilySpec, loose = false): RegExp {
   const hj = loose ? '(?<hj>-?[A-Z]{1,3}(?=[(+0-9]|$))?' : '';
   const num = (n: string) => `-${n}${hj}`;
   // ท่อนที่บางตารางไม่มี — ประกอบเมื่อถูกใช้เท่านั้น (ตารางที่ไม่มีช่องสายก็ไม่มีตัวเลือกสายให้อ่าน)
-  const unit = loose ? '(?<clu>CM|M)' : 'M';
+  // `MM` ก่อน `M` — `+400mm` คือ 0.4 เมตร ไม่ใช่ 400 เมตรกับตัวอักษร M เกินท้าย (เคยได้ราคา 65,160 · 2026-10-05)
+  const unit = loose ? '(?<clu>MM|CM|M)' : 'M';
   const cable = () => `(?:\\+(?<cl>${NUM})${unit}${g('cable', 'cable')}${g('ground', 'ground')})${loose ? '?' : ''}`;
   const elem = `(?:-(?<elem>2))?`;
   const hd = () => `(?:-(?=[A-Z])${g('hd', 'hd')}${g('ground', 'ground')})?`;
@@ -530,7 +582,8 @@ function grammar(spec: TsFamilySpec, loose = false): RegExp {
   switch (spec.family) {
     case 'TS_-01': body = `${head}${num('01')}${parenOpt('thread')}${dm()}(?:X(?<l1>${NUM})${loose ? '?' : ''})?${cable()}`; break;
     case 'TS_-01-0': body = `${head}${num('01-0')}${parenOpt('hold')}${cable()}`; break;
-    case 'TS_-02': body = `${head}-02${g('sub', 'sub')}${hj}${paren('id')}${dm()}${L1}${cable()}`; break;
+    case 'TS_-02': body = `${head}-02${hj}${paren('id')}${dm()}${L1}${cable()}`; break;
+    case 'TS_-02-SI': body = `${head}-02-SI${hj}${paren('id')}${dm()}${L1}${cable()}`; break;
     case 'TS_-04': body = `${head}${num('04')}${paren('thread')}${dm()}${L1}${elem}${cable()}`; break;
     case 'TS_-06': body = `${head}${num('06')}${paren('thread')}${dm()}${L1}${elem}${hd()}`; break;
     case 'TS_-08': body = `${head}${num('08')}${paren('thread')}${dm()}${L1}${elem}${hd()}`; break;
@@ -590,9 +643,14 @@ export function askSlotKey(spec: TsFamilySpec, role: 'sensor' | 'thread' | 'd'):
   return role === 'thread' && !spec.slots.thread && spec.slots.hold ? 'hold' : role;
 }
 
-/** ตารางของแคตตาล็อกที่รุ่นในสมุดราคานี้ใช้ — TS_-12 แยกตามชนิด Sensor (Thermocouple / RTD คนละหน้า) */
-export function tsFamilyOfModel(modelCode: string): TsFamily | undefined {
-  return TS_CATALOG.find((s) => s.model === modelCode)?.family;
+/**
+ * ตารางของแคตตาล็อกที่รุ่นในสมุดราคานี้ใช้ — TS_-12 แยกตามชนิด Sensor (Thermocouple / RTD คนละหน้า)
+ * `submodel` = รุ่นย่อยที่ตัวอ่านรหัสอ่านได้ (`TS-02-SI` → ตาราง TS_-02-SI) · ไม่ส่ง/ไม่ตรงตารางไหน = ตารางหลักของรุ่น
+ * ⚠️ คำถามระดับรุ่น ("ค่านี้อยู่ในแคตตาล็อกไหม" ของหน้าสมุดราคา) ไม่ส่ง `submodel` — ได้ตารางหลักเสมอ
+ */
+export function tsFamilyOfModel(modelCode: string, submodel?: string): TsFamily | undefined {
+  const specs = TS_CATALOG.filter((s) => s.model === modelCode);
+  return (specs.find((s) => submodel !== undefined && s.submodel === submodel) ?? specs.find((s) => !s.submodel) ?? specs[0])?.family;
 }
 
 /** รหัสตามที่คนอ่าน — แบบเดียวกับ `norm` ของตัวอ่านรหัส (เครื่องหมายนิ้วทุกแบบเป็น `"` · ไม่มีช่องว่าง) **คงตัวพิมพ์เดิม** */
@@ -676,6 +734,7 @@ export function readTsFormLoose(input: string, family: TsFamily): LooseTsRead | 
   const form: TsForm = { family, values };
   if (Object.keys(written).length) form.written = written;
   if (m.groups.clu === 'CM') form.clUnit = 'cm';
+  if (m.groups.clu === 'MM') form.clUnit = 'mm';
   if (family === 'TS_-11' && (m.groups.cable || m.groups.ground) && !m.groups.dash) form.cableNoDash = true;
   if (m.groups.hj) form.headJunk = asWritten('hj');
   // ช่องที่รหัสไม่ได้เขียนเลย — ประกอบกลับแล้วต้องไม่มีค่ามาตรฐานงอกขึ้นมา

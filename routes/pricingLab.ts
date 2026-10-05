@@ -674,7 +674,7 @@ function cleanTsForm(raw: unknown): TsForm | undefined {
     }
     if (Object.keys(written).length) form.written = written;
   }
-  if (r.clUnit === 'cm') form.clUnit = 'cm';
+  if (r.clUnit === 'cm' || r.clUnit === 'mm') form.clUnit = r.clUnit;
   if (r.cableNoDash === true) form.cableNoDash = true;
   if (typeof r.headJunk === 'string' && /^-?[A-Z]{1,3}$/i.test(r.headJunk)) form.headJunk = r.headJunk;
   if (Array.isArray(r.tail)) {
