@@ -287,7 +287,8 @@ function buildRecordsPath(cursorToken: string | null) {
 // ค่าเริ่มต้น = v3 · ทางของ v2 ข้างล่าง (syncSaleOrdersV2) คงไว้ครบเป็นทางถอย — ตั้ง SALEORDER_API_VERSION=v2
 // forceFull (ปุ่ม Full sync ใบสั่งขาย · --full) = ล้าง cursor ของ v3 แล้วกวาดใหม่ตั้งแต่ V3_SWEEP_SINCE_ISO
 // เหมือนที่ v2 ล้างแล้วกวาดจาก 1970 (เจ้าของสั่งให้คงปุ่มไว้ 2026-10-05) — ต่างแค่เวลา: ~1.5–2 ชม. แทนไม่กี่นาที
-// และตลอดเวลานั้นรอบอัตโนมัติของสินค้า/ลูกค้าต้องรอ (mutex ของ syncService) ⇒ กดนอกเวลางาน
+// และตลอดเวลานั้นรอบอัตโนมัติของสินค้า/ลูกค้าต้องรอ (mutex ของ syncService) · gateway เปิดแค่ 07:00–18:00
+// ⇒ กดได้แค่ในเวลางาน · กวาดใหม่โดยไม่หยุดสินค้า/ลูกค้า = --v3-backfill --restart ด้วยกล่องแยก (แผนข้อ 7)
 // deps = ของที่ด่านฉีดแทน (diag:saleorder-v3 ส่วน ค) — แอปกับ CLI ไม่ส่ง
 // ============================================================
 export async function syncSaleOrders(opts?: { forceFull?: boolean }, deps?: V3SweepDeps) {
