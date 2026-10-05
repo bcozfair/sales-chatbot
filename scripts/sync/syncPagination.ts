@@ -66,11 +66,23 @@ export function decidePageTransition(input: PageTransitionInput): PageTransition
 // Full Sync ได้ 681 แถวจาก 593,273 แต่ขึ้น "สำเร็จ") · วัด 2026-10-05 ตอบ true ปกติ แต่ไม่มีใครรับประกัน
 // ⇒ เกณฑ์ "จบ" คือหน้าว่าง · หน้ามีข้อมูลและ cursor ขยับ = ไปต่อเสมอ (เสียหน้าว่างเพิ่ม 1 หน้าต่อรอบ)
 // cursor เป็น keyset (V3 Updated At, Sale Order ID) — หน้าว่างแปลว่าไม่มีใบไหนอยู่หลังจุดนี้แล้วจริง
+//
+// ยกเว้นรอบ incremental (stopOnShortPage · ตั้งแต่ 2026-10-05): หน้าที่ได้ใบไม่เต็ม limit = จบรอบเลย
+// เพราะ v3 ใช้ 6–8 วิต่อครั้งคงที่ไม่ว่าจะได้กี่ใบ (วัด 2026-10-05 · v2 0.2 วิ) หน้าว่างที่ยิงไว้ยืนยัน
+// จึงกินครึ่งหนึ่งของรอบ (22 วิ → ~13 วิ) · ไม่ทำข้อมูลหาย: cursor ของหน้านั้นถูกบันทึกแล้ว ถ้ายังมีใบเหลือ
+// (หน้าไม่เต็มกลางทาง) รอบถัดไปดึงต่อจากจุดเดิม = ช้าไปหนึ่งรอบ ไม่ใช่หล่น
+// การกวาดเต็ม (sync_mode='full') ห้ามใช้ข้อนี้ — มันจะประกาศว่ากวาดจบทั้งที่ยังเหลือหลายแสนใบ
 // ============================================================
 
 export interface V3PageTransitionInput extends PageTransitionInput {
   /** จำนวนแถวใน payload.data ของหน้านี้ */
   rowCount: number;
+  /** payload.sale_order_count — หน่วยเดียวกับ limit (ใบ ไม่ใช่แถว) · ไม่มีค่า = ถือว่าเต็มหน้า (ไปต่อ) */
+  orderCount?: number | null;
+  /** limit ที่ขอไปในหน้านี้ */
+  pageLimit?: number;
+  /** รอบ incremental เท่านั้น — หน้าไม่เต็ม limit = จบรอบ (ดูหัวข้อด้านบน) */
+  stopOnShortPage?: boolean;
 }
 
 export function decideV3PageTransition(input: V3PageTransitionInput): PageTransition {
@@ -93,6 +105,12 @@ export function decideV3PageTransition(input: V3PageTransitionInput): PageTransi
       action: 'error',
       reason: `v3 sync stalled: next_cursor did not advance after ${maxStallRetries} retries — sweep incomplete, refusing to report success`,
     };
+  }
+
+  // หลังเช็ก cursor แล้วเท่านั้น — หน้าไม่เต็มที่ cursor ไม่ขยับยังต้อง retry/throw เหมือนเดิม
+  const { orderCount, pageLimit, stopOnShortPage } = input;
+  if (stopOnShortPage && typeof orderCount === 'number' && typeof pageLimit === 'number' && orderCount < pageLimit) {
+    return { action: 'complete' };
   }
 
   return { action: 'advance' };

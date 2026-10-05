@@ -301,6 +301,11 @@ export async function runSaleOrderV3Sweep(opts: V3SweepOptions = {}, deps: V3Swe
           previousCursor: cursor,
           stallRetries,
           maxStallRetries: MAX_STALL_RETRIES,
+          // รอบ incremental: หน้าไม่เต็ม = จบรอบ ไม่ต้องยิงหน้าว่างอีก 6–8 วิ (ของที่เหลือรอบหน้าดึงต่อจาก cursor)
+          // limit ที่ gateway ตอบกลับมา (ถ้ามันตัดให้ต่ำกว่าที่ขอ หน้าเต็มจะไม่ถูกนับเป็นหน้าไม่เต็ม)
+          orderCount: typeof payload.sale_order_count === 'number' ? payload.sale_order_count : null,
+          pageLimit: typeof payload.limit === 'number' && payload.limit > 0 ? payload.limit : PAGE_LIMIT,
+          stopOnShortPage: syncMode === 'incremental',
         });
 
         if (transition.action === 'error') throw new Error(transition.reason);
