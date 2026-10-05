@@ -705,6 +705,11 @@ sudo systemctl restart logworker      # ให้ worker โหลดโค้�
 docker compose exec app npm run diag:log-worker
 ```
 
+**แก้ไฟล์ใน `scripts/logworker/` หรือ `db/auditKinds.ts` แล้ว worker ยังรันโค้ดเก่าอยู่จนกว่าจะรีสตาร์ท** — worker
+รันบน host จากทรีหลัก (ไม่ใช่ image) ⇒ merge แล้วต้อง `sudo systemctl restart logworker` เอง · ถ้ากติกาการนับเปลี่ยน
+(เช่น "การแก้ไข" นับเฉพาะการแก้จริง ตั้งแต่ 2026-10-05) สั่ง `recompute.ts` ข้างบนด้วยให้วันเก่าตรงกัน · ไม่รีสตาร์ท =
+worker เก่าเขียนเมื่อวาน/วันนี้ทับด้วยกติกาเดิมทุก 15 นาที
+
 > ⚠️ ไฟล์ที่ 2 ติด trigger `trg_audit` กับ **ตารางตั้งค่า 11 ตัวเท่านั้น**
 > ห้ามเติมตารางในเส้นทางออกใบเสนอราคา (`quotations`, `quotation_counters`, `messages`)
 > หรือตารางที่ sync เขียนรัว (`products`, `customers`, `sale_orders`, `customers_data_view`) เด็ดขาด

@@ -245,11 +245,25 @@ function timeDir(dir?: string): 'ASC' | 'DESC' {
   return String(dir).toLowerCase() === 'asc' ? 'ASC' : 'DESC';
 }
 
-export function listAuditLogs(f: AuditFilters, limit: number, offset: number, dir?: string) {
+/**
+ * ชื่อที่อ่านออกของรายการที่ trigger เก็บเป็นรหัสบริษัทล้วน (บัญชีเสนอในนาม PM · บัญชีห้ามเสนอราคา)
+ * — หาตอนอ่าน ไม่เขียนทับ entity_label · ใช้เฉพาะหน้าจอ **ไฟล์ส่งออกไม่ได้คอลัมน์นี้**
+ * (รูปแบบไฟล์ส่งออกเป็นของที่ต้องส่งมอบตาม ม.26 ห้ามขยับคอลัมน์) · ตรง idx_cdv_company
+ */
+const AUDIT_DISPLAY_EXPR = `
+  CASE WHEN audit_logs.entity_type IN ('quote_pm', 'blacklist') AND audit_logs.entity_label ~ '^[0-9]{1,9}$'
+       THEN (SELECT c.customer_name FROM customers_data_view c
+              WHERE c.company_id = audit_logs.entity_label::int AND c.customer_name IS NOT NULL
+              LIMIT 1)
+  END`;
+const AUDIT_DISPLAY_COL = `${AUDIT_DISPLAY_EXPR} AS entity_display`;
+
+export function listAuditLogs(f: AuditFilters, limit: number, offset: number, dir?: string,
+                              opts: { display?: boolean } = {}) {
   const { where, params } = auditWhere(f);
   const d = timeDir(dir);
   return q(
-    `SELECT ${AUDIT_COLS} FROM audit_logs ${where}
+    `SELECT ${AUDIT_COLS}${opts.display ? `, ${AUDIT_DISPLAY_COL}` : ''} FROM audit_logs ${where}
       ORDER BY occurred_at ${d}, id ${d}
       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
     [...params, limit, offset]);
@@ -356,15 +370,26 @@ export function getRequestTimeline(requestId: string) {
     `SELECT 'api'   AS kind, id::text, created_at  AS at,
             method || ' ' || path AS title,
             status_code::text     AS detail,
-            duration_ms
+            duration_ms,
+            NULL::jsonb           AS audit
        FROM api_logs   WHERE request_id = $1
      UNION ALL
      SELECT 'audit', id::text, occurred_at,
-            action, COALESCE(entity_label, entity_id), NULL
+            action, COALESCE(entity_label, entity_id), NULL,
+            -- พอให้หน้าจอแปลถ้อยคำได้ (frontend/src/admin/logs/auditMeaning.ts) — ค่าเดิม/ใหม่ส่งแค่ status
+            -- ซึ่งเป็นช่องเดียวที่การแปลต้องดู ไม่ส่งทั้งแถว
+            jsonb_build_object(
+              'entity_type', entity_type, 'entity_id', entity_id, 'entity_label', entity_label,
+              'entity_display', ${AUDIT_DISPLAY_EXPR},
+              'changed_cols', to_jsonb(changed_cols),
+              'before', jsonb_build_object('status', "before"->'status', 'signature_key', "before"->'signature_key',
+                                           'odoo_matched_at', "before"->'odoo_matched_at'),
+              'after',  jsonb_build_object('status', "after"->'status', 'signature_key', "after"->'signature_key',
+                                           'odoo_matched_at', "after"->'odoo_matched_at'))
        FROM audit_logs WHERE request_id = $1
      UNION ALL
      SELECT 'system', id::text, created_at,
-            level || ' ' || COALESCE(source, ''), left(message, 300), NULL
+            level || ' ' || COALESCE(source, ''), left(message, 300), NULL, NULL
        FROM system_logs WHERE request_id = $1
      ORDER BY at, kind`,
     [requestId]);

@@ -166,7 +166,7 @@ logsRouter.get('/audit', safe('GET /audit', async (req, res) => {
 
   // dir ถูกกรองด้วย timeDir ใน repository — ค่าที่ไม่ใช่ 'asc' ตกกลับเป็นใหม่ไปเก่า
   const [data, total] = await Promise.all([
-    listAuditLogs(f, limit, offset, q.dir), countAuditLogs(f),
+    listAuditLogs(f, limit, offset, q.dir, { display: true }), countAuditLogs(f),
   ]);
   audit(req, 'log.view', 'audit_log');
   res.json({ data, total, limit, offset, ...f });

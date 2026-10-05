@@ -116,56 +116,15 @@ export function actorStyle(actorType: string, actorSource: string | null): Actor
              cls: 'bg-amber-50 border-amber-200 text-amber-700' };
   }
   if (actorType === 'line_user') {
-    return { label: 'เจ้าตัวผ่าน LINE', hint: 'เจ้าของข้อมูลแก้เองผ่านบอท/LIFF — จับคู่จาก request ของคนคนนั้นที่ครอบเวลาที่แก้พอดี',
+    return { label: 'เจ้าตัวผ่าน LINE', hint: 'เจ้าตัวทำเองผ่านบอท/LIFF — จับคู่จาก request ของคนคนนั้นที่ครอบเวลานั้นพอดี',
              cls: 'bg-violet-50 border-violet-200 text-violet-700' };
   }
   return { label: 'ไม่ทราบ', hint: 'ไม่พบ request ของแอดมินหรือของเจ้าของข้อมูลเองที่ครอบเวลานี้ — น่าจะแก้จาก psql หรือ script ตรง ๆ',
            cls: 'bg-slate-100 border-slate-300 text-slate-600' };
 }
 
-/** ชื่อภาษาไทยของชนิดข้อมูลที่ถูกแก้ — ไม่มีในรายการก็แสดงชื่อดิบ ไม่ใช่ซ่อน */
-const ENTITY_LABELS: Record<string, string> = {
-  promotion: 'โปรโมชันส่วนลด',
-  quotation_rule: 'เงื่อนไขใบเสนอราคา',
-  optional_link: 'สินค้าพ่วงเสริม',
-  stock_rule: 'กฎระงับเมื่อหมดสต็อก',
-  moq_rule: 'ขั้นต่ำสั่งซื้อ',
-  shipping_fee: 'ค่าขนส่ง',
-  credit_policy: 'นโยบายเครดิต',
-  blacklist: 'บัญชีห้ามเสนอราคา',
-  quote_pm: 'บัญชีเสนอในนาม PM',
-  admin_user: 'ผู้ใช้งานระบบ',
-  salesperson: 'พนักงานขาย',
-  sync_setting: 'ตั้งค่าการ sync',
-  traffic: 'รายงานการใช้งาน',
-  audit_log: 'บันทึกการแก้ไข',
-  system_log: 'บันทึกระบบ',
-};
-
-export function entityLabel(t: string | null): string {
-  if (!t) return '-';
-  return ENTITY_LABELS[t] ?? t;
-}
-
-const OP_LABELS: Record<string, string> = {
-  insert: 'เพิ่ม', update: 'แก้ไข', delete: 'ลบ', view: 'เข้าดู', export: 'ส่งออก',
-  // คำสั่งเดียวที่กระทบเกินเพดาน — trigger ยุบเหลือแถวสรุปแถวเดียว (ดู audit_stmt ใน migration)
-  bulk_insert: 'เพิ่มยกชุด', bulk_update: 'แก้ไขยกชุด', bulk_delete: 'ลบยกชุด',
-};
-
-/** แถวสรุปของการกดยกชุด — หน้าจอต้องแสดงต่างจากการแก้รายตัว ห้ามให้ดูเหมือนกัน */
-export function isBulk(action: string): boolean {
-  return action.includes('.bulk_');
-}
-
-/** 'promotion.update' → 'แก้ไข โปรโมชันส่วนลด' — ผู้ใช้ไม่ควรต้องอ่านชื่อตารางในระบบ */
-export function actionLabel(action: string): string {
-  const dot = action.lastIndexOf('.');
-  if (dot < 0) return action;
-  const op = OP_LABELS[action.slice(dot + 1)];
-  const ent = ENTITY_LABELS[action.slice(0, dot)];
-  return op && ent ? `${op}${ent}` : action;
-}
+// ชื่อชนิดข้อมูล/การกระทำของบันทึกการแก้ไขย้ายไป auditMeaning.ts (2026-10-05) — ถ้อยคำอยู่ที่นั่นที่เดียว
+export { entityLabel, actionLabel, isBulk } from './auditMeaning';
 
 /** แสดงค่าใน before/after ให้อ่านออก — null ต้องเห็นชัดว่า "ว่าง" ไม่ใช่หายไป */
 export function displayValue(v: unknown): string {
