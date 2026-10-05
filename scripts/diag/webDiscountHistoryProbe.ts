@@ -48,7 +48,8 @@ async function sample(withOrders: boolean) {
     if (!/^[A-Z]\/[0-9]{4,}$/.test(co.ref ?? '') || !co.contacts?.length) continue;
     const dup = await pool.query(`SELECT count(DISTINCT company_id)::int AS k FROM customers_data_view WHERE customer_reference = $1`, [co.ref]);
     if (dup.rows[0].k !== 1) continue;
-    const n = (await pool.query(`SELECT count(*)::int AS n FROM sale_orders WHERE contact_id = ANY($1::int[])`, [co.contacts])).rows[0].n;
+    // นับเฉพาะใบที่มียอดทั้งใบ — ประวัติส่วนลดข้ามแถวที่ไม่มี (ขั้น 5 ของ docs/plan-saleorder-v3.md)
+    const n = (await pool.query(`SELECT count(*)::int AS n FROM sale_orders WHERE contact_id = ANY($1::int[]) AND order_total_amount IS NOT NULL`, [co.contacts])).rows[0].n;
     if (withOrders ? n >= 3 : n === 0) return co;
   }
   return null;

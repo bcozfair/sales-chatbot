@@ -144,15 +144,16 @@ export interface DiscountSummary {
 /**
  * แปลงใบสั่งขายเป็นสรุปส่วนลดที่หน้าจอใช้ได้ทันที
  *
- * ⚠️ ใช้ total_discount ตรง ๆ ไม่คำนวณใหม่ — มี 2,362 ใบ (0.7%) ที่
- *    total_amount − total_discount ≠ amount_after_discount จากต้นทาง
- * ⚠️ ส่วนลด 0 ไม่ใช่ "ไม่มีข้อมูล" — มี 27,802 ใบที่ส่วนลดเป็นศูนย์จริง ๆ
+ * ⚠️ ยอดทั้งใบ (`order_*`) ไม่ใช่บรรทัดแรก — ขั้น 5 ของ docs/plan-saleorder-v3.md (2026-10-05)
+ * ⚠️ ใช้ order_total_discount ตรง ๆ ไม่คำนวณใหม่ — มี 2,468 ใบที่
+ *    order_total_amount − order_total_discount ≠ order_amount_after_discount (วัด 2026-10-05)
+ * ⚠️ ส่วนลด 0 ไม่ใช่ "ไม่มีข้อมูล" — มี 25,332 ใบที่ส่วนลดทั้งใบเป็นศูนย์จริง ๆ (วัด 2026-10-05)
  */
 export function summarizeDiscounts(orders: DiscountOrderRow[]): DiscountSummary | null {
   if (!orders.length) return null;
   const rows = orders.map((o) => {
-    const amount = Number(o.total_amount ?? 0);
-    const discount = Number(o.total_discount ?? 0);
+    const amount = Number(o.order_total_amount ?? 0);
+    const discount = Number(o.order_total_discount ?? 0);
     return {
       ref: o.order_reference,
       date: o.order_date,

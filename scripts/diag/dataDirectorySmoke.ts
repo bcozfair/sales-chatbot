@@ -7,7 +7,9 @@
  *   1. กฎบล็อกที่หน้าจอโชว์ ตรงกับ engine ตัวเดียวกับที่ใช้ตอนออกใบจริง
  *   2. ส่วนลดดึงจาก company_id เดียว **ไม่ขยายนิติบุคคล** (เจ้าของตัดสิน 2026-09-17)
  *      — ถ้าวันหนึ่งมีคนแก้ให้ขยาย ข้อนี้จะล้มทันที
- *   3. total_discount ถูกส่งต่อตรง ๆ ไม่ถูกคำนวณใหม่ (มี 0.7% ของใบที่คำนวณใหม่แล้วไม่ตรง)
+ *   3. ส่วนลดเป็นยอดทั้งใบ order_total_discount ส่งต่อตรง ๆ ไม่ถูกคำนวณใหม่ (2,468 ใบคำนวณใหม่แล้วไม่ตรง)
+ *      · แถวที่ไม่มียอดทั้งใบ (ซากชื่อเก่าก่อน v3) ถูกข้าม และใบที่เหลือคือ N ใบล่าสุดที่มียอดทั้งใบจริง
+ *      · หน้าตาราง (หลายบริษัท) กับแผงรายละเอียด (บริษัทเดียว) เลือกใบชุดเดียวกัน
  *   4. ตัวกรองทุกตัวคืนผลที่ "ตรงกับที่กรอง" จริง ไม่ใช่แค่ไม่ล้ม
  *   5. query ของหน้าไม่ช้าเกินงบ (เขียนผิดท่าเดียวกลายเป็น timeout 15 วิ — เคยเกิดแล้ว)
  */
@@ -134,17 +136,62 @@ async function main() {
     ok('เรียงจากใบล่าสุดก่อน', d.rows.every((r: any, i: number) =>
       i === 0 || !r.date || !d.rows[i - 1].date || new Date(d.rows[i - 1].date) >= new Date(r.date)));
 
-    // ข้อ 3 ของหัวไฟล์: ตัวเลขต้องเป็นค่าจากฐานตรง ๆ
+    // ข้อ 3 ของหัวไฟล์: ตัวเลขต้องเป็นยอดทั้งใบจากฐานตรง ๆ
     const first = d.rows[0];
     const { rows: raw } = await pool.query(
-      `SELECT total_discount, total_amount FROM sale_orders WHERE order_reference = $1 LIMIT 1`,
+      `SELECT order_total_discount, order_total_amount FROM sale_orders WHERE order_reference = $1 LIMIT 1`,
       [first.ref],
     );
-    ok('ส่วนลดตรงกับ total_discount ในฐาน (ไม่ได้คำนวณใหม่)',
-      raw.length > 0 && Math.abs(Number(raw[0].total_discount) - first.discount) < 0.005,
-      `ฐาน ${raw[0]?.total_discount} · ที่ส่งออก ${first.discount}`);
-    ok('ยอดก่อนลดตรงกับ total_amount ในฐาน',
-      raw.length > 0 && Math.abs(Number(raw[0].total_amount) - first.amount) < 0.005);
+    ok('ส่วนลดตรงกับ order_total_discount ในฐาน (ยอดทั้งใบ · ไม่ได้คำนวณใหม่)',
+      raw.length > 0 && Math.abs(Number(raw[0].order_total_discount) - first.discount) < 0.005,
+      `ฐาน ${raw[0]?.order_total_discount} · ที่ส่งออก ${first.discount}`);
+    ok('ยอดก่อนลดตรงกับ order_total_amount ในฐาน',
+      raw.length > 0 && Math.abs(Number(raw[0].order_total_amount) - first.amount) < 0.005);
+
+    const [one] = await timed(() => getCompanyDetail(Number(withDiscount.company_id)));
+    ok('หน้าตารางกับแผงรายละเอียดเลือกใบชุดเดียวกัน',
+      JSON.stringify(one?.discount) === JSON.stringify(d),
+      `${d.rows.map((r: any) => r.ref).join(' ')} / ${one?.discount?.rows.map((r) => r.ref).join(' ')}`);
+  }
+
+  const shownRefs = (co.items as any[]).flatMap((r) => (r.discount?.rows ?? []).map((x: any) => x.ref));
+  const { rows: nullShown } = await pool.query(
+    `SELECT order_reference FROM sale_orders WHERE order_reference = ANY($1::text[]) AND order_total_amount IS NULL`,
+    [shownRefs],
+  );
+  ok('ไม่มีใบที่ไม่มียอดทั้งใบหลุดขึ้นจอ (หน้าแรก)', shownRefs.length > 0 && nullShown.length === 0,
+    `${shownRefs.length} ใบ` + (nullShown.length ? ` · หลุด ${nullShown.map((r) => r.order_reference).join(',')}` : ''));
+
+  // บริษัทที่ "3 ใบล่าสุดแบบไม่กรอง" มีแถวไม่มียอดทั้งใบ (ซากชื่อเก่า) — ต้องถูกข้าม และใบที่เหลือ
+  // ต้องเป็น 3 ใบล่าสุดของแถวที่มียอดทั้งใบ (คิวรีตรงข้างล่างเขียนแยกจาก repo โดยตั้งใจ)
+  const { rows: ghostCos } = await pool.query(
+    `SELECT DISTINCT d.company_id FROM (
+        SELECT contact_id FROM sale_orders
+         WHERE order_total_amount IS NULL AND contact_id > 0
+         ORDER BY order_date DESC NULLS LAST LIMIT 30) g
+       JOIN customers_data_view d ON d.contact_id = g.contact_id`,
+  );
+  const latest = (companyId: number, onlyWhole: boolean) => pool.query(
+    `SELECT order_reference, order_total_amount FROM sale_orders
+      WHERE contact_id IN (SELECT contact_id FROM customers_data_view WHERE company_id = $1)
+        ${onlyWhole ? 'AND order_total_amount IS NOT NULL' : ''}
+      ORDER BY order_date DESC NULLS LAST, order_reference DESC LIMIT 3`,
+    [companyId],
+  ).then((r) => r.rows);
+  let ghostCase: { company_id: number; ghost: string } | null = null;
+  for (const g of ghostCos) {
+    const hit = (await latest(g.company_id, false)).find((r) => r.order_total_amount == null);
+    if (hit) { ghostCase = { company_id: g.company_id, ghost: hit.order_reference }; break; }
+  }
+  if (ghostCase) {
+    const det = await getCompanyDetail(ghostCase.company_id);
+    const got = (det?.discount?.rows ?? []).map((r) => r.ref);
+    const want = (await latest(ghostCase.company_id, true)).map((r) => r.order_reference);
+    ok('แถวไม่มียอดทั้งใบถูกข้าม', !got.includes(ghostCase.ghost), `company ${ghostCase.company_id} · ${ghostCase.ghost}`);
+    ok('ใบที่เหลือ = 3 ใบล่าสุดที่มียอดทั้งใบ', JSON.stringify(got) === JSON.stringify(want),
+      `${got.join(' ')} / ${want.join(' ')}`);
+  } else {
+    ok('แถวไม่มียอดทั้งใบถูกข้าม (ไม่มีบริษัทให้ทดสอบ)', true, 'ข้าม');
   }
 
   // ขอบเขต: ต้องไม่ดึงใบของสาขาอื่นที่เลขภาษีเดียวกัน
