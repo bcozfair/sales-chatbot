@@ -40,7 +40,15 @@ export const FilterCombo: React.FC<{
   onChange: (v: string) => void;
   /** ข้อความตอนค้นไม่เจอ — บอกด้วยว่ารายการมาจากไหน */
   emptyText?: string;
-}> = ({ label, value, options, onChange, emptyText }) => {
+  /**
+   * ส่วนเสริมของ ComboBox สำหรับหน้าที่ตัวเลือกมีมากกว่า "ชื่อ + จำนวน" — เช่นช่อง "ผู้เรียก"
+   * ของหน้าบันทึก (ป้ายแอดมิน/LINE · ค้นด้วยไอดีได้) · ไม่ส่ง = หน้าตาเดิมของหน้าข้อมูลสินค้า/ลูกค้าเป๊ะ
+   */
+  facts?: (o: FilterOption, where: 'field' | 'list') => React.ReactNode;
+  searchText?: (o: FilterOption) => string;
+  searchPlaceholder?: string;
+  footer?: React.ReactNode;
+}> = ({ label, value, options, onChange, emptyText, facts, searchText, searchPlaceholder, footer }) => {
   const CLEAR_ID = '';
   const all: FilterOption[] = React.useMemo(
     () => [{ id: CLEAR_ID, name: 'ทั้งหมด' }, ...options],
@@ -57,15 +65,20 @@ export const FilterCombo: React.FC<{
       onPick={(o) => onChange(o.id)}
       placeholder={label}
       ariaLabel={label}
-      searchPlaceholder={`พิมพ์เพื่อค้น${label}`}
+      searchPlaceholder={searchPlaceholder ?? `พิมพ์เพื่อค้น${label}`}
       emptyText={emptyText ?? `ไม่มี${label}ที่ตรงกับคำค้น`}
-      facts={(o) =>
-        o.count != null ? (
-          <span className="text-[11px] tabular-nums text-slate-400 shrink-0">
-            {o.count.toLocaleString('th-TH')}
-          </span>
-        ) : null
-      }
+      searchText={searchText}
+      footer={footer}
+      facts={(o, where) => (
+        <>
+          {facts?.(o, where)}
+          {o.count != null ? (
+            <span className="text-[11px] tabular-nums text-slate-400 shrink-0">
+              {o.count.toLocaleString('th-TH')}
+            </span>
+          ) : null}
+        </>
+      )}
     />
   );
 };

@@ -53,6 +53,7 @@ import {
   countApiLogs,
   getApiLogById,
   getApiLogStats,
+  getApiLogCallers,
   insertMessage,
   ownQuotesCondition,
   getRolePermissionRows,
@@ -5518,6 +5519,7 @@ app.get('/api/admin/api-logs', adminAuthMiddleware, requireCapability('page.traf
       route: q.route ? String(q.route) : undefined,
       adminUserId: q.adminUserId ? parseInt(q.adminUserId) : undefined,
       lineUserId: q.lineUserId ? String(q.lineUserId) : undefined,
+      noCaller: q.noCaller === '1',
       ip: q.ip ? String(q.ip) : undefined,
       minDuration: q.minDuration ? parseInt(q.minDuration) : undefined,
       // "เฉพาะที่บอทส่งไม่ถึง" — นับแค่สถานะ ไม่มีเนื้อแชท จึงเปิดให้ทุกคนที่เห็นหน้านี้ (ทาง ก ข้อ 3)
@@ -5544,6 +5546,17 @@ app.get('/api/admin/api-logs/stats', adminAuthMiddleware, requireCapability('pag
     res.json({ ...stats, dateFrom, dateTo });
   } catch (err: any) {
     console.error('GET /api/admin/api-logs/stats error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ตัวเลือกของช่อง "ผู้เรียก" — ต้องประกาศก่อน /:id ไม่งั้น "callers" ถูกจับเป็น id
+app.get('/api/admin/api-logs/callers', adminAuthMiddleware, requireCapability('page.traffic'), async (req: any, res: any) => {
+  try {
+    const { dateFrom, dateTo } = apiLogDateRange(req.query);
+    res.json({ data: await getApiLogCallers(dateFrom, dateTo), dateFrom, dateTo });
+  } catch (err: any) {
+    console.error('GET /api/admin/api-logs/callers error:', err);
     res.status(500).json({ error: err.message });
   }
 });

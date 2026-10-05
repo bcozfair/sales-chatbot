@@ -1589,6 +1589,8 @@ export interface ApiLogFilters {
   dateFrom?: string; dateTo?: string; method?: string; status?: string;
   path?: string; route?: string; adminUserId?: number; lineUserId?: string;
   ip?: string; minDuration?: number; requestId?: string;
+  /** เฉพาะแถวที่ไม่มีผู้เรียกทั้งสองแบบ (ลิงก์ PDF สาธารณะ · งานของระบบ) — ตัวเลือก "ไม่มีผู้เรียก" ของช่องผู้เรียก */
+  noCaller?: boolean;
   /** เฉพาะแถว TASK ของ request ที่บอทส่งไม่ถึง (หน้าบันทึก เฟส 2) — นิยามอยู่ที่ db/logRepositories.ts */
   undelivered?: boolean;
 }
@@ -1615,6 +1617,7 @@ function buildApiLogWhere(f: ApiLogFilters): { where: string; params: any[] } {
   if (f.route) add(i => `${API_LOG_ROUTE_GROUP} = $${i}`, f.route);
   if (typeof f.adminUserId === 'number') add(i => `admin_user_id = $${i}`, f.adminUserId);
   if (f.lineUserId) add(i => `line_user_id = $${i}`, f.lineUserId);
+  if (f.noCaller) conds.push('admin_user_id IS NULL AND line_user_id IS NULL');
   // ไม่มี index ให้ ip โดยตั้งใจ — ทุกหน้าจอคัดด้วยช่วงเวลาก่อนเสมอ จึงสแกนแค่หน้าต่างนั้น
   // เหมือนตัวกรอง path ที่ใช้ ILIKE อยู่แล้ว · ถ้าวันหน้าช้าค่อยเพิ่ม CREATE INDEX CONCURRENTLY
   if (f.ip) add(i => `ip = $${i}`, f.ip);
@@ -1672,7 +1675,8 @@ export async function listApiLogs(
               ${API_LOG_ROUTE_GROUP} AS route_group,
               route, path, status_code, duration_ms, resp_bytes, admin_user_id,
               (SELECT username FROM admin_users u WHERE u.id = api_logs.admin_user_id) AS admin_username,
-              line_user_id, ip, inflight, db_waiting, queue_waited_ms,${API_LOG_DOC_OWNER}
+              line_user_id, (SELECT s.name FROM salesperson s WHERE s.user_id = api_logs.line_user_id) AS line_user_name,
+              ip, inflight, db_waiting, queue_waited_ms,${API_LOG_DOC_OWNER}
          FROM api_logs
          ${where}
         ${orderBy}
@@ -1697,7 +1701,8 @@ export async function getApiLogById(id: string): Promise<any | null> {
   try {
     const { rows } = await pool.query(
       `SELECT api_logs.*, id::text AS id,
-              (SELECT username FROM admin_users u WHERE u.id = api_logs.admin_user_id) AS admin_username,${API_LOG_DOC_OWNER}
+              (SELECT username FROM admin_users u WHERE u.id = api_logs.admin_user_id) AS admin_username,
+              (SELECT s.name FROM salesperson s WHERE s.user_id = api_logs.line_user_id) AS line_user_name,${API_LOG_DOC_OWNER}
          FROM api_logs WHERE id = $1::bigint`, [id]);
     if (!rows.length) return null;
 
@@ -1707,6 +1712,44 @@ export async function getApiLogById(id: string): Promise<any | null> {
       [rows[0].request_id, id]);
     return { ...rows[0], related: related.rows };
   } catch (err) { logErr('getApiLogById', err); return null; }
+}
+
+/**
+ * รายชื่อ "ผู้เรียก" ที่มีจริงในช่วงวัน — ตัวเลือกของช่องผู้เรียกในตัวกรองขั้นสูงของหน้าบันทึก
+ *
+ * ดึงจาก log ไม่ใช่จากตาราง admin_users/salesperson ทั้งตาราง เพราะคำถามของช่องนี้คือ
+ * "ใครเรียกบ้างในช่วงนี้" — คนที่ไม่ได้เรียกเลยเลือกไปก็ได้ตารางว่าง · count ตรงกับผลกรองจริง
+ * (นับด้วยเงื่อนไขเดียวกับ buildApiLogWhere: admin_user_id = x / line_user_id = x / ไม่มีทั้งคู่)
+ *
+ * รวมกลุ่มใน CTE ก่อนค่อย JOIN — admin_users/salesperson มี created_at ชื่อซ้ำ
+ * เงื่อนไขช่วงวัน (apiLogFromThaiDay) อ้าง created_at แบบไม่มี alias จึงต้องอยู่ในชั้นที่ไม่มี JOIN
+ */
+export async function getApiLogCallers(dateFrom: string, dateTo: string): Promise<any[]> {
+  try {
+    const { rows } = await pool.query(
+      `WITH c AS (
+         SELECT admin_user_id, line_user_id, count(*)::int AS n
+           FROM api_logs
+          WHERE ${apiLogFromThaiDay(1)} AND ${apiLogToThaiDay(2)}
+          GROUP BY 1, 2)
+       SELECT 'admin' AS kind, c.admin_user_id::text AS id, u.username AS name,
+              NULL::text AS code, sum(c.n)::int AS count
+         FROM c LEFT JOIN admin_users u ON u.id = c.admin_user_id
+        WHERE c.admin_user_id IS NOT NULL
+        GROUP BY c.admin_user_id, u.username
+       UNION ALL
+       SELECT 'line', c.line_user_id, s.name, s.salesperson_id, sum(c.n)::int
+         FROM c LEFT JOIN salesperson s ON s.user_id = c.line_user_id
+        WHERE c.line_user_id IS NOT NULL
+        GROUP BY c.line_user_id, s.name, s.salesperson_id
+       UNION ALL
+       SELECT 'none', NULL, NULL, NULL, sum(c.n)::int
+         FROM c WHERE c.admin_user_id IS NULL AND c.line_user_id IS NULL
+       HAVING count(*) > 0
+        ORDER BY 5 DESC`,
+      [dateFrom, dateTo]);
+    return rows;
+  } catch (err) { logErr('getApiLogCallers', err); return []; }
 }
 
 /**
@@ -1752,7 +1795,8 @@ export async function getApiLogStats(dateFrom: string, dateTo: string): Promise<
     pool.query(
       `SELECT id::text AS id, created_at, request_id, method, path,
               status_code, duration_ms, queue_waited_ms, line_user_id,
-              (SELECT username FROM admin_users u WHERE u.id = api_logs.admin_user_id) AS admin_username
+              (SELECT username FROM admin_users u WHERE u.id = api_logs.admin_user_id) AS admin_username,
+              (SELECT s.name FROM salesperson s WHERE s.user_id = api_logs.line_user_id) AS line_user_name
          FROM api_logs WHERE ${range}
         ORDER BY duration_ms DESC LIMIT 20`, p),
 
