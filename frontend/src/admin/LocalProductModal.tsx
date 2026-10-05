@@ -1,9 +1,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  หน้าต่าง "เพิ่มสินค้าใหม่" / "แก้ไขสินค้าเพิ่มเอง" — เฟส J6 ของ docs/plan-local-products.md (§13)
 //
-//  **หน้าต่างเดียว สองทางเข้า** (ไม่มีฟอร์มสองชุด):
+//  **หน้าต่างเดียว สามทางเข้า** (ไม่มีฟอร์มชุดที่สอง):
 //    1. หน้าขอใบเสนอราคา — แถว "+ เพิ่มสินค้าใหม่" ท้ายรายการผลค้นสินค้า ⇒ เพิ่มเสร็จ = ใส่ลงแถวนั้นทันที
 //    2. หน้า "สินค้าเพิ่มเอง" — ปุ่ม "เพิ่มสินค้าใหม่" + ไอคอนแก้ไขในแถว
+//    3. หน้าคำนวณราคา — ปุ่ม "เพิ่มเป็นสินค้าใหม่" ใต้ราคา (`fromPricing` · mockup `pricing-add-product` รอบ 3
+//       ที่เจ้าของยืนยัน 2026-10-02) ⇒ model = รหัสที่คิด · ราคาครบ = เติมราคาให้ · ตัวเลือกนอกรหัส = เติม Description
+//       · รหัสที่มีในระบบแล้ว **หน้าคำนวณราคาเตือนและปิดปุ่มเองก่อนเปิดหน้าต่าง** — กล่อง "model นี้มีอยู่แล้ว"
+//         ข้างล่างยังอยู่เป็นตาข่าย (มีคนเพิ่มแทรกระหว่างนั้น) และ server ตัดสินซ้ำด้วย 409 เหมือนเดิม
 //  หน้าตาตาม mockup `local-product-add` ที่เจ้าของยืนยัน 2026-10-02 (+ ช่อง % ราคาขั้นต่ำ รอบเดียวกัน)
 //
 //  ── กรอกจริงสองช่อง: model + ราคาขาย ───────────────────────────────────────
@@ -17,7 +21,9 @@
 //  · **คำเตือน "ระบบไม่แน่ใจรหัสนี้" + ช่องติ๊ก "ตรวจรหัสแล้ว"** (tier `max_plus_one`) — เจ้าของเอาป้ายเตือนออกจาก
 //    หน้ารายการเพราะ "คนต้องตรวจก่อนกดยืนยันก่อนเพิ่มสินค้าอยู่แล้ว" ⇒ ที่นี่คือจุดเดียวที่เหลือ (แผน §4.1)
 //  · **ต้นแบบที่เลือกให้ต้องโชว์ชื่อ + รหัส + ปุ่ม "เปลี่ยน" เสมอ** — ตระกูลรวมอย่าง Buy to Sell เลือกพลาดได้ (§13.2)
-//  · **ราคา 0 ใช้ไม่ได้** — ผลคิดราคาที่ไม่ใช่ `priced` หรือได้ 0 ไม่มีปุ่ม "ใช้ราคานี้" (§13.5)
+//  · **ราคาไม่ครบ/ราคา 0 ไม่เติมให้** — ปุ่มคิดราคา (สีหลัก) เติมราคาลงช่องราคาขายทันทีเฉพาะผลที่ `isFullPrice()`
+//    (เจ้าของสั่ง 2026-10-02 "ใส่ราคาที่คิดได้ในช่องได้เลย ไม่ต้องกดใช้ราคาอีก" · เดิมมีปุ่ม "ใช้ราคานี้" §13.5)
+//    ไม่ครบ = กล่องเหลืองบอกเหตุผล ช่องราคาคงค่าเดิม · ปุ่มคิดราคาสีหลักเป็นปุ่มที่สองของหน้าต่างตามที่เจ้าของสั่ง
 //
 //  ── ช่องรหัสสินค้า (โหมดเพิ่ม · mockup รอบ 7 ที่เจ้าของยืนยัน 2026-10-02) ─────────────────
 //  · ช่องเดียวเสมอ: เติมรหัสที่ระบบตั้งให้ และแก้ในช่องได้เลย — ป้าย "อัตโนมัติ"/"กำหนดเอง" + ลิงก์ "ใช้รหัสที่ระบบตั้ง"
@@ -36,7 +42,8 @@ import { Plus, Pencil, Calculator, Loader2, Lock, Search, ChevronRight } from 'l
 import { Modal } from './Modal';
 import { Button } from './Button';
 import { describeApiError } from './apiError';
-import type { PickedProduct } from './localProducts';
+import { notifyBadgesChanged } from './badgeRefresh';
+import { isFullPrice, type PickedProduct } from './localProducts';
 
 interface ParentBrief {
   product_template_id: number;
@@ -100,17 +107,29 @@ type PriceResult =
   | { kind: 'none'; why: string }
   | { kind: 'error'; message: string };
 
+/** ของที่หน้าคำนวณราคาส่งมาให้เติม (ทางเข้าที่ 3) — คนแก้ได้ทุกช่องเหมือนพิมพ์เอง */
+export interface FromPricing {
+  /** ราคาครบ = ราคาที่คิดได้ + เล่มที่คิด · `null` = ราคาไม่ครบ ⇒ ไม่เติม ให้กรอกเอง (ราคาครึ่งเดียวห้ามหลุดเข้าใบ) */
+  price: { price: number; revision: number | null } | null;
+  /** ตัวเลือกนอกรหัสที่อยู่ในราคาแต่ไม่อยู่ใน model — ว่าง = ไม่มี */
+  description: string;
+  /** ตัวเลือกนอกรหัสชุดเดียวกับที่หน้าคำนวณราคาส่งไปคิด — ปุ่มคิดราคาในหน้าต่างส่งไปด้วย ไม่งั้นได้ราคาที่ไม่รวมของเหล่านี้ */
+  picks?: Record<string, unknown>;
+}
+
 interface Props {
   /** `null` = เพิ่มใหม่ · มีค่า = แก้ไข (product_template_id ของแถว local) */
   editId?: number | null;
   /** คำที่พิมพ์ค้างในช่องค้น — เป็น model ตั้งต้น (โหมดเพิ่ม) */
   initialModel?: string;
+  /** เปิดจากหน้าคำนวณราคา — ดูหัวไฟล์ ทางเข้าที่ 3 */
+  fromPricing?: FromPricing;
   /** คำบนปุ่มบันทึกของโหมดเพิ่ม — ในใบ = "เพิ่มและใส่ลงใบ" · หน้ารายการ = "เพิ่มสินค้า" */
   saveLabel?: string;
   authHeaders: Record<string, string>;
   onClose: () => void;
-  /** บันทึกสำเร็จ — ในใบ: ใส่ลงแถว · หน้ารายการ: โหลดใหม่ */
-  onSaved: (p: PickedProduct) => void;
+  /** บันทึกสำเร็จ — ในใบ: ใส่ลงแถว · หน้ารายการ: โหลดใหม่ · หน้าคำนวณราคา: แถบ "เพิ่มแล้ว" พร้อมรหัส (`ref`) */
+  onSaved: (p: PickedProduct, ref: string) => void;
   /** model ซ้ำกับสินค้าที่มีอยู่ ⇒ "ใช้สินค้านี้ในใบ" (มีเฉพาะทางเข้าจากใบ) */
   onUseExisting?: (p: PickedProduct) => void;
 }
@@ -121,7 +140,9 @@ const INPUT_CLS =
   'w-full h-9 px-3 rounded-xl border border-slate-200 bg-card text-sm text-slate-800 outline-none ' +
   'focus:border-[var(--brand-fg)] focus:ring-2 focus:ring-[var(--brand-fg)]/20 ' +
   'disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed';
-const LABEL_CLS = 'flex items-center gap-1.5 text-xs font-semibold text-slate-600 mb-1.5';
+// หัวช่องสูงตายตัว (h-5 = 20px) — ป้ายอย่าง "จากสมุดราคา" (~19px) สูงกว่าตัวหนังสือเปล่า (16px) ถ้าปล่อยตามเนื้อหา
+// ช่องใต้หัวที่มีป้ายจะต่ำกว่าช่องข้าง ๆ 3px (เจ้าของทัก 2026-10-02 · ด่าน diag:pricing-add-ui "แถวราคา")
+const LABEL_CLS = 'flex items-center gap-1.5 h-5 text-xs font-semibold text-slate-600 mb-1.5';
 const HINT_CLS = 'text-[11px] text-slate-400 mt-1';
 const TAG = 'inline-block px-1.5 py-0.5 rounded-md border text-[10px] font-semibold whitespace-nowrap';
 const BOX = 'rounded-xl border px-3 py-2 text-xs leading-relaxed';
@@ -150,12 +171,12 @@ const INHERITED_LABEL: [string, string][] = [
 
 /** แปลงคำตอบของ `POST /price` เป็นสิ่งที่จอโชว์ — ไม่คิดเลขเอง แค่หยิบของที่ตัวคิดราคาคืนมา */
 function toPriceResult(body: {
-  parsed?: { problems?: string[] };
+  parsed?:{ problems?: string[]; parts?: { kind: string; text?: string; reads?: string }[] } | null;
   outcome?: {
     status: string;
     unitPrice: number;
     breakdown?: { label: string; detail?: string; amount: number }[];
-    violations?: { message: string }[];
+    violations?: { message: string; level?: string; partial?: boolean }[];
   } | null;
   revision?: number | null;
 }): PriceResult {
@@ -163,7 +184,8 @@ function toPriceResult(body: {
   if (!o) {
     return { kind: 'none', why: (body.parsed?.problems ?? []).join(' · ') };
   }
-  if (o.status === 'priced' && o.unitPrice > 0) {
+  // เกณฑ์เดียวกับปุ่ม "เพิ่มเป็นสินค้าใหม่" ของหน้าคำนวณราคา — ผลนี้ถูกเติมลงช่องเองแล้ว ราคาครึ่งเดียวต้องไม่ผ่าน
+  if (isFullPrice(body)) {
     return {
       kind: 'priced',
       price: o.unitPrice,
@@ -171,11 +193,17 @@ function toPriceResult(body: {
       revision: body.revision ?? null,
     };
   }
-  return { kind: 'partial', price: o.unitPrice, notes: (o.violations ?? []).map((v) => v.message) };
+  const notes = [
+    ...(o.violations ?? []).map((v) => v.message),
+    ...(body.parsed?.parts ?? []).filter((p) => p.kind === 'unknown' || p.kind === 'choose')
+      .map((p) => `ยังไม่รวมในราคา — ${p.text ?? ''}${p.reads ? ` — ${p.reads}` : ''}`),
+    ...(body.parsed?.problems ?? []),
+  ];
+  return { kind: 'partial', price: o.unitPrice, notes };
 }
 
 export const LocalProductModal: React.FC<Props> = ({
-  editId = null, initialModel = '', saveLabel = 'เพิ่มสินค้า', authHeaders, onClose, onSaved, onUseExisting,
+  editId = null, initialModel = '', fromPricing, saveLabel = 'เพิ่มสินค้า', authHeaders, onClose, onSaved, onUseExisting,
 }) => {
   const editing = editId !== null;
 
@@ -200,7 +228,7 @@ export const LocalProductModal: React.FC<Props> = ({
   const [nameEdited, setNameEdited] = useState(false);
   const [name, setName] = useState('');
 
-  const [price, setPrice] = useState('');
+  const [price, setPrice] = useState(!editing && fromPricing?.price ? String(fromPricing.price.price) : '');
   const [pct, setPct] = useState(String(DEFAULT_MIN_PCT));
   /** คนแก้ % เอง (หรือพิมพ์บาทเอง) แล้ว — คำตอบของ /suggest ที่มาทีหลังต้องไม่ทับ */
   //  เป็น ref ไม่ใช่ state — เปลี่ยนแล้วต้องไม่ทำให้ effect ของ /suggest ยิงใหม่
@@ -210,11 +238,12 @@ export const LocalProductModal: React.FC<Props> = ({
   const [quote, setQuote] = useState<PriceResult | null>(null);
   const [quoting, setQuoting] = useState(false);
   /** ราคาจากสมุดที่ได้ล่าสุด — ส่งให้ server ตัดสินที่มาของราคา · `undefined` (โหมดแก้ไข) = ไม่แตะของเดิม */
+  //  เปิดจากหน้าคำนวณราคาพร้อมราคาครบ = ราคาจากสมุดราคาเหมือนกดปุ่มคิดราคาเองแล้ว (server ตัดสินที่มาจากค่านี้)
   const [bookPrice, setBookPrice] = useState<{ price: number; revision: number | null } | null | undefined>(
-    editing ? undefined : null,
+    editing ? undefined : fromPricing?.price ?? null,
   );
 
-  const [desc, setDesc] = useState('');
+  const [desc, setDesc] = useState(editing ? '' : fromPricing?.description ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -403,7 +432,11 @@ export const LocalProductModal: React.FC<Props> = ({
       const res = await fetch('/api/admin/webquote/products/price', {
         method: 'POST',
         headers: { ...authHeaders, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: model.trim() }),
+        // model ยังเป็นรหัสที่หน้าคำนวณราคาคิด ⇒ ส่งตัวเลือกนอกรหัสชุดเดิมไปด้วย ราคาจึงตรงกับที่เติมให้
+        body: JSON.stringify({
+          code: model.trim(),
+          ...(fromPricing?.picks && model.trim() === initialModel.trim() ? { picks: fromPricing.picks } : {}),
+        }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -413,17 +446,16 @@ export const LocalProductModal: React.FC<Props> = ({
       const r = toPriceResult(body);
       setQuote(r);
       setBookPrice(r.kind === 'priced' ? { price: r.price, revision: r.revision } : null);
+      // ราคาครบ = ใส่ลงช่องราคาขายเลย แล้วค่อยแก้ตัวเลขเอา · ราคาขั้นต่ำกลับไปคิดจาก % (เหมือนพิมพ์ราคาขายใหม่)
+      if (r.kind === 'priced') {
+        setPrice(String(r.price));
+        setMinManual(null);
+      }
     } catch {
       setQuote({ kind: 'error', message: 'ติดต่อเซิร์ฟเวอร์ไม่ได้ — ลองใหม่อีกครั้ง' });
     } finally {
       setQuoting(false);
     }
-  };
-
-  const applyBookPrice = () => {
-    if (quote?.kind !== 'priced') return;
-    setPrice(String(quote.price));
-    setMinManual(null);
   };
 
   /** model ซ้ำ ⇒ หาแถวเดิมจากช่องค้นตัวเดียวกับใบ (ได้ราคา/สต็อกครบ) แล้วส่งให้ใบใช้ */
@@ -493,7 +525,11 @@ export const LocalProductModal: React.FC<Props> = ({
         return;
       }
       const p = body.product;
-      onSaved({ product_id: Number(p.product_template_id), model: String(p.model), name: String(p.name), price: Number(p.sales_price), stock: 0 });
+      notifyBadgesChanged();   // ตัวเลขข้างเมนู "สินค้าเพิ่มเอง"
+      onSaved(
+        { product_id: Number(p.product_template_id), model: String(p.model), name: String(p.name), price: Number(p.sales_price), stock: 0 },
+        String(p.internal_reference ?? ''),
+      );
     } catch {
       setError('ติดต่อเซิร์ฟเวอร์ไม่ได้ — ลองใหม่อีกครั้ง');
     } finally {
@@ -642,11 +678,9 @@ export const LocalProductModal: React.FC<Props> = ({
         <div className="flex items-center gap-2">
           <span className="text-emerald-800">ราคาจากสมุดราคา</span>
           <span className="text-base font-bold text-emerald-700 tabular-nums">฿{money2(quote.price)}</span>
-          <span className="ml-auto">
-            {Math.round(priceNum * 100) === Math.round(quote.price * 100)
-              ? <span className="text-[11px] text-emerald-700">ใช้แล้ว</span>
-              : <Button variant="primary" onClick={applyBookPrice}>ใช้ราคานี้</Button>}
-          </span>
+          {Math.round(priceNum * 100) === Math.round(quote.price * 100) && (
+            <span className="ml-auto text-[11px] text-emerald-700">ใส่ในช่องราคาขายแล้ว · แก้ตัวเลขได้</span>
+          )}
         </div>
         <div className="mt-1.5 pt-1.5 border-t border-dashed border-emerald-200 space-y-0.5">
           {quote.lines.map((l, i) => (
@@ -712,6 +746,9 @@ export const LocalProductModal: React.FC<Props> = ({
                 Model <span className="text-red-500">*</span>
                 {modelLocked && <span className="ml-auto flex items-center gap-1 font-normal text-slate-400"><Lock className="w-3 h-3" /> มีใบอ้างแล้ว</span>}
                 {!editing && sugLoading && <Loader2 className="ml-auto w-3.5 h-3.5 animate-spin text-slate-400" />}
+                {!editing && !sugLoading && fromPricing && model.trim() === initialModel.trim() && (
+                  <span className="ml-auto font-normal text-[11px] text-slate-400">จากรหัสที่คิดราคา</span>
+                )}
               </label>
               <input id="lp-model" autoFocus={!editing} value={model} maxLength={MAX.model}
                      onChange={(e) => onModelChange(e.target.value)} disabled={modelLocked || lockedByOdoo}
@@ -756,11 +793,14 @@ export const LocalProductModal: React.FC<Props> = ({
                     <div className="flex gap-2">
                       <input id="lp-price" inputMode="decimal" placeholder="0.00" value={price} disabled={lockedByOdoo}
                              onChange={(e) => onPriceChange(e.target.value)} className={`${INPUT_CLS} tabular-nums`} />
-                      <Button variant="neutral" icon={Calculator} busy={quoting} disabled={!model.trim() || lockedByOdoo}
+                      <Button variant="primary" icon={Calculator} busy={quoting} disabled={!model.trim() || lockedByOdoo}
                               onClick={() => void runQuote()} className="shrink-0">
                         คิดราคา
                       </Button>
                     </div>
+                    {fromPricing && !fromPricing.price && (
+                      <p className="text-[11px] text-amber-700 mt-1">ราคาจากหน้าคำนวณยังไม่ครบ — ไม่ได้เติมให้</p>
+                    )}
                   </div>
                   <div>
                     <label className={LABEL_CLS} htmlFor="lp-min">
@@ -787,7 +827,11 @@ export const LocalProductModal: React.FC<Props> = ({
                     <Plus className="w-3.5 h-3.5 shrink-0" />
                     {/* ชื่อช่องตามที่เจ้าของสั่ง 2026-10-02 · บรรทัดเดียวเสมอ — จอแคบตัดคำอธิบายด้านขวาแทน */}
                     <span className="whitespace-nowrap">รายละเอียดสินค้า (Description)</span>
-                    <span className="ml-auto min-w-0 truncate text-[11px] text-slate-400" title="ไม่บังคับ · ไม่ลอกจากต้นแบบ">ไม่บังคับ · ไม่ลอกจากต้นแบบ</span>
+                    {fromPricing?.description ? (
+                      <span className="ml-auto min-w-0 truncate text-[11px] text-slate-400" title="ตัวเลือกนอกรหัสอยู่ในราคาแต่ไม่อยู่ใน model">เติมตัวเลือกนอกรหัสให้แล้ว · แก้ได้</span>
+                    ) : (
+                      <span className="ml-auto min-w-0 truncate text-[11px] text-slate-400" title="ไม่บังคับ · ไม่ลอกจากต้นแบบ">ไม่บังคับ · ไม่ลอกจากต้นแบบ</span>
+                    )}
                   </summary>
                   <div className="px-3 pb-3">
                     <textarea value={desc} onChange={(e) => setDesc(e.target.value)} maxLength={MAX.sales_description} rows={3}

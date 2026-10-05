@@ -43,6 +43,7 @@ import { ComboBox, type ComboOption } from './PersonComboBox';
 import { RevisePicker } from './RevisePicker';
 import { ConfirmIssueModal } from './ConfirmIssueModal';
 import { describeApiError } from './apiError';
+import { notifyBadgesChanged } from './badgeRefresh';
 import { LocalContactModal, DeleteContactModal } from './LocalContactModal';
 import { isLocalContactId } from './localContacts';
 import { LocalProductModal } from './LocalProductModal';
@@ -3246,6 +3247,7 @@ export const QuoteRequest: React.FC<{ canAddProduct?: boolean }> = ({ canAddProd
       }
       setDeleteContact(null);
       setContactId((cur) => (cur === gone ? null : cur));
+      notifyBadgesChanged();
       await reloadContacts();
     } catch {
       setDeleteError('ติดต่อเซิร์ฟเวอร์ไม่ได้ — ลองใหม่อีกครั้ง');
@@ -3906,6 +3908,8 @@ export const QuoteRequest: React.FC<{ canAddProduct?: boolean }> = ({ canAddProd
         }),
       });
       if (!res.ok) throw new Error(await readError(res, needsApproval ? 'ส่งขออนุมัติไม่สำเร็จ' : 'ออกใบเสนอราคาไม่สำเร็จ'));
+      // คำขออนุมัติใหม่ / คำขอที่ถูกตีกลับถูกแทนที่ — ตัวเลขข้างเมนู "อนุมัติราคา" เปลี่ยนได้ทั้งสองทาง
+      notifyBadgesChanged();
       const data = await res.json();
       const webId = String(data.web_user_id ?? webUserId);
       setWebUserId(webId);
