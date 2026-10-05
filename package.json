@@ -81,6 +81,7 @@
     "diag:pricing-import": "tsx scripts/diag/pricingImport.ts",
     "diag:pb-ui": "tsx scripts/diag/pricebookUiProbe.ts",
     "diag:pricing-coverage": "tsx scripts/diag/pricingCoverage.ts",
+    "diag:pricing-diff": "tsx scripts/diag/pricingDiff.ts",
     "pricebook:import": "tsx scripts/pricebook/importer.ts",
     "pricebook:xlsx": "tsx scripts/pricebook/xlsx.ts",
     "pricebook:calc": "tsx scripts/pricebook/cli.ts",
