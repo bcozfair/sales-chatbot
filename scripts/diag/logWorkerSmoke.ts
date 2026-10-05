@@ -11,9 +11,16 @@
 //    (ง) ค่า env ที่อ่านไม่ออกต้องตกกลับเป็นค่าปลอดภัย ไม่ใช่ค่าที่ทำให้ตารางโตเงียบ ๆ
 //    (จ) migration ขึ้นครบและ trigger ติดถูกตาราง — โดยเฉพาะ "ตารางต้องห้าม" ต้องสะอาด
 //    (ฉ) worker ยังหายใจอยู่ (cursor ไม่ค้าง) และไม่มีความลับหลุดลง system_logs
+//    (ช) worker ที่รันอยู่โหลดโค้ดชุดเดียวกับบนดิสก์ — มันรันบน host จากทรีหลัก ไม่ได้มากับ image
+//        ⇒ merge แล้วไม่รีสตาร์ท = รันโค้ดเก่าต่อเงียบ ๆ (เกิดจริง: ตัวที่เริ่ม 2026-09-22 ไม่มี heartbeat
+//        ของ 2026-09-29 อยู่ 13 วัน ⇒ ขึ้น "ค้าง" ทุกครั้งที่แอปเงียบเกิน 15 นาที ทั้งที่ทำงานปกติ)
 //
 //  ให้รันซ้ำทุกครั้งที่แตะ scripts/logworker/ หรือ migration ทั้ง 3 ไฟล์ของแผน log
 // ─────────────────────────────────────────────────────────────────────────────
+import { execFileSync } from 'child_process';
+import { readFileSync, readdirSync, statSync } from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { pool } from '../../config/db.js';
 import { getWorkerStatus } from '../../db/logRepositories.js';
 import { parseLevel, parseDays, levelRank } from '../logworker/config.js';
@@ -126,9 +133,77 @@ ok('เวลาไทย 06:59 ยังเป็นวันเดิม',
   thaiToday(new Date('2026-09-02T16:59:00Z')) === '2026-09-02');
 ok('เลื่อนวันข้ามเดือนถูกต้อง', shiftDay('2026-09-01', -1) === '2026-08-31');
 
-// ── 8. สถานะบน DB จริง ───────────────────────────────────────────────────────
+const ROOT = fileURLToPath(new URL('../../', import.meta.url));
+
+/**
+ * ตารางที่ต้องติด trigger บันทึกการแก้ไข — อ่านจากไฟล์ migration ไม่ฝังตัวเลขไว้ในด่าน
+ * เคยฝัง "11 ตาราง" แล้ว migration ทีหลังเพิ่มอีก 3 ตัวตามแบบ (local_contacts · customer_quote_company
+ * · local_products) ด่านจึงล้มค้างบน main อยู่หลายสัปดาห์จนคนเลิกเชื่อผล
+ * รองรับสองรูปที่มีอยู่: วนจาก VALUES (ไฟล์แรกของแผน log) และ CREATE TRIGGER ตรง ๆ ต่อตาราง
+ */
+function auditedTablesFromMigrations(): Set<string> {
+  const dir = path.join(ROOT, 'migrations/changes');
+  const tables = new Set<string>();
+  for (const f of readdirSync(dir).filter(n => n.endsWith('.sql'))) {
+    const sql = readFileSync(path.join(dir, f), 'utf8');
+    if (!sql.includes('trg_audit_ins')) continue;
+    for (const m of sql.matchAll(/trg_audit_ins AFTER INSERT ON public\.([a-z_]+)/g)) tables.add(m[1]);
+    for (const m of sql.matchAll(/^\s*\('([a-z_]+)',\s*'[a-z_]+',\s*'[a-z_]+',\s*'[a-z_]+'\)/gm)) tables.add(m[1]);
+  }
+  return tables;
+}
+
+/** ไฟล์ทุกตัวที่ worker โหลดจริง — ไล่ import แบบ relative จาก index.ts (แพ็กเกจใน node_modules ไม่นับ) */
+function workerSources(entry: string): string[] {
+  const seen = new Set<string>();
+  const queue = [entry];
+  while (queue.length > 0) {
+    const file = queue.pop()!;
+    if (seen.has(file)) continue;
+    seen.add(file);
+    for (const m of readFileSync(file, 'utf8').matchAll(/from '(\.{1,2}\/[^']+)\.js'/g)) {
+      queue.push(path.resolve(path.dirname(file), `${m[1]}.ts`));
+    }
+  }
+  return [...seen];
+}
+
+/** โปรเซสของ systemd unit logworker — null = ไม่มี systemd/ไม่ได้รัน (เครื่อง dev · ในคอนเทนเนอร์) */
+function runningWorker(): { pid: string; entry: string; startedAt: Date } | null {
+  try {
+    const pid = execFileSync('systemctl', ['show', 'logworker', '-p', 'MainPID', '--value'], { encoding: 'utf8' }).trim();
+    if (!/^[1-9]\d*$/.test(pid)) return null;
+    const exec = execFileSync('systemctl', ['show', 'logworker', '-p', 'ExecStart', '--value'], { encoding: 'utf8' });
+    const entry = exec.match(/\s(\/\S+\/scripts\/logworker\/index\.ts)\b/)?.[1];
+    if (!entry) return null;
+    const ageSec = Number(execFileSync('ps', ['-o', 'etimes=', '-p', pid], { encoding: 'utf8' }).trim());
+    if (!Number.isFinite(ageSec)) return null;
+    return { pid, entry, startedAt: new Date(Date.now() - ageSec * 1000) };
+  } catch {
+    return null;
+  }
+}
+
+// ── 8. โค้ดที่ worker รันอยู่ ────────────────────────────────────────────────
+console.log('\n── 8. worker รันโค้ดชุดล่าสุดบนดิสก์ ──');
+const worker = runningWorker();
+if (!worker) {
+  console.log('   (ข้าม — ไม่พบ systemd unit logworker ที่รันอยู่บนเครื่องนี้)');
+} else {
+  // เทียบ mtime กับเวลาเริ่มโปรเซส: git เขียนไฟล์ใหม่เฉพาะตัวที่เนื้อเปลี่ยน ⇒ mtime หลังเวลาเริ่ม = ยังไม่ได้โหลด
+  // ใช้ทรีที่ unit ชี้ (ExecStart) ไม่ใช่ทรีที่รันด่าน — รันจาก worktree ก็ยังตรวจตัวจริง
+  const newer = workerSources(worker.entry)
+    .filter(f => statSync(f).mtime > worker.startedAt)
+    .map(f => path.relative(path.resolve(path.dirname(worker.entry), '../..'), f));
+  ok('ไฟล์ที่ worker ใช้ไม่ถูกแก้หลังเวลาที่มันเริ่มทำงาน', newer.length === 0,
+    newer.length === 0
+      ? `เริ่ม ${worker.startedAt.toLocaleString('sv-SE', { timeZone: 'Asia/Bangkok' })}`
+      : `${newer.join(', ')} ใหม่กว่า → sudo systemctl restart logworker`);
+}
+
+// ── 9. สถานะบน DB จริง ───────────────────────────────────────────────────────
 async function dbChecks(): Promise<void> {
-  console.log('\n── 8. migration และ trigger บน DB จริง ──');
+  console.log('\n── 9. migration และ trigger บน DB จริง ──');
 
   const { rows: missing } = await pool.query<{ t: string }>(
     `SELECT t FROM unnest(ARRAY['system_logs','log_worker_state','audit_logs','traffic_daily']) t
@@ -177,15 +252,22 @@ async function dbChecks(): Promise<void> {
 
   // statement-level + transition table รวมหลาย event ในคำสั่งเดียวไม่ได้ ⇒ ตารางละ 3 ตัว
   // ขาดตัวใดตัวหนึ่งไป = มีช่องทางแก้ข้อมูลที่ไม่ถูกบันทึก ซึ่งมองไม่เห็นจากหน้าจอ
-  const { rows: cnt } = await pool.query<{ tables: number; triggers: number }>(
-    `SELECT (SELECT count(*)::int FROM (
-               SELECT tgrelid FROM pg_trigger
-                WHERE tgname IN ('trg_audit_ins','trg_audit_upd','trg_audit_del')
-                GROUP BY tgrelid HAVING count(*) = 3) s) AS tables,
-            (SELECT count(*)::int FROM pg_trigger WHERE tgname LIKE 'trg_audit%') AS triggers`);
-  ok('ตารางตั้งค่าติดครบตารางละ 3 ตัว (ins/upd/del) รวม 11 ตาราง',
-    cnt[0].tables === 11 && cnt[0].triggers === 33,
-    `${cnt[0].tables} ตาราง / ${cnt[0].triggers} trigger`);
+  const expected = auditedTablesFromMigrations();
+  ok('อ่านรายชื่อตารางจากไฟล์ migration ได้ (อย่างน้อย 11 ตัวของไฟล์แรก)', expected.size >= 11,
+    `${expected.size} ตาราง`);
+  const { rows: trg } = await pool.query<{ tbl: string; names: string[] }>(
+    `SELECT c.relname AS tbl, array_agg(tg.tgname::text ORDER BY tg.tgname) AS names
+       FROM pg_trigger tg JOIN pg_class c ON c.oid = tg.tgrelid
+      WHERE tg.tgname LIKE 'trg_audit%' GROUP BY c.relname`);
+  const FULL = 'trg_audit_del,trg_audit_ins,trg_audit_upd';
+  const have = new Map(trg.map(r => [r.tbl, r.names.join(',')]));
+  const notFull = [...expected].filter(t => have.get(t) !== FULL);
+  const extra = [...have.keys()].filter(t => !expected.has(t));
+  ok(`ตารางตามไฟล์ migration ติดครบตารางละ 3 ตัว (ins/upd/del) รวม ${expected.size} ตาราง`,
+    notFull.length === 0 && extra.length === 0,
+    [notFull.length ? `ขาด/ไม่ครบ: ${notFull.map(t => `${t}[${have.get(t) ?? '-'}]`).join(', ')}` : '',
+     extra.length ? `ไม่มีในไฟล์ migration: ${extra.join(', ')}` : '',
+    ].filter(Boolean).join(' · ') || `${have.size} ตาราง / ${trg.reduce((n, r) => n + r.names.length, 0)} trigger`);
 
   const { rows: old } = await pool.query<{ n: number }>(
     `SELECT (SELECT count(*)::int FROM pg_trigger WHERE tgname = 'trg_audit')
