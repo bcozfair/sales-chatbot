@@ -603,9 +603,9 @@ function grammar(spec: TsFamilySpec, loose = false): RegExp {
 const GRAMMARS = new Map(TS_CATALOG.map((s) => [s.family, grammar(s)]));
 const LOOSE_GRAMMARS = new Map(TS_CATALOG.map((s) => [s.family, grammar(s, true)]));
 
-/** รหัสสองตัวเป็นรหัสเดียวกันไหม **ตามที่คนอ่าน** — ไม่สนช่องว่างและตัวพิมพ์ (`x` = `X`) */
+/** รหัสสองตัวเป็นรหัสเดียวกันไหม **ตามที่คนอ่าน** — ไม่สนช่องว่างและตัวพิมพ์ (`x` = `X` = `×`) */
 export function sameTsCode(a: string, b: string): boolean {
-  const canon = (s: string) => s.toUpperCase().replace(/\s+/g, '').replace(/[”“″"]/g, '');
+  const canon = (s: string) => s.toUpperCase().replace(/\s+/g, '').replace(/[”“″"]/g, '').replace(/×/g, 'X');
   return canon(a) === canon(b);
 }
 

@@ -120,6 +120,10 @@ for (const width of [1280, 390]) {
     const hscroll = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
     ok(`ชีต ${sheet}: ทุกราคาในเล่มมีช่องบนจอ · ไม่เลื่อนซ้ายขวาทั้งหน้า`, filled === want && !hscroll, `ช่องที่มีเลข ${filled} / ราคาในเล่ม ${want}${hscroll ? ' · หน้าเลื่อนข้าง' : ''}`);
     await page.screenshot({ path: join(shots, `${width}-${sheet.replace(/[^\w.-]+/g, '_')}.png`), fullPage: true });
+    // เปิดมายังไม่ได้แก้อะไร = ไม่มีช่องที่บันทึกไม่ได้ — กฎที่ยังไม่มีราคา (PL-5 ของ BH) ว่างได้
+    // (เดิมช่องว่างของ PL-5 ถูกนับเป็นช่องผิด ⇒ ชีต BH ทั้งหน้ากด "ตรวจก่อนบันทึก" ไม่ได้ · แก้ 2026-10-05)
+    const blockedAtOpen = await page.evaluate(() => (document.body.innerText.match(/ยังบันทึกไม่ได้[^\n]*/) ?? [''])[0]);
+    ok(`  เปิดมายังไม่แก้ → ไม่มีช่องที่บันทึกไม่ได้`, blockedAtOpen === '', blockedAtOpen);
 
     if (width === 1280) {
       // แก้ช่องแรกที่มีเลข → หน้าตรวจเห็น 1 รายการ เดิม → ใหม่ → กลับไปแก้ต่อ → ย้อนการแก้ (ไม่กดบันทึก)
@@ -153,6 +157,23 @@ for (const width of [1280, 390]) {
           return !!b?.disabled && document.body.innerText.includes('ยังบันทึกไม่ได้');
         });
         ok('  พิมพ์ "12a" → ขึ้นเตือนและกดตรวจก่อนบันทึกไม่ได้', blocked);
+        await clickButton(/^ย้อนการแก้$/);
+      }
+      // กฎที่ยังไม่มีราคา (PL-5 ของ BH) — กรอกทีหลังได้ · หน้าตรวจเห็น "ว่าง (ยังไม่มีราคา) → ราคาที่กรอก" (ไม่กดบันทึก)
+      const pending = await page.evaluate(() => {
+        const el = [...document.querySelectorAll('section input[inputmode="decimal"]')]
+          .find((x) => (x as HTMLInputElement).placeholder === 'ยังไม่มีราคา' && (x as HTMLInputElement).value === '') as HTMLInputElement | undefined;
+        return el?.getAttribute('aria-label') ?? null;
+      });
+      if (pending) {
+        await page.click(`input[aria-label="${pending.replace(/"/g, '\\"')}"]`);
+        await page.keyboard.type('150');
+        await wait(100);
+        await clickButton(/^ตรวจก่อนบันทึก/);
+        const modal = await text();
+        ok(`  กฎที่ยังไม่มีราคา "${pending}" กรอก 150 → หน้าตรวจเห็นว่าง (ยังไม่มีราคา) → 150`,
+          modal.includes('ตรวจก่อนบันทึก — ชีต') && modal.includes('ยังไม่มีราคา') && /\b150\b/.test(modal));
+        await clickButton(/^กลับไปแก้ต่อ$/);
         await clickButton(/^ย้อนการแก้$/);
       }
     }

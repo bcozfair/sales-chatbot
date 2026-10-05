@@ -282,6 +282,11 @@ async function main(): Promise<void> {
     && !tagged.p.parts.some((x) => x.kind === 'unknown') && tagged.o?.unitPrice === price('BH-01 100x50-220-600W-N').o?.unitPrice);
   check('S### / (HPT) ไม่ลามไปซีรีส์อื่น (scope BH-0*)', parseProductCode('TSK-01(M6)4.8+3M-S007', book).parts.some((x) => x.text === 'S007' && x.kind === 'unknown'));
 
+  // เครื่องหมายคูณ `×` = `x` (เจ้าของสั่ง 2026-10-05) — ขนาดอ่านได้ · ช่องกรอกครบ · ราคาเท่ากัน
+  const times = price('BH-01 113×50-220-750W');
+  check('ขนาด 113×50 = 113x50 (ราคาเท่ากัน · ได้ช่องกรอก)', times.o?.status === 'priced' && !!times.p.form
+    && times.o.unitPrice === price('BH-01 113x50-220-750W').o?.unitPrice && !times.p.parts.some((x) => x.kind === 'unknown'));
+
   const bare = price('BH-01 113x50-220-750W-1.5');
   check('สายเป็นตัวเลขเปล่า = เมตร (1.5 เท่ากับ +1.5M)', rule(bare.o, 'cable_over_30cm')?.status === 'applied'
     && bare.o?.unitPrice === price('BH-01 113x50-220-750W+1.5M').o?.unitPrice && !bare.p.parts.some((x) => x.kind === 'unknown'));

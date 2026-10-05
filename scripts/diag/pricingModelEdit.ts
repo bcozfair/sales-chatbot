@@ -1066,7 +1066,7 @@ console.log('\n── 13. สมุดราคาแบบ Excel ทุกช�
   }
 
   // ค. ราคาของกฎราคาเดียว — ตามชนิด · ว่างไม่ได้ · กฎที่แยกตามแกนใช้ทางนี้ไม่ได้
-  const flat = bh01.adders.find((a) => a.kind === 'flat' && !a.rates);
+  const flat = bh01.adders.find((a) => a.kind === 'flat' && !a.rates && a.amount !== undefined);
   const per = bh01.adders.find((a) => a.kind === 'perUnit' && !a.rates);
   if (flat && per) {
     const na = applyModelEdit(bh01, { adderPrices: { [flat.id]: 999, [per.id]: 7 } }, book);
@@ -1078,6 +1078,15 @@ console.log('\n── 13. สมุดราคาแบบ Excel ทุกช�
       bh01.adders.filter((a) => a.id !== flat.id && a.id !== per.id)));
     check('  ราคาว่างถูกปฏิเสธ (ว่าง ≠ ปิดกฎ)', /ว่างไม่ได้/.test(rejects(() => applyModelEdit(bh01, { adderPrices: { [flat.id]: null } }, book)) ?? ''));
     check('  พิมพ์ไม่ใช่ตัวเลขถูกปฏิเสธ', !!rejects(() => applyModelEdit(bh01, { adderPrices: { [flat.id]: 'abc' } }, book)));
+    // กฎที่ยังไม่เคยมีราคา (PL-5 ของ BH) — ว่างต่อ = คงเดิม ไม่ใช่ข้อผิด · กรอกแล้วได้ราคา (แก้ 2026-10-05:
+    // เดิมช่องว่างของ PL-5 ทำให้ชีต BH ทั้งหน้าบันทึกไม่ได้) — สร้างกฎว่างเองจากกฎที่มีราคา ไม่พึ่งข้อมูลในเล่ม
+    const { amount: _drop, ...emptyRule } = flat;
+    const bhEmpty = { ...bh01, adders: bh01.adders.map((a) => (a.id === flat.id ? emptyRule : a)) };
+    const keep = applyModelEdit(bhEmpty, { adderPrices: { [flat.id]: null } }, book);
+    check('  กฎที่ยังไม่มีราคา ส่งว่าง = คงเดิม (ไม่ถูกปฏิเสธ · ไม่กลายเป็น 0)',
+      same(keep.adders.find((a) => a.id === flat.id), emptyRule));
+    const filled = applyModelEdit(bhEmpty, { adderPrices: { [flat.id]: 150 } }, book);
+    check('  กฎที่ยังไม่มีราคา กรอก 150 → ราคา 150', filled.adders.find((a) => a.id === flat.id)?.amount === 150);
   }
   const tsk04 = Object.values(book.models).find((m) => /^TS.-04$/.test(m.code));
   const rated = tsk04?.adders.find((a) => a.rates);
