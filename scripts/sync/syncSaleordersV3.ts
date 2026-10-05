@@ -195,20 +195,16 @@ export async function selectStorable(db: Pick<Client, 'query'>, orders: OrderSna
 export type SaleOrderApiVersion = 'v2' | 'v3';
 
 /**
- * SALEORDER_API_VERSION = auto (ค่าเริ่มต้น) | v2 | v3
- * auto = v3 ต่อเมื่อการกวาดครั้งแรกของ v3 จบแล้ว (แถว sale_order_v3 เป็น incremental) ⇒ ขึ้นโค้ดนี้แล้ว
- * ระบบยังเป็น v2 ทุกประการจนกว่าเจ้าของสั่ง backfill และมันจบ · ค่าอื่นที่ไม่รู้จัก = throw (พิมพ์ผิดต้องดัง)
+ * SALEORDER_API_VERSION = v3 (ค่าเริ่มต้น) | v2 (ทางถอย)
+ * ขึ้นโค้ดนี้ = ใช้ v3 ทันที (เจ้าของเคาะ 2026-10-05 — v3 มีทุกอย่างที่ v2 มี ไม่ต้องรอ) ⇒ migration
+ * 2026-10-05_01 ต้องลงก่อน ไม่งั้นรอบใบสั่งขายล้มดัง ๆ ทุกรอบ (assertV3Schema) · รอบแรกของ v3 คือการกวาด
+ * ตั้งแต่ V3_SWEEP_SINCE_ISO ~1.5–2 ชม. — ทำก่อนสลับกล่องตามแผนข้อ 6 ไม่งั้นแอปกวาดเองในคิว sync ของมัน
+ * ค่าอื่นที่ไม่รู้จัก (รวม auto ของร่างแรก) = throw — พิมพ์ผิดต้องดัง ไม่ใช่เงียบกลายเป็นอีกเวอร์ชัน
  */
-export async function resolveSaleOrderApiVersion(): Promise<SaleOrderApiVersion> {
-  const raw = (process.env.SALEORDER_API_VERSION || 'auto').trim().toLowerCase();
+export function resolveSaleOrderApiVersion(): SaleOrderApiVersion {
+  const raw = (process.env.SALEORDER_API_VERSION || 'v3').trim().toLowerCase();
   if (raw === 'v2' || raw === 'v3') return raw;
-  if (raw !== 'auto') throw new Error(`SALEORDER_API_VERSION="${raw}" ไม่รู้จัก — ใช้ได้แค่ auto / v2 / v3`);
-  try {
-    const { rows } = await pool.query(`SELECT sync_mode FROM sync_state WHERE resource = $1`, [V3_STATE_KEY]);
-    return rows[0]?.sync_mode === 'incremental' ? 'v3' : 'v2';
-  } catch {
-    return 'v2'; // ยังไม่มี sync_state (ฐานใหม่) — ทางเดิม
-  }
+  throw new Error(`SALEORDER_API_VERSION="${raw}" ไม่รู้จัก — ใช้ได้แค่ v3 (ค่าเริ่มต้น) / v2`);
 }
 
 async function assertV3Schema(db: Client) {
