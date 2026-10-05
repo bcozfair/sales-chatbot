@@ -235,6 +235,22 @@ for (const width of [1280, 390]) {
   await page.click('button[aria-label="เอา S000 ออก"]');
   await settle();
   ok('กดเอา S000 ออก → รหัสไม่มี -S000', (await codeValue()) === 'TSP-11P 6x50+5M-PU', await codeValue());
+  // TS_-02 / TS_-02-SI (2026-10-05) — อยู่ในช่อง "รุ่น" ต่อเมื่อเล่มในฐานมี TSK-02 แล้ว (`importer.ts --new-models`)
+  const has02 = await page.$eval('select[aria-label="รุ่น"]', (el) => [...(el as HTMLSelectElement).options].some((x) => x.value === 'TS_-02'));
+  if (!has02) {
+    console.log(`  ${DIM}… ช่อง "รุ่น" ยังไม่มี TS_-02 — เล่มในฐานยังไม่มี TSK-02 (ยังไม่ได้เติมลงฐาน) · ข้าม${RESET}`);
+  } else {
+    await typeCode('TSK-02-SI(11.5)5x10+2M');
+    ok('TS_-02-SI ช่องได้ค่าจากรหัส (รุ่นย่อย -SI · เขี้ยวล็อค 11.5 · แกน 5)',
+      (await val('รุ่นย่อย')) === '-SI' && (await val('ขนาดเขี้ยวล็อค')) === '11.5' && (await val('ขนาดแกน')) === '5' && (await shown('รุ่น')).face === 'TS_-02');
+    const priceSi = await text();
+    await choose('รุ่นย่อย', '');
+    body = await text();
+    ok('เปลี่ยนเป็น TS_-02 ธรรมดา → รหัสไม่มี -SI · ราคาเปลี่ยน · เตือนว่า 11.5 ทำได้เฉพาะ TS-02-SI',
+      (await codeValue()) === 'TSK-02(11.5)5x10+2M' && body !== priceSi && body.includes('เฉพาะ TS-02-SI'), await codeValue());
+    await choose('ขนาดเขี้ยวล็อค', '12');
+    ok('เลือกเขี้ยวล็อค 12 → รหัสเปลี่ยนตาม · คำเตือนหาย', (await codeValue()) === 'TSK-02(12)5x10+2M' && !(await text()).includes('เฉพาะ TS-02-SI'), await codeValue());
+  }
   await choose('รุ่น', 'BH-01');
   ok('สลับจาก TS กลับไป BH ได้จากช่องเดียวกัน', (await page.$('select[aria-label="การออกขั้วไฟ"]')) !== null && (await codeValue()).startsWith('BH-01 '), await codeValue());
   // ── ตั้งแต่ 2026-10-01 ทุกรหัสใช้ช่องกรอกแบบเดียว อะไรไม่ตรงแค่แจ้งเตือน (mockup `pricing-one-form.html`) ──

@@ -22,10 +22,12 @@
 //    · งานที่จะ **เขียนสมุดราคาลงฐาน** ด้วย (importer --catalog/--new-rules …) ให้สร้างเล่มใหม่เป็นไฟล์ก่อน
 //      (`importer.ts … --out <ไฟล์.json>`) แล้ว `-- --head-book <ไฟล์.json>` ⇒ ฝั่งปัจจุบันคิดด้วยเล่มนั้น
 //      ได้ผลกระทบก่อนเขียนฐานจริง · เปลี่ยนแค่เล่ม ไม่ได้แก้โค้ด ⇒ ใส่ `--base HEAD` คู่กัน
+//    · งานที่จะเขียน **แถวรหัสย่อยจาก catalog-subcodes.json** ด้วย (`seedCatalogSubcodes --apply` · รุ่นใหม่ TS_-02 2026-10-05)
+//      ใส่ `--head-seed-subcodes` ⇒ ฝั่งปัจจุบันเติมแถวที่ฐานยังไม่มี (แถวในฐานชนะไฟล์) · ฝั่งก่อนแก้ใช้ตารางในฐานล้วนเหมือนเดิม
 //
 //  รัน:  npm run diag:pricing-diff                         (บน host — ต้องมี git · ~1 นาที)
 //        npm run diag:pricing-diff -- --base <ref>
-//        npm run diag:pricing-diff -- --head-book <เล่ม.json> [--base HEAD]
+//        npm run diag:pricing-diff -- --head-book <เล่ม.json> [--head-seed-subcodes] [--base HEAD]
 //        npm run diag:pricing-diff -- --examples 20         ตัวอย่างต่อกลุ่ม (ตั้งต้น 5)
 //        npm run diag:pricing-diff -- --json <ไฟล์>         เขียนรายการเปลี่ยนทั้งหมดลงไฟล์
 //        npm run diag:pricing-diff -- --expect-price-change ไม่ตกเมื่อราคาเดิมขยับ (ยังพิมพ์ครบ)
@@ -45,6 +47,7 @@ const argv = process.argv.slice(2);
 const val = (flag: string): string | undefined => { const i = argv.indexOf(flag); return i > -1 ? argv[i + 1] : undefined; };
 const BASE_ARG = val('--base');
 const HEAD_BOOK = val('--head-book');
+const HEAD_SEED = argv.includes('--head-seed-subcodes');
 const JSON_OUT = val('--json');
 const EXAMPLES = Number(val('--examples') ?? 5);
 const EXPECT_PRICE_CHANGE = argv.includes('--expect-price-change');
@@ -100,12 +103,15 @@ async function main(): Promise<void> {
     // ตัวเก็บผลของ "ปัจจุบัน" ไปวางใน base ⇒ ย่อผลแบบเดียวกันทั้งสองฝั่ง
     fs.copyFileSync(path.join(root, CAPTURE_REL), path.join(wt, CAPTURE_REL));
     before = capture(wt, 'โค้ดก่อนแก้');
-    after = capture(root, 'โค้ดปัจจุบัน', HEAD_BOOK ? ['--source', 'json', '--book', path.resolve(HEAD_BOOK)] : []);
+    after = capture(root, 'โค้ดปัจจุบัน', [
+      ...(HEAD_BOOK ? ['--source', 'json', '--book', path.resolve(HEAD_BOOK)] : []),
+      ...(HEAD_SEED ? ['--seed-subcodes'] : []),
+    ]);
   } finally {
     try { git(root, 'worktree', 'remove', '--force', wt); } catch { fs.rmSync(wt, { recursive: true, force: true }); git(root, 'worktree', 'prune'); }
   }
   console.log(`${DIM}เล่มฝั่งก่อนแก้: ${before.book}${RESET}`);
-  console.log(`${DIM}เล่มฝั่งปัจจุบัน: ${after.book}${RESET}\n`);
+  console.log(`${DIM}เล่มฝั่งปัจจุบัน: ${after.book}${HEAD_SEED ? ' + แถวรหัสย่อยจาก catalog-subcodes.json ที่ฐานยังไม่มี' : ''}${RESET}\n`);
 
   const codes = [...new Set([...Object.keys(before.rows), ...Object.keys(after.rows)])].sort();
   const groups = new Map<string, string[]>();

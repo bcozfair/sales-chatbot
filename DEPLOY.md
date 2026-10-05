@@ -902,6 +902,22 @@ npx tsx scripts/pricebook/importer.ts --data <โฟลเดอร์ Excel> --
 เทปล่อนหุ้มชีลด์ 160 → TSK-11 · TSP-12 / ซิลิโคน 120 → TSP-10 · TSP-12 — **อยู่ในฐานเท่านั้น ไม่มีใน Excel** (เหมือนสาย TS 160 ของ TS_-01/TS-10)
 ⇒ ฐานใหม่ที่บูตจาก Excel ต้องกรอกเองที่หน้าสมุดราคา แถบราคาสายใต้ตาราง · หลังเขียน 32 รหัส TS-11/TSP-12 สาย TS ได้ราคาครบ
 
+**TS_-02 / TS_-02-SI** (เจ้าของสั่ง 2026-10-05 · `docs/pricing-code-ts-catalog.md` หัวข้อ TS_-02) — **รุ่นใหม่** `TSK-02` จากชีต `TS-02,02-SI`
+(แมป 21) + แถวรหัสย่อย 6 แถว (สาย T/P/F/C/TS + U) · เล่มที่มีอยู่แล้วเพิ่มรุ่นด้วย `--new-models` (**ห้าม `--replace-all`** — ทับราคาที่แก้จากจอ)
+· ลำดับ: **ขึ้นโค้ดก่อน แล้วเขียนฐานต่อ** (โค้ดใหม่กับฐานเก่า = ช่อง "รุ่น" ยังไม่มี TS_-02 · ราคาเดิมไม่ขยับ — `diag:pricing-diff` 2026-10-05)
+· สำรอง `pricing_*` + `pricing_subcodes` ก่อน:
+```bash
+npx tsx scripts/pricebook/importer.ts --data <โฟลเดอร์ Excel> --new-models --out /tmp/ts02-book.json   # รายงาน — ต้องเห็น + TSK-02 รุ่นเดียว · ราคาตั้ง 85 ช่อง
+npm run diag:pricing-diff -- --head-book /tmp/ts02-book.json --head-seed-subcodes --base HEAD          # ราคาเดิมห้ามขยับ · TS-02 ไม่มีรุ่น → ได้ราคา 901 / ขอราคา 69
+npx tsx scripts/pricebook/importer.ts --data <โฟลเดอร์ Excel> --new-models --apply --by admin
+npx tsx scripts/pricebook/seedCatalogSubcodes.ts                                                        # รายงาน — ต้องเห็น + 6 แถว TSK-02
+npx tsx scripts/pricebook/seedCatalogSubcodes.ts --apply --by admin
+```
+ตรวจ: `npm run diag:pricing-catalog-ts` หัวข้อ 8 ไม่ข้าม · `npm run diag:pricing-catalog-ui` ขั้น TS_-02 ไม่ข้าม · หน้าคำนวณราคา
+`TSK-02(12)4.8x25+1M` = 568 · `TSK-02-SI(11.5)5x10+2M` = 610 · `TSJ-02(11.5)4.8x7+3M` = 650 + คำเตือน 11.5 (ตัวเลขของ Excel 13-05-69) ·
+รันซ้ำต้องได้ "ไม่มีอะไรต้องเขียน" · สาย TS / C ของ TSK-02 **ยังไม่มีราคา** (69 รหัสขึ้นขอราคา) — กรอกที่หน้าสมุดราคา ชีต TS-02,02-SI
+แถบราคาสาย เมื่อเจ้าของสั่ง
+
 **ถอยกลับ** (หลัง dump): `TRUNCATE pricing_model_history, pricing_models, pricing_book_revisions;` — หน้าจอกลับไปขึ้น
 "ยังไม่มีสมุดราคาในระบบ" เท่ากับก่อนนำเข้า · ⚠️ `db:restore` / `pg_restore` ของ dump เก่าก็พาราคาย้อนไปตามวันของ dump ด้วย
 

@@ -33,7 +33,7 @@ import { checkPriceModel } from '../../services/pricingLab/modelShape.js';
 import { axisValues } from '../../services/pricingLab/code.js';
 import type { PriceBook, SubCode } from '../../services/pricingLab/types.js';
 
-const GREEN = '\x1b[32m', RED = '\x1b[31m', DIM = '\x1b[2m', BOLD = '\x1b[1m', RESET = '\x1b[0m';
+const GREEN = '\x1b[32m', RED = '\x1b[31m', YEL = '\x1b[33m', DIM = '\x1b[2m', BOLD = '\x1b[1m', RESET = '\x1b[0m';
 let pass = 0;
 let fail = 0;
 const check = (label: string, ok: boolean, detail?: string): void => {
@@ -65,7 +65,8 @@ function withMapDefaults(book: PriceBook): { book: PriceBook; filled: string[] }
 
 async function main(): Promise<void> {
   const loaded = await loadBookFrom();
-  const dbSubs = loaded.from === 'db' ? await listSubCodes() : [];
+  // ตารางรหัสย่อยในฐานรวมเสมอ แม้เล่มมาจากไฟล์ (`--book` ของ `importer.ts --new-models --out`) — แบบเดียวกับ diag:pricing-diff
+  const dbSubs = await listSubCodes();
   const withDefaults = withMapDefaults(loaded.book);
   const book = withSubCodes(withDefaults.book, mergeSeed(dbSubs, loadCatalogSubcodes()));
   console.log(`สมุดราคาที่ใช้: ${loaded.label} + รหัสย่อยจากแคตตาล็อก${withDefaults.filled.length ? ` + ค่ามาตรฐานจากแมป (${withDefaults.filled.join(', ')})` : ''} (ในหน่วยความจำ)`);
@@ -79,14 +80,24 @@ async function main(): Promise<void> {
 
   // ── 0. ข้อมูลแคตตาล็อกตรงกับสมุดราคา ─────────────────────────────────────────
   section('0. ทุกตารางของแคตตาล็อกชี้ไปที่รุ่นที่มีอยู่จริงในสมุดราคา');
+  // รุ่นที่แมปมีแล้วแต่เล่มนี้ยังไม่มี = ขั้น "เติมรุ่นลงฐาน" ยังค้าง (โค้ดขึ้นก่อนเขียนฐานเสมอ — `importer.ts --new-models` · DEPLOY.md 4.11ข)
+  // ⇒ บอกออกมาแล้วข้ามการตรวจของตารางนั้น (เหมือน `withPendingCatalogRules`) · ไม่มีทั้งในเล่มและในแมป = แคตตาล็อกชี้ผิด ⇒ ตก
+  // ตรวจของรุ่นใหม่ก่อนเขียนฐาน: `npm run diag:pricing-catalog-ts -- --book <ไฟล์จาก importer.ts --new-models --out>`
+  const mapModels = catalogRulesFromMaps().models;
+  const pendingModels = new Set(TS_CATALOG.filter((s) => !book.models[s.model] && mapModels[s.model]).map((s) => s.model));
+  const catalog = TS_CATALOG.filter((s) => !pendingModels.has(s.model));
   for (const spec of TS_CATALOG) {
+    if (pendingModels.has(spec.model)) {
+      console.log(`  ${YEL}…${RESET} ${spec.head} → รุ่น ${spec.model} มีในแมปแต่เล่มนี้ยังไม่มี — ยังไม่ได้เติมลงฐาน (importer.ts --new-models) · ข้ามการตรวจของตารางนี้`);
+      continue;
+    }
     check(`${spec.head} ${spec.family === 'TS_-12R' ? '(RTD) ' : ''}→ รุ่น ${spec.model}`, !!book.models[spec.model]);
   }
 
   // ── 1. รหัสจริงทุกตัว: อ่าน → ช่อง → ประกอบกลับ → ราคาเท่าเดิม ─────────────────────
   section('1. รหัสจริงในฐาน (products) — อ่านเป็นช่องแล้วประกอบกลับต้องได้รหัสเดิมและราคาเท่าเดิม');
   const { rows } = await pool.query<{ model: string }>(
-    `SELECT DISTINCT model FROM products WHERE model ~* '^(TS[A-Z]*|[NP][0-9]{1,2})-(01|04|06|08|10|11|12|14|18)'`
+    `SELECT DISTINCT model FROM products WHERE model ~* '^(TS[A-Z]*|[NP][0-9]{1,2})-(01|02|04|06|08|10|11|12|14|18)'`
   );
   // ตั้งแต่ 2026-10-01 ทุกรหัสได้ช่อง (เจ้าของ: "ใช้หน้าตา ui เป็นมาตรฐานเดียวกัน อะไรไม่ตรงก็แค่แจ้งเตือน") —
   // ตรงแคตตาล็อกทุกตัวอักษร (`readTsForm`) = เกณฑ์เดิมทุกข้อ · นอกรูปแบบ (`readTsFormLoose`) = ประกอบกลับเป็นรหัสเดิมเกือบทุกตัว
@@ -133,7 +144,7 @@ async function main(): Promise<void> {
   let combos = 0;
   const drift: string[] = [];
   const unread: string[] = [];
-  for (const spec of TS_CATALOG) {
+  for (const spec of catalog) {
     const probes = spec.slots.probe?.options?.map((x) => x.code) ?? [undefined];
     for (const probe of probes) {
       const baseVals: Record<string, string> = { ...spec.defaults, ...(probe ? { probe } : {}) };
@@ -383,6 +394,52 @@ async function main(): Promise<void> {
   const exactForm = f('TSK-01(M6)4.8+1M');
   check('รหัสตรงแคตตาล็อก = ไม่มีของ "ตามที่เขียน" ติดมา (ช่องแบบเดิมทุกอย่าง)',
     !!exactForm.p.tsForm && !exactForm.p.tsForm.issues && !exactForm.p.tsForm.written && !exactForm.p.tsForm.tail && !exactForm.p.tsForm.omit);
+  }
+
+  // ── 8. TS_-02 / TS_-02-SI (เจ้าของตอบ 2026-10-05) ─────────────────────────────────────
+  section('8. TS_-02 / TS_-02-SI — คำตอบของเจ้าของ 2026-10-05 เป็นจริงในตัวคิดราคา');
+  const k02 = book.models['TSK-02'];
+  if (!k02) {
+    console.log(`  ${YEL}…${RESET} เล่มนี้ยังไม่มี TSK-02 — ข้าม (ตรวจก่อนเขียนฐานด้วย -- --book <ไฟล์จาก importer.ts --new-models --out>)`);
+  } else {
+    const len02 = (d: string) => k02.adders.find((a) => a.id === 'len_l1')?.rates?.[d] ?? NaN;
+    const cell02 = (key: string) => k02.base.kind === 'matrix' ? k02.base.cells[key] : undefined;
+    const p10 = price('TSK-02(12)4.8x10+1M');
+    const p25 = price('TSK-02(12)4.8x25+1M');
+    const p12 = price('TSK-02(12)4.8x12+1M');
+    check('ข้อ 1: ราคาตั้งที่แกน 10 mm (= ช่อง 4.8 · Type K/J · TS-02 ของชีต) ไม่มีค่าความยาว',
+      p10.o?.status === 'priced' && p10.o.unitPrice === cell02('4.8 | Type K/J | TS-02') && p10.o.breakdown.length === 1, `${p10.o?.unitPrice}`);
+    check('ข้อ 1: แกน 25 = ราคาตั้ง + 3 ช่วง 5 mm ของแกน 4.8 · แกน 12 = 1 ช่วง (ปัดขึ้น)',
+      p25.o?.unitPrice === (p10.o?.unitPrice ?? NaN) + 3 * len02('4.8') && p12.o?.unitPrice === (p10.o?.unitPrice ?? NaN) + len02('4.8'),
+      `${p25.o?.unitPrice} · ${p12.o?.unitPrice}`);
+    check('ข้อ 2: แกนสั้นกว่า 10 mm (5 · 7) = ราคาตั้ง',
+      ['TSK-02(12)4.8x5+1M', 'TSK-02(12)4.8x7+1M'].every((c) => price(c).o?.status === 'priced' && price(c).o?.unitPrice === p10.o?.unitPrice));
+    const s115 = price('TSK-02(11.5)4.8x10+1M');
+    const si115 = price('TSK-02-SI(11.5)4.8x10+1M');
+    const si12 = price('TSK-02-SI(12)4.8x10+1M');
+    check('ข้อ 3: เขี้ยวล็อค 11.5 กับ TS_-02 ธรรมดา ราคาเท่าเขี้ยวล็อคขนาดอื่น + เตือนว่าทำได้เฉพาะ TS-02-SI',
+      s115.o?.status === 'priced' && s115.o.unitPrice === p10.o?.unitPrice && s115.p.warnings.some((w) => /11\.5.*เฉพาะ TS-02-SI/.test(w)), s115.p.warnings.join(' · '));
+    check('ข้อ 3: TS_-02-SI กับ 11.5 ไม่เตือน · ราคา = คอลัมน์ TS-02-SI ของชีต (เท่าเขี้ยวล็อค 12)',
+      !si115.p.warnings.length && si115.o?.unitPrice === cell02('4.8 | Type K/J | TS-02-SI') && si115.o?.unitPrice === si12.o?.unitPrice, `${si115.o?.unitPrice}`);
+    const pB = price('TSP-02(12)5x10+1M');
+    const pA = price('TSPA-02(12)5x10+1M');
+    check('TSP = PT100 Class B · TSPA = PT100 Class A (หัวคอลัมน์ไม่มีรหัสตระกูลกำกับ — คนละคอลัมน์)',
+      pB.o?.unitPrice === cell02('5 | PT100 (Class B) | TS-02') && pA.o?.unitPrice === cell02('5 | PT100 (Class A) | TS-02') && pA.o?.unitPrice !== pB.o?.unitPrice);
+    const off = price('TSK-02(12.5)4.8x10+1M');
+    check('เขี้ยวล็อคนอกแคตตาล็อก (12.5) = ไม่มีผลกับราคา + เตือน · ไม่ใช่ท่อนที่ยังไม่รู้จัก · ช่องกรอกขึ้นป้ายนอกแคตตาล็อก',
+      off.o?.unitPrice === p10.o?.unitPrice && off.p.warnings.some((w) => /12\.5.*ไม่อยู่ในแคตตาล็อก/.test(w))
+        && !off.p.parts.some((x) => x.kind === 'unknown') && off.p.tsForm?.issues?.id === 'off');
+    const bare = price('TSJ-02 5x50+2M');
+    check('ไม่ระบุเขี้ยวล็อค = คิดราคาได้ + เตือน · ช่องกรอกขึ้น missing · ประกอบกลับเป็นรหัสเดิม',
+      bare.o?.status === 'priced' && bare.p.warnings.some((w) => /ไม่ได้ระบุขนาดเขี้ยวล็อค/.test(w)) && bare.p.tsForm?.issues?.id === 'missing'
+        && sameTsCode(buildTsCode(bare.p.tsForm), 'TSJ-02 5x50+2M'));
+    check('เขี้ยวล็อคไม่คู่กับแกน (14.5 กับแกน 5) = ราคาเท่าเดิม + เตือน',
+      price('TSK-02(14.5)5x10+1M').o?.unitPrice === price('TSK-02(12)5x10+1M').o?.unitPrice && price('TSK-02(14.5)5x10+1M').p.warnings.some((w) => /ใช้กับแกน/.test(w)));
+    const si8 = price('TSK-02-SI(15.5)8x10+1M');
+    check('TS_-02-SI แกน 8 (ชีตเว้นว่าง) = ต้องขอราคา ไม่ใช่ไม่รับผลิต', si8.o?.status === 'quoteOnRequest' && !!si8.o.violations.some((v) => v.noRate));
+    const none02 = price('TSP-02(12)5x10+3M');
+    const ss02 = k02.adders.find((a) => a.id === 'cable_over_1m')?.rates?.['สายสแตนเลสถัก'];
+    check('สายไม่ระบุชนิด = สแตนเลสถัก ตามแคตตาล็อก (แม้ PT100)', none02.o?.status === 'priced' && line(none02.o, /สาย/) === (ss02 ?? NaN) * 2, `${line(none02.o, /สาย/)}`);
   }
 }
 

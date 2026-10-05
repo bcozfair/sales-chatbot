@@ -221,6 +221,13 @@ export function askSpecOf(model: PriceModel): TsFamilySpec | undefined {
   return spec?.askPrice ? spec : undefined;
 }
 
+/** แคตตาล็อกของรุ่นนี้ ถ้าวงเล็บของมันคือขนาดเขี้ยวล็อค (TS_-02 · ไม่มีผลกับราคา) — ดู `TsFamilySpec.connector` */
+function connectorSpecOf(model: PriceModel): TsFamilySpec | undefined {
+  const fam = tsFamilyOfModel(model.code);
+  const spec = fam ? tsSpec(fam) : undefined;
+  return spec?.connector ? spec : undefined;
+}
+
 /** เกลียวในรหัส → คอลัมน์ของตาราง (ตรงตัว → นิ้วไม่มีเครื่องหมาย → มิลตามเลขหลัง M) — **ไม่แปลงหุน** (ดู `TsFamilySpec.askPrice`) */
 function resolveThread(values: string[], raw: string): string | undefined {
   return matchValue(values, raw) ?? matchInchThread(values, raw) ?? matchMetricThread(values, raw);
@@ -346,6 +353,13 @@ function matchSensor(values: string[], prefix: string, letter: string): string |
     const hits = values.filter((v) => tokens(v).includes(alias));
     if (hits.length === 1) return hits[0];
   }
+  // ชีตที่หัวคอลัมน์เขียนแค่ชื่อหัววัดกับคลาส ไม่มีรหัสตระกูลกำกับ (TS-02,02-SI!I11 `PT100 (Class B)`) — ต้องเทียบทั้งสองคำ
+  // ไม่งั้น TSP/TSPA ไม่ได้คอลัมน์ไหนเลย · เทียบแค่ `PT100` ไม่ได้เพราะกำกวมเสมอ (ดู SENSOR_ALIAS)
+  const cls = PT100_CLASS[P];
+  if (cls) {
+    const hits = values.filter((v) => tokens(v).includes('PT100') && tokens(v).includes(cls));
+    if (hits.length === 1) return hits[0];
+  }
   const exact = values.find((v) => v.toUpperCase() === letter.toUpperCase());
   if (exact) return exact;
   // 'Type K/J' — ชีตรวม K กับ J ไว้ช่องเดียวเพราะราคาเท่ากัน
@@ -360,6 +374,9 @@ const SENSOR_ALIAS: Record<string, string[]> = {
   TSZ: ['PT1000'],
   TSN: ['NTC', 'PTC']
 };
+
+/** คลาสของ PT100 ตามตัวอักษรท้ายรหัสตระกูล — แคตตาล็อก "Type for RTD": P = PT100 CLASS B · PA = PT100 CLASS A */
+const PT100_CLASS: Record<string, string> = { TSP: 'B', TSPA: 'A' };
 
 /**
  * หัววัดที่ชีต **ไม่ได้ทำคอลัมน์ราคาตั้งของตัวเองไว้** แต่เขียนกำกับว่า "บวกเพิ่มจาก" คอลัมน์ไหน
@@ -712,12 +729,33 @@ function readTsGeneric(c: Ctx, rest: string, prefix: string, letter = ''): void 
   const junk = rest.match(/^-([A-Z]{1,3})(?=[(0-9])/i);
   if (junk) {
     const raw = junk[1] ?? '';
-    if (!readFromTable(c, raw, junk[0])) add(c, { text: junk[0], reads: 'ยังไม่ได้ตั้งค่าว่าแปลว่าอะไร', kind: 'unknown', subCode: raw });
+    // รุ่นย่อยที่เป็นคอลัมน์ของตารางราคาตั้ง (`TSK-02-SI` = คอลัมน์ TS-02-SI ของชีต TS-02,02-SI) — ไม่ใช่ท่อนที่ยังไม่รู้จัก
+    const sub = axisValues(c.model, 'submodel').find((v) => v.toUpperCase().endsWith(`-${raw.toUpperCase()}`));
+    if (sub) {
+      c.cfg.axes = { ...c.cfg.axes, submodel: sub };
+      add(c, { text: junk[0], reads: `รุ่นย่อย ${sub} (คอลัมน์ ${sub} ของตารางราคา ${c.model.sheet ?? c.model.code})`, kind: 'axis' });
+    } else if (!readFromTable(c, raw, junk[0])) add(c, { text: junk[0], reads: 'ยังไม่ได้ตั้งค่าว่าแปลว่าอะไร', kind: 'unknown', subCode: raw });
     rest = rest.slice(junk[0].length);
   }
 
+  // วงเล็บของ TS_-02 = ขนาดเขี้ยวล็อค (ตัวเลข mm) ไม่มีผลกับราคา — เตือนอย่างเดียว (เจ้าของเคาะ 2026-10-05) · ตรวจคู่กับแกนหลังอ่านแกน
+  const conn = connectorSpecOf(c.model);
+  let connText: string | undefined;
+
   const paren = rest.match(/^\(([^)]*)\)/);
-  if (paren && ask?.askPrice?.thread && canonicalAskValue('thread', paren[1] ?? '') !== undefined) {
+  if (paren && conn && /^\d+(?:\.\d+)?$/.test(paren[1] ?? '')) {
+    connText = paren[1]!;
+    const opts = conn.slots[conn.connector!.slot]?.options ?? [];
+    const hit = opts.find((x) => x.code !== '' && Number(x.code) === Number(connText));
+    add(c, {
+      text: paren[0],
+      reads: hit ? `ขนาดเขี้ยวล็อค ${hit.code} mm — ไม่มีผลกับราคา` : `ขนาดเขี้ยวล็อค ${connText} mm — นอกแคตตาล็อก ${conn.head} (ไม่มีผลกับราคา)`,
+      kind: 'noPrice',
+    });
+    if (hit) connText = hit.code;
+    else c.warnings.push(`ขนาดเขี้ยวล็อค ${connText} mm ไม่อยู่ในแคตตาล็อก ${conn.head} (${opts.map((x) => x.code).join(' · ')} mm) — ราคาคิดตามขนาดแกน`);
+    rest = rest.slice(paren[0].length);
+  } else if (paren && ask?.askPrice?.thread && canonicalAskValue('thread', paren[1] ?? '') !== undefined) {
     threadText = paren[1] ?? '';
     threadCol = readAskThread(c, ask, threadText);
     rest = rest.slice(paren[0].length);
@@ -761,6 +799,8 @@ function readTsGeneric(c: Ctx, rest: string, prefix: string, letter = ''): void 
       add(c, { text: `(${raw})`, reads: 'ยังไม่ได้กำหนดว่าเป็นเกลียวขนาดไหน', kind: 'unknown', subCode: raw });
     }
     rest = rest.slice(paren[0].length);
+  } else if (!paren && conn) {
+    c.warnings.push(`รหัสนี้ไม่ได้ระบุขนาดเขี้ยวล็อค — แคตตาล็อก ${conn.head} ต้องระบุในวงเล็บหลังเลขรุ่น เช่น TSK-02(12) (ไม่มีผลกับราคา)`);
   } else if (hasThread && !c.model.axisDefaults?.thread) {
     // รุ่นที่มีเกลียวมาตรฐาน (TS_-01 = 1/4” · TS_-01-0 = M5 ตามแคตตาล็อก) ไม่ต้องเตือน — engine ใช้ค่านั้นแล้วบอกบนบรรทัดราคา
     c.warnings.push('รหัสนี้ไม่มีวงเล็บบอกขนาดเกลียว — ใส่เกลียวต่อท้ายเลขรุ่นแล้วคิดใหม่ เช่น TSK-01(M6)');
@@ -862,6 +902,21 @@ function readTsGeneric(c: Ctx, rest: string, prefix: string, letter = ''): void 
       }
     }
     rest = rest.slice(core[0].length);
+  }
+  // เขี้ยวล็อคไม่คู่กับขนาดแกน / ใช้กับรุ่นย่อยที่ทำไม่ได้ — เตือน ราคาไม่เปลี่ยน (เจ้าของเคาะ 2026-10-05: "ให้ราคาเท่ากัน แต่แจ้งเตือน")
+  if (conn && connText !== undefined) {
+    const spec = conn.connector!;
+    const d = c.cfg.axes?.D;
+    const fits = spec.fits[connText];
+    const dBare = d?.replace(/[A-Z]+$/i, '');
+    if (fits && dBare && !fits.includes(dBare)) {
+      c.warnings.push(`แคตตาล็อก ${conn.head}: เขี้ยวล็อค ${connText} mm ใช้กับแกน ${fits.join(' · ')} mm — รหัสนี้แกน ${d} mm (ราคาคิดตามขนาดแกน)`);
+    }
+    const only = spec.only?.[connText];
+    const sub = c.cfg.axes?.submodel ?? c.model.axisDefaults?.submodel;
+    if (only && sub !== only.submodel) {
+      c.warnings.push(`${only.source}: เขี้ยวล็อค ${connText} mm ทำได้เฉพาะ ${only.submodel} — รหัสนี้เป็น ${sub ?? c.model.code} (ราคาคิดตามตาราง ${sub ?? c.model.code} เท่ากับเขี้ยวล็อคขนาดอื่น)`);
+    }
   }
   // เคลือบเทปล่อนเต็มความยาวแกน — ไม่ได้บอกความยาว = ความยาวมาตรฐานของรุ่น
   if (teflon) {

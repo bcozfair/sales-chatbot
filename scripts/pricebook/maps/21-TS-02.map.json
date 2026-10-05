@@ -1,0 +1,46 @@
+{
+  "file": "ราคาTC อัพเดต (13-05-69).xlsx",
+  "sheet": "TS-02,02-SI",
+  "code": "TSK-02",
+  "label": "Thermocouple / RTD TS-02 (เขี้ยวล็อค)",
+  "aliases": ["TSJ-02", "TST-02", "TSP-02", "TSPA-02", "TSZ-02"],
+  "standard": { "L1": 10, "cable_m": 1 },
+  "axisDefaults": { "submodel": "TS-02", "cable": "สายสแตนเลสถัก" },
+  "base": {
+    "kind": "matrix",
+    "axes": ["D", "sensor", "submodel"],
+    "rowHeaderCol": "A",
+    "rows": [14, 23],
+    "colHeaderRow": [11, 13],
+    "cols": ["E", "F", "G", "H", "I", "J", "K", "L", "M", "N"]
+  },
+  "adders": [
+    {
+      "id": "len_l1",
+      "label": "ความยาวแกนส่วนที่เกิน 10 mm (บวกเพิ่ม 5 mm ละ)",
+      "order": 20,
+      "kind": "perUnit",
+      "dim": "L1",
+      "step": 5,
+      "round": "ceil",
+      "unit": "mm",
+      "byAxis": "D",
+      "ratesFrom": { "col": "D", "keyCol": "A", "rows": [14, 23] },
+      "source": "TS-02,02-SI!C11 'Tube Length (L1) เริ่มต้น 10 mm' + D11 'Tube Length บวกเพิ่ม 5 mm. ละ' — เจ้าของเคาะ 2026-10-05: ราคาตั้งที่ 10 mm ตาม Excel (ไม่ใช่ Standard 25 mm ของแคตตาล็อก) แล้วบวกทุก 5 mm · แกนสั้นกว่า 10 mm = ราคาตั้ง"
+    },
+    {
+      "id": "cable_over_1m",
+      "label": "ราคาสายส่วนที่ยาวเกิน 1 เมตร (ตามชนิดสาย)",
+      "order": 45,
+      "kind": "perUnit",
+      "dim": "cable_m",
+      "step": 1,
+      "round": "ceil",
+      "unit": " m",
+      "byAxis": "cable",
+      "ratesFrom": { "sheet": "TS-21+22+25", "col": "B", "keyCol": "A", "rows": [26, 29] },
+      "source": "TS-02,02-SI!E27 'สายยาวกว่า 1 M บวกเพิ่มตามราคาสายแต่ละชนิด' + TS-21+22+25!A26:B29 — ชนิดสายจากตัวอักษรหลัง M (ตารางรหัสย่อย) · ไม่ระบุ = สแตนเลสถัก ตามแคตตาล็อก TS_-02 'Cable Type None' (แนวเดียวกับ TS_-01 · ชีตเขียน Type T / PT100 = เทปล่อน ที่ E25:E26 แต่เจ้าของเคาะให้ยึดแคตตาล็อก)"
+    }
+  ],
+  "constraints": []
+}

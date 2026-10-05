@@ -363,7 +363,9 @@ pricingLabRouter.get('/overview', async (_req: AdminRequest, res: Response) => {
     // ลำดับท่อน + ตัวเลือกของแคตตาล็อก (ไม่มีราคาสักบาท — เงินอยู่ที่สมุดราคาซึ่งไม่เคยออกจากเซิร์ฟเวอร์)
     catalog: BH_CATALOG,
     // ซีรีส์ TS (เจ้าของเคาะ mockup 2026-09-29) — ข้อมูลชุดเดียวกับที่ตัวอ่านรหัสใช้ ไม่มีราคาเช่นกัน
-    catalogTs: TS_CATALOG,
+    // เฉพาะตารางที่เล่มมีรุ่นแล้ว — โค้ดขึ้นก่อนเติมรุ่นใหม่ลงฐาน (TS_-02 · `importer.ts --new-models`) ระหว่างนั้นช่อง "รุ่น"
+    // ต้องไม่มีตารางที่เลือกแล้วคิดราคาไม่ได้
+    catalogTs: TS_CATALOG.filter((s) => !book || book.models[s.model]),
   });
 });
 

@@ -333,7 +333,13 @@ if (!ts01 || !ts010 || ts01.base.kind !== 'matrix') {
     '01': ['K', 'J', 'T', 'P', 'PA', 'Z'], '01-0': ['K', 'J', 'T', 'P', 'PA', 'Z'], '04': ['K', 'J', 'T'], '06': ['K', 'J', 'T'],
     '08': ['P', 'PA', 'Z'], '10': ['P', 'PA', 'Z'], '11': ['K', 'J', 'T', 'P', 'PA', 'Z'], '12': ['K', 'J', 'P', 'PA', 'Z'],
     '14': ['K', 'R', 'S'], '18': ['K', 'J', 'T', 'R', 'S', 'P', 'PA', 'Z'],
+    '02': ['K', 'J', 'T', 'P', 'PA', 'Z'],
   };
+  // เลขรุ่นที่แมปมีแล้วแต่เล่มยังไม่มีรุ่น = ยังไม่ได้เติมลงฐาน (`importer.ts --new-models` · TS_-02 2026-10-05) — ข้าม ไม่นับว่าตก
+  const inBook = new Set(Object.keys(book.models));
+  const pendingNums = Object.keys(CATALOGUE).filter((n) =>
+    maps.some((mp) => !inBook.has(mp.code) && new RegExp(`^TS[A-Z]*-${n}$`).test(mp.code)));
+  if (pendingNums.length) console.log(`  (ข้ามเลขรุ่น ${pendingNums.join(' · ')} — แมปมีแล้วแต่เล่มนี้ยังไม่มีรุ่น · ยังไม่ได้เติมลงฐาน)`);
   const bare: string[] = [];
   const noData: string[] = [];
   const waitingOutside: string[] = [];
@@ -352,7 +358,7 @@ if (!ts01 || !ts010 || ts01.base.kind !== 'matrix') {
       if (onBlank && !(CATALOGUE[hm[2]!] ?? []).includes(hm[1]!)) waitingOutside.push(`${m.code}: ${c}`);
     }
   }
-  const missingCat = Object.entries(CATALOGUE).flatMap(([n, ls]) =>
+  const missingCat = Object.entries(CATALOGUE).filter(([n]) => !pendingNums.includes(n)).flatMap(([n, ls]) =>
     ls.filter((l) => !covered[n]?.has(l)).map((l) => `TS${l}-${n}`));
   check('ไม่มี TS-<เลข> เปล่า ๆ ใน "ใช้กับรหัส" ของรุ่นไหนเลย', bare.length === 0, bare.join(' · ') || `${maps.length} แมป`);
   check('ทุกชนิดในหน้า "การสั่งซื้อ" ของแคตตาล็อกอยู่ใน "ใช้กับรหัส" (มีราคาหรือยังไม่มีราคาก็ต้องใส่)',
@@ -715,8 +721,8 @@ if (ts01 && ts010) {
     JSON.stringify(v9.axisDefaults));
   check('ยังเปิดแบบชีต Excel ได้', excelReady(b9.models['TSK-01']!) && excelReady(b9.models['TSK-01-0']!));
   check('ไฟล์ catalog-subcodes.json ผ่านตัวตรวจทุกแถว (TS_-01 12 + แกน 6 · TS_-08 5 + หัวค่าว่าง 4 + เกลียวมิล 10 · TS_-10 5 + เกลียวมิล 12 · BH ปลั๊ก PL-5 ค่าว่าง 2 ' +
-    '+ แคตตาล็อก TS ชุด 2026-09-29: TS_-04 9 · 06 13 · 08 1 · 10 3 · 11 6 · 12 5 · 12 RTD 6 · 14 8 · 18 14)',
-    cat.length === 116, String(cat.length));
+    '+ แคตตาล็อก TS ชุด 2026-09-29: TS_-04 9 · 06 13 · 08 1 · 10 3 · 11 6 · 12 5 · 12 RTD 6 · 14 8 · 18 14 · TS_-02 6 ชุด 2026-10-05)',
+    cat.length === 122, String(cat.length));
 
   // ── ราคาสายที่ตารางรหัสย่อยตั้งให้ ต้องมีช่องบนหน้าสมุดราคาเสมอ (เจ้าของ 2026-09-25: "ต้องสามารถแก้ไขผ่าน ui ได้")
   const rowsOf = (b: PriceBook, code: string) =>

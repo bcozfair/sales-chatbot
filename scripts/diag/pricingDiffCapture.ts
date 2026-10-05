@@ -8,13 +8,14 @@
 //  ต้อง import เฉพาะของที่อยู่มานานใน pricingLab (parseProductCode · computePrice · withSubCodes ·
 //  listSubCodes · loadBookFrom) — ตัวนี้ถูกวางลงทรีเก่าด้วย ใช้ของใหม่เมื่อไหร่ฝั่งเก่ารันไม่ขึ้น
 //
-//  รัน:  tsx scripts/diag/pricingDiffCapture.ts <ไฟล์ผล.json> [--source json --book <เล่ม.json>]
+//  รัน:  tsx scripts/diag/pricingDiffCapture.ts <ไฟล์ผล.json> [--source json --book <เล่ม.json>] [--seed-subcodes]
 //  อ่านฐานอย่างเดียว (SELECT products + สมุดราคา + ตารางรหัสย่อย)
 // ─────────────────────────────────────────────────────────────────────────────
 import { writeFileSync } from 'node:fs';
 import { pool } from '../../config/db.js';
 import { loadBookFrom } from '../pricebook/bookSource.js';
 import { listSubCodes } from '../../db/pricingLabRepo.js';
+import { loadCatalogSubcodes } from '../pricebook/seedCatalogSubcodes.js';
 import { withSubCodes } from '../../services/pricingLab/bookStore.js';
 import { parseProductCode } from '../../services/pricingLab/code.js';
 import { computePrice } from '../../services/pricingLab/engine.js';
@@ -34,7 +35,13 @@ async function main(): Promise<void> {
   if (!out) throw new Error('ต้องบอกไฟล์ผล: tsx scripts/diag/pricingDiffCapture.ts <out.json>');
   const loaded = await loadBookFrom(process.argv.slice(3));
   // เล่มใดก็ตาม รวมตารางรหัสย่อยในฐานแบบเดียวกับหน้าคำนวณราคา (pricingQuoteHandler)
-  const book = withSubCodes(loaded.book, await listSubCodes());
+  // `--seed-subcodes` (pricingDiff ส่งให้ฝั่งปัจจุบันเมื่อสั่ง `--head-seed-subcodes`) = เติมแถวจาก catalog-subcodes.json ที่ฐานยังไม่มี
+  // = ผลของ `seedCatalogSubcodes --apply` ก่อนเขียนจริง · แถวที่มีในฐานแล้วชนะไฟล์เสมอ (กติกาเดียวกับตัวเขียน)
+  const dbSubs = await listSubCodes();
+  const key = (s: { subCode: string; scope: string }) => `${s.subCode.toUpperCase()}|${s.scope}`;
+  const have = new Set(dbSubs.map(key));
+  const subs = process.argv.includes('--seed-subcodes') ? [...dbSubs, ...loadCatalogSubcodes().filter((s) => !have.has(key(s)))] : dbSubs;
+  const book = withSubCodes(loaded.book, subs);
 
   const { rows } = await pool.query<{ model: string }>(
     `SELECT DISTINCT btrim(model) AS model FROM products WHERE model IS NOT NULL AND btrim(model) <> ''`,

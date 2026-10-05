@@ -12,6 +12,7 @@
 //    … --data <dir> --rounding [--apply --by <username>]                         ปรับ "วิธีปัดเศษ" ของกฎเดิมให้ตรงแมป ไม่แตะตัวเลขราคาสักช่อง
 //    … --data <dir> --aliases  [--apply --by <username>]                         ปรับ "รายชื่อรหัสที่ใช้ตารางเดียวกัน" ให้ตรงแมป ไม่แตะตัวเลขราคาสักช่อง
 //    … --data <dir> --catalog  [--apply --by <username>]                         ปรับ "สูตรที่ระบบคิดเอง + ข้อห้าม + ช่องที่ระบุของกฎ/ตัวเลือก C" ให้ตรงแมป (แคตตาล็อก BH) ไม่แตะตัวเลขราคาของกฎเดิม
+//    … --data <dir> --new-models [--out <ไฟล์.json>] [--apply --by <username>]   เติม "รุ่นที่แมปเพิ่งมี" ลงเล่มปัจจุบัน ไม่แตะรุ่นเดิมสักช่อง
 //    … --data <dir> --out <ไฟล์.json>                                           เขียนเป็นไฟล์ (ไม่แตะฐาน)
 //
 //  **`--data` ไม่มีค่าเริ่มต้นโดยตั้งใจ** — ยุคไฟล์ตั้งต้นที่ `data/` ซึ่งถูกเสิร์ฟออกเว็บโดยไม่ตรวจสิทธิ์
@@ -41,8 +42,10 @@ import { pool } from '../../config/db.js';
 import { readBookState } from '../../services/pricingLab/bookStore.js';
 import { BookConflict, BookRejected, commitBookChange, seedBook } from '../../services/pricingLab/bookUpdate.js';
 import { pruneUnpriced } from '../../services/pricingLab/modelEditor.js';
+import { checkPriceModel } from '../../services/pricingLab/modelShape.js';
 import type { SourceFile } from '../../db/pricingBookRepo.js';
 import { catalogRulesChanges } from './catalogRules.js';
+import { loadCatalogSubcodes } from './seedCatalogSubcodes.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -899,6 +902,69 @@ async function applyCatalog(fromFile: PriceBook, opts: { apply: boolean; by: str
   return 0;
 }
 
+/**
+ * `--new-models` — เติม **รุ่นที่แมปเพิ่งมี** (รหัสรุ่นที่เล่มในฐานยังไม่มี) ลงเล่มปัจจุบันในฐาน
+ * รุ่นเดิม · กฎ · ราคาที่แอดมินแก้จากจอ **คงเดิมทุกไบต์** (`commitBookChange` เขียนเฉพาะรุ่นใน `changed`)
+ *
+ * มีเพราะก่อนหน้านี้ทางเดียวที่เพิ่มรุ่นได้คือ `--replace-all` ซึ่งทับราคาที่แก้จากจอทั้งเล่ม (เช่นสาย TS 160 ที่อยู่ในฐานเท่านั้น)
+ * · ครั้งแรกที่ใช้: TS_-02 / TS_-02-SI (เจ้าของสั่ง 2026-10-05 · `docs/pricing-code-ts-catalog.md`)
+ * · "ใช้กับรหัส" ของรุ่นใหม่ชนกับรุ่นในฐาน = หยุด ไม่เขียน (รหัสเดียวกันจะได้สองตาราง)
+ * · `--out <ไฟล์>` = เล่มหลังเติม (ไม่แตะฐาน) ⇒ `diag:pricing-diff -- --head-book <ไฟล์> --head-seed-subcodes --base HEAD`
+ *   ได้ผลเท่าหลังเขียนฐานทั้งสองคำสั่ง (`--new-models --apply` + `seedCatalogSubcodes --apply`) — แถวรหัสย่อยไม่ใส่ลงเล่ม
+ *   เพราะมีเจ้าของคือตารางในฐาน (`diag:pricing` ตรวจว่ารหัสย่อยในเล่มต้องมาจากไฟล์ราคาเท่านั้น)
+ */
+async function applyNewModels(fromFile: PriceBook, opts: { apply: boolean; by: string | null; out?: string }): Promise<number> {
+  const state = await readBookState();
+  if (!state) {
+    console.error('ยังไม่มีสมุดราคาในฐาน — --new-models เติมได้เฉพาะเล่มที่มีอยู่แล้ว (เล่มแรกใช้ --apply ธรรมดา)');
+    return 1;
+  }
+  const added = Object.keys(fromFile.models).filter((code) => !state.book.models[code]);
+  const owner = new Map(Object.values(state.book.models).flatMap((m) => [m.code, ...(m.aliases ?? [])].map((c) => [c, m.code] as const)));
+  for (const code of added) {
+    const clash = [code, ...(fromFile.models[code]!.aliases ?? [])].filter((c) => owner.has(c));
+    if (clash.length) {
+      console.error(`${code}: ${clash.map((c) => `${c} (เป็นของ ${owner.get(c)})`).join(' · ')} อยู่ในเล่มแล้ว — ไม่เขียน ให้คนตัดสินก่อน`);
+      return 1;
+    }
+  }
+  if (added.length === 0) {
+    console.log('\nเล่มในฐานมีทุกรุ่นตามแมปแล้ว — ไม่มีอะไรต้องเขียน');
+    return 0;
+  }
+  // ด่านรูปตัวเดียวกับตอนบันทึก — รายงานต้องบอกปัญหาก่อนมีคนสั่ง --apply ไม่ใช่ตอน --apply ล้ม
+  const problems = added.flatMap((code) => checkPriceModel(fromFile.models[code], code).map((p) => `${code} ${p}`));
+  if (problems.length) {
+    for (const p of problems) console.error(`  ✗ ${p}`);
+    return 1;
+  }
+  const models = { ...state.book.models };
+  for (const code of added) {
+    const m = fromFile.models[code]!;
+    models[code] = m;
+    const cells = m.base.kind === 'matrix' ? Object.keys(m.base.cells).length : 0;
+    console.log(`\n+ ${code} "${m.label}" (ชีต ${m.sheet ?? '—'}) · ใช้กับรหัส ${[code, ...(m.aliases ?? [])].join(', ')}`);
+    console.log(`  ราคาตั้ง ${cells} ช่อง · กฎ ${m.adders.map((a) => a.id).join(' · ') || '—'} · มาตรฐาน ${JSON.stringify(m.standard)}`);
+  }
+  const at = new Date().toISOString();
+  const next: PriceBook = { ...state.book, models, edited: { at, by: opts.by ?? undefined, note: `เติมรุ่นใหม่จากแมป: ${added.join(', ')} (รุ่นเดิมคงเดิม)` } };
+
+  if (opts.out) {
+    writeFileSync(resolve(opts.out), JSON.stringify(next, null, 2), 'utf8');
+    const seed = loadCatalogSubcodes().filter((sc) => added.includes(sc.scope)).length;
+    console.log(`\nเขียนไฟล์ → ${resolve(opts.out)} (เล่ม r${state.revision} + ${added.join(', ')} · ไม่แตะฐาน)` +
+      (seed ? ` · แถวรหัสย่อยของรุ่นใหม่ ${seed} แถวอยู่ที่ catalog-subcodes.json — วัดด้วย diag:pricing-diff ต้องใส่ --head-seed-subcodes` : ''));
+  }
+  if (!opts.apply) {
+    console.log(`\n(ยังไม่ได้เขียนลงฐาน — ${added.length} รุ่น · ใส่ --apply --by <username> เพื่อบันทึก · แถวรหัสย่อยเขียนแยกด้วย seedCatalogSubcodes.ts --apply)`);
+    return 0;
+  }
+  const revision = await commitBookChange({ parent: state.revision, kind: 'model', next, changed: added, by: opts.by });
+  console.log(`\nบันทึกแล้ว — การบันทึกครั้งที่ ${revision} (${added.join(', ')})`);
+  console.log('ต่อด้วย:  npx tsx scripts/pricebook/seedCatalogSubcodes.ts --apply --by <username>   (ตัวอักษรท้ายรหัสของรุ่นใหม่)');
+  return 0;
+}
+
 async function main(): Promise<number> {
   const args = process.argv.slice(2);
   const val = (flag: string): string | undefined => {
@@ -916,6 +982,7 @@ async function main(): Promise<number> {
   const rounding = args.includes('--rounding');
   const aliases = args.includes('--aliases');
   const catalog = args.includes('--catalog');
+  const newModels = args.includes('--new-models');
 
   if (!dataDir === !fromJson) {
     console.error('ต้องบอกที่มาของสมุดราคาอย่างใดอย่างหนึ่ง:');
@@ -962,6 +1029,7 @@ async function main(): Promise<number> {
   if (rounding) return applyRounding(book, { apply, by });
   if (aliases) return applyAliases(book, { apply, by });
   if (catalog) return applyCatalog(book, { apply, by });
+  if (newModels) return applyNewModels(book, { apply, by, out: outFile });
 
   if (outFile) {
     writeFileSync(resolve(outFile), JSON.stringify(book, null, 2), 'utf8');
