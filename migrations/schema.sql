@@ -24,6 +24,8 @@
 --   ด้วย pg_dump -t เทียบฐานจริง ตรงทุกบรรทัด (ไม่ได้รัน diff ทั้งไฟล์ — รอบเต็มล่าสุดยังเป็นของ 2026-08-25)
 -- 2026-10-02: ยุบ 2026-10-02_01 (webhook_events + 4 คอลัมน์ + webhook_events_reply_status_check)
 --   เขียนตามรูปที่ pg_dump พ่น ยังไม่ได้เทียบฐานจริง (migration ยังไม่ได้รัน ณ วันที่ยุบ)
+-- 2026-10-05: ยุบ 2026-10-05_01 (sale_orders + 7 คอลัมน์ · sale_order_details + pkey + index)
+--   เขียนตามรูปที่ pg_dump พ่น ยังไม่ได้เทียบฐานจริง (migration ยังไม่ได้รัน ณ วันที่ยุบ)
 -- ตรวจล่าสุด 2026-08-25 (ผ่าน — ยุบ 2026-08-25_01 นิยาม last_order_at ใหม่ + 2026-08-25_02 ปลดโหมด warn เข้าไปแล้ว)
 -- ก่อนหน้า 2026-08-21 (รอบนั้นพบว่าขาด quotation_counters, sync_settings, index 6 ตัว
 -- และ role 'subadmin' — ยุบเข้าครบแล้ว)
@@ -266,6 +268,10 @@ CREATE TABLE public.customers (
 -- สถานะมี 2 ชั้นคนละความหมาย: order_status = สถานะเอกสาร (Quotation/Approved/Locked/
 -- Cancelled/Demo Order) · invoice_status = ตั้งบิลหรือยัง (no/to invoice/invoiced)
 --
+-- ยอดเงิน/model/quantity เป็นของ "รายการแรก" · ยอดทั้งใบอยู่ที่ order_* (2026-10-05_01 · เติมโดย sync v3
+-- เท่านั้น NULL = ยังไม่เคยถูก v3 เขียน) · source_updated_at = "V3 Updated At" ใช้กันของเก่าทับของใหม่
+-- รายละเอียดทุกบรรทัด/ใบแจ้งหนี้/MO อยู่ที่ sale_order_details (docs/plan-saleorder-v3.md)
+--
 
 CREATE TABLE public.sale_orders (
     order_reference character varying(255) CONSTRAINT sale_orders_order_reference_not_null1 NOT NULL,
@@ -315,7 +321,29 @@ CREATE TABLE public.sale_orders (
     invoice_date timestamp with time zone,
     source text,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    source_updated_at timestamp with time zone,
+    order_total_amount numeric,
+    order_total_discount numeric,
+    order_amount_after_discount numeric,
+    order_vat numeric,
+    order_net_amount numeric,
+    order_line_count integer
+);
+
+
+--
+-- Name: sale_order_details; Type: TABLE; Schema: public; Owner: -
+-- 1 แถว/ใบ (คีย์ sale_order_id — order_reference เปลี่ยนได้ตอนยืนยัน) · lines = jsonb รายละเอียดบรรทัด ×
+-- ใบแจ้งหนี้ × MO จาก sync v3 แทนที่ทั้งก้อนต่อใบ · รูปของ jsonb อยู่ใน docs/plan-saleorder-v3.md ข้อ 4.3
+--
+
+CREATE TABLE public.sale_order_details (
+    sale_order_id integer NOT NULL,
+    order_reference character varying(255) NOT NULL,
+    source_updated_at timestamp with time zone NOT NULL,
+    lines jsonb NOT NULL,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
 --
@@ -1601,6 +1629,14 @@ ALTER TABLE ONLY public.sale_orders
 
 
 --
+-- Name: sale_order_details sale_order_details_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sale_order_details
+    ADD CONSTRAINT sale_order_details_pkey PRIMARY KEY (sale_order_id);
+
+
+--
 -- Name: salesperson salesperson_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1748,6 +1784,13 @@ CREATE INDEX idx_products_source_local ON public.products USING btree (internal_
 --
 
 CREATE INDEX idx_so_salesperson_cover ON public.sale_orders USING btree (salesperson, order_date DESC) INCLUDE (salesperson_id, salesperson_phone, customer_sale_area, sales_team);
+
+
+--
+-- Name: idx_sale_order_details_ref; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_sale_order_details_ref ON public.sale_order_details USING btree (order_reference);
 
 
 --

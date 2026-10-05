@@ -382,10 +382,14 @@ npm run logworker                                          # worker เขีย
   · ตรรกะอยู่ที่ `getCompanyDiscountHistory()` ใน `db/dataDirectoryRepo.ts` ที่เดียว
   · gate: `npm run diag:data-directory` มีข้อที่พิสูจน์ว่าสองรหัสที่เลขภาษีเดียวกันไม่เห็นใบของกัน
 
-- **`sale_orders` เป็น 1 แถว = 1 ใบ ไม่ใช่ระดับบรรทัด** ถึงจะมีคอลัมน์ `model` / `quantity` อยู่ก็ตาม
-  (วัด 2026-09-17: 320,090 แถว / 320,090 `order_reference`) ⇒ ใช้ `total_discount` เป็นส่วนลดทั้งบิล
-  ได้เลย ไม่ต้อง `GROUP BY` ก่อน · **ห้ามคำนวณส่วนลดใหม่จาก `total_amount − amount_after_discount`**
+- **`sale_orders` เป็น 1 แถว = 1 ใบ แต่ยอด/`model`/`quantity` เป็นของ "บรรทัดแรก" ไม่ใช่ทั้งใบ**
+  (วัด 2026-09-17: 320,090 แถว / 320,090 `order_reference` · 2026-10-05: OP-260900178 ในฐาน 70,400 ใบจริง ~296,000)
+  ⇒ `total_discount` **ไม่ใช่**ส่วนลดทั้งบิล · ยอดทั้งใบอยู่ที่ `order_*` (sync v3 เติม · `NULL` = ยังไม่ถูก v3 เขียน)
+  และรายละเอียดบรรทัด/ใบแจ้งหนี้/MO อยู่ที่ `sale_order_details` — แผน+สถานะ: `docs/plan-saleorder-v3.md`
+  · **ห้ามคำนวณส่วนลดใหม่จาก `total_amount − amount_after_discount`**
   เพราะมี **2,362 ใบ (0.7%)** ที่สามช่องนั้นไม่ลงตัวกันเองจากต้นทาง
+  · ฐานมีเฉพาะใบที่หัวใบถูกแก้ตั้งแต่ 2022-01-03 (v2 ไม่เคยส่งที่เก่ากว่า) ⇒ ปี 2021 มีแค่ ~10% ของจริง
+  และ **ห้ามเติมใบเก่าหรือลบใบเก่า** — รายชื่อลูกค้า (Arm 2) กับด่านเครดิตเปลี่ยนตาม (เจ้าของเคาะ 2026-10-05)
   · ดึง 3 ใบล่าสุดต่อบริษัทเร็ว **1 ms** ถ้าเขียนให้ตรงกับ `idx_so_contact_latest` (กรอง `contact_id`
   ก่อนแล้วค่อย `ORDER BY order_date DESC NULLS LAST LIMIT n`) — เขียนเป็น CTE `DISTINCT ON`
   คร่อมทั้งตารางก่อนกรอง = **timeout เกิน 15 วินาที**
@@ -543,6 +547,7 @@ chatbot/
 - **`README.md`** — โครงสร้างละเอียด: endpoint ทั้งหมด, schema, business logic รายบริการ
 - **`docs/SYNC_API.md`** — API ให้ระบบภายนอกดึงข้อมูล (3 โหมด sync และเกณฑ์เลือก)
 - **`docs/line-webhook-redelivery.md`** — LINE ส่ง webhook ซ้ำ: สวิตช์ที่เปิดไว้ · อายุ replyToken ที่วัดเอง · สองกลุ่มที่คนละเรื่อง · สิ่งที่ยังไม่รู้
+- **`docs/plan-saleorder-v3.md`** — ย้าย sync ใบสั่งขายไป `_v3`: ยอดทั้งใบ `order_*` + jsonb `sale_order_details` · สวิตช์ `SALEORDER_API_VERSION` (`auto` = v3 เมื่อ backfill จบ) · วันตัด 2022 + ใบเดิมคงไว้ · runbook ขึ้นระบบ · gate `diag:saleorder-v3` + `sync:saleorders -- --v3-dry-run` (อ่านอย่างเดียว)
 - **`docs/plan-message-log-merge.md`** — รวมประวัติแชทให้ครบ: เฟส 1 เก็บส่วนที่ขาด (`wh_*` · คอลัมน์บันทึกผลของ `webhook_events`) · เฟส 2 หน้าจอ (เนื้อแชทเฉพาะ admin · ลงโค้ดบน branch `log-chat-ui` 2026-10-05) · เฟส 3 ทดลองให้บอทจำปุ่ม
 - **`docs/plan-web-quote-request.md`** — หน้าเว็บขอใบเสนอราคา เฟส A–D (แผนยาว อ่านเฉพาะหัวข้อที่ตรงงาน)
 - **`docs/plan-local-contacts.md`** — เพิ่มผู้ติดต่อใหม่ (`local_contacts` + Arm 3) เฟส I · แบบของโมดูล

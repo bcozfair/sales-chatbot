@@ -58,3 +58,42 @@ export function decidePageTransition(input: PageTransitionInput): PageTransition
 
   return { action: 'advance' };
 }
+
+// ============================================================
+// ตัวตัดสินของ sale_order v3 — ไม่เชื่อ has_more ตัวเดียว
+//
+// v3 เคยตอบ has_more=false ตั้งแต่หน้าแรกทั้งที่ next_cursor เดินต่อได้ (Appsale เจอ 2026-08-21:
+// Full Sync ได้ 681 แถวจาก 593,273 แต่ขึ้น "สำเร็จ") · วัด 2026-10-05 ตอบ true ปกติ แต่ไม่มีใครรับประกัน
+// ⇒ เกณฑ์ "จบ" คือหน้าว่าง · หน้ามีข้อมูลและ cursor ขยับ = ไปต่อเสมอ (เสียหน้าว่างเพิ่ม 1 หน้าต่อรอบ)
+// cursor เป็น keyset (V3 Updated At, Sale Order ID) — หน้าว่างแปลว่าไม่มีใบไหนอยู่หลังจุดนี้แล้วจริง
+// ============================================================
+
+export interface V3PageTransitionInput extends PageTransitionInput {
+  /** จำนวนแถวใน payload.data ของหน้านี้ */
+  rowCount: number;
+}
+
+export function decideV3PageTransition(input: V3PageTransitionInput): PageTransition {
+  const { rowCount, hasMore, nextCursor, previousCursor, stallRetries, maxStallRetries } = input;
+
+  if (rowCount === 0) return { action: 'complete' };
+
+  const validNext = typeof nextCursor === 'string' && nextCursor.length > 0;
+  if (!validNext) {
+    // มีข้อมูลแต่ไม่บอกทางไปต่อ — ถ้า gateway ยังยืนยันว่ามีอีก = ไปต่อไม่ได้จริง ห้ามรายงานว่าสำเร็จ
+    return hasMore
+      ? { action: 'error', reason: 'v3: page has rows and has_more=true but next_cursor is missing/invalid' }
+      : { action: 'complete' };
+  }
+
+  if (nextCursor === previousCursor) {
+    if (!hasMore) return { action: 'complete' };
+    if (stallRetries < maxStallRetries) return { action: 'retry-stall' };
+    return {
+      action: 'error',
+      reason: `v3 sync stalled: next_cursor did not advance after ${maxStallRetries} retries — sweep incomplete, refusing to report success`,
+    };
+  }
+
+  return { action: 'advance' };
+}

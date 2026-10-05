@@ -5,6 +5,7 @@ import { createGatewayGet, sleep } from './gatewayClient.js';
 import { decidePageTransition, MAX_STALL_RETRIES } from './syncPagination.js';
 import { createPageTicker, logResourceDone, serr, setSyncCtx, slog, vlog } from './syncLog.js';
 import { reconcileQuotationOdooLinks } from '../../services/quotationOdooLink.js';
+import { dryRunSaleOrderV3, resolveSaleOrderApiVersion, runSaleOrderV3Sweep } from './syncSaleordersV3.js';
 
 const INITIAL_SINCE = '1970-01-01T00:00:00.000Z';
 const PAGE_LIMIT = 500;
@@ -282,9 +283,24 @@ function buildRecordsPath(cursorToken: string | null) {
 }
 
 // ============================================================
-// Main Sync Function
+// ทางเข้าของแอปและ CLI — เลือกเวอร์ชันของ endpoint ก่อน (docs/plan-saleorder-v3.md ข้อ 4.7)
+// ค่าเริ่มต้น auto = v2 ทุกประการจนกว่า backfill ของ v3 จะจบ แล้วรอบถัดไปเปลี่ยนเป็น v3 เอง
+// ทางของ v2 ข้างล่าง (syncSaleOrdersV2) คงไว้ครบเป็นทางถอย — ตั้ง SALEORDER_API_VERSION=v2
 // ============================================================
 export async function syncSaleOrders(opts?: { forceFull?: boolean }) {
+  if ((await resolveSaleOrderApiVersion()) === 'v2') return syncSaleOrdersV2(opts);
+
+  if (opts?.forceFull) {
+    // กวาดใหม่ทั้งฐานด้วย v3 ใช้ ~2 ชม. — ถ้าทำในรอบของแอปจะถือ mutex ของ sync ทั้งระบบไว้ตลอดเวลานั้น
+    throw new Error('ใบสั่งขายใช้ v3 แล้ว — กวาดใหม่ทั้งฐานให้สั่ง CLI: npm run sync:saleorders -- --v3-backfill --restart');
+  }
+  return runSaleOrderV3Sweep({ mirrorStatus: true, label: 'saleorders' });
+}
+
+// ============================================================
+// Main Sync Function (v2)
+// ============================================================
+async function syncSaleOrdersV2(opts?: { forceFull?: boolean }) {
   let dbClient: any;
   const startTime = Date.now();
   const syncedOrderIds = new Set();
@@ -463,19 +479,42 @@ export async function syncSaleOrders(opts?: { forceFull?: boolean }) {
 }
 
 // รันเป็น CLI เฉพาะเมื่อถูกเรียกตรง ๆ (npm run sync:saleorders) — ไม่รันเมื่อถูก import จาก backend
+//   (ไม่ใส่อะไร) / --full   รอบปกติตามเวอร์ชันที่เลือก (เหมือนที่แอปรัน)
+//   --v3-dry-run [--since=ISO] [--pages=N]   อ่าน v3 แล้วเทียบกับฐาน ไม่เขียนอะไรเลย (--pages=0 = จนสุด)
+//   --v3-backfill [--restart]                กวาด v3 ตั้งแต่ปี 2021 ทำต่อจากจุดค้างได้ · จบแล้วแอปสลับเป็น v3 เอง
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const forceFull = process.argv.includes('--full') || process.env.SYNC_FULL === '1';
-  syncSaleOrders({ forceFull })
-    .then(async () => {
-      // customers_data_view เป็น source of truth ของแอป — ต้องสร้างใหม่เอง (path นี้ไม่ผ่าน syncService)
-      // --full = สั่งกวาดใหม่ทั้งฐาน → บังคับ rebuild ด้วย ไม่ให้ watermark ข้าม (ใช้กู้ข้อมูลที่เพี้ยนได้)
-      await refreshCustomerDataView({ force: forceFull });
-      // path นี้ไม่ผ่าน syncService จึงต้องมาร์ก "นำเข้า Odoo แล้ว" เองด้วย (ตัวเดียวกับที่รอบ sync ปกติเรียก)
-      await reconcileQuotationOdooLinks();
-      await pool.end(); // ปิด pool → event loop ว่าง → Node ออกเอง (อย่าเรียก process.exit(0) จะชน libuv teardown บน Windows)
-    })
-    .catch((error) => {
-      serr(`saleorders ล้มเหลว — ${error?.message || error}`);
-      process.exit(1);
-    });
+  const argv = process.argv.slice(2);
+  const opt = (name: string) => argv.find((a) => a.startsWith(`${name}=`))?.slice(name.length + 1);
+
+  if (argv.includes('--v3-dry-run')) {
+    const pages = opt('--pages');
+    dryRunSaleOrderV3({ since: opt('--since'), pages: pages === undefined ? undefined : Number(pages) })
+      .then(async (r) => {
+        await pool.end();
+        if (!r.ok) process.exitCode = 1;
+      })
+      .catch((error) => {
+        serr(`saleorders v3 dry-run ล้มเหลว — ${error?.message || error}`);
+        process.exit(1);
+      });
+  } else {
+    const backfill = argv.includes('--v3-backfill');
+    const forceFull = !backfill && (argv.includes('--full') || process.env.SYNC_FULL === '1');
+    const run = backfill
+      ? runSaleOrderV3Sweep({ restart: argv.includes('--restart'), patient: true, label: 'saleorders-v3' })
+      : syncSaleOrders({ forceFull });
+    run
+      .then(async () => {
+        // customers_data_view เป็น source of truth ของแอป — ต้องสร้างใหม่เอง (path นี้ไม่ผ่าน syncService)
+        // --full = สั่งกวาดใหม่ทั้งฐาน → บังคับ rebuild ด้วย ไม่ให้ watermark ข้าม (ใช้กู้ข้อมูลที่เพี้ยนได้)
+        await refreshCustomerDataView({ force: forceFull });
+        // path นี้ไม่ผ่าน syncService จึงต้องมาร์ก "นำเข้า Odoo แล้ว" เองด้วย (ตัวเดียวกับที่รอบ sync ปกติเรียก)
+        await reconcileQuotationOdooLinks();
+        await pool.end(); // ปิด pool → event loop ว่าง → Node ออกเอง (อย่าเรียก process.exit(0) จะชน libuv teardown บน Windows)
+      })
+      .catch((error) => {
+        serr(`saleorders ล้มเหลว — ${error?.message || error}`);
+        process.exit(1);
+      });
+  }
 }

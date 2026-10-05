@@ -18,6 +18,15 @@ dotenv.config();
 const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_ATTEMPTS = 5;
 const INITIAL_RETRY_DELAY_MS = 2000;
+/** เพดานของช่วงรอระหว่าง retry — ค่าเริ่มต้น 5 ครั้ง (2→16 วิ) ไม่ถึงเพดานนี้ มีผลเฉพาะผู้เรียกที่ขอ maxAttempts มากกว่า */
+const MAX_RETRY_DELAY_MS = 60_000;
+
+export interface GatewayGetOptions {
+  /** แทน REQUEST_TIMEOUT_MS — sale_order v3 ใช้ 60 วิ (วัด 2026-10-05: หน้าละ 6.3–15.2 วิ · v2 0.3 วิ) */
+  timeoutMs?: number;
+  /** แทน MAX_ATTEMPTS — backfill ที่รันยาวขอรอนานกว่าได้ (ใช้ key ร่วมกับ Appsale จึงชน 429 ได้เป็นพัก ๆ) */
+  maxAttempts?: number;
+}
 
 /**
  * ติดต่อ gateway ไม่ได้ / gateway ไม่ไหว — ยิง resource อื่นต่อก็พังเหมือนกัน
@@ -81,16 +90,18 @@ function isConnectivityError(error: any): boolean {
  * โมดูล — เพื่อคงพฤติกรรมเดิมที่ syncService ตั้งใจ lazy import ไว้: env หาย ต้องพังตอน
  * เริ่ม sync (ซึ่งมี try/catch รออยู่) ไม่ใช่ตอน boot เซิร์ฟเวอร์
  */
-export function createGatewayGet(apiKeyEnvNames: string[]) {
+export function createGatewayGet(apiKeyEnvNames: string[], options: GatewayGetOptions = {}) {
   const baseUrl = trimTrailingSlash(requiredEnv('GATEWAY_BASE_URL', 'gateway_host'));
   const apiKey = requiredEnv(...apiKeyEnvNames);
+  const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
+  const maxAttempts = options.maxAttempts ?? MAX_ATTEMPTS;
 
   return async function gatewayGet(path: string): Promise<any> {
     const url = `${baseUrl}${path}`;
     let attempts = 0;
     let delay = INITIAL_RETRY_DELAY_MS;
 
-    while (attempts < MAX_ATTEMPTS) {
+    while (attempts < maxAttempts) {
       attempts += 1;
       try {
         const response = await fetch(url, {
@@ -100,18 +111,18 @@ export function createGatewayGet(apiKeyEnvNames: string[]) {
           },
           // กันเคสร้ายที่สุด: gateway รับ connection แล้วเงียบ ไม่ตอบ ไม่ปิด
           // ถ้าไม่มีบรรทัดนี้ sync จะค้างถาวรและล็อก mutex ไว้จน restart container
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+          signal: AbortSignal.timeout(timeoutMs)
         });
 
         if (response.status === 429 || response.status === 503 || response.status === 504) {
-          if (attempts >= MAX_ATTEMPTS) {
+          if (attempts >= maxAttempts) {
             throw new GatewayUnreachableError(
               `Gateway API Error: ${response.status} - ${response.statusText} (max attempts reached)`
             );
           }
-          swarn(`${syncCtxLabel()}gateway ${response.status} — retry ${attempts}/${MAX_ATTEMPTS} ใน ${delay / 1000}s`);
+          swarn(`${syncCtxLabel()}gateway ${response.status} — retry ${attempts}/${maxAttempts} ใน ${delay / 1000}s`);
           await sleep(delay);
-          delay *= 2;
+          delay = Math.min(delay * 2, MAX_RETRY_DELAY_MS);
           continue;
         }
 
@@ -131,21 +142,21 @@ export function createGatewayGet(apiKeyEnvNames: string[]) {
       } catch (error: any) {
         if (error instanceof GatewayRejectedError) throw error;
 
-        if (attempts >= MAX_ATTEMPTS) {
+        if (attempts >= maxAttempts) {
           if (error instanceof GatewayUnreachableError) throw error;
           // 5xx ที่ retry จนครบ หรือเชื่อมต่อไม่ได้ → ถือว่า gateway ใช้งานไม่ได้
           if (isConnectivityError(error) || (error?.status && error.status >= 500)) {
             throw new GatewayUnreachableError(
-              `ติดต่อ gateway ไม่ได้ (${error?.message || error}) — ลองแล้ว ${MAX_ATTEMPTS} ครั้ง`,
+              `ติดต่อ gateway ไม่ได้ (${error?.message || error}) — ลองแล้ว ${maxAttempts} ครั้ง`,
               { cause: error }
             );
           }
           throw error;
         }
 
-        swarn(`${syncCtxLabel()}gateway ยิงไม่ผ่าน (${error.message}) — retry ${attempts}/${MAX_ATTEMPTS} ใน ${delay / 1000}s`);
+        swarn(`${syncCtxLabel()}gateway ยิงไม่ผ่าน (${error.message}) — retry ${attempts}/${maxAttempts} ใน ${delay / 1000}s`);
         await sleep(delay);
-        delay *= 2;
+        delay = Math.min(delay * 2, MAX_RETRY_DELAY_MS);
       }
     }
 
