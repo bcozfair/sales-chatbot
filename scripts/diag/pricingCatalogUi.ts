@@ -171,9 +171,11 @@ for (const width of [1280, 390]) {
   ok('ลบแถวสุดท้าย → ไม่มีค่าเจาะรู ราคากลับเท่าเดิม', (await page.$('input[aria-label="ขนาดรู (mm) แถว 1"]')) === null && !(await text()).includes('รวม 40 mm'));
 
   // ช่อง "รุ่น" ช่องเดียวรวม BH กับ TS แบ่งกลุ่ม (เจ้าของเคาะข้อ 9 · 2026-09-29) — TS 11 ตาราง (TS_-12 สองหน้า) + BH 4 รุ่น
+  // + TS_-02 เมื่อเล่มในฐานมี TSK-02 แล้ว (ฐาน PMSV เขียน 2026-10-05) — เงื่อนไขเดียวกับขั้น TS_-02 ข้างล่าง
   const groups = await page.$$eval('select[aria-label="รุ่น"] optgroup', (gs) => gs.map((g) => `${(g as HTMLOptGroupElement).label}:${g.children.length}`));
-  ok('เลือกรุ่นจาก dropdown ในช่อง "รุ่น" (ไม่มีการ์ดแยกแล้ว) · กลุ่ม TS 11 + BH 4',
-    JSON.stringify(groups) === JSON.stringify(['TS — Temperature Sensor:11', 'BH — Heater:4'])
+  const tsTables = (await page.$eval('select[aria-label="รุ่น"]', (el) => [...(el as HTMLSelectElement).options].some((x) => x.value === 'TS_-02'))) ? 12 : 11;
+  ok(`เลือกรุ่นจาก dropdown ในช่อง "รุ่น" (ไม่มีการ์ดแยกแล้ว) · กลุ่ม TS ${tsTables} + BH 4`,
+    JSON.stringify(groups) === JSON.stringify([`TS — Temperature Sensor:${tsTables}`, 'BH — Heater:4'])
       && (await page.$$('xpath/.//button[.//b[text()="BH-03"]]')).length === 0, groups.join(' · '));
   await choose('รุ่น', 'BH-03');
   await choose('การออกขั้วไฟ', '1');
@@ -290,7 +292,8 @@ for (const width of [1280, 390]) {
   ok('ตัวอย่าง 5: ท่อนที่ยังไม่ได้กำหนด → ชิป L ป้าย "ยังไม่ได้กำหนด" · ไม่มีคำว่า "อ่านไม่ออก" บนจอ (เจ้าของสั่ง 2026-10-05)',
     (await page.$('button[aria-label="เอา L ออก"]')) !== null && body.includes('ยังไม่ได้กำหนด') && !/อ่าน\S{0,20}ไม่ออก/.test(body));
 
-  await typeCode('TSK-02(11.5)5x10+2M');
+  // เลข 99 ไม่มีในแคตตาล็อก — เดิมใช้ TSK-02 ซึ่งมีรุ่นแล้วตั้งแต่ 2026-10-05 (ห้ามใช้ซีรีส์ที่รอเติม เช่น TSK-03 ไม่งั้นตกอีกรอบ)
+  await typeCode('TSK-99(12)5x10+2M');
   ok('ตัวอย่าง 7: รุ่นที่ไม่มีในสมุดราคา → ช่อง "รุ่น" ว่าง + เหตุผล', (await text()).includes('ไม่พบรุ่นในสมุดราคา'));
 
   await typeCode('BH-02C 210-220-1400W-N-Z');

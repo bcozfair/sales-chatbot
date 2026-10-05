@@ -582,6 +582,7 @@ chatbot/
   · gate `diag:pricing-catalog-ts` + `diag:pricing-catalog-ui`
   · **TS_-02 / TS_-02-SI (2026-10-05):** รุ่นเดียว `TSK-02` ตารางสามแกน (แกน `submodel` = คอลัมน์ TS-02 / TS-02-SI) · ราคาตั้งที่แกน **10 mm ตาม Excel** ไม่ใช่ 25 ของแคตตาล็อก
   · วงเล็บ = ขนาดเขี้ยวล็อค **ไม่มีผลกับราคา แค่เตือน** (`TsFamilySpec.connector`) · เพิ่มรุ่นลงเล่มที่มีอยู่ด้วย `importer.ts --new-models` (ไม่แตะรุ่นเดิม)
+  · **ฐานเขียนแล้ว 2026-10-05 ก่อนโค้ดขึ้น prod** (r18 รุ่น + 6 แถว · r19 สาย TS 160/C 120) ⇒ ระหว่างรอ deploy prod คิด `-SI` เป็นราคา TS-02 (ต่ำไป 20–40) — deploy แล้วหาย
 - **`docs/plan-pricebook-db.md`** — **สมุดราคาอยู่ใน DB แล้ว ขึ้น production 2026-09-23** (เล่มแรก `r1` · 13 รุ่น · เจ้าของเคาะ §12 "ตามที่แนะนำ") — 3 ตาราง `pricing_*` · `spec` เป็น **`json` ไม่ใช่ `jsonb`** เพราะ jsonb สลับลำดับคีย์แล้วแม่แบบ .xlsx เรียงใหม่ 16/22 ชีต · กันทับด้วย `UNIQUE NULLS NOT DISTINCT (parent_id)` · ทางเขียนเดียวคือ `commitBookChange`/`restoreRevision` · **ประวัติเขียนต่อท้ายอย่างเดียว ห้ามมีโค้ด UPDATE/DELETE** · gate: `npm run diag:pricing-db` (ROLLBACK) · บูตเล่มแรกของฐานใหม่ = `DEPLOY.md` ขั้น 4.11 · นำเข้าซ้ำถูกปฏิเสธ แทนทั้งเล่มต้อง `--replace-all`
 - **`docs/plan-logging-audit-compliance.md`** — ระบบ log / audit / ข้อกำหนดตามกฎหมาย
 - **`docs/plan-user-roles-auth.md`** — สิทธิ์ผู้ใช้และการยืนยันตัวตน
