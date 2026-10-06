@@ -110,6 +110,19 @@ export function timesAsX(s: string): string {
   return s.replace(/×/g, 'x');
 }
 
+/**
+ * จุลภาคคั่นหลักพัน `1,000` = `1000` (เจ้าของสั่ง 2026-10-06) — แคตตาล็อก TS ไม่มีจุลภาคในรหัสเลย
+ * เดิมตัวอ่านหยุดที่จุลภาค ⇒ `TSK-03 5x1,000+1M` ได้แกนยาว 1 mm แล้วราคาต่ำไปเงียบ ๆ (450 · ในฐาน 1,400) · รหัสจริง 2 ตัว
+ * รับเฉพาะรูปที่อ่านได้ทางเดียว: 1–3 หลัก ตามด้วยกลุ่มละ 3 หลักพอดี (`10,000`) — `6,5` · `1,00` ไม่แตะ
+ * **ไม่ใช้กับ BH** (จุลภาคของ BH คั่นสองค่า `750W,750W`) · คืนค่าที่แปลง ไว้เตือนให้แก้รหัสใน Odoo
+ * เกณฑ์ "ยอมรับรูปที่เขียนผิด" (เจ้าของ 2026-10-06): ตีความได้ทางเดียว · ยังเตือน · วัดด้วย diag:pricing-diff
+ */
+export function thousandsAsPlain(s: string): { text: string; fixed: string[] } {
+  const fixed: string[] = [];
+  const text = s.replace(/(?<![\d.,])\d{1,3}(?:,\d{3})+(?![\d,])/g, (m) => { fixed.push(m); return m.replace(/,/g, ''); });
+  return { text, fixed };
+}
+
 /** ทำให้เครื่องหมายนิ้วทุกแบบ (” “ ″ ') เทียบกันได้ `×` เป็น `x` และตัดช่องว่างทิ้งทั้งหมด */
 function norm(s: string): string {
   return timesAsX(s)
@@ -1706,13 +1719,18 @@ export function modelOfCode(input: string, book: PriceBook): PriceModel | undefi
 }
 
 export function parseProductCode(input: string, book: PriceBook, picks: CodePicks = {}): ParsedCode {
-  // `×` → `x` ก่อนตัวอ่านทุกตัว (ช่องตามแคตตาล็อกอ่านจากรหัสเดิม ไม่ได้ผ่าน `norm`) · `out.input` คงตามที่พิมพ์
-  const typed = timesAsX(input);
+  // `×` → `x` · `1,000` → `1000` ก่อนตัวอ่านทุกตัว (ช่องตามแคตตาล็อกอ่านจากรหัสนี้ ไม่ได้ผ่าน `norm`) · `out.input` คงตามที่พิมพ์
+  const isBh = /^\s*BH/i.test(input);
+  const thousands = isBh ? { text: timesAsX(input), fixed: [] } : thousandsAsPlain(timesAsX(input));
+  const typed = thousands.text;
   // BH: ช่องว่างระหว่างตัวเลขสองตัวคือตัวคั่นท่อน (`BH-01 101x150 220-2000W`) — `norm` ลบช่องว่างทิ้งหมด
   // ทำให้ขนาดกับแรงดันติดกันเป็น "101x150220" แล้วได้ราคาของความสูง 150,220 mm เงียบ ๆ (เจอ 2026-09-28 · 23 รหัสจริง)
-  const prepared = /^\s*BH/i.test(typed) ? typed.replace(/(\d)\s+(?=\d)/g, '$1-') : typed;
+  const prepared = isBh ? typed.replace(/(\d)\s+(?=\d)/g, '$1-') : typed;
   const normalized = norm(prepared);
   const out: ParsedCode = { input, normalized, parts: [], problems: [], warnings: [] };
+  for (const f of thousands.fixed) {
+    out.warnings.push(`อ่าน ${f} เป็น ${f.replace(/,/g, '')} — รหัสในแคตตาล็อกไม่มีจุลภาค ควรแก้รหัสใน Odoo`);
+  }
   if (normalized === '') {
     out.problems.push('ยังไม่ได้พิมพ์รหัส');
     return out;
