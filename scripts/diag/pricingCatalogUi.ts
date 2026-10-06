@@ -172,10 +172,10 @@ for (const width of [1280, 390]) {
 
   // ช่อง "รุ่น" ช่องเดียวรวม BH กับ TS แบ่งกลุ่ม (เจ้าของเคาะข้อ 9 · 2026-09-29) — TS 11 ตาราง (TS_-12 สองหน้า) + BH 4 รุ่น
   // + TS_-02 กับ TS_-02-SI (แคตตาล็อกคนละหน้า · รุ่นเดียวกัน) เมื่อเล่มในฐานมี TSK-02 แล้ว (ฐาน PMSV เขียน 2026-10-05) — เงื่อนไขเดียวกับขั้น TS_-02 ข้างล่าง
-  // + TS_-03 เมื่อเล่มมี TSK-03 แล้ว (ฐาน PMSV เขียน 2026-10-06)
+  // + TS_-03 เมื่อเล่มมี TSK-03 แล้ว (ฐาน PMSV เขียน 2026-10-06) · + TS_-05 เมื่อเล่มมี TSK-05 แล้ว
   const groups = await page.$$eval('select[aria-label="รุ่น"] optgroup', (gs) => gs.map((g) => `${(g as HTMLOptGroupElement).label}:${g.children.length}`));
   const hasTable = (v: string) => page.$eval('select[aria-label="รุ่น"]', (el, v) => [...(el as HTMLSelectElement).options].some((x) => x.value === v), v);
-  const tsTables = 11 + ((await hasTable('TS_-02')) ? 2 : 0) + ((await hasTable('TS_-03')) ? 1 : 0);
+  const tsTables = 11 + ((await hasTable('TS_-02')) ? 2 : 0) + ((await hasTable('TS_-03')) ? 1 : 0) + ((await hasTable('TS_-05')) ? 1 : 0);
   ok(`เลือกรุ่นจาก dropdown ในช่อง "รุ่น" (ไม่มีการ์ดแยกแล้ว) · กลุ่ม TS ${tsTables} + BH 4`,
     JSON.stringify(groups) === JSON.stringify([`TS — Temperature Sensor:${tsTables}`, 'BH — Heater:4'])
       && (await page.$$('xpath/.//button[.//b[text()="BH-03"]]')).length === 0, groups.join(' · '));

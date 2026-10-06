@@ -888,7 +888,7 @@ function readTsGeneric(c: Ctx, rest: string, prefix: string, letter = ''): void 
     }
     rest = rest.slice(paren[0].length);
   } else if (!paren && conn) {
-    c.warnings.push(`รหัสนี้ไม่ได้ระบุขนาดเขี้ยวล็อค — แคตตาล็อก ${conn.head} ต้องระบุในวงเล็บหลังเลขรุ่น เช่น TSK-02(12) (ไม่มีผลกับราคา)`);
+    c.warnings.push(`รหัสนี้ไม่ได้ระบุขนาดเขี้ยวล็อค — แคตตาล็อก ${conn.head} ต้องระบุในวงเล็บหลังเลขรุ่น เช่น ${conn.model}(12) (ไม่มีผลกับราคา)`);
   } else if (hasThread && !c.model.axisDefaults?.thread) {
     // รุ่นที่มีเกลียวมาตรฐาน (TS_-01 = 1/4” · TS_-01-0 = M5 ตามแคตตาล็อก) ไม่ต้องเตือน — engine ใช้ค่านั้นแล้วบอกบนบรรทัดราคา
     c.warnings.push('รหัสนี้ไม่มีวงเล็บบอกขนาดเกลียว — ใส่เกลียวต่อท้ายเลขรุ่นแล้วคิดใหม่ เช่น TSK-01(M6)');

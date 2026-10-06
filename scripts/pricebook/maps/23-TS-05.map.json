@@ -1,0 +1,102 @@
+{
+  "file": "ราคาTC อัพเดต (13-05-69).xlsx",
+  "sheet": "TS-05",
+  "code": "TSK-05",
+  "label": "Thermocouple / NTC / PTC TS-05 (เขี้ยวล็อค + ด้ามจับ + สปริง)",
+  "aliases": ["TSJ-05", "TST-05", "TSN-05"],
+  "standard": { "L1": 20, "cable_m": 1 },
+  "axisDefaults": { "cable": "สายสแตนเลสถัก" },
+  "base": {
+    "kind": "matrix",
+    "axes": ["D", "sensor"],
+    "rowHeaderCol": "B",
+    "rows": [13, 20],
+    "colHeaderRow": 11,
+    "cols": ["F", "G"]
+  },
+  "adders": [
+    {
+      "id": "len_l1",
+      "label": "ความยาวแกนส่วนที่เกิน 20 mm (บวกเพิ่ม 5 mm ละ)",
+      "order": 20,
+      "kind": "perUnit",
+      "dim": "L1",
+      "step": 5,
+      "round": "ceil",
+      "unit": "mm",
+      "byAxis": "D",
+      "ratesFrom": { "col": "E", "keyCol": "B", "rows": [13, 20] },
+      "source": "TS-05!D13 'Tube Length (L1) 20 mm' + E11 'L1 บวกเพิ่ม 5 mm. ละ' — ราคาตั้งที่ 20 mm (B10 'TS_- 05 (11.5) 4.8x20+1M.' = แคตตาล็อก Standard 20 mm) · สั้นกว่า 20 = ราคาตั้ง (แนวเดียวกับ TS_-02 ที่เจ้าของเคาะ 2026-10-05)"
+    },
+    {
+      "id": "sensor_t",
+      "label": "Type T (บวกเพิ่มจาก Type K)",
+      "order": 30,
+      "kind": "flat",
+      "when": { "option": "sensor:T" },
+      "byAxis": "D",
+      "ratesFrom": { "col": "H", "keyCol": "B", "rows": [13, 20] },
+      "source": "TS-05!H11 'Type T บวกเพิ่ม Type K'"
+    },
+    {
+      "id": "sensor_ntc",
+      "label": "NTC / PTC (บวกเพิ่มจาก Type K)",
+      "order": 30,
+      "kind": "flat",
+      "when": { "option": "sensor:NTC" },
+      "byAxis": "D",
+      "ratesFrom": { "col": "I", "keyCol": "B", "rows": [13, 20] },
+      "source": "TS-05!I11 'NTC / PTC บวกเพิ่ม Type K' — แคตตาล็อก TS_-05 หัวหน้าเขียน Thermocouple/NTC/PTC แต่ช่อง 'ชนิดของ Sensor' มีแค่ K/J/T (ไม่มีหัว N_-05)"
+    },
+    {
+      "id": "sensor_pt1000",
+      "label": "PT1000 (บวกเพิ่มจาก PT100)",
+      "order": 30,
+      "kind": "flat",
+      "when": { "option": "sensor:PT1000" },
+      "byAxis": "D",
+      "ratesFrom": { "col": "J", "keyCol": "B", "rows": [13, 20] },
+      "source": "TS-05!J11 'PT1000 บวกเพิ่ม PT100' — แคตตาล็อก TS_-05 ไม่มี RTD · หัวคอลัมน์ G เขียน 'PT100' เฉย ๆ ไม่บอกคลาส ⇒ ยังไม่ใส่ TSP-05/TSZ-05 ใน aliases (รหัสจริง TSP-05 2 ตัวคงเป็น 'ไม่มีรุ่น') จนกว่าเจ้าของบอกว่าคอลัมน์นี้คือคลาสไหน"
+    },
+    {
+      "id": "cable_over_1m",
+      "label": "ราคาสายส่วนที่ยาวเกิน 1 เมตร (ตามชนิดสาย)",
+      "order": 45,
+      "kind": "perUnit",
+      "dim": "cable_m",
+      "step": 1,
+      "round": "ceil",
+      "unit": " m",
+      "byAxis": "cable",
+      "ratesFrom": { "sheet": "TS-21+22+25", "col": "B", "keyCol": "A", "rows": [26, 29] },
+      "source": "TS-05!D22 'สายยาวกว่า 1 M บวกเพิ่มตามราคาสาย' + TS-21+22+25!A26:B29 — ราคาตั้งของชีตคือ '+1M' (B10) แม้แคตตาล็อกเขียนสาย Standard 2 M (ยึด Excel แบบ TS_-03/04) · ไม่ระบุชนิดสาย = สแตนเลสถัก ตามแคตตาล็อก 'Cable Type None' (ชีต D23:D25 เขียน T = เทปล่อน / PT100·NTC·PTC = PVC — แนวเดียวกับ TS_-02/03 ที่ยึดแคตตาล็อก)"
+    },
+    {
+      "id": "bend_l",
+      "label": "หัก L ดัดงอ",
+      "order": 55,
+      "kind": "flat",
+      "when": { "option": "bend:L" },
+      "amount": 100,
+      "source": "TS-05!C8 'สำหรับรุ่นหัก L ดัดงอ บวกเพิ่ม 100 บาท'"
+    },
+    {
+      "id": "bend_square",
+      "label": "หักฉาก (เชื่อมฉาก)",
+      "order": 55,
+      "kind": "flat",
+      "when": { "option": "bend:square" },
+      "amount": 200,
+      "source": "TS-05!C8 'แบบฉาก (เชื่อมฉาก) บวกเพิ่ม 200 บาท'"
+    }
+  ],
+  "constraints": [
+    {
+      "id": "ELEM2_ASK_PRODUCTION",
+      "when": { "option": "element:2" },
+      "level": "quoteOnRequest",
+      "message": "2 element — แคตตาล็อก TS_-05 มีตัวเลือก แต่ชีต TS-05 ไม่มีราคา ⇒ ปรึกษาผลิต 2 ก่อนยืนยันราคา",
+      "source": "แคตตาล็อก TS_-05 'Number of Element 2' · ชีต TS-05 ไม่มีคอลัมน์ 2 element (แนวเดียวกับ TS_-04/11 · เจ้าของเคาะข้อ 3 2026-09-29)"
+    }
+  ]
+}

@@ -651,6 +651,44 @@ async function main(): Promise<void> {
     check('เกลียว M6 (ยังไม่มีแถว) ไม่ได้ราคาไหนแบบเงียบ ๆ — รอแอดมินตั้งที่ตารางรหัสย่อย', m6.o?.status !== 'priced' &&
       m6.p.parts.some((x) => x.kind === 'unknown' && /M6/.test(x.text)), `${m6.o?.status} ${m6.p.parts.map((x) => `${x.text}:${x.kind}`).join(' ')}`);
   }
+
+  // ── 13. TS_-05 (2026-10-06) — รุ่นใหม่ TSK-05 · เขี้ยวล็อคแบบ TS_-02 + ราคาตั้งที่แกน 20 mm · เทียบกับช่องของชีต ไม่ใช่ตัวเลขที่จดไว้ ──
+  section('13. TS_-05 — ชีต TS-05 + แคตตาล็อก TS_-05 (เขี้ยวล็อคไม่มีผลกับราคา · แกน 20 mm)');
+  const k05 = book.models['TSK-05'];
+  if (!k05) {
+    console.log(`  ${YEL}…${RESET} เล่มนี้ยังไม่มี TSK-05 — ข้าม (ตรวจก่อนเขียนฐานด้วย -- --book <ไฟล์จาก importer.ts --new-models --out>)`);
+  } else {
+    const cell05 = (d: string) => k05.base.kind === 'matrix' ? k05.base.cells[`${d} | Type K/J`] : undefined;
+    const rate05 = (id: string, key: string) => k05.adders.find((a) => a.id === id)?.rates?.[key] ?? NaN;
+    const std = price('TSK-05(12)4.8x20+1M');
+    check('ราคาตั้ง = แถวแกน 4.8 ของชีต ที่แกน 20 mm + สาย 1 M (B10) ไม่มีบรรทัดอื่น', std.o?.status === 'priced' && std.o.unitPrice === cell05('4.8') &&
+      std.o.breakdown.length === 1, `${std.o?.unitPrice}`);
+    check('ได้ช่องตามแคตตาล็อก TS_-05 ตรงทุกตัวอักษร · ประกอบกลับเป็นรหัสเดิม',
+      std.p.tsForm?.family === 'TS_-05' && !!readTsForm('TSK-05(12)4.8x20+1M', 'TS_-05') && buildTsCode(std.p.tsForm!) === 'TSK-05(12)4.8x20+1M',
+      std.p.tsForm ? buildTsCode(std.p.tsForm) : '—');
+    const l50 = price('TSK-05(15.5)6Ax50+1M');
+    check('แกน 50 = ราคาตั้งของ 6A + 6 ช่วง 5 mm ของแกน 6A', l50.o?.unitPrice === (cell05('6A') ?? NaN) + 6 * rate05('len_l1', '6A'), `${l50.o?.unitPrice}`);
+    const short = price('TSJ-05(12)4.8x10+1M');
+    check('แกนสั้นกว่า 20 mm = ราคาตั้ง (แนวเดียวกับ TS_-02)', short.o?.unitPrice === cell05('4.8'), `${short.o?.unitPrice}`);
+    const conn = price('TSK-05(15.5)4.8x20+1M');
+    check('เขี้ยวล็อคไม่คู่กับแกน = ราคาเท่ากัน + เตือน', conn.o?.unitPrice === std.o?.unitPrice && conn.p.warnings.some((w) => /15\.5/.test(w)),
+      conn.p.warnings.join(' | '));
+    const noId = price('TSK-05 4.8x20+1M');
+    check('ไม่มีวงเล็บเขี้ยวล็อค = ราคาเท่ากัน + เตือนพร้อมตัวอย่างของรุ่นนี้ (TSK-05(12))', noId.o?.unitPrice === std.o?.unitPrice &&
+      noId.p.warnings.some((w) => w.includes('TSK-05(12)')), noId.p.warnings.join(' | '));
+    const t = price('TST-05(12)6x20+1M');
+    check('Type T = ราคาตั้ง K/J + คอลัมน์ "Type T บวกเพิ่ม Type K"', t.o?.status === 'priced' && t.o.unitPrice === (cell05('6') ?? NaN) + rate05('sensor_t', '6'), `${t.o?.unitPrice}`);
+    const cab = price('TSK-05(12)4.8x20+3M');
+    check('สายไม่ระบุชนิด = สแตนเลสถัก (แคตตาล็อก None) · ราคาตั้งรวมสาย 1 M เกิน 2 M คิดสองเมตร',
+      line(cab.o, /สาย/) === rate05('cable_over_1m', 'สายสแตนเลสถัก') * 2, `${line(cab.o, /สาย/)}`);
+    const lj = price('TSJ-05L(12)4.8x20+1M');
+    check('ตัว L = หัก L +100 ตามชีต C8 (กฎกลาง SUFFIX_ADDON)', lj.o?.unitPrice === (std.o?.unitPrice ?? NaN) + 100, `${lj.o?.unitPrice}`);
+    const d5 = price('TSK-05(12)5x30+1M');
+    check('แกน 5 (ไม่มีทั้งแคตตาล็อกและชีต) = ต้องขอราคา · ช่องกรอกขึ้น ask', d5.o?.status === 'quoteOnRequest' && d5.p.tsForm?.issues?.d === 'ask',
+      `${d5.o?.status} ${JSON.stringify(d5.p.tsForm?.issues)}`);
+    const e2 = price('TSJ-05(12)6Ax20-2+1M');
+    check('2 Element (ชีตไม่มีราคา) = ต้องขอราคา ไม่ใช่ไม่รับผลิต', e2.o?.status === 'quoteOnRequest', `${e2.o?.status}`);
+  }
 }
 
 main()
