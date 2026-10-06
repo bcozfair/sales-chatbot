@@ -559,6 +559,13 @@ const add = (c: Ctx, part: CodePart) => c.parts.push(part);
  * `text` แยกจาก `token` เพราะสิ่งที่โชว์บนจอต้องเป็นสิ่งที่คนพิมพ์มาจริง ๆ (มีวงเล็บ)
  * ส่วนสิ่งที่เอาไปค้นตารางคือเนื้อในวงเล็บ
  */
+/**
+ * แถวรหัสย่อยที่เป็น "วัสดุของแกน" (`TN` · `AL` = setAxis แกน D) — ตัวอักษรท้ายขนาดแกน (`15.8B`) ต้องถามเฉพาะแถวแบบนี้
+ * ตัวอักษรเดียวกันในตารางเป็นช่องอื่นได้: TSK-06 `B` = หัวกระโหลกใหญ่ · `S` = หัวเล็ก ⇒ เดิม `15.8B` ถูกอ่านเป็น "หัว B (+500)"
+ * แทนวัสดุ SUS 310S แล้วขึ้น "รหัสไม่ได้บอกขนาดแกน" (ตรวจ TS_-06 2026-10-06 · 39 รหัส `15.8B` + `4S`)
+ */
+const isMaterialRow = (sc: { effect: string; axis?: string } | undefined) => sc?.effect === 'setAxis' && sc.axis === 'D';
+
 function readFromTable(c: Ctx, token: string, text: string = token): boolean {
   const sc = findSubCode(c.book, c.model, token);
   if (!sc) return false;
@@ -958,7 +965,7 @@ function readTsGeneric(c: Ctx, rest: string, prefix: string, letter = ''): void 
         });
       } else if (asModel) {
         readPriceAsD(c, asModel, asMat!.source, mat![1]!, mat![2]!.toUpperCase(), dText);
-      } else if (mat && readFromTable(c, mat[2] ?? '', dText)) {
+      } else if (mat && isMaterialRow(findSubCode(c.book, c.model, mat[2] ?? '')) && readFromTable(c, mat[2] ?? '', dText)) {
         // แถวในตารางรหัสย่อยบอกแล้วว่าวัสดุนี้แปลว่าอะไร (วันนี้: ยังไม่มีราคาตั้ง)
       } else if (catalogOnlySize(c, 'd', dText, dValues)) {
         c.cfg.axes = { ...c.cfg.axes, D: dText };

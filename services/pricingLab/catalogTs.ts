@@ -404,13 +404,18 @@ export const TS_CATALOG: TsFamilySpec[] = [
     slots: {
       probe: ch('ชนิดของหัววัด', PROBE), sensor: sensorByProbe(TC_KJT),
       thread: ch('ขนาดเกลียว', [...INCH, ...METRIC]),
-      d: ch('ขนาดแกน', mm(D_TC, TITANIUM), 'NTC/PTC แกน 5 mm ขึ้นไป'),
+      // แกน 2.5 = แถว `2.5S` ของชีต TS-06 ที่แคตตาล็อกไม่มี (แบบ TS_-04) — ตัดออกเมื่อไหร่ แถวที่มีราคาจาก Excel
+      // จะกลายเป็นแถวสีส้ม "ราคาที่แอดมินใส่" ทั้งที่ไม่ใช่ (`askPrice.d`)
+      d: ch('ขนาดแกน', mm(['2', '2.5', ...D_TC.slice(1)], { ...TITANIUM, '2.5': '(Excel · Sheath 316 เท่านั้น)' }), 'NTC/PTC แกน 5 mm ขึ้นไป'),
       mat: ch('วัสดุ', MAT_TC),
       l1: L1, elem: ch('จำนวน Element', ELEMENT, 'ทำ 2 Element ได้ตั้งแต่แกน 6 mm'),
       hd: ch('ชนิดหัวกระโหลก', HEADS), ground: ch('Ground', GROUND, 'NTC/PTC Unground เท่านั้น'),
     },
     defaults: { probe: 'TS', sensor: 'K', thread: 'S4', d: '6', mat: '', l1: '100', elem: '', hd: '', ground: '' },
     addons: TS_ADDONS,
+    // ขนาดแกนที่ทั้งแคตตาล็อกและชีตไม่มี (`10.2A` · `15.8B` · `10.2` · `17` …) = ต้องขอราคา + แถวสีส้ม แบบ TS_-02/03/04/05
+    // (ตรวจ TS_-06 2026-10-06 · เดิมขึ้น "รหัสไม่ได้บอกขนาดแกน" ทั้งที่รหัสบอกแล้ว 115 รหัส) · เกลียวไม่อยู่ในนี้ — แนวเดียวกับ TS_-04
+    askPrice: { d: 'D' },
   },
   {
     family: 'TS_-08', head: 'TS_-08', name: 'RTD · Thread + RTD Head', model: 'TSP-08',
