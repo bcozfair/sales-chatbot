@@ -622,6 +622,35 @@ async function main(): Promise<void> {
   const bhc = price('BH-03 178x65-230-750W,750W(HPT)');
   check('BH ไม่แตะจุลภาค (`750W,750W` คั่นสองค่า) — ไม่มีคำเตือนจุลภาค', !bhc.p.warnings.some((w) => /จุลภาค/.test(w)) && bhc.p.normalized.includes(','),
     bhc.p.normalized);
+
+  // ── 12. TS_-04 — คำตอบของเจ้าของหลังตรวจ TS_-04 (2026-10-06) ──────────────────────────────────────────
+  // 1 สาย C = ซิลิโคน 120/ม. (แถวรหัสย่อย + อัตราในกฎสายของรุ่นในฐาน แบบ TSK-03) · 2 เกลียวที่ไม่มีราคาปล่อยไว้ก่อน ·
+  // 3 แกนนอกตาราง = ขอราคา + แถวสีส้ม (`askPrice.d`) · 4 ชีต B22 (แกน 4.8A 110/100 mm) ยืนยันตาม Excel — ไม่มีอะไรต้องตรวจในโค้ด
+  section('12. TS_-04 — สาย C · แกนนอกตาราง = ขอราคา · เกลียวที่ไม่มีราคาปล่อยไว้ (เจ้าของ 2026-10-06)');
+  const k04m = book.models['TSK-04'];
+  if (!k04m) {
+    console.log(`  ${YEL}…${RESET} เล่มนี้ไม่มี TSK-04 — ข้าม`);
+  } else {
+    const d102 = price('TSK-04(S4)10.2x100+10M');
+    check('แกน 10.2 (ไม่มีทั้งแคตตาล็อกและชีต) = ต้องขอราคา + ราคาเท่าที่คิดได้ · ช่องกรอกขึ้น ask · เดิม "รหัสไม่ได้บอกขนาดแกน"',
+      d102.o?.status === 'quoteOnRequest' && d102.o.violations.some((v) => v.askPrice && v.level === 'quoteOnRequest') && !d102.o.violations.some((v) => v.missing) &&
+        d102.p.tsForm?.issues?.d === 'ask', `${d102.o?.status} ${JSON.stringify(d102.p.tsForm?.issues)}`);
+    check('แอดมินเพิ่มแกน 10.2 เป็นแถวสีส้มที่หน้าชีตได้', askValueProblem(k04m, 'd', '10.2') === undefined, askValueProblem(k04m, 'd', '10.2'));
+    const s25 = price('TSK-04(S1)2.5Sx20+3MF');
+    check('แถว 2.5S ของชีต (แคตตาล็อกไม่มีแกน 2.5) ได้ราคาเต็ม ไม่เตือน "ราคาที่แอดมินใส่" · ไม่ขึ้นเป็นแถวสีส้ม',
+      s25.o?.status === 'priced' && !s25.o.violations.some((v) => v.askPrice) && !(offCatalogValues(k04m).D ?? []).includes('2.5S'),
+      `${s25.o?.status} ${JSON.stringify(offCatalogValues(k04m))}`);
+    check('แกน 15.8B (แคตตาล็อกมีขนาด+วัสดุ ชีตไม่มีแถว) = ยังไม่มีราคา', noRate(price('TSK-04(S6)15.8Bx500+3M').o));
+    const silicone = k04m.adders.find((a) => a.id === 'cable_over_1m')?.rates?.['สายซิลิโคน'];
+    const c3 = price('TSK-04(S2)6x100+3MC');
+    check(`สาย C = ซิลิโคน คิดตามอัตราในกฎสายของรุ่น (${silicone === undefined ? 'ว่าง = ยังไม่มีราคา' : `${silicone}/ม.`} · เจ้าของสั่ง 120 ใส่ในฐาน)`,
+      silicone === undefined ? noRate(c3.o) : c3.o?.status === 'priced' && line(c3.o, /สาย/) === silicone * 2 && !c3.o.violations.some((v) => v.partial),
+      `${c3.o?.status} ${line(c3.o, /สาย/)}`);
+    check('เกลียว M8 (แถวรหัสย่อยค่าว่าง) = ยังไม่มีราคา — เจ้าของสั่งปล่อยไว้ ค่อยขอราคามาใส่', noRate(price('TSK-04(M8)6x100+1M').o));
+    const m6 = price('TSK-04(M6)6x100+2M');
+    check('เกลียว M6 (ยังไม่มีแถว) ไม่ได้ราคาไหนแบบเงียบ ๆ — รอแอดมินตั้งที่ตารางรหัสย่อย', m6.o?.status !== 'priced' &&
+      m6.p.parts.some((x) => x.kind === 'unknown' && /M6/.test(x.text)), `${m6.o?.status} ${m6.p.parts.map((x) => `${x.text}:${x.kind}`).join(' ')}`);
+  }
 }
 
 main()

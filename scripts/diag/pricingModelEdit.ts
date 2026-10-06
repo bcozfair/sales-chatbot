@@ -721,8 +721,9 @@ if (ts01 && ts010) {
     JSON.stringify(v9.axisDefaults));
   check('ยังเปิดแบบชีต Excel ได้', excelReady(b9.models['TSK-01']!) && excelReady(b9.models['TSK-01-0']!));
   check('ไฟล์ catalog-subcodes.json ผ่านตัวตรวจทุกแถว (TS_-01 12 + แกน 6 · TS_-08 5 + หัวค่าว่าง 4 + เกลียวมิล 10 · TS_-10 5 + เกลียวมิล 12 · BH ปลั๊ก PL-5 ค่าว่าง 2 ' +
-    '+ แคตตาล็อก TS ชุด 2026-09-29: TS_-04 9 · 06 13 · 08 1 · 10 3 · 11 6 · 12 5 · 12 RTD 6 · 14 8 · 18 14 · TS_-02 6 ชุด 2026-10-05 · TS_-03 7 ชุด 2026-10-06)',
-    cat.length === 129, String(cat.length));
+    '+ แคตตาล็อก TS ชุด 2026-09-29: TS_-04 9 · 06 13 · 08 1 · 10 3 · 11 6 · 12 5 · 12 RTD 6 · 14 8 · 18 14 · TS_-02 6 ชุด 2026-10-05 · TS_-03 7 ชุด 2026-10-06 ' +
+    '· TS_-04 สาย C 1 ชุด 2026-10-06)',
+    cat.length === 130, String(cat.length));
 
   // ── ราคาสายที่ตารางรหัสย่อยตั้งให้ ต้องมีช่องบนหน้าสมุดราคาเสมอ (เจ้าของ 2026-09-25: "ต้องสามารถแก้ไขผ่าน ui ได้")
   const rowsOf = (b: PriceBook, code: string) =>
@@ -737,11 +738,15 @@ if (ts01 && ts010) {
   const noSc: PriceBook = { ...b9, subCodes: (book.subCodes ?? []).filter((x) => !(x.effect === 'setAxis' && x.value === 'สายซิลิโคน')) };
   check('  ไม่มีแถวรหัสย่อย ⇒ ไม่มีช่องซิลิโคน (ช่องมาจากตารางรหัสย่อยจริง ไม่ได้ฝังชื่อสายไว้)',
     !rowsOf(noSc, 'TSK-01').some((x) => x.value === 'สายซิลิโคน'));
-  const tsk04 = Object.values(b9.models).find((m) => !excelReady(m) && m.adders.some((a) => a.byAxis === 'cable'));
-  if (tsk04) {
-    const own = Object.keys(tsk04.adders.find((a) => a.byAxis === 'cable')!.rates ?? {});
-    check(`  รุ่นที่รหัสย่อยไม่ได้ครอบ (${tsk04.code}) ไม่ได้ช่องเพิ่ม`,
-      (modelEditorView(b9, tsk04).adders.find((a) => a.byAxis === 'cable')?.rates ?? []).length === own.length);
+  // รุ่นที่ไม่มีแถวรหัสย่อยตั้งสายนอกอัตราของตัวเอง — เดิมคือ TSK-04 จนแถว C ของมันลงไฟล์ (2026-10-06) ⇒ หาจากไฟล์ ไม่ระบุชื่อรุ่น
+  const ownCable = (m: PriceModel) => Object.keys(m.adders.find((a) => a.byAxis === 'cable')?.rates ?? {});
+  const uncovered = Object.values(b9.models).find((m) => !excelReady(m) && m.adders.some((a) => a.byAxis === 'cable') &&
+    !cat.some((s) => s.scope === m.code && s.effect === 'setAxis' && s.axis === 'cable' && !ownCable(m).includes(s.value ?? '')));
+  if (uncovered) {
+    check(`  รุ่นที่รหัสย่อยไม่ได้ครอบ (${uncovered.code}) ไม่ได้ช่องเพิ่ม`,
+      (modelEditorView(b9, uncovered).adders.find((a) => a.byAxis === 'cable')?.rates ?? []).length === ownCable(uncovered).length);
+  } else {
+    console.log('  (ข้ามข้อ "รุ่นที่รหัสย่อยไม่ได้ครอบ" — ทุกรุ่นที่มีกฎสายมีแถวรหัสย่อยตั้งสายเพิ่มแล้ว)');
   }
   const setC = applyModelEdit(b9.models['TSK-01']!, { adderRates: { cable_over_1m: [{ value: 'สายซิลิโคน', rate: 120 }] } }, b9);
   check('กรอกราคาซิลิโคนจากจอ ⇒ เก็บได้ และ TSK-01(M6)4.8+3MC = 160 + 120 × 2',
@@ -976,9 +981,14 @@ console.log('\n── 12. เกลียวที่อ่านไม่ออ
   }
   const ts04 = Object.keys(book.models).find((k) => k === 'TSJ-04' || k === 'TSK-04');
   if (ts04) {
-    const both = run('TSJ-04(20G)7.8x5.56+1M');
-    check('TSJ-04(20G)… — ขาดสองแกน ⇒ ข้อความบอกครบทั้ง "เกลียวยังไม่ได้กำหนด" และ "ไม่ได้บอกขนาดแกน"',
+    // แกน 7.8 ของรหัสจริง `TSJ-04(20G)7.8x5.56+1M` = ขอราคา ตั้งแต่ 2026-10-06 (TS_-04 `askPrice.d`) ⇒ ไม่ใช่ "ขาด" แล้ว — ใช้รหัสที่ไม่บอกแกนเลย
+    const both = run('TSJ-04(20G)+1M');
+    check('TSJ-04(20G)+1M — ขาดสองแกน ⇒ ข้อความบอกครบทั้ง "เกลียวยังไม่ได้กำหนด" และ "ไม่ได้บอกขนาดแกน"',
       both.r.violations.some((v) => v.message.includes('"(20G)"') && /ไม่ได้บอกขนาดแกน/.test(v.message)), why(both));
+    const d78 = run('TSJ-04(20G)7.8x5.56+1M');
+    check('  TSJ-04(20G)7.8… — เกลียวยังไม่ได้กำหนด · แกน 7.8 นอกตาราง = ขอราคา ไม่ใช่ "ไม่ได้บอกขนาดแกน"',
+      d78.r.violations.some((v) => v.message.includes('"(20G)"') && !/ไม่ได้บอกขนาดแกน/.test(v.message)) && d78.p.cfg?.askPrice?.D === '7.8',
+      `${why(d78)} · askPrice ${JSON.stringify(d78.p.cfg?.askPrice)}`);
   }
   if (Object.keys(book.models).some((k) => /^TS.-11$/.test(k))) {
     // ค่าสายปัดขึ้น (เจ้าของ 2026-10-01) ⇒ เกินไม่ถึงเมตรก็คิด 1 เมตร · ไม่บอกชนิดสาย = ใช้ค่ามาตรฐานของเล่ม (ข้างล่าง)
