@@ -57,18 +57,18 @@ export interface Ts11Spec {
   spring: 'NONE' | 'P';
   /** ขนาดแกน D1 (mm) ตามที่เขียน เช่น `'3.2'` — เก็บเป็นข้อความแบบแคตตาล็อก */
   dia: string;
-  /** วัสดุแกน — ไม่มีผลกับรูปทรง */
-  mat: 'NONE' | 'A' | 'T' | 'TN' | 'AT';
+  /** วัสดุแกน — ไม่มีผลกับรูปทรง · `null` = ผลอ่านรหัสบอกค่านอกแคตตาล็อก/อ่านไม่ออก (ส่งลูกค้าไม่ได้ — checks.ts) */
+  mat: 'NONE' | 'A' | 'T' | 'TN' | 'AT' | null;
   /** ความยาวแกน L1 (mm) */
   tubeLen: number;
-  /** จำนวน Element — ไม่มีผลกับรูปทรง */
-  elem: 'NONE' | '2';
+  /** จำนวน Element — ไม่มีผลกับรูปทรง · `null` = อ่านไม่ออก */
+  elem: 'NONE' | '2' | null;
   /** ความยาวสาย (เมตร) · `null` = รหัสไม่ได้บอก — ไม่มีผลกับรูปทรง (สายวาดย่อ 120 mm) */
   cableLen: number | null;
   /** ชนิดสาย — กำหนดสีปลอก · `NONE` = สแตนเลสถัก */
   cable: 'NONE' | 'P' | 'T' | 'TS';
-  /** `NONE` = Ground · `U` = Unground — ไม่มีผลกับรูปทรง */
-  ground: 'NONE' | 'U';
+  /** `NONE` = Ground · `U` = Unground — ไม่มีผลกับรูปทรง · `null` = อ่านไม่ออก */
+  ground: 'NONE' | 'U' | null;
 }
 
 /**
@@ -111,4 +111,66 @@ export interface DrawingFamily<S extends DrawingSpec> {
   /** ที่มาของรูปทรง — หน้าแคตตาล็อก + ไฟล์ของ Appsale ที่พอร์ตมา (คอมมิตอยู่ใน README) */
   source: { catalog: string; appsale: string[] };
   model(spec: S): DrawingModel;
+}
+
+// ── ผลอ่านรหัส/ผลคิดราคาจากหน้าคำนวณราคา — ประกาศเอง ไม่ import pricingLab ───────────────────
+//
+// รูปตรงกับ `TsForm` (catalogTs.ts) และ `BhForm` (catalogBh.ts) **ทุกช่อง** — ด่าน `diag:drawing-coverage`
+// ยืนยัน `keyof` สองทางตอน typecheck ⇒ หน้าคำนวณราคาเพิ่ม/เปลี่ยนชื่อช่อง (เช่นธงความหลวมใหม่) = `tsc` ล้ม
+// ไม่ใช่แบบที่มองข้ามธงนั้นเงียบ ๆ · ช่องเป็น optional ฝั่งนั้น การส่งเข้าฟังก์ชันอย่างเดียวจึงจับไม่ได้ (ช่องใหม่ผ่านเฉย)
+
+/** ช่องตามแคตตาล็อกของซีรีส์ TS (= `TsForm`) */
+export interface TsFormReading {
+  family: string;
+  values: Record<string, string>;
+  addons?: string[];
+  extras?: string[];
+  written?: Record<string, string>;
+  clUnit?: 'cm' | 'mm';
+  cableNoDash?: boolean;
+  headJunk?: string;
+  tail?: string[];
+  omit?: string[];
+  issues?: Record<string, 'off' | 'ask' | 'unread' | 'missing'>;
+}
+
+/** ช่องตามแคตตาล็อกของซีรีส์ BH (= `BhForm`) */
+export interface BhFormReading {
+  family: string;
+  shape?: string;
+  id?: number;
+  h?: number;
+  w?: number;
+  l?: number;
+  d1?: number;
+  d2?: number;
+  sizeText?: string;
+  volt?: string;
+  watt?: number;
+  wattText?: string;
+  conn?: string;
+  term?: string;
+  amp?: string;
+  addons?: string[];
+  holes?: { count: number; mm: number }[];
+  mat?: string;
+  extras?: { text: string; after: string; glue?: boolean }[];
+  loose?: boolean;
+}
+
+/** ผลอ่านรหัสหนึ่งครั้งของหน้าคำนวณราคา (ส่วนที่โมดูลแบบใช้ของ `ParsedCode`) */
+export interface PricingReading {
+  tsForm?: TsFormReading;
+  form?: BhFormReading;
+}
+
+/** ผลคิดราคา (ส่วนที่ checks.ts ใช้ของ `PriceOutcome`) */
+export interface PricingOutcome {
+  status: 'priced' | 'quoteOnRequest' | 'notManufacturable';
+}
+
+/** หนึ่งเหตุผลที่วาด/ส่งไม่ได้ — `reason` เป็นภาษาคน (ขึ้นจอได้ตรง ๆ) · `key` ไว้นับรวมในรายงาน */
+export interface Doubt {
+  key: string;
+  reason: string;
 }

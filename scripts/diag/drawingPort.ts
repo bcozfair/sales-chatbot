@@ -17,6 +17,11 @@
 //  รหัสที่รูปทรงเหมือนกันรันครั้งเดียว (คีย์เดียวกับ cache ของต้นฉบับ)
 //  `-- --quick` = ไม่แตะฐาน (ค่าเริ่มต้น + ตัวอย่าง + สังเคราะห์)
 //
+//  **ส่วน ค** (ไม่ใช่ --quick): รหัสจริงที่ทั้งตัวอ่านของ Appsale อ่านได้โดยไม่มีคำเตือน **และ** ผลอ่านของหน้าคำนวณราคาสะอาด
+//  (ไม่มีความหลวมเลย) → `fromReading` ต้องได้ค่าเท่ากับ values ของ Appsale ทุกช่อง ⇒ ตัวแปลงช่องของเราไม่ได้อ่านรหัสต่างจาก
+//  ต้นแบบ · ความต่างที่ตั้งใจมีข้อเดียว: BH-01C ที่รหัสไม่บอกการต่อใช้งาน — Appsale เติม `PL` เอง เราเก็บ `''` (ไม่ระบุ ·
+//  ห้ามเติมค่าเริ่มต้นของ Appsale) นับแยกไว้ ไม่ใช่ความผิด
+//
 //  ฐาน: SELECT อย่างเดียวใน transaction READ ONLY + statement_timeout · เขียนแค่โฟลเดอร์ชั่วคราวแล้วลบ ⇒ รันบน PMSV ได้
 //  ตระกูลที่ปรับปรุงโดยตั้งใจ (เลิกเหมือนต้นฉบับ) ต้องถอดออกจากด่านนี้ในคอมมิตเดียวกับการปรับ พร้อมตัวเลขก่อน/หลัง
 // ─────────────────────────────────────────────────────────────────────────────
@@ -27,7 +32,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { pool } from '../../config/db.js';
+import { listSubCodes } from '../../db/pricingLabRepo.js';
+import { loosenessOf } from '../../services/drawing/checks.js';
 import { buildModel } from '../../services/drawing/families/registry.js';
+import { fromReading } from '../../services/drawing/spec/fromReading.js';
+import { withSubCodes } from '../../services/pricingLab/bookStore.js';
+import { parseProductCode } from '../../services/pricingLab/code.js';
+import { NoBook, loadBookFrom } from '../pricebook/bookSource.js';
 import type { BandSpec, DrawingSpec, Ts11Spec } from '../../services/drawing/types.js';
 import { writeStep } from '../../services/drawing/writers/step.js';
 
@@ -92,12 +103,12 @@ const TS11_COVER: Coverage = {
       sensor: pick(v.sensor, ['TSK', 'TSJ', 'TST', 'TSP', 'TSPA', 'TSZ', 'N2', 'N10', 'P2', 'P10'], 'sensor'),
       spring: pick(v.spring, ['NONE', 'P'], 'spring'),
       dia: typeof v.dia === 'string' ? v.dia : String(num(v.dia, 'dia')),
-      mat: pick(mat, ['NONE', 'A', 'T', 'TN', 'AT'], 'mat'),
+      mat: pick(mat, ['NONE', 'A', 'T', 'TN', 'AT'] as const, 'mat'),
       tubeLen: num(v.tubeLen, 'tubeLen'),
-      elem: pick(v.elem, ['NONE', '2'], 'elem'),
+      elem: pick(v.elem, ['NONE', '2'] as const, 'elem'),
       cableLen: v.cableLen === undefined ? null : num(v.cableLen, 'cableLen'),
       cable: pick(v.cable, ['NONE', 'P', 'T', 'TS'], 'cable'),
-      ground: pick(v.ground, ['NONE', 'U'], 'ground'),
+      ground: pick(v.ground, ['NONE', 'U'] as const, 'ground'),
     };
   },
   shapeKey: (v) => JSON.stringify(['TS-11', v.dia, v.tubeLen, v.spring, v.cable, TS11_LEADS[String(v.sensor)]]),
@@ -240,6 +251,53 @@ async function realCodes(): Promise<string[]> {
 
 interface Case { family: string; label: string; values: AppValues }
 
+/** ตระกูลของ Appsale → ตระกูลตามผลอ่านของหน้าคำนวณราคา */
+const FAMILY_OF: Record<string, string> = { 'TS-11': 'TS_-11', 'BH-01': 'BH-01', 'BH-01C': 'BH-01C' };
+const SPEC_FIELDS: Record<string, string[]> = {
+  'TS_-11': ['sensor', 'spring', 'dia', 'mat', 'tubeLen', 'elem', 'cableLen', 'cable', 'ground'],
+  'BH-01': ['id', 'h', 't', 'v', 'w', 'term', 'mat', 'conn', 'termPos', 'holes'],
+  'BH-01C': ['id', 'h', 't', 'v', 'w', 'term', 'mat', 'conn', 'termPos', 'holes'],
+};
+
+/** ส่วน ค — คืนบรรทัดรายงาน + จำนวนที่ต่างโดยไม่ตั้งใจ */
+async function partC(clean: { raw: string; family: string; values: AppValues }[]): Promise<{ lines: string[]; fail: number; compared: number }> {
+  const lines: string[] = [];
+  let book;
+  try {
+    const loaded = await loadBookFrom();
+    book = loaded.from === 'db' ? withSubCodes(loaded.book, await listSubCodes()) : loaded.book;
+    lines.push(`${DIM}สมุดราคา: ${loaded.label}${RESET}`);
+  } catch (e) {
+    if (!(e instanceof NoBook)) throw e;
+    return { lines: [`${RED}ส่วน ค ตอบไม่ได้${RESET} — ${e.message}`], fail: 1, compared: 0 };
+  }
+  let compared = 0, fail = 0, intended = 0, notClean = 0;
+  const diffs: string[] = [];
+  for (const c of clean) {
+    const parsed = parseProductCode(c.raw.trim(), book);
+    const conv = fromReading(parsed);
+    if (!conv.ok || loosenessOf(parsed).length) { notClean++; continue; }
+    compared++;
+    const fam = FAMILY_OF[c.family];
+    if (conv.spec.family !== fam) {
+      fail++;
+      if (diffs.length < MAX_REPORT) diffs.push(`${c.raw}: ตระกูล Appsale ${c.family} · หน้าคำนวณราคา ${conv.spec.family}`);
+      continue;
+    }
+    const theirs = COVERED[c.family].toSpec(c.values) as unknown as Record<string, unknown>;
+    const ours = conv.spec as unknown as Record<string, unknown>;
+    const bad = SPEC_FIELDS[fam].filter((k) => JSON.stringify(ours[k]) !== JSON.stringify(theirs[k]));
+    if (bad.length === 1 && bad[0] === 'conn' && fam === 'BH-01C' && ours.conn === '' && theirs.conn === 'PL') { intended++; continue; }
+    if (bad.length) {
+      fail++;
+      if (diffs.length < MAX_REPORT) diffs.push(`${c.raw}: ${bad.map((k) => `${k} เรา ${JSON.stringify(ours[k])} · Appsale ${JSON.stringify(theirs[k])}`).join(' · ')}`);
+    }
+  }
+  lines.push(`${fail ? RED + '✗' : GREEN + '✓'}${RESET} ส่วน ค: ผลอ่านสะอาดทั้งสองตัวอ่าน ${compared.toLocaleString()} รหัส — ต่างโดยไม่ตั้งใจ ${fail} · ต่างโดยตั้งใจ (BH-01C ไม่บอกการต่อ: Appsale เติม PL) ${intended} ${DIM}· ผลอ่านของหน้าคำนวณราคาไม่สะอาด/วาดไม่ได้ ${notClean.toLocaleString()} (ไม่อยู่ในส่วนนี้)${RESET}`);
+  for (const d of diffs) lines.push(`    ${RED}${d}${RESET}`);
+  return { lines, fail, compared };
+}
+
 async function main(): Promise<void> {
   console.log(`\n${BOLD}ด่านพอร์ตแบบ 3 มิติจาก Appsale${RESET} ${DIM}(คอมมิต ${APPSALE_COMMIT} · รีโป ${REPO})${RESET}\n`);
 
@@ -274,6 +332,7 @@ async function main(): Promise<void> {
     for (const s of SYNTHETIC) cases.push({ family: s.family, label: `สังเคราะห์: ${s.label}`, values: { ...byId(s.family).defaults, ...s.values } });
 
     let realRead = 0, realSeen = 0;
+    const cleanAppsale: { raw: string; family: string; values: AppValues }[] = [];
     if (!QUICK) {
       for (const raw of await realCodes()) {
         const code = app.registry.canonical(raw);
@@ -286,6 +345,7 @@ async function main(): Promise<void> {
         const values: AppValues = { ...p.defaults, ...r.values };
         if (p.holes && !Array.isArray(values.holes)) values.holes = [];
         cases.push({ family: p.id, label: `รหัส ${raw}`, values });
+        if (r.msg === '') cleanAppsale.push({ raw, family: p.id, values });
       }
     }
 
@@ -346,8 +406,17 @@ async function main(): Promise<void> {
     for (const f of failures) console.log(`\n  ${RED}✗${RESET} ${f}`);
     if (totalFail > MAX_REPORT) console.log(`\n  ${DIM}… และอีก ${totalFail - MAX_REPORT} ชุด${RESET}`);
 
-    const pass = total > 0 && totalFail === 0;
-    console.log(`\n${'─'.repeat(70)}\nสรุป: ${pass ? `${GREEN}ผ่าน${RESET} — ทุกชุดตรงกับต้นฉบับทุกไบต์` : total === 0 ? `${RED}ตอบไม่ได้${RESET} — ไม่มีเคสให้ตรวจ` : `${RED}ตก${RESET} — ${totalFail} ชุดไม่ตรงกับต้นฉบับ`}\n${'─'.repeat(70)}\n`);
+    let cFail = 0;
+    if (!QUICK) {
+      const c = await partC(cleanAppsale);
+      console.log('');
+      for (const l of c.lines) console.log(`  ${l}`);
+      cFail = c.fail + (c.compared === 0 ? 1 : 0);
+      if (c.compared === 0) console.log(`  ${RED}ส่วน ค ตอบไม่ได้${RESET} — ไม่มีรหัสที่สะอาดทั้งสองฝั่ง`);
+    }
+
+    const pass = total > 0 && totalFail === 0 && cFail === 0;
+    console.log(`\n${'─'.repeat(70)}\nสรุป: ${pass ? `${GREEN}ผ่าน${RESET} — ทุกชุดตรงกับต้นฉบับทุกไบต์${QUICK ? '' : ' และตัวแปลงช่องอ่านเหมือนต้นแบบ'}` : total === 0 ? `${RED}ตอบไม่ได้${RESET} — ไม่มีเคสให้ตรวจ` : `${RED}ตก${RESET} — ${totalFail} ชุดไม่ตรงกับต้นฉบับ · ส่วน ค ${cFail}`}\n${'─'.repeat(70)}\n`);
     process.exitCode = pass ? 0 : 1;
   } finally {
     rmSync(tmp, { recursive: true, force: true });
