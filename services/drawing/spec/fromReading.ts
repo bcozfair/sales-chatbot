@@ -14,6 +14,10 @@
 //  **แกนหักวาดไม่ได้ทุกตระกูล** (แบบวันนี้วาดแกนตรงอย่างเดียว) — อ่านสัญญาณจาก `bend:*` ทั้งในช่องที่ติ๊ก (`addons`)
 //  และใน `cfg.options` ที่ตัวอ่านรหัสตั้งเองจากรหัส (ตั้งแต่ pricingLab `c80d688` ตัว L ท้ายเลขรุ่น = กฎหัก L +100)
 //  ⇒ ไม่พึ่งว่า `headJunk` ยังค้างอยู่ — วันที่ฝั่งคิดราคาล้าง `headJunk` เมื่ออ่าน L ได้ แกนหัก 330 รหัสต้องไม่ถูกวาดเป็นแท่งตรง
+//  **ท่อนท้ายที่ทับตำแหน่งช่องรูปทรงที่เป็น None (`''`) = ไม่รู้ค่าช่องนั้น ⇒ วาดไม่ได้** (QA รอบ 2 · 2026-10-06) — ตัวอ่านรหัส
+//  เอาตัวอักษรหลัง M ที่ไม่อยู่ในรายการสายไปไว้ใน `tail` แล้วปล่อย `cable = ''` ไม่มี issue (`+3M-CU` · `+1MF`) ถ้าวาดตาม `''`
+//  จะได้สายสแตนเลสถักทั้งที่รหัสเขียนสายอื่น · BH เช่นเดียวกัน: `-PL(HPT)` · `-3P` ที่ไม่ได้อ่านเป็นขั้วไฟ ⇒ ขั้วไฟไม่รู้ค่า
+//  (`tailHidesCable` · `extraHidesTerm` · ด่าน coverage มีตัวตัดสินของตัวเองแยกจากไฟล์นี้)
 //  ส่วน "ส่งลูกค้าได้ไหม" (ความหลวมของช่องอื่น · รูเจาะ · ไม่รับผลิต) อยู่ที่ checks.ts ที่เดียว
 //
 //  ทางที่ไม่ได้เลือก: วาดด้วยค่าที่หน้าคำนวณราคา "เดา" (ช่องที่มี issue ยังมีค่าใน `values` ได้) แล้วติดป้ายเตือน —
@@ -60,6 +64,24 @@ function bendReason(reading: PricingReading): Doubt | null {
   return all.some((a) => a.startsWith('bend:')) ? { key: 'bend', reason: 'แกนหัก L / หักฉาก — แบบยังวาดแกนงอไม่ได้' } : null;
 }
 
+/**
+ * ท่อนท้ายของ TS_-11 ที่อาจเป็นชนิดสาย/Ground — ขึ้นต้นด้วยตัวอักษร (หลังตัด `-`/`+`) และไม่ใช่รหัสงานสั่งทำ `S###`
+ * (`-CU` · `F` · `+TU` · `-MP` · `-SP`) · ท่อนที่ขึ้นต้นด้วยตัวเลข / `.` / `(` ไม่ใช่ตำแหน่งสาย
+ */
+const tailHidesCable = (tail: string[] | undefined): string | undefined =>
+  tail?.find((t) => { const x = t.replace(/^[-+]+/, ''); return /^[A-Z]/i.test(x) && !/^S\d+$/i.test(x); });
+
+/**
+ * ท่อนนอกแคตตาล็อกของ BH ที่อาจเป็นการออกขั้วไฟ — ขึ้นต้นด้วย PL · N · T · หรือ 1/2/3 ตามด้วยตัวอักษร (`PL` · `PL45` · `3P`)
+ * · ตัวเลขเปล่า (`1.5`) · ตัวเลข+หน่วยความยาว (`1M` · `1.5M` · `30cm` · `500mm` — ความยาวสาย ซึ่งวาดเป็น "ออกสาย" เหมือน
+ *   ขั้วไฟ `''`/1/2/3 ทุกตัว รูปทรงไม่เปลี่ยน) · วงเล็บ (`(HPT)`) · `LH`/`RH` · `S###` ไม่ใช่ตำแหน่งขั้วไฟ
+ */
+const extraHidesTerm = (extras: { text: string }[] | undefined): string | undefined =>
+  extras?.map((e) => e.text).find((t) => {
+    const x = t.replace(/^[-+]+/, '');
+    return /^(PL|N|T|[123][A-Z])/i.test(x) && !/^\d+(\.\d+)?(M|CM|MM)$/i.test(x);
+  });
+
 function ts11(f: TsFormReading, bend: Doubt | null): FromReading {
   const reasons: Doubt[] = [];
   const v = f.values;
@@ -70,6 +92,8 @@ function ts11(f: TsFormReading, bend: Doubt | null): FromReading {
     if (issue) reasons.push({ key: `issue:${slot}`, reason: `${SLOT_LABEL[slot]} ${ISSUE_TEXT[issue]} — แบบต้องรู้ค่านี้` });
     else if (f.omit?.includes(slot)) reasons.push({ key: `omit:${slot}`, reason: `รหัสไม่ได้บอก${SLOT_LABEL[slot]} — แบบต้องรู้ค่านี้ (ไม่เติมค่ามาตรฐานให้)` });
   }
+  const hidden = v.cable === '' && !f.issues?.cable ? tailHidesCable(f.tail) : undefined;
+  if (hidden) reasons.push({ key: 'tail:cable', reason: `ท้ายรหัส «${hidden}» อยู่ตรงตำแหน่งชนิดสาย — ไม่รู้ว่าสายเป็นชนิดไหน (แบบต้องรู้ชนิดสาย ไม่เดาเป็นสแตนเลสถัก)` });
   const sensor = choice(`${v.probe ?? ''}${v.sensor ?? ''}`, SENSORS);
   const spring = choice(v.spring, ['NONE', 'P'] as const);
   const dia = positive(v.d);
@@ -112,6 +136,8 @@ function band(f: BhFormReading, family: BandSpec['family'], bend: Doubt | null):
   else if (!(typeof f.id === 'number' && f.id > 0) || !(typeof f.h === 'number' && f.h > 0)) reasons.push({ key: 'size', reason: 'รหัสไม่ได้บอกขนาด ID × H — แบบต้องรู้ขนาด' });
   const term = choice(f.term ?? '', BH_TERMS);
   if (!term) reasons.push({ key: 'value:term', reason: `ไม่รู้จักการออกขั้วไฟ «${f.term}» ในแบบ ${family}` });
+  const hiddenTerm = (f.term ?? '') === '' ? extraHidesTerm(f.extras) : undefined;
+  if (hiddenTerm) reasons.push({ key: 'extra:term', reason: `ท่อน «${hiddenTerm}» อาจเป็นการออกขั้วไฟ — ไม่รู้ว่าขั้วไฟแบบไหน (แบบต้องรู้ขั้วไฟ ไม่เดาเป็นสาย 30 cm)` });
   const mat = choice(f.mat ?? '', ['NONE', 'Z'] as const);
   if (!mat) reasons.push({ key: 'value:mat', reason: `ไม่รู้จักวัสดุ «${f.mat}» ในแบบ ${family}` });
   // การต่อใช้งานมีเฉพาะ BH-01C (`''` = ไม่ระบุ — แคตตาล็อกมีแค่ SE/PL แต่รหัสจริงที่ไม่ระบุมีอยู่ · ไม่เติม PL แบบ Appsale)
