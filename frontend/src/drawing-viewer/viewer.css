@@ -1,0 +1,23 @@
+/* ตัวดูแบบ 3 มิติ — ป้ายชื่อชิ้น (ตัวหนังสือไม่มีกรอบ · ขอบขาวรอบตัวอักษร) + ป้ายขนาด · เจ้าของเคาะ mockup รอบ 4 2026-10-06
+   ผืนภาพใช้พื้นอ่อนคงที่ทั้งธีมสว่าง/มืด ⇒ สีหมึกของป้ายเป็นค่าคงที่ ไม่ตามธีม (อ่านได้บนชิ้นสีเงินทั้งสองธีม) */
+.dv-stage { position: relative; overflow: hidden; background: linear-gradient(180deg, #fbfcfd 0%, #e9edf0 100%); }
+.dv-stage canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+.dv-lbls { position: absolute; inset: 0; pointer-events: none; z-index: 2; font-family: 'IBM Plex Sans Thai', 'Sarabun', sans-serif; transition: opacity .15s; }
+.dv-lbls svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.dv-lbls .ld { fill: none; stroke: #3d5261; stroke-width: 1; stroke-linejoin: round; }
+.dv-lbls .ld.hl { stroke: #00764a; stroke-width: 1.6; }
+.dv-lbls .dot { fill: #3d5261; }
+.dv-lbls .dm { stroke: #12212b; stroke-width: 1; fill: none; }
+.dv-lbls .ah { fill: #12212b; }
+.dv-lbls .dt { font-size: 12px; font-weight: 600; fill: #12212b; paint-order: stroke; stroke: rgba(255, 255, 255, .9); stroke-width: 3px; stroke-linejoin: round; }
+.dv-lbls .lb { position: absolute; left: 0; top: 0; color: #12212b; font-size: 12px; font-weight: 600; line-height: 1.25; padding: 1px; white-space: nowrap; pointer-events: auto; cursor: default; text-align: center;
+  text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 3px #fff, 0 0 4px rgba(255, 255, 255, .9); }
+.dv-lbls .lb small { display: block; font-size: 11px; font-weight: 500; color: #3d5261; }
+.dv-lbls .lb.hl, .dv-lbls .lb.hl small { color: #00764a; }
+.dv-lbls .bl { position: absolute; left: 0; top: 0; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%; background: #fff; border: 1.5px solid #12212b; color: #12212b; font-size: 11.5px; font-weight: 700; display: grid; place-items: center; pointer-events: auto; }
+.dv-lbls .bl.hl { background: #00764a; border-color: #00764a; color: #fff; }
+.dv-plist { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 12px; font-size: 12.5px; }
+.dv-plist li { display: flex; align-items: center; gap: 8px; padding: 3px 4px; border-radius: 8px; cursor: default; }
+.dv-plist li .n { width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid currentColor; display: grid; place-items: center; font-size: 11px; font-weight: 700; flex: none; }
+.dv-plist li small { opacity: .75; margin-left: 2px; }
+.dv-plist li.hl { background: rgba(0, 118, 74, .12); color: #00764a; }
