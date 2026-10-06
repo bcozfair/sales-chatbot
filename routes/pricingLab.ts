@@ -704,12 +704,7 @@ export async function pricingQuoteHandler(req: AdminRequest, res: Response) {
   const code = form ? buildBhCode(form) : tsForm ? buildTsCode(tsForm) : typeof req.body?.code === 'string' ? req.body.code.trim() : '';
   // ขนาดเต๋า 10A/30A · สิ่งที่ต้องบวกเพิ่ม · รูที่เจาะ ไม่อยู่ในรหัส — มากับช่องกรอก หรือส่งมาคู่กับรหัสที่พิมพ์
   // (จำค่าที่เลือกไว้ตอนพิมพ์รหัสใหม่) · ตัวอ่านรหัสกรองซ้ำตามรุ่นที่อ่านได้อีกชั้น
-  const ampRaw = form?.amp ?? req.body?.picks?.amp;
-  const picks: CodePicks = typeof ampRaw === 'string' && AMP.some((a) => a.code === ampRaw) ? { amp: ampRaw } : {};
-  const addons = form?.addons ?? tsForm?.addons ?? cleanAddons([...ADDONS, ...TS_ADDONS], req.body?.picks?.addons);
-  if (addons.length) picks.addons = addons;
-  const holes = form ? form.holes ?? [] : cleanHoles(req.body?.picks?.holes);
-  if (holes.length) picks.holes = holes;
+  const picks = picksOf(req.body?.picks, form, tsForm);
   if (!code) return res.status(400).json({ error: 'ยังไม่ได้ใส่รหัสสินค้า' });
   if (code.length > 200) return res.status(400).json({ error: 'รหัสยาวเกินไป' });
 
@@ -724,10 +719,39 @@ export async function pricingQuoteHandler(req: AdminRequest, res: Response) {
     book = withSubCodes(book, [draft]);
   }
 
+  // `revision` = เล่มที่คิด — สินค้าเพิ่มเองเก็บไว้เป็นที่มาของราคา (price_book_revision)
+  res.json({ code, ...priceCode(code, book, picks), revision: state.revision });
+}
+
+/** ของที่เลือกนอกรหัส (เต๋า 10A/30A · สิ่งที่บวกเพิ่ม · รูเจาะ) — จากช่องกรอก หรือก้อน `picks` ที่ส่งมาคู่กับรหัสที่พิมพ์ */
+function picksOf(raw: unknown, form?: BhForm, tsForm?: TsForm): CodePicks {
+  const r = (raw ?? {}) as { amp?: unknown; addons?: unknown; holes?: unknown };
+  const ampRaw = form?.amp ?? r.amp;
+  const picks: CodePicks = typeof ampRaw === 'string' && AMP.some((a) => a.code === ampRaw) ? { amp: ampRaw } : {};
+  const addons = form?.addons ?? tsForm?.addons ?? cleanAddons([...ADDONS, ...TS_ADDONS], r.addons);
+  if (addons.length) picks.addons = addons;
+  const holes = form ? form.holes ?? [] : cleanHoles(r.holes);
+  if (holes.length) picks.holes = holes;
+  return picks;
+}
+
+/** อ่านรหัส + คิดราคา — ขั้นเดียวกันทุกทางเข้า (หน้าคำนวณราคา · ปุ่มคิดราคาของสินค้าเพิ่มเอง · แบบ 3 มิติ) */
+function priceCode(code: string, book: PriceBook, picks: CodePicks) {
   const parsed = parseProductCode(code, book, picks);
   const outcome = parsed.cfg ? computePrice(parsed.cfg, book) : null;
-  // `revision` = เล่มที่คิด — สินค้าเพิ่มเองเก็บไว้เป็นที่มาของราคา (price_book_revision)
-  res.json({ code, parsed, outcome, revision: state.revision });
+  return { parsed, outcome };
+}
+
+/**
+ * "รหัสนี้อ่านว่าอะไร ราคาเท่าไร" สำหรับโมดูลอื่น — **export ให้ index.ts ฉีดเข้าโมดูลแบบ 3 มิติ** (`createDrawingRouter({ quote })`)
+ * ⇒ แบบกับราคามาจากการอ่านครั้งเดียวกัน และ services/drawing ไม่ต้อง import โฟลเดอร์นี้ (docs/plan-product-drawing-3d.md §4.3)
+ * · `picks` ผ่านตัวกรองเดียวกับ `POST /quote` · ไม่มีสมุดราคา = `null`
+ */
+export async function quoteForCode(code: string, rawPicks?: unknown) {
+  const state = await loadBookState();
+  if (!state) return null;
+  const book = withSubCodes(state.book, await listSubCodes());
+  return { code, ...priceCode(code, book, picksOf(rawPicks)), revision: state.revision };
 }
 
 pricingLabRouter.post('/quote', pricingQuoteHandler);
