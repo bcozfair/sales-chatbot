@@ -370,12 +370,13 @@ export const TS_CATALOG: TsFamilySpec[] = [
     // แคตตาล็อก `Catalogue_Thermocouple_TS_-05.pdf` + ชีต `TS-05` (2026-10-06 · docs/pricing-code-ts-catalog.md หัวข้อ TS_-05) —
     // เขี้ยวล็อค + ด้ามจับ + สปริง · วงเล็บ = ขนาดเขี้ยวล็อค **ไม่มีผลกับราคา** แบบ TS_-02 (ชีตคอลัมน์ C เป็นข้อความประกอบ)
     // ราคาตั้งที่แกน 20 mm (= Standard ของแคตตาล็อก) + สาย 1 M (แคตตาล็อกเขียน 2 M · ยึด Excel แบบ TS_-03/04) · บวกทุก 5 mm
-    // ชีตมีคอลัมน์ PT100 + PT1000 แต่แคตตาล็อกมีแค่ K/J/T ⇒ ช่อง Sensor ตามแคตตาล็อก (รหัส TSP-05 ได้ช่องแบบหลวม + เตือน)
+    // ชีตมีคอลัมน์ PT100 (ไม่บอกคลาส) + PT1000 บวกเพิ่ม แต่แคตตาล็อกหน้านี้มีแค่ K/J/T — เจ้าของสั่ง 2026-10-06 "ใช้ตามมาตรฐาน เหมือนรุ่นอื่นๆ"
+    // ⇒ ช่อง Sensor = K/J/T + Type for RTD มาตรฐาน (P = PT100 Class B = คอลัมน์ PT100 · PA = ยังไม่มีราคา · Z = PT1000 บวกเพิ่มจาก PT100)
     family: 'TS_-05', head: 'TS_-05', name: 'Thermocouple · เขี้ยวล็อค (Connector) + Spring + Cable', model: 'TSK-05',
     layout: [{ fixed: 'TS' }, { slot: 'sensor' }, { sep: '-05(' }, { slot: 'id' }, { sep: ')' }, { slot: 'd' }, { slot: 'mat' },
       { sep: 'x' }, { slot: 'l1' }, { sep: '-' }, { slot: 'elem' }, { sep: '+' }, { slot: 'cl' }, { sep: 'M' }, { slot: 'cable' }, { slot: 'ground' }],
     slots: {
-      sensor: ch('ชนิด Sensor', TC_KJT),
+      sensor: ch('ชนิด Sensor', [...TC_KJT, ...RTD]),
       id: ch('ขนาดเขี้ยวล็อค', [o('12', '12 mm (แกน 4–6)'), o('12.7', '12.7 mm (แกน 4–6)'), o('14.5', '14.5 mm (แกน 6–8)'), o('15.5', '15.5 mm (แกน 6–8)')],
         'ไม่มีผลกับราคา'),
       d: ch('ขนาดแกน', mm(['4', '4.8', '6', '8'])),

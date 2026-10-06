@@ -3,7 +3,7 @@
   "sheet": "TS-05",
   "code": "TSK-05",
   "label": "Thermocouple / NTC / PTC TS-05 (เขี้ยวล็อค + ด้ามจับ + สปริง)",
-  "aliases": ["TSJ-05", "TST-05", "TSN-05"],
+  "aliases": ["TSJ-05", "TST-05", "TSN-05", "TSP-05", "TSPA-05", "TSZ-05"],
   "standard": { "L1": 20, "cable_m": 1 },
   "axisDefaults": { "cable": "สายสแตนเลสถัก" },
   "base": {
@@ -56,7 +56,7 @@
       "when": { "option": "sensor:PT1000" },
       "byAxis": "D",
       "ratesFrom": { "col": "J", "keyCol": "B", "rows": [13, 20] },
-      "source": "TS-05!J11 'PT1000 บวกเพิ่ม PT100' — แคตตาล็อก TS_-05 ไม่มี RTD · หัวคอลัมน์ G เขียน 'PT100' เฉย ๆ ไม่บอกคลาส ⇒ ยังไม่ใส่ TSP-05/TSZ-05 ใน aliases (รหัสจริง TSP-05 2 ตัวคงเป็น 'ไม่มีรุ่น') จนกว่าเจ้าของบอกว่าคอลัมน์นี้คือคลาสไหน"
+      "source": "TS-05!J11 'PT1000 บวกเพิ่ม PT100' — แคตตาล็อก TS_-05 ไม่มี RTD · หัวคอลัมน์ G เขียน 'PT100' เฉย ๆ ไม่บอกคลาส ⇒ ใช้มาตรฐาน 'Type for RTD' ของแคตตาล็อกรุ่นอื่น (เจ้าของสั่ง 2026-10-06): TSP = คอลัมน์ PT100 (Class B) · TSZ = PT100 + คอลัมน์ J · TSPA = ยังไม่มีราคา (ไม่มีคอลัมน์ Class A)"
     },
     {
       "id": "cable_over_1m",
