@@ -1,0 +1,119 @@
+{
+  "file": "ราคาTC อัพเดต (13-05-69).xlsx",
+  "sheet": "TS-03",
+  "code": "TSK-03",
+  "label": "Thermocouple / NTC / PTC TS-03 (สปริง + ปีกนก)",
+  "aliases": ["TSJ-03", "TST-03", "TSN-03"],
+  "standard": { "L1": 100, "cable_m": 1 },
+  "axisDefaults": { "cable": "สายสแตนเลสถัก" },
+  "base": {
+    "kind": "matrix",
+    "axes": ["D", "sensor"],
+    "rowHeaderCol": "A",
+    "rows": [12, 30],
+    "colHeaderRow": 11,
+    "cols": ["C"]
+  },
+  "adders": [
+    {
+      "id": "len_l1",
+      "label": "ความยาวแกน L1",
+      "order": 20,
+      "kind": "perUnit",
+      "dim": "L1",
+      "step": 100,
+      "round": "ceil",
+      "unit": "mm",
+      "byAxis": "D",
+      "ratesFrom": { "col": "B", "keyCol": "A", "rows": [12, 30] },
+      "source": "TS-03!B11 'บวกเพิ่ม 100 mm ละ' — ราคาตั้งที่ 100 mm (A9 'TS_- 03 6x100+1M.')"
+    },
+    {
+      "id": "sensor_t",
+      "label": "Type T (บวกเพิ่มจาก Type K/J)",
+      "order": 30,
+      "kind": "flat",
+      "when": { "option": "sensor:T" },
+      "byAxis": "D",
+      "ratesFrom": { "col": "D", "keyCol": "A", "rows": [12, 30] },
+      "source": "TS-03!D11 'Type T บวกเพิ่ม'"
+    },
+    {
+      "id": "sensor_ntc",
+      "label": "NTC / PTC (บวกเพิ่มจาก Type K/J)",
+      "order": 30,
+      "kind": "flat",
+      "when": { "option": "sensor:NTC" },
+      "byAxis": "D",
+      "ratesFrom": { "col": "E", "keyCol": "A", "rows": [12, 30] },
+      "source": "TS-03!E11 'NTC / PTC บวกเพิ่ม' — ช่องว่างของแกนต่ำกว่า 5 mm = ยังไม่มีราคา (แคตตาล็อก TS_-03 '***NTC/PTC Diameter 5 mm. ขึ้นไป')"
+    },
+    {
+      "id": "cable_over_1m",
+      "label": "ราคาสายส่วนที่ยาวเกิน 1 เมตร (ตามชนิดสาย)",
+      "order": 45,
+      "kind": "perUnit",
+      "dim": "cable_m",
+      "step": 1,
+      "round": "ceil",
+      "unit": " m",
+      "byAxis": "cable",
+      "ratesFrom": { "sheet": "TS-21+22+25", "col": "B", "keyCol": "A", "rows": [26, 29] },
+      "source": "TS-03!A32 'สายยาวกว่า 1 M บวกเพิ่มตามราคาสาย' + TS-21+22+25!A26:B29 — ราคาตั้งของชีตคือ '+1M' (A9) แม้แคตตาล็อกเขียนสาย Standard 2 M (ยึด Excel แบบ TS_-04 · docs/pricing-code-ts-01.md) · ไม่ระบุชนิดสาย = สแตนเลสถัก ตามแคตตาล็อก 'Cable Type None' (ชีต A33:A34 เขียน T = เทปล่อน / NTC·PTC = PVC — แนวเดียวกับ TS_-02 · TS_-11 ที่ยึดแคตตาล็อก)"
+    },
+    {
+      "id": "coat_teflon",
+      "label": "หุ้มเทปล่อน",
+      "order": 40,
+      "kind": "perUnit",
+      "when": { "option": "coat:teflon" },
+      "dim": "teflon_mm",
+      "over": 0,
+      "step": 100,
+      "round": "ceil",
+      "unit": "mm",
+      "byAxis": "D",
+      "ratesFrom": { "col": "G", "keyCol": "A", "rows": [12, 30] },
+      "source": "TS-03!G11 'หุ้มเทปล่อน เพิ่ม 100มม. ละ' — มีอัตราเฉพาะแกน 4 · 4A · 6 · 6A ตรงกับแคตตาล็อก 'แกนเคลือบเทปล่อน (เฉพาะแกน 4 mm. และ 6 mm.)' · ช่อง '-' / ว่าง = หุ้มไม่ได้"
+    },
+    {
+      "id": "bend_l",
+      "label": "หัก L ดัดงอ",
+      "order": 55,
+      "kind": "flat",
+      "when": { "option": "bend:L" },
+      "amount": 100,
+      "source": "TS-03!B7 'สำหรับรุ่นหัก L ดัดงอ บวกเพิ่ม 100 บาท'"
+    },
+    {
+      "id": "bend_square",
+      "label": "หักฉาก (เชื่อมฉาก)",
+      "order": 55,
+      "kind": "flat",
+      "when": { "option": "bend:square" },
+      "amount": 200,
+      "source": "TS-03!B7 'แบบฉาก (เชื่อมฉาก) บวกเพิ่ม 200 บาท'"
+    }
+  ],
+  "constraints": [
+    {
+      "id": "ELEM2_MIN_DIA",
+      "when": {
+        "all": [
+          { "option": "element:2" },
+          { "axis": "D", "in": ["2", "3", "3A", "3.2", "3.2A", "4", "4A", "4.8", "4.8A", "5"] }
+        ]
+      },
+      "level": "block",
+      "message": "2 element ทำได้ตั้งแต่แกน 6 mm ขึ้นไป",
+      "source": "TS-03!F12 '* ตั้งแต่แกน 6 mm ขึ้นไป' · แคตตาล็อก TS_-03 'สามารถทำ 2 Element ได้ตั้งแต่แกน 6 mm. ขึ้นไป'"
+    },
+    {
+      "id": "ELEM2_ASK_PRODUCTION",
+      "when": { "option": "element:2" },
+      "level": "quoteOnRequest",
+      "message": "2 element — ชีตเขียนว่า 'ใช้ราคาสาย X2' แต่ไม่ได้เขียนเป็นตัวเลขต่อขนาด ⇒ ปรึกษาผลิต 2 ก่อนยืนยันราคา",
+      "source": "TS-03!F12 'กรณีออกสาย 2 element ให้ใช้ราคาสาย X2'"
+    }
+  ]
+}

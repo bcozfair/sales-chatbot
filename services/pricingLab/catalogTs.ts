@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-//  "การสั่งซื้อ" ของแคตตาล็อก TS — ลำดับท่อนของรหัส + ตัวเลือกของแต่ละท่อน (13 ตาราง · TS_-02 กับ TS_-02-SI ใช้รุ่นเดียวกัน)
+//  "การสั่งซื้อ" ของแคตตาล็อก TS — ลำดับท่อนของรหัส + ตัวเลือกของแต่ละท่อน (14 ตาราง · TS_-02 กับ TS_-02-SI ใช้รุ่นเดียวกัน)
 //
 //  โมดูล "คิดราคาสินค้า" — ถอดออกได้ทั้งก้อน ดู services/pricingLab/README.md · docs/pricing-code-ts-catalog.md
 //
@@ -27,13 +27,13 @@
 
 import type { CatalogOption } from './catalogBh.js';
 
-export type TsFamily = 'TS_-01' | 'TS_-01-0' | 'TS_-02' | 'TS_-02-SI' | 'TS_-04' | 'TS_-06' | 'TS_-08' | 'TS_-10' | 'TS_-11' | 'TS_-12' | 'TS_-12R' | 'TS_-14' | 'TS_-18';
+export type TsFamily = 'TS_-01' | 'TS_-01-0' | 'TS_-02' | 'TS_-02-SI' | 'TS_-03' | 'TS_-04' | 'TS_-06' | 'TS_-08' | 'TS_-10' | 'TS_-11' | 'TS_-12' | 'TS_-12R' | 'TS_-14' | 'TS_-18';
 
 export interface TsSlot {
   label: string;
   kind: 'choice' | 'number';
   options?: CatalogOption[];
-  /** ตัวเลือกที่ขึ้นกับช่อง "ชนิดหัววัด" (TS / N / P) — TS_-04 · 06 · 11 */
+  /** ตัวเลือกที่ขึ้นกับช่อง "ชนิดหัววัด" (TS / N / P) — TS_-03 · 04 · 06 · 11 */
   optionsByProbe?: Record<string, CatalogOption[]>;
   unit?: string;
   /** ค่าที่แคตตาล็อกเขียนว่า Standard — โชว์เป็นตัวจางในช่องว่าง */
@@ -167,13 +167,16 @@ const CL: TsSlot = { label: 'ความยาวสาย', kind: 'number', un
 const ch = (label: string, options: CatalogOption[], hint?: string): TsSlot => ({ label, kind: 'choice', options, ...(hint ? { hint } : {}) });
 const sensorByProbe = (tc: CatalogOption[]): TsSlot => ({ label: 'ชนิด Sensor', kind: 'choice', optionsByProbe: { TS: tc, N: NTC_TYPES, P: NTC_TYPES } });
 
-/** หัก L / หักฉาก — ชีต TS-06 · 08 · 10 · 11 · TSP-12 มีราคา แต่รหัสไม่มีท่อนนี้ (เจ้าของเคาะข้อ 8 · 2026-09-29) */
+/** หัก L / หักฉาก — ชีต TS-03 · 06 · 08 · 10 · 11 · TSP-12 มีราคา แต่รหัสไม่มีท่อนนี้ (เจ้าของเคาะข้อ 8 · 2026-09-29) */
 export const TS_ADDONS: CatalogOption[] = [o('bend:L', 'หัก L ดัดงอ'), o('bend:square', 'หักฉาก (เชื่อมฉาก)')];
 
-/** หัว NTC/PTC ตามแคตตาล็อก TS_-04 · 06 · 11 ("N_-04/P_-04") = ชนิดหัววัด + ชนิด Sensor (2 = 2K · 10 = 10K) — เจ้าของเคาะข้อ 1 */
+/** หัว NTC/PTC ตามแคตตาล็อก TS_-03 · 04 · 06 · 11 ("N_-04/P_-04") = ชนิดหัววัด + ชนิด Sensor (2 = 2K · 10 = 10K) — เจ้าของเคาะข้อ 1 */
 export const NTC_HEADS: Record<string, string> = { N2: 'NTC 2K', N10: 'NTC 10K', P2: 'PTC 2K', P10: 'PTC 10K' };
-/** เลขรุ่นที่แคตตาล็อกมีหัว NTC/PTC — ตารางอื่นไม่มี (TSN-18 ของ Excel ยังพิมพ์เป็น TSN ได้เหมือนเดิม) */
-export const NTC_NUMBERS = ['04', '06', '11'];
+/**
+ * เลขรุ่นที่แคตตาล็อกมีหัว NTC/PTC — ตารางอื่นไม่มี (TSN-18 ของ Excel ยังพิมพ์เป็น TSN ได้เหมือนเดิม)
+ * · `03` เพิ่ม 2026-10-06 พร้อมรุ่น TSK-03 (หัวแคตตาล็อก "TS_-03 / N_-03/P_-03" · รหัสจริง N2/N10/P2-03 15 ตัว)
+ */
+export const NTC_NUMBERS = ['03', '04', '06', '11'];
 
 /**
  * ตัวอักษรท้ายเลขรุ่นที่แคตตาล็อกบอกความหมาย — วันนี้ตัวเดียวคือ Spring ของ TS_-11 (P = None Spring)
@@ -289,6 +292,30 @@ export const TS_CATALOG: TsFamilySpec[] = [
     defaults: { sensor: 'K', id: '12', d: '4.8', mat: '', l1: '25', cl: '1', cable: '', ground: '' },
     askPrice: { d: 'D' },
     connector: TS02.connector,
+  },
+  {
+    // แคตตาล็อก `Catalogue_Thermocouple_TS_-03.pdf` + ชีต `TS-03` (2026-10-06 · docs/pricing-code-ts-catalog.md หัวข้อ TS_-03) —
+    // หน้าตาเหมือน TS_-04 ที่ไม่มีเกลียว: สปริง + ปีกนก (แถมให้เมื่อแกน 4–10 mm · ไม่มีผลกับราคา) · รหัสจริงเว้นวรรคหลังเลขรุ่น (`TSK-03 6x100+1M`)
+    // แคตตาล็อกเขียนสาย Standard 2 M แต่ชีตตั้งราคาที่ `+1M` (A9) ⇒ ยึด Excel แบบ TS_-04 · แกน 7 (Titanium) = แคตตาล็อกมี ชีตไม่มีแถว
+    // วัสดุ S (Sheath) — ชีต H12 เขียน "สำหรับรุ่นแกนสำเร็จให้ไปใช้ราคา Model TSK-12" แต่ไม่มีแถวในชีตนี้ ⇒ ยังไม่มีราคา (ไม่ยืมตารางข้ามรุ่น)
+    family: 'TS_-03', head: 'TS_-03', name: 'Thermocouple / NTC / PTC · Spring + Cable (ปีกนก)', model: 'TSK-03',
+    layout: [{ slot: 'probe' }, { slot: 'sensor' }, { sep: '-03' }, { sep: ' ' }, { slot: 'd' }, { slot: 'mat' }, { sep: 'x' }, { slot: 'l1' },
+      { sep: '-' }, { slot: 'elem' }, { sep: '+' }, { slot: 'cl' }, { sep: 'M' }, { slot: 'cable' }, { slot: 'ground' }],
+    slots: {
+      probe: ch('ชนิดหัววัด', PROBE), sensor: sensorByProbe(TC_KJT),
+      d: ch('ขนาดแกน', mm(['2', '3', '3.2', '4', '4.8', '5', '6', '6.35', '7', '8', '9.5', '10'], { '7': '(Titanium)' }), 'NTC/PTC แกน 5 mm ขึ้นไป'),
+      mat: ch('วัสดุ', [o('', 'SUS 304'), o('A', 'SUS 316L'), o('S', 'Sheath 316 (Thermocouple เท่านั้น)'),
+        o('T', 'SUS 304 With Teflon Coated'), o('AT', 'SUS 316 With Teflon Coated')], 'เคลือบเทปล่อนเฉพาะแกน 4 · 6 mm'),
+      l1: L1, elem: ch('จำนวน Element', ELEMENT, 'ทำ 2 Element ได้ตั้งแต่แกน 6 mm'),
+      cl: { ...CL, hint: 'แคตตาล็อก Standard 2 M · ราคาตั้งของ Excel รวมสาย 1 M · ระบุความยาวได้ตามต้องการ' },
+      cable: ch('ชนิดสาย', [o('', 'สแตนเลสถัก (Standard)'), o('F', 'ไฟเบอร์กลาส'), o('P', 'พีวีซี'), o('T', 'เทปล่อน')], 'Type T มีเฉพาะสแตนเลสถัก'),
+      ground: ch('Ground', GROUND, 'NTC/PTC Unground เท่านั้น'),
+    },
+    defaults: { probe: 'TS', sensor: 'K', d: '6', mat: '', l1: '100', elem: '', cl: '1', cable: '', ground: '' },
+    addons: TS_ADDONS,
+    // ขนาดแกนเป็นแถวของตารางราคาตั้ง (แบบ TS_-02) — ขนาดที่ทั้งแคตตาล็อกและชีตไม่มี (`10.2` 6 รหัสจริง) = ต้องขอราคา + แถวสีส้ม
+    // ขนาด/วัสดุที่แคตตาล็อกมีแต่ชีตไม่มีแถว (`7` · `3.2S`) = ยังไม่มีราคา (`catalogDRow`)
+    askPrice: { d: 'D' },
   },
   {
     family: 'TS_-04', head: 'TS_-04', name: 'Thermocouple / NTC / PTC · Thread + Spring + Cable', model: 'TSK-04',
@@ -490,6 +517,10 @@ export function buildTsCode(form: TsForm): string {
       // ไม่มีวงเล็บเขี้ยวล็อค = เว้นวรรคแบบรหัสจริง (`TSJ-02 5x50+2M`)
       code = `TS${s('sensor')}-02${spec.family === 'TS_-02-SI' ? '-SI' : ''}${hj}${omit.has('id') ? ' ' : `(${s('id')})`}${s('d')}${s('mat')}${xl1}${cable}`;
       break;
+    case 'TS_-03':
+      // เว้นวรรคหลังเลขรุ่นแบบรหัสจริง (`TSK-03 6x100+1M` · ทุกตัวในฐาน 2026-10-06)
+      code = `${headOf(v)}-03${hj} ${s('d')}${s('mat')}${xl1}${elem}${cable}`;
+      break;
     case 'TS_-04':
       code = `${headOf(v)}-04${hj}${par('thread')}${s('d')}${s('mat')}${xl1}${elem}${cable}`;
       break;
@@ -584,6 +615,7 @@ function grammar(spec: TsFamilySpec, loose = false): RegExp {
     case 'TS_-01-0': body = `${head}${num('01-0')}${parenOpt('hold')}${cable()}`; break;
     case 'TS_-02': body = `${head}-02${hj}${paren('id')}${dm()}${L1}${cable()}`; break;
     case 'TS_-02-SI': body = `${head}-02-SI${hj}${paren('id')}${dm()}${L1}${cable()}`; break;
+    case 'TS_-03': body = `${head}${num('03')}${dm()}${L1}${elem}${cable()}`; break;
     case 'TS_-04': body = `${head}${num('04')}${paren('thread')}${dm()}${L1}${elem}${cable()}`; break;
     case 'TS_-06': body = `${head}${num('06')}${paren('thread')}${dm()}${L1}${elem}${hd()}`; break;
     case 'TS_-08': body = `${head}${num('08')}${paren('thread')}${dm()}${L1}${elem}${hd()}`; break;
