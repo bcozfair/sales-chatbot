@@ -36,7 +36,7 @@ import type { PriceBook, PriceModel, Predicate, ProductConfig } from './types.js
 import { resolveModel } from './engine.js';
 import { findSubCode, subCodeOption } from './subcodes.js';
 import { ADDONS, AMP, BH_CATALOG, SHAPE_AXIS, bhSpec, buildBhCode, sameBhCode, type BhFamily, type BhForm, type HoleSpec, type SizeKey } from './catalogBh.js';
-import { MODEL_SUFFIX, NTC_HEADS, OFF_CATALOG_SUFFIX, askSlotKey, NTC_NUMBERS, TS_ADDONS, TS_CATALOG, readTsForm, readTsFormLoose, tsFamilyOfModel, tsSpec, type TsFamily, type TsFamilySpec, type TsForm } from './catalogTs.js';
+import { MAT_PRICE_AS, MODEL_SUFFIX, NTC_HEADS, OFF_CATALOG_SUFFIX, askSlotKey, NTC_NUMBERS, TS_ADDONS, TS_CATALOG, readTsForm, readTsFormLoose, tsFamilyOfModel, tsSpec, type TsFamily, type TsFamilySpec, type TsForm } from './catalogTs.js';
 
 /** หนึ่งรหัสย่อยในรหัสสินค้า พร้อมคำอธิบายว่าระบบอ่านมันว่าอะไร — ใช้โชว์ให้คนตรวจก่อนเชื่อราคา */
 export interface CodePart {
@@ -704,6 +704,37 @@ function readAskD(c: Ctx, spec: TsFamilySpec, dText: string, dRates: string[]): 
   return v;
 }
 
+/**
+ * ขนาดแกนของวัสดุที่ชีตสั่งให้คิดราคาตามรุ่นอื่นทั้งชิ้น (`MAT_PRICE_AS` — S ของ TS_-03 → TSK-12) — **แถวของตารางรุ่นนั้นตัดสิน**
+ * มีแถว = คิดได้ (ขนาดที่แคตตาล็อกของรหัสไม่มี เช่น `2.5S` = เตือน) · ไม่มีแถวแต่แคตตาล็อกมีขนาดนี้ = ยังไม่มีราคา · นอกทั้งคู่ = ขอราคา
+ * ตัวอ่านแค่บอกรุ่นปลายทาง (`cfg.priceAs`) — engine เปิดตารางของรุ่นนั้นเอง ⇒ แก้ราคา TSK-12 แล้วรหัสเหล่านี้ตามทันที
+ */
+function readPriceAsD(c: Ctx, target: PriceModel, source: string, size: string, letter: string, dText: string): void {
+  const fam = tsFamilyOfModel(c.model.code);
+  const spec = fam ? tsSpec(fam) : undefined;
+  // `Sheath 316 (Thermocouple เท่านั้น)` → `Sheath 316` — ข้อความนี้อยู่ในวงเล็บอยู่แล้ว
+  const matLabel = (spec?.slots.mat?.options?.find((o) => o.code === letter)?.label ?? letter).replace(/\s*\(.*\)\s*$/, '');
+  const listed = (spec?.slots.d?.options ?? []).some((o) => o.code !== '' && Number(o.code) === Number(size));
+  const where = `ตารางราคา ${target.code}${target.sheet ? ` (ชีต ${target.sheet})` : ''}`;
+  c.cfg.priceAs = { model: target.code, why: `วัสดุ ${letter} (${matLabel}) — ${source} ⇒ ราคาตั้ง กฎบวกเพิ่ม และค่าสายของใบนี้มาจาก${where}` };
+  const hit = matchD(axisValues(target, 'D'), size);
+  if (hit) {
+    c.cfg.axes = { ...c.cfg.axes, D: hit };
+    add(c, { text: dText, reads: `แกน D = ${size} mm วัสดุ ${letter} (${matLabel}) — ${source} ⇒ คิดตาม${where} แถว ${hit}`, kind: 'axis' });
+    if (!listed) c.warnings.push(`แกน ${size} mm ไม่อยู่ในแคตตาล็อก ${spec?.head ?? c.model.code} — ราคาคิดตามแถว ${hit} ของ${where}`);
+    return;
+  }
+  const v = canonicalAskValue('d', size) ?? size;
+  c.cfg.axes = { ...c.cfg.axes, D: v };
+  if (listed) c.cfg.catalogOnly = { ...c.cfg.catalogOnly, D: v };
+  else c.cfg.askPrice = { ...c.cfg.askPrice, D: v };
+  add(c, {
+    text: dText,
+    reads: `แกน D = ${v} mm วัสดุ ${letter} (${matLabel}) — ${source} แต่${where} ไม่มีแถวแกน ${v} ⇒ ${listed ? 'ยังไม่มีราคา' : 'ต้องขอราคาจากฝ่ายผลิต'}`,
+    kind: 'axis',
+  });
+}
+
 /** ขนาดแกน (คีย์อัตรา) → คอลัมน์เกลียวที่แคตตาล็อกจับคู่ไว้ (`TsFamilySpec.dThreads`) */
 function pairedThreadCols(model: PriceModel, spec: TsFamilySpec): Map<string, Set<string>> {
   const axis = spec.askPrice?.thread ?? 'thread';
@@ -868,6 +899,10 @@ function readTsGeneric(c: Ctx, rest: string, prefix: string, letter = ''): void 
       const coatBase = coat ? matchValue(dValues, coat[1] ?? '') : undefined;
       // ตัวอักษรวัสดุที่ Excel ยังไม่มีราคาตั้ง (TN · AL) — ตั้งในตารางรหัสย่อยเป็นแกน D ที่ยังไม่มีค่า ⇒ "ยังไม่มีราคา"
       const mat = !dHit && !coatBase ? dText.match(/^([0-9.]+)([A-Z]+)$/i) : null;
+      // วัสดุที่ชีตสั่งให้คิดราคาตามรุ่นอื่นทั้งชิ้น (S ของ TS_-03 → TSK-12 · `MAT_PRICE_AS`) — มาก่อนตารางรหัสย่อย เพราะชีตเขียนความหมายไว้เองแล้ว
+      // เล่มที่ไม่มีรุ่นปลายทาง = กติกาเดิม (แคตตาล็อกมีขนาดนี้แต่ชีตไม่มีแถว → ยังไม่มีราคา)
+      const asMat = mat ? MAT_PRICE_AS[c.model.code]?.[mat[2]!.toUpperCase()] : undefined;
+      const asModel = asMat ? resolveModel(c.book, asMat.model) : undefined;
       // ขนาดแกนเป็นแถวของตารางราคาตั้งและรุ่นตั้งให้ "ขนาดนอกแคตตาล็อก = ขอราคา" (TS_-02 · เจ้าของสั่ง 2026-10-05)
       const askRow = ask && dIsRow(c.model, ask) ? ask : undefined;
       /** หน้าแคตตาล็อกที่รหัสนี้ใช้ (TS_-02-SI สำหรับรหัส -SI) — ข้อความพูดถึงหน้านั้น */
@@ -889,6 +924,8 @@ function readTsGeneric(c: Ctx, rest: string, prefix: string, letter = ''): void 
           reads: `แกน D = ${coatBase} mm เคลือบเทปล่อน (วัสดุ ${/AT$/i.test(dText) ? 'AT = SUS 316' : 'T = SUS 304'} With Teflon Coated) — คิด "หุ้มเทปล่อน" เต็มความยาวแกน`,
           kind: 'axis'
         });
+      } else if (asModel) {
+        readPriceAsD(c, asModel, asMat!.source, mat![1]!, mat![2]!.toUpperCase(), dText);
       } else if (mat && readFromTable(c, mat[2] ?? '', dText)) {
         // แถวในตารางรหัสย่อยบอกแล้วว่าวัสดุนี้แปลว่าอะไร (วันนี้: ยังไม่มีราคาตั้ง)
       } else if (catalogOnlySize(c, 'd', dText, dValues)) {
