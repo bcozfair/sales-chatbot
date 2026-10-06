@@ -22,6 +22,8 @@
 //           (QA รอบ 2: `+3M-CU` ถูกวาดเป็นสายสแตนเลสถักแล้วไปอยู่ชั้น "ส่งได้หลังยืนยัน" 93 รหัส)
 //      6. (ก) ความหลวมที่ไม่ใช่ "วิธีเขียน" และไม่ใช่ "ส่วนท้ายที่ยืนยันได้" (issue · ไม่ได้เขียน · ท่อนหลังเลขรุ่น · สิ่งบวกเพิ่ม ·
 //             BH loose/รู/กำลังไฟนอกรูปแบบ) ⇒ ต้องส่งไม่ได้ · ส่งได้ ⇒ คิดราคาได้และไม่ใช่ "ไม่รับผลิต"
+//             + **ท่อนท้ายที่เป็นค่าของช่องที่ปล่อยว่าง** (TS Ground/วัสดุ/Element/ความยาวสาย · BH แรงดัน/กำลังไฟค่าที่สอง ·
+//               ความยาวสายที่ไม่ตรงกับขั้วไฟแบบออกสาย) = ระบบเดา ⇒ ต้องส่งไม่ได้ (รอบแก้ 3 · ตัวตัดสินของด่านเอง ไม่เรียก checks.ts)
 //         (ข) ส่วนท้ายที่ยืนยันได้ (TS ท้ายรหัส/`S###` · BH ท่อนนอกแคตตาล็อก) ⇒ ต้องอยู่ใน `confirm` ครบทุกชนิด และ `confirm`
 //             มีของได้เฉพาะเมื่อผลอ่านมีส่วนนั้นจริง — ห้ามหลุดเป็น "ส่งได้" โดยไม่มีอะไรให้ผู้เสนอราคาติ๊ก (เจ้าของเคาะ 2026-10-06)
 //      7. ทุกรหัสของตระกูลที่มีแบบได้คำตัดสิน · ตรวจ 0 รหัส = **ตอบไม่ได้** (ไม่ใช่ผ่าน)
@@ -260,6 +262,33 @@ function blockingLooseness(ts?: TsForm, bh?: BhForm): string | null {
   }
   if (bh) {
     if (bh.loose || bh.addons?.length || bh.holes?.length || bh.wattText !== undefined) return 'ผลอ่าน BH หลวม/มีรู/มีสิ่งบวกเพิ่ม/กำลังไฟนอกรูปแบบ';
+  }
+  return guessedEmptyField(ts, bh);
+}
+/** ท่อนท้ายที่เป็นค่าของช่องที่ตัวอ่านปล่อยว่าง — ตัดสินเองจากผลอ่าน (สำเนาโดยตั้งใจ · เป็นสัญญาณอิสระจาก checks.ts) */
+function guessedEmptyField(ts?: TsForm, bh?: BhForm): string | null {
+  if (ts) {
+    const v = ts.values;
+    for (const t of (ts.tail ?? []).map((x) => x.replace(/^[-+]+/, ''))) {
+      if (v.ground === '' && /^U/i.test(t)) return `ท้ายรหัส ${t} = Ground แต่ช่องว่าง`;
+      if (v.mat === '' && /^(A|T)/i.test(t)) return `ท้ายรหัส ${t} = วัสดุ แต่ช่องว่าง`;
+      if (v.elem === '' && /^2(?![\d.])/.test(t)) return `ท้ายรหัส ${t} = Element แต่ช่องว่าง`;
+      if (v.cl === '' && /^\d+(\.\d+)?(M|CM|MM)$/i.test(t)) return `ท้ายรหัส ${t} = ความยาวสาย แต่ช่องว่าง`;
+    }
+  }
+  if (bh) {
+    const wire = ({ '': 0.3, '1': 1, '2': 2, '3': 3 } as Record<string, number>)[bh.term ?? ''];
+    for (const e of bh.extras ?? []) {
+      const t = e.text.replace(/^[-+]+/, '');
+      if (e.after === 'volt' && /^\d+(\.\d+)?$/.test(t)) return `ตัวเลขที่สองต่อจากแรงดัน ${t}`;
+      if (e.after === 'watt' && /^\d+(\.\d+)?W$/i.test(t)) return `วัตต์ที่สอง ${t}`;
+      const m = t.match(/^(\d+(?:\.\d+)?)(M|CM|MM)?$/i);
+      if (m && wire !== undefined && e.after !== 'volt') {
+        const u = (m[2] ?? 'M').toUpperCase();
+        const metres = Number(m[1]) / (u === 'CM' ? 100 : u === 'MM' ? 1000 : 1);
+        if (Math.abs(metres - wire) > 1e-9) return `ความยาวสาย ${t} ไม่ตรงกับขั้วไฟ (${wire} ม.)`;
+      }
+    }
   }
   return null;
 }
