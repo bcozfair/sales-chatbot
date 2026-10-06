@@ -13,8 +13,8 @@
 | ลบ | อะไร |
 | --- | --- |
 | `services/drawing/` | โฟลเดอร์นี้ |
-| `scripts/diag/drawingPort.ts` | ด่านเทียบกับต้นฉบับ Appsale |
-| 1 บรรทัดใน `package.json` | `diag:drawing-port` |
+| `scripts/diag/drawingPort.ts` · `drawingGlb.ts` · `drawingGlbLib.ts` · `gltf-validator.d.ts` | ด่านของโมดูล |
+| ใน `package.json` | `diag:drawing-port` · `diag:drawing-glb` · devDependency `gltf-validator` |
 
 **สิ่งที่ทำให้ตารางนี้จริง: การพึ่งพาเป็นทางเดียว** — ไม่มีโค้ดเดิมตัวไหน import โฟลเดอร์นี้ และโฟลเดอร์นี้
 **ไม่ import** `services/pricingLab/` · `routes/` · `pdfGenerator.ts` · `puppeteer` (ผลอ่านรหัสของหน้าคำนวณราคา
@@ -27,6 +27,7 @@ types.ts  ←  geometry/tsPrimitives.ts  ←  families/tsParts.ts  ←  families
          ←  families/bh-01.ts (ชุดเวกเตอร์ของตัวเอง + weldSolid)  ─────────────────────┴─  families/registry.ts
                                                                                         ↑
 writers/step.ts  (รับ StepSolid[] — ไม่รู้จักตระกูล)                                      ด่าน / เฟส 1
+writers/glb.ts   (รับ DrawingModel — ใช้ parts ที่มี normal)
 ```
 
 `registry.ts` คือทางเดียวที่ส่วนอื่นได้โมเดล (`buildModel(spec)`) · type ของ `FAMILIES` ผูกกับ union `DrawingSpec`
@@ -51,6 +52,7 @@ sqrt · ห้ามสลับลำดับบวก/คูณ · ห้า�
 | TS_-11 | `products/ts-11-model.js` (`BUILDERS['11']`) · `ts-series-model.js` · `ts-series-parts.js` · `cableRadius` ของ `ts-series-assembly.js` · จำนวนสายจาก `ts-11.js`/`ts-common.js` | **exact** — ทุกชิ้น + STEP ตรงต้นฉบับทุกไบต์ | `diag:drawing-port` |
 | BH-01 · BH-01C | `products/bh-01-mesh.js` (`buildBandMesh` ทั้งไฟล์ · ผ่าครึ่ง = `split`) · `weldSolid` ของ `engine/step.js` (seal = false) · ความหนา 4 mm ตามแคตตาล็อก | **exact** — ชิ้นดิบ + ชิ้นที่รวมจุดแล้ว + STEP ตรงต้นฉบับทุกไบต์ (รวมรูเจาะและ termPos) | `diag:drawing-port` |
 | writers/step | `engine/step.js` `colouredStep` (ทางสามเหลี่ยม) | **exact** ยกเว้นบรรทัด FILE_NAME (ชื่อระบบ "Primus Quotation System" · เวลา) | `diag:drawing-port` |
+| writers/glb | — (ของใหม่ · Appsale ไม่มีไฟล์สำหรับเว็บ) | glTF 2.0 ไบนารี · node ราก scale 0.001 · หนึ่ง node/mesh/วัสดุ ต่อชิ้น · ผลนิ่ง · วัสดุเฟส 0 = สีของชิ้น ไม่เงา (สี sRGB ยังไม่แปลงเป็น linear — ตัดสินพร้อม PBR เฟส 1 ที่ `materialFor()`) | `diag:drawing-glb` |
 
 `exact` = ยังเหมือนต้นฉบับทุกไบต์และด่านยังครอบ · `improved` = ปรับปรุงโดยตั้งใจแล้ว (ต้องถอดออกจากด่าน port
 ในคอมมิตเดียวกับการปรับ พร้อมตัวเลขก่อน/หลัง)
@@ -82,6 +84,7 @@ sqrt · ห้ามสลับลำดับบวก/คูณ · ห้า�
 
 | ด่าน | พิสูจน์อะไร | ฐาน |
 | --- | --- | --- |
+| `npm run diag:drawing-glb` | `writeGlb` → ตัวถอดของด่านเอง (ไม่ใช้โค้ดตัวเขียน) ตรวจโครง (magic · ความยาว · ตัวเติม chunk · bufferView ในขอบ/หาร 4 · min/max · index < จุด · normal ยาว 1 ±5e-4) แล้วถอดกลับ = `Math.fround(ต้นฉบับ)` · **gltf-validator ของ Khronos 0 error 0 warning** · เขียนซ้ำได้ไบต์เดิม · ชิ้นสังเคราะห์ 90,000 จุดบังคับทาง index uint32 | ไม่แตะ |
 | `npm run diag:drawing-port` | ค่าชุดเดียวกันเข้าโมดูลเรากับต้นฉบับ Appsale ที่คอมมิตต้นแบบ → ทุกชิ้น (ชื่อ/สี/positions/normals/triangles/edges) `Object.is` ทีละตัว + STEP ทั้งไฟล์ (ยกเว้น FILE_NAME) · ไม่มีรีโป/คอมมิต = **ตอบไม่ได้ exit 1** · `-- --quick` ไม่แตะฐาน | SELECT อย่างเดียว (READ ONLY + statement_timeout) · เขียนแค่ tmpdir แล้วลบ |
 
 ผลวัด 2026-10-06 (`diag:drawing-port` เต็ม · ~3 นาที): รหัสจริงที่ Appsale ชี้ว่าเป็นสามตระกูลนี้ 4,059 · ตัวอ่านของ Appsale
@@ -94,3 +97,6 @@ sqrt · ห้ามสลับลำดับบวก/คูณ · ห้า�
 | BH-01C | 51 | 1,424 | 52 MB |
 
 ชุดควบคุม (2026-10-06): แก้ค่าคงที่ของ TS 1e-9 → ตก 9/9 · เปลี่ยน `unit` ของ BH เป็นแบบ `x/n` ของ TS → ตก 20/20 ⇒ ด่านจับบิตที่เพี้ยนได้จริง
+
+`diag:drawing-glb` 2026-10-06: 13 ไฟล์ (TS_-11 4 · BH-01 6 · BH-01C 2 · สังเคราะห์ uint32 1) ผ่านครบ — validator 0 error/warning/info ·
+ไฟล์ทั่วไป 41–292 KB ก่อนบีบอัด · ชุดควบคุม: คูณ normal ×2 → validator `ACCESSOR_VECTOR3_NON_UNIT` 1,932 จุด และตัวถอดของด่านจับได้เอง

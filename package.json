@@ -85,6 +85,7 @@
     "diag:pricing-coverage": "tsx scripts/diag/pricingCoverage.ts",
     "diag:pricing-diff": "tsx scripts/diag/pricingDiff.ts",
     "diag:drawing-port": "tsx scripts/diag/drawingPort.ts",
+    "diag:drawing-glb": "tsx scripts/diag/drawingGlb.ts",
     "pricebook:import": "tsx scripts/pricebook/importer.ts",
     "pricebook:xlsx": "tsx scripts/pricebook/xlsx.ts",
     "pricebook:calc": "tsx scripts/pricebook/cli.ts",
@@ -141,6 +142,7 @@
     "@types/node": "^25.9.3",
     "@types/pg": "^8.20.0",
     "concurrently": "^10.0.3",
+    "gltf-validator": "^2.0.0-dev.3.10",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3"
   }
