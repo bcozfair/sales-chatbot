@@ -11,6 +11,9 @@
 //  · ค่าคงที่ของตระกูลที่แคตตาล็อกเขียนไว้ (BH ความหนา 4 mm) ไม่ใช่การเติมค่าจากรหัส
 //
 //  ไฟล์นี้ตัดสินแค่ "วาดได้ไหม" — ช่องที่กำหนดรูปทรงต้องมาจากรหัสโดยไม่เดา ไม่งั้นวาดไม่ได้
+//  **แกนหักวาดไม่ได้ทุกตระกูล** (แบบวันนี้วาดแกนตรงอย่างเดียว) — อ่านสัญญาณจาก `bend:*` ทั้งในช่องที่ติ๊ก (`addons`)
+//  และใน `cfg.options` ที่ตัวอ่านรหัสตั้งเองจากรหัส (ตั้งแต่ pricingLab `c80d688` ตัว L ท้ายเลขรุ่น = กฎหัก L +100)
+//  ⇒ ไม่พึ่งว่า `headJunk` ยังค้างอยู่ — วันที่ฝั่งคิดราคาล้าง `headJunk` เมื่ออ่าน L ได้ แกนหัก 330 รหัสต้องไม่ถูกวาดเป็นแท่งตรง
 //  ส่วน "ส่งลูกค้าได้ไหม" (ความหลวมของช่องอื่น · รูเจาะ · ไม่รับผลิต) อยู่ที่ checks.ts ที่เดียว
 //
 //  ทางที่ไม่ได้เลือก: วาดด้วยค่าที่หน้าคำนวณราคา "เดา" (ช่องที่มี issue ยังมีค่าใน `values` ได้) แล้วติดป้ายเตือน —
@@ -51,12 +54,17 @@ function choice<T extends string>(raw: string | undefined, allowed: readonly T[]
   return v !== undefined && (allowed as readonly string[]).includes(v) ? (v as T) : null;
 }
 
-function ts11(f: TsFormReading): FromReading {
+/** แกนหัก (`bend:*`) จากช่องที่ติ๊ก + จากสเปกที่ตัวอ่านรหัสตั้ง — มี = วาดไม่ได้ ทุกตระกูล */
+function bendReason(reading: PricingReading): Doubt | null {
+  const all = [...(reading.tsForm?.addons ?? []), ...(reading.form?.addons ?? []), ...(reading.cfg?.options ?? [])];
+  return all.some((a) => a.startsWith('bend:')) ? { key: 'bend', reason: 'แกนหัก L / หักฉาก — แบบยังวาดแกนงอไม่ได้' } : null;
+}
+
+function ts11(f: TsFormReading, bend: Doubt | null): FromReading {
   const reasons: Doubt[] = [];
   const v = f.values;
   if (f.headJunk) reasons.push({ key: 'headJunk', reason: `ท่อน «${f.headJunk}» หลังเลขรุ่นไม่อยู่ในแคตตาล็อก TS_-11 (L / LP = แกนงอ TS_-11L ซึ่งยังไม่มีแบบ)` });
-  const bends = (f.addons ?? []).filter((a) => a.startsWith('bend:'));
-  if (bends.length) reasons.push({ key: 'bend', reason: 'แกนหัก L / หักฉาก — แบบยังวาดแกนงอไม่ได้' });
+  if (bend) reasons.push(bend);
   for (const slot of TS11_SHAPE_SLOTS) {
     const issue = f.issues?.[slot];
     if (issue) reasons.push({ key: `issue:${slot}`, reason: `${SLOT_LABEL[slot]} ${ISSUE_TEXT[issue]} — แบบต้องรู้ค่านี้` });
@@ -97,8 +105,9 @@ function ts11(f: TsFormReading): FromReading {
   };
 }
 
-function band(f: BhFormReading, family: BandSpec['family']): FromReading {
+function band(f: BhFormReading, family: BandSpec['family'], bend: Doubt | null): FromReading {
   const reasons: Doubt[] = [];
+  if (bend) reasons.push(bend);
   if (f.sizeText !== undefined) reasons.push({ key: 'size', reason: `ขนาด «${f.sizeText}» ไม่ใช่รูปแบบ ID × H ของแคตตาล็อก — แบบต้องรู้ขนาด` });
   else if (!(typeof f.id === 'number' && f.id > 0) || !(typeof f.h === 'number' && f.h > 0)) reasons.push({ key: 'size', reason: 'รหัสไม่ได้บอกขนาด ID × H — แบบต้องรู้ขนาด' });
   const term = choice(f.term ?? '', BH_TERMS);
@@ -126,12 +135,12 @@ function band(f: BhFormReading, family: BandSpec['family']): FromReading {
 /** ผลอ่านรหัส → spec ของแบบ หรือเหตุผลที่วาดไม่ได้ */
 export function fromReading(reading: PricingReading): FromReading {
   if (reading.tsForm) {
-    if (reading.tsForm.family === 'TS_-11') return ts11(reading.tsForm);
+    if (reading.tsForm.family === 'TS_-11') return ts11(reading.tsForm, bendReason(reading));
     return { ok: false, family: reading.tsForm.family, reasons: [{ key: 'noFamily', reason: `รุ่น ${reading.tsForm.family} ยังไม่มีแบบ 3 มิติ` }] };
   }
   if (reading.form) {
     const fam = reading.form.family;
-    if (fam === 'BH-01' || fam === 'BH-01C') return band(reading.form, fam);
+    if (fam === 'BH-01' || fam === 'BH-01C') return band(reading.form, fam, bendReason(reading));
     return { ok: false, family: fam, reasons: [{ key: 'noFamily', reason: `รุ่น ${fam} ยังไม่มีแบบ 3 มิติ` }] };
   }
   return { ok: false, family: null, reasons: [{ key: 'noForm', reason: 'รหัสนี้ไม่มีช่องตามแคตตาล็อก — ยังไม่มีแบบ 3 มิติ' }] };

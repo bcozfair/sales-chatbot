@@ -162,6 +162,12 @@ export interface BhFormReading {
 export interface PricingReading {
   tsForm?: TsFormReading;
   form?: BhFormReading;
+  /**
+   * สเปกที่ส่งเข้าตัวคิดราคา (ส่วนที่ใช้ของ `ProductConfig`) — `options` คือ **สัญญาณแกนหัก** (`bend:L` · `bend:square`)
+   * ที่ตัวอ่านรหัสตั้งจากรหัสเอง ไม่ใช่แค่จากช่องที่ติ๊ก (ตั้งแต่ `c80d688` ตัว L ท้ายเลขรุ่น = กฎหัก L +100)
+   * ⇒ แบบต้องอ่านตรงนี้ ไม่พึ่งว่า `headJunk` จะยังค้างอยู่ (ด่าน coverage ยืนยันว่าชื่อช่องนี้ยังมีใน `ProductConfig`)
+   */
+  cfg?: { options?: string[] };
 }
 
 /** ผลคิดราคา (ส่วนที่ checks.ts ใช้ของ `PriceOutcome`) */

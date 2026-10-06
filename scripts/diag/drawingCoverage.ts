@@ -4,7 +4,7 @@
 //  ทุกรหัสจริงตระกูล TS/N/P/BH → อ่าน + คิดราคาแบบหน้าคำนวณราคา (`parseProductCode` + `computePrice` + ตารางรหัสย่อย
 //  ในฐาน — ทางเดียวกับ `pricingQuoteHandler`) → `judge()` ของโมดูลแบบ → โมเดล/GLB/STEP ครั้งเดียวต่อรูปทรงที่ไม่ซ้ำ
 //
-//  (ก) **รายงาน** ต่อตระกูล: ทั้งหมด · วาดได้ · ส่งได้ · เหตุผลที่วาด/ส่งไม่ได้ · ตระกูลที่ยังไม่มีแบบ — **ไม่มีเกณฑ์ขั้นต่ำ**
+//  (ก) **รายงาน** ต่อตระกูล: ทั้งหมด · วาดได้ · ส่งได้ทันที · ส่งได้หลังผู้เสนอราคายืนยัน · เหตุผล · ตระกูลที่ยังไม่มีแบบ — **ไม่มีเกณฑ์ขั้นต่ำ**
 //      (ตัวเลขขยับตามแค็ตตาล็อกที่ sync ทุกวัน · CLAUDE.md ห้ามเทียบผลที่ขึ้นกับข้อมูลกับไฟล์ที่บันทึกไว้)
 //  (ข) **สิ่งที่ต้องจริงเสมอ** — ล้มทันทีแม้รหัสเดียว:
 //      1. วาดได้ ⇒ โมเดลไม่ throw · ตัวเลข finite · normal ยาวเท่า positions · index อยู่ในขอบ
@@ -15,7 +15,12 @@
 //                 · มี/ไม่มีสปริงตามช่อง · สีปลอกตามชนิดสาย
 //         BH-01/01C: รัศมีใน = ID/2 = dims.dia_mm/2 · หนา 4 · สูงตามแกน = H = dims.width_mm · ชิ้นขั้วไฟตามช่อง · ผ่าครึ่งตามตระกูล
 //      5. ช่องรูปทรงมี issue/ไม่ได้เขียน · ท่อนหลังเลขรุ่น · แกนหัก ⇒ ต้อง "วาดไม่ได้" (ตรวจซ้ำจากผลอ่านเอง ไม่ใช้ checks.ts)
-//      6. ส่งได้ ⇒ ผลอ่านไม่มีความหลวมนอกจาก "วิธีเขียน" · คิดราคาได้ · ไม่ใช่ "ไม่รับผลิต"
+//         · แกนหักอ่านจาก **`parsed.cfg.options` ตรง ๆ** (`bend:*` ที่ตัวอ่านรหัสตั้งจากตัว L ท้ายเลขรุ่น — pricingLab `c80d688`)
+//           ไม่ผ่าน `PricingReading` และไม่พึ่ง `headJunk` (QA 2026-10-06: ล้าง headJunk แล้วแกนหัก 330 รหัสถูกวาดเป็นแท่งตรงโดยด่านเดิมยังผ่าน)
+//      6. (ก) ความหลวมที่ไม่ใช่ "วิธีเขียน" และไม่ใช่ "ส่วนท้ายที่ยืนยันได้" (issue · ไม่ได้เขียน · ท่อนหลังเลขรุ่น · สิ่งบวกเพิ่ม ·
+//             BH loose/รู/กำลังไฟนอกรูปแบบ) ⇒ ต้องส่งไม่ได้ · ส่งได้ ⇒ คิดราคาได้และไม่ใช่ "ไม่รับผลิต"
+//         (ข) ส่วนท้ายที่ยืนยันได้ (TS ท้ายรหัส/`S###` · BH ท่อนนอกแคตตาล็อก) ⇒ ต้องอยู่ใน `confirm` ครบทุกชนิด และ `confirm`
+//             มีของได้เฉพาะเมื่อผลอ่านมีส่วนนั้นจริง — ห้ามหลุดเป็น "ส่งได้" โดยไม่มีอะไรให้ผู้เสนอราคาติ๊ก (เจ้าของเคาะ 2026-10-06)
 //      7. ทุกรหัสของตระกูลที่มีแบบได้คำตัดสิน · ตรวจ 0 รหัส = **ตอบไม่ได้** (ไม่ใช่ผ่าน)
 //      8. ทิศการพึ่งพา: services/drawing/** ไม่ import pricingLab / pdfGenerator / puppeteer / routes และไม่มีโค้ดเดิม import มัน
 //         + ตัวยืนยัน keyof สองทางระหว่าง type ที่โมดูลแบบประกาศเอง กับ TsForm / BhForm (บรรทัดล่าง — ล้มที่ tsc)
@@ -37,7 +42,8 @@ import { judge } from '../../services/drawing/checks.js';
 import { buildModel } from '../../services/drawing/families/registry.js';
 import { JACKETS } from '../../services/drawing/families/tsParts.js';
 import { SENSOR_LEADS } from '../../services/drawing/families/ts-11.js';
-import type { BhFormReading, DrawingModel, DrawingSpec, TsFormReading } from '../../services/drawing/types.js';
+import type { ProductConfig } from '../../services/pricingLab/types.js';
+import type { BhFormReading, DrawingModel, DrawingSpec, PricingReading, TsFormReading } from '../../services/drawing/types.js';
 import { writeGlb } from '../../services/drawing/writers/glb.js';
 import { writeStep } from '../../services/drawing/writers/step.js';
 import { NoBook, loadBookFrom } from '../pricebook/bookSource.js';
@@ -48,7 +54,11 @@ import { decodeGlb, roundtripProblems } from './drawingGlbLib.js';
 type SameKeys<A, B> = [Exclude<keyof A, keyof B>, Exclude<keyof B, keyof A>] extends [never, never] ? true : { missing: Exclude<keyof B, keyof A>; extra: Exclude<keyof A, keyof B> };
 const TS_FORM_KEYS_MATCH: SameKeys<TsFormReading, TsForm> = true;
 const BH_FORM_KEYS_MATCH: SameKeys<BhFormReading, BhForm> = true;
-void TS_FORM_KEYS_MATCH; void BH_FORM_KEYS_MATCH;
+// สัญญาณแกนหัก: `PricingReading.cfg.options` ต้องเป็นช่องที่มีอยู่จริงใน `ProductConfig` ชนิดเดียวกัน — เปลี่ยนชื่อ = tsc ล้มที่นี่
+type CfgReading = NonNullable<PricingReading['cfg']>;
+const CFG_KEYS_IN_PRODUCT_CONFIG: Exclude<keyof CfgReading, keyof ProductConfig> extends never ? true : { notInProductConfig: Exclude<keyof CfgReading, keyof ProductConfig> } = true;
+const CFG_OPTIONS_TYPE: CfgReading = {} as Pick<ProductConfig, 'options'>;
+void TS_FORM_KEYS_MATCH; void BH_FORM_KEYS_MATCH; void CFG_KEYS_IN_PRODUCT_CONFIG; void CFG_OPTIONS_TYPE;
 
 const GREEN = '\x1b[32m', RED = '\x1b[31m', DIM = '\x1b[2m', BOLD = '\x1b[1m', RESET = '\x1b[0m';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -215,11 +225,12 @@ function threeWay(spec: DrawingSpec, m: Measured, cfg: { axes?: Record<string, s
 }
 
 /** ข้อ 5 และ 6 — ตรวจจากผลอ่านเอง (ไม่เรียก checks.ts) */
-function mustNotDraw(ts?: TsForm, bh?: BhForm): string | null {
+function mustNotDraw(ts?: TsForm, bh?: BhForm, cfg?: ProductConfig): string | null {
+  // แกนหักทุกตระกูล — สัญญาณอิสระจากสเปกที่ส่งเข้าตัวคิดราคา + ช่องที่ติ๊ก
+  if ([...(cfg?.options ?? []), ...(ts?.addons ?? []), ...(bh?.addons ?? [])].some((a) => a.startsWith('bend:'))) return 'แกนหัก (bend:* ใน cfg.options/addons)';
   if (ts?.family === 'TS_-11') {
     const shape = ['probe', 'sensor', 'spring', 'd', 'l1', 'cable'];
     if (ts.headJunk) return `ท่อนหลังเลขรุ่น ${ts.headJunk}`;
-    if ((ts.addons ?? []).some((a) => a.startsWith('bend:'))) return 'แกนหัก';
     const bad = shape.find((s) => ts.issues?.[s] || ts.omit?.includes(s));
     if (bad) return `ช่องรูปทรง ${bad} มี issue/ไม่ได้เขียน`;
   }
@@ -228,17 +239,24 @@ function mustNotDraw(ts?: TsForm, bh?: BhForm): string | null {
   }
   return null;
 }
-function sendLooseness(ts?: TsForm, bh?: BhForm): string | null {
+/** ข้อ 6 (ก) — ความหลวมที่ต้องปิดการส่ง (ไม่ใช่วิธีเขียน · ไม่ใช่ส่วนท้ายที่ยืนยันได้) */
+function blockingLooseness(ts?: TsForm, bh?: BhForm): string | null {
   if (ts) {
     if (Object.keys(ts.issues ?? {}).length) return 'มี issue';
     if (ts.omit?.length) return 'มีช่องที่ไม่ได้เขียน';
-    if (ts.tail?.length || ts.extras?.length) return 'มีท่อนนอกแคตตาล็อก';
     if (ts.headJunk || ts.addons?.length) return 'มีท่อนหลังเลขรุ่น/สิ่งบวกเพิ่ม';
   }
   if (bh) {
-    if (bh.loose || bh.extras?.length || bh.addons?.length || bh.holes?.length || bh.wattText !== undefined) return 'ผลอ่าน BH หลวม/มีรู/มีสิ่งบวกเพิ่ม';
+    if (bh.loose || bh.addons?.length || bh.holes?.length || bh.wattText !== undefined) return 'ผลอ่าน BH หลวม/มีรู/มีสิ่งบวกเพิ่ม/กำลังไฟนอกรูปแบบ';
   }
   return null;
+}
+/** ข้อ 6 (ข) — ส่วนท้ายที่ยืนยันได้ซึ่งผลอ่านมีจริง → คีย์ที่ต้องเจอใน `confirm` */
+function confirmableKeys(ts?: TsForm, bh?: BhForm): string[] {
+  const keys: string[] = [];
+  if (ts?.tail?.length) keys.push('tail');
+  if (ts?.extras?.length || bh?.extras?.length) keys.push('extras');
+  return keys;
 }
 
 async function main(): Promise<void> {
@@ -264,7 +282,7 @@ async function main(): Promise<void> {
 
   const codes = await realCodes();
   const t0 = Date.now();
-  interface FamilyStat { total: number; draw: number; send: number; noDraw: Map<string, { n: number; sample: string }>; noSend: Map<string, { n: number; sample: string }> }
+  interface FamilyStat { total: number; draw: number; sendNow: number; sendConfirm: number; noDraw: Map<string, { n: number; sample: string }>; noSend: Map<string, { n: number; sample: string }>; confirm: Map<string, { n: number; sample: string }> }
   const stats = new Map<string, FamilyStat>();
   const noDrawingFamilies = new Map<string, number>();
   const cache = new Map<string, Measured>();
@@ -287,21 +305,26 @@ async function main(): Promise<void> {
       if (v.canDraw) fail(`${code}: ตระกูล ${label} ไม่มีแบบแต่ได้คำตัดสินว่าวาดได้`);
       continue;
     }
-    const st = stats.get(fam) ?? { total: 0, draw: 0, send: 0, noDraw: new Map(), noSend: new Map() };
+    const st = stats.get(fam) ?? { total: 0, draw: 0, sendNow: 0, sendConfirm: 0, noDraw: new Map(), noSend: new Map(), confirm: new Map() };
     stats.set(fam, st);
     st.total++;
 
     // ข้อ 5
-    const why = mustNotDraw(ts, bh);
+    const why = mustNotDraw(ts, bh, parsed.cfg);
     if (why && v.canDraw) fail(`${code}: ข้อ 5 — ${why} แต่ได้คำตัดสินว่าวาดได้`);
     if (!v.canDraw) { for (const d of v.noDraw) bump(st.noDraw, d.key, d.reason); continue; }
     st.draw++;
+    // ข้อ 6 (ข) — ทุกรหัสที่วาดได้ ไม่ว่าส่งได้หรือไม่
+    const want = confirmableKeys(ts, bh), got = new Set(v.confirm.map((d) => d.key));
+    for (const k of want) if (!got.has(k)) fail(`${code}: ข้อ 6 (ข) — มีส่วนท้ายที่ระบบไม่รู้จัก (${k}) แต่ไม่อยู่ในรายการให้ผู้เสนอราคายืนยัน`);
+    for (const k of got) if (!want.includes(k)) fail(`${code}: ข้อ 6 (ข) — รายการยืนยันมี ${k} ทั้งที่ผลอ่านไม่มีส่วนนั้น`);
+    for (const d of v.confirm) bump(st.confirm, d.key, d.reason);
     if (v.canSend) {
-      st.send++;
-      // ข้อ 6
-      const loose = sendLooseness(ts, bh);
-      if (loose) fail(`${code}: ข้อ 6 — ${loose} แต่ได้คำตัดสินว่าส่งได้`);
-      if (!outcome || outcome.status === 'notManufacturable') fail(`${code}: ข้อ 6 — ผลคิดราคา ${outcome?.status ?? 'ว่าง'} แต่ส่งได้`);
+      if (v.confirm.length) st.sendConfirm++; else st.sendNow++;
+      // ข้อ 6 (ก)
+      const loose = blockingLooseness(ts, bh);
+      if (loose) fail(`${code}: ข้อ 6 (ก) — ${loose} แต่ได้คำตัดสินว่าส่งได้`);
+      if (!outcome || outcome.status === 'notManufacturable') fail(`${code}: ข้อ 6 (ก) — ผลคิดราคา ${outcome?.status ?? 'ว่าง'} แต่ส่งได้`);
     } else for (const d of v.noSend) bump(st.noSend, d.key, d.reason);
 
     // ข้อ 1–4
@@ -327,7 +350,7 @@ async function main(): Promise<void> {
   const pct = (n: number, d: number) => (d ? `${((n / d) * 100).toFixed(1)}%` : '—');
   for (const [fam, s] of stats) {
     judged += s.total;
-    console.log(`  ${fam.padEnd(8)} ${s.total.toLocaleString().padStart(6)} รหัส · วาดได้ ${s.draw.toLocaleString().padStart(6)} (${pct(s.draw, s.total)}) · ส่งได้ ${s.send.toLocaleString().padStart(6)} (${pct(s.send, s.total)})`);
+    console.log(`  ${fam.padEnd(8)} ${s.total.toLocaleString().padStart(6)} รหัส · วาดได้ ${s.draw.toLocaleString().padStart(6)} (${pct(s.draw, s.total)}) · ส่งได้ทันที ${s.sendNow.toLocaleString().padStart(6)} (${pct(s.sendNow, s.total)}) · ส่งได้หลังยืนยัน ${s.sendConfirm.toLocaleString().padStart(5)} (${pct(s.sendConfirm, s.total)})`);
     const list = (title: string, m: Map<string, { n: number; sample: string }>) => {
       if (!m.size) return;
       console.log(`    ${DIM}${title}${RESET}`);
@@ -335,6 +358,7 @@ async function main(): Promise<void> {
     };
     list('วาดไม่ได้ (รหัสหนึ่งนับได้หลายเหตุผล)', s.noDraw);
     list('วาดได้แต่ส่งไม่ได้', s.noSend);
+    list('ต้องให้ผู้เสนอราคายืนยัน (แบบไม่ได้วาดส่วนนี้ · นับทั้งรหัสที่ส่งได้และไม่ได้)', s.confirm);
   }
   console.log(`\n${BOLD}ตระกูลที่ยังไม่มีแบบ${RESET} ${DIM}(เรียงตามจำนวนรหัสจริง)${RESET}`);
   for (const [fam, n] of [...noDrawingFamilies.entries()].sort((a, b) => b[1] - a[1]).slice(0, 25)) console.log(`  ${String(n).padStart(6)}  ${fam}`);
