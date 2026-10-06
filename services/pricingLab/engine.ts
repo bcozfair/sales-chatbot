@@ -565,15 +565,35 @@ export function resolveModel(book: PriceBook, code: string): PriceModel | undefi
 /** ที่มาของค่าที่กรอกในช่องนอกรหัส (`ProductConfig.offCode`) */
 const OFF_CODE = 'กรอกในช่องนอกรหัส (รหัสไม่ได้บอก)';
 
+/** รุ่นนี้มีกฎ/ข้อห้ามที่อ่านตัวเลือกนี้ไหม — ใช้ตอนคิดตามรุ่นอื่น (`ProductConfig.priceAs`) */
+function mentionsOption(model: PriceModel, option: string): boolean {
+  const uses = (p?: Predicate): boolean =>
+    !!p && ('option' in p ? p.option === option : 'all' in p ? p.all.some(uses) : 'any' in p ? p.any.some(uses) : 'not' in p ? uses(p.not) : false);
+  return model.adders.some((a) => uses(a.when)) || model.constraints.some((c) => uses(c.when));
+}
+
 export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome {
-  const model = resolveModel(book, cfg.model);
-  if (!model) {
+  const own = resolveModel(book, cfg.model);
+  if (!own) {
     return {
       status: 'notManufacturable',
       model: cfg.model,
       unitPrice: 0,
       breakdown: [],
       violations: [{ id: 'UNKNOWN_MODEL', level: 'block', message: `ไม่มีรุ่น ${cfg.model} ในสมุดราคา` }],
+      bookVersion: book.version
+    };
+  }
+  // วัสดุที่ชีตสั่งให้คิดราคาตามรุ่นอื่นทั้งชิ้น (S ของ TS_-03 → TSK-12 · `ProductConfig.priceAs`) — ตาราง กฎ ข้อห้าม ค่ามาตรฐาน
+  // มาจากรุ่นนั้นทั้งหมด · `own` (รุ่นของรหัส) ใช้ที่เดียวคือจับคู่ตารางรหัสย่อย (ชนิดสาย · Ground ตั้งไว้ที่รุ่นของรหัส)
+  const model = cfg.priceAs ? resolveModel(book, cfg.priceAs.model) : own;
+  if (!model) {
+    return {
+      status: 'quoteOnRequest',
+      model: own.code,
+      unitPrice: 0,
+      breakdown: [],
+      violations: [{ id: 'PRICE_AS_MODEL', level: 'quoteOnRequest', noRate: true, message: `${cfg.priceAs!.why} — แต่สมุดราคาไม่มีรุ่น ${cfg.priceAs!.model} ⇒ ต้องขอราคาจากฝ่ายผลิต` }],
       bookVersion: book.version
     };
   }
@@ -601,7 +621,7 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
     defaultedBy[axis] = `${d.label ?? axisLabel(axis)}ของ ${axes[d.by]}`;
   }
   // รหัสย่อยที่ "เซ็ตค่าให้ช่อง" ต้องมีผลก่อนหาราคาตั้ง ไม่งั้นตารางจะถูกค้นด้วยค่าเก่า
-  const subCodes = matchedSubCodes(book, model, cfg.options ?? []);
+  const subCodes = matchedSubCodes(book, own, cfg.options ?? []);
   // รหัสย่อยที่ "รู้ความหมายแล้วแต่ยังไม่มีราคา" — ช่องเงินของ `flat` ว่าง / ค่าที่ `setAxis` จะตั้งว่าง
   // (เจ้าของสั่ง 2026-09-25: หัว S/E/SS/SB และเกลียวมิลของ TS_-08/10 "ใส่ค่าว่างไว้ก่อน ค่อยกำหนดภายหลังผ่าน ui")
   // ⇒ ขึ้น "ยังไม่มีราคา" แบบเดียวกับอัตราที่ขาด · **ห้ามคิดเป็น +0** และห้ามปล่อยให้ค่ามาตรฐานของแกนนั้นมาแทน
@@ -627,6 +647,11 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
   // รหัสย่อยที่ "เปิดกฎของรุ่น" (`B` ของ TS_-08 = หัวอลูมิเนียมใหญ่) — ต้องเข้า options ก่อน constraint
   // เพราะกฎห้ามอย่าง "2 element ต้องแกน 6 mm ขึ้นไป" อ่าน option ตัวเดียวกัน · เงินมาจากกฎเดิม ไม่ใช่จากแถวนี้
   for (const sc of subCodes) if (sc.effect === 'option' && sc.value) options.add(sc.value);
+  // คิดตามรุ่นอื่น แต่รุ่นนั้นไม่มีกฎของตัวเลือกนี้ (Type T · NTC · หัก L ของ TS_-03 วัสดุ S → TSK-12) — ปล่อยไว้ = ราคาขาดส่วนนั้น
+  // เงียบ ๆ ⇒ ยังไม่มีราคา (ขอราคา) · รุ่นของรหัสเองไม่ต้องตรวจ: ตัวอ่านรหัสเปิดเฉพาะตัวเลือกที่รุ่นมีกฎอยู่แล้ว (`hasOptionAdder`)
+  const orphanOptions = model === own ? [] : [...options].filter(
+    (o) => !o.startsWith(SUBCODE_PREFIX) && !o.startsWith(VARIANT_OPTION_PREFIX) && !mentionsOption(model, o)
+  );
 
   // ค่าที่คำนวณจากค่าอื่น ต้องมาก่อน constraint และก่อน adder เพราะทั้งคู่อ่านมันได้
   const derivedText: Record<string, string> = {};
@@ -699,6 +724,14 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
       s.effect === 'setAxis' ? `ยังไม่ได้กำหนดว่าคิดราคาเท่า${axisLabel(s.axis ?? '')}ไหน` : 'ยังไม่ได้ใส่จำนวนเงิน'
     } (ตั้งที่ตารางรหัสย่อย)`,
   }));
+  for (const o of orphanOptions) {
+    violations.push({
+      id: 'PRICE_AS_OPTION:' + o,
+      level: 'quoteOnRequest',
+      noRate: true,
+      message: `${optionLabel(o)}: ยังไม่มีราคา — ใบนี้คิดตามตาราง ${model.code} ซึ่งไม่มีราคาส่วนนี้ (ต้องขอราคาจากฝ่ายผลิต)`,
+    });
+  }
   const checks: TraceCheck[] = [];
   for (const c of model.constraints) {
     if (c.disabled) continue;
@@ -735,7 +768,7 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
       }
     : computeBase(model, book, axes, dims, new Set([model.code]), cfg.unread, cfg.catalogOnly, cfg.askPrice);
   const baseWaits = model.base.kind === 'matrix' && model.base.axes.some((a) => pendingAxes.has(a));
-  const traceBase: TraceBase = { ok: base.ok, label: base.label, steps: [...base.steps] };
+  const traceBase: TraceBase = { ok: base.ok, label: base.label, steps: [...(model !== own ? [cfg.priceAs!.why] : []), ...base.steps] };
   if (!base.ok && baseWaits) {
     // ราคาตั้งหาไม่ได้เพราะรหัสย่อยยังไม่ได้บอกค่าของแกนตาราง — ข้อความ "ยังไม่มีราคา" ข้างบนบอกครบแล้ว
     traceBase.steps.push('ยังหาราคาตั้งไม่ได้ — รอรหัสย่อยกำหนดค่าของแกนในตาราง (ดู "ค่าที่ใช้คิด")');
@@ -767,7 +800,9 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
     const baseAxes = !ownBase[0] && model.base.kind === 'matrix' ? model.base.axes : [];
     const fromDefault = baseAxes.filter((a) => defaultedBy[a])
       .map((a) => `${axisLabel(a)} ${axes[a]} = ${defaultedBy[a]} — รหัสไม่ได้ระบุ`);
-    const detail = fromDefault.length ? [base.detail, `(${fromDefault.join(' · ')})`].filter(Boolean).join(' ') : base.detail;
+    // คิดตามรุ่นอื่น — บรรทัดราคาตั้งต้องบอกเอง (หมายเหตุใน PDF/จอเห็นแค่บรรทัดนี้ ไม่เห็นวิธีคิดทีละขั้น)
+    const plain = fromDefault.length ? [base.detail, `(${fromDefault.join(' · ')})`].filter(Boolean).join(' ') : base.detail;
+    const detail = model !== own ? [plain, `(รหัส ${own.code} — คิดตามตาราง ${model.code})`].filter(Boolean).join(' ') : plain;
     breakdown.push({ step: 'base', label: base.label, detail, amount: base.amount, running });
     traceBase.amount = base.amount;
     // ช่องที่แอดมินเพิ่มเอง (นอกแคตตาล็อก) มีราคาแล้ว — คิดได้ แต่ต้องบอกว่าราคามาจากไหน (ไม่ใช่ของ Excel)

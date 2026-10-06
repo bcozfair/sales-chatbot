@@ -33,6 +33,7 @@ import { TS_CATALOG, buildTsCode, readTsForm, sameTsCode, slotOptions, tsFamilyO
 import { EditRejected, applySheetEdit } from '../../services/pricingLab/modelEditor.js';
 import { checkPriceModel } from '../../services/pricingLab/modelShape.js';
 import { axisValues } from '../../services/pricingLab/code.js';
+import { findSubCode } from '../../services/pricingLab/subcodes.js';
 import type { PriceBook, SubCode } from '../../services/pricingLab/types.js';
 
 const GREEN = '\x1b[32m', RED = '\x1b[31m', YEL = '\x1b[33m', DIM = '\x1b[2m', BOLD = '\x1b[1m', RESET = '\x1b[0m';
@@ -533,10 +534,43 @@ async function main(): Promise<void> {
     const d102 = price('TSK-03 10.2x300+2M');
     check('แกน 10.2 (ไม่มีทั้งแคตตาล็อกและชีต) = ต้องขอราคา + ราคาเท่าที่คิดได้ · ช่องกรอกขึ้น ask', d102.o?.status === 'quoteOnRequest' &&
       d102.p.tsForm?.issues?.d === 'ask', `${d102.o?.status} ${JSON.stringify(d102.p.tsForm?.issues)}`);
-    const sh = price('TSJ-03 3.2Sx200+1M');
-    check('วัสดุ S (Sheath · แคตตาล็อกมี ชีตไม่มีแถว) = ยังไม่มีราคา ไม่ใช่ "รหัสไม่ได้บอกขนาดแกน"', noRate(sh.o) &&
-      !sh.o!.violations.some((v) => v.missing), sh.o?.violations.map((v) => v.message).join(' | '));
     check('แกน 7 (Titanium · แคตตาล็อกมี ชีตไม่มีแถว) = ยังไม่มีราคา', noRate(price('TSK-03 7x100+1M').o));
+
+    // คำตอบเจ้าของ 2026-10-06 (ข้อ 1–3) — ตัว L · วัสดุ S → TSK-12 · ราคาสาย C/TS
+    const k12 = book.models['TSK-12'];
+    const sh = price('TSJ-03 3.2Sx200+1M');
+    if (!k12) {
+      check('วัสดุ S — เล่มไม่มี TSK-12 = ยังไม่มีราคา (กติกาเดิม)', noRate(sh.o) && !sh.o!.violations.some((v) => v.missing));
+    } else {
+      const cell12 = (d: string) => k12.base.kind === 'matrix' ? k12.base.cells[`${d} | Type K/J`] : undefined;
+      const len12 = (d: string) => k12.adders.find((a) => a.id === 'len_l1')?.rates?.[d] ?? NaN;
+      check('วัสดุ S = ราคา TSK-12 ทั้งชิ้นตามชีต TS-03 H12 (ราคาตั้งแกน 3.2 + 1 ช่วง 100 mm ของ TSK-12) · รหัสยังเป็นรุ่น TSK-03',
+        sh.o?.status === 'priced' && sh.o.model === 'TSK-12' && sh.p.model === 'TSK-03' && sh.o.unitPrice === (cell12('3.2') ?? NaN) + len12('3.2') &&
+        sh.p.tsForm?.family === 'TS_-03' && sh.p.tsForm.values.mat === 'S', `${sh.o?.status} ${sh.o?.model} ${sh.o?.unitPrice}`);
+      check('วัสดุ S — วิธีคิดทีละขั้นบอกว่าใช้ตาราง TSK-12 เพราะอะไร', !!sh.o?.trace?.base.steps[0]?.includes('TSK-12') && /H12/.test(sh.o.trace.base.steps[0] ?? ''),
+        sh.o?.trace?.base.steps[0]);
+      const shT = price('TSK-03 3.2Sx200+5MT');
+      check('วัสดุ S + สายเทปล่อน (รหัสย่อย T ของ TSK-03) = ค่าสายตามอัตราของ TSK-12', shT.o?.status === 'priced' &&
+        line(shT.o, /สาย/) === 4 * (k12.adders.find((a) => a.id === 'cable_over_1m')?.rates?.['สายเทปล่อน'] ?? NaN), `${line(shT.o, /สาย/)}`);
+      const shTT = price('TST-03 3.2Sx100+1M');
+      check('วัสดุ S + Type T (TSK-12 ไม่มีกฎ Type T) = ยังไม่มีราคา ไม่ใช่ +0 · ราคาเท่าที่คิดได้ = ราคาตั้ง TSK-12', shTT.o?.status === 'quoteOnRequest' &&
+        !!shTT.o.violations.some((v) => v.noRate && v.id === 'PRICE_AS_OPTION:sensor:T') && shTT.o.unitPrice === cell12('3.2'), `${shTT.o?.status} ${shTT.o?.unitPrice}`);
+      check('วัสดุ S แกนที่ TSK-12 ไม่มีแถว (4 · แคตตาล็อก TS_-03 มี) = ยังไม่มีราคา', noRate(price('TSK-03 4Sx100+1M').o));
+    }
+    if (findSubCode(book, k03, '03L')) {
+      const l = price('TSK-03L 6x100+1M');
+      check('ตัว L ต่อท้ายเลขรุ่น (รหัสย่อย 03L) = เปิดกฎหัก L +100 ตามชีต B7', l.o?.status === 'priced' && l.o.unitPrice === (std.o?.unitPrice ?? NaN) + 100, `${l.o?.unitPrice}`);
+      const lTick = price('TSK-03L 6x100+1M', { addons: ['bend:L'] });
+      check('ตัว L + ติ๊กหัก L นอกรหัสซ้ำ = ไม่คิดสองครั้ง', lTick.o?.unitPrice === l.o?.unitPrice, `${lTick.o?.unitPrice}`);
+    } else {
+      console.log(`  ${YEL}…${RESET} ตารางรหัสย่อยยังไม่มี 03L — ข้ามข้อตัว L`);
+    }
+    for (const [sub, cable] of [['C', 'สายซิลิโคน'], ['TS', 'สายเทปล่อนหุ้มชีลด์']] as const) {
+      const r = rate03('cable_over_1m', cable);
+      const c3 = price(`TSK-03 6x100+3M${sub}`);
+      check(`สาย ${sub} คิดตามอัตราในกฎสายของรุ่น (${Number.isNaN(r) ? 'ว่าง = ยังไม่มีราคา' : `${r}/ม.`} · เจ้าของสั่ง 120/160 ใส่ในฐาน)`,
+        Number.isNaN(r) ? noRate(c3.o) : c3.o?.status === 'priced' && line(c3.o, /สาย/) === r * 2, `${c3.o?.status} ${line(c3.o, /สาย/)}`);
+    }
   }
 }
 
