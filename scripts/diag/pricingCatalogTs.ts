@@ -27,7 +27,7 @@ import { catalogRulesFromMaps } from '../pricebook/catalogRules.js';
 import { loadCatalogSubcodes } from '../pricebook/seedCatalogSubcodes.js';
 import { listSubCodes } from '../../db/pricingLabRepo.js';
 import { withSubCodes } from '../../services/pricingLab/bookStore.js';
-import { askValueProblem, modelOfCode, offCatalogValues, parseProductCode, type CodePicks } from '../../services/pricingLab/code.js';
+import { askValueProblem, modelOfCode, offCatalogValues, parseProductCode, thousandsAsPlain, type CodePicks } from '../../services/pricingLab/code.js';
 import { computePrice } from '../../services/pricingLab/engine.js';
 import { TS_CATALOG, buildTsCode, readTsForm, sameTsCode, slotOptions, tsFamilyOfModel, type TsForm } from '../../services/pricingLab/catalogTs.js';
 import { EditRejected, applySheetEdit } from '../../services/pricingLab/modelEditor.js';
@@ -601,6 +601,27 @@ async function main(): Promise<void> {
   check('TSJ-02L (TS_-02 ไม่มีกฎหัก L) = ตัว L ยังเป็นท่อนนอกแคตตาล็อก (รหัสย่อย 02L) ราคาเท่ารุ่นที่ไม่มี L',
     !book.models['TSK-02'] || (j02.p.parts.some((x) => x.text === 'L' && x.kind === 'unknown' && x.subCode === '02L') &&
       j02.o?.unitPrice === price('TSJ-02(12)5x10+1M').o?.unitPrice), j02.p.parts.map((x) => `${x.text}:${x.kind}`).join(' '));
+
+  // ── 11. จุลภาคคั่นหลักพัน `1,000` = 1000 (เจ้าของสั่ง 2026-10-06 "อ่าน 1,000 เป็น 1000 mm พร้อมเตือน") ──
+  // เดิมตัวอ่านหยุดที่จุลภาค ⇒ แกนยาว 1 mm ราคาต่ำไปเงียบ ๆ · รับเฉพาะรูปที่อ่านได้ทางเดียว · BH ไม่แตะ (จุลภาคคั่นสองค่า)
+  section('11. จุลภาคคั่นหลักพัน — อ่าน 1,000 เป็น 1000 พร้อมเตือน · รูปที่อ่านได้หลายทางไม่แตะ');
+  const commaPairs: [string, string][] = [['TSK-11 6x1,200+1M', 'TSK-11 6x1200+1M'], ['TSK-12 1.5x10,000+2MP', 'TSK-12 1.5x10000+2MP'], ['TSK-03 5x1,000+1M', 'TSK-03 5x1000+1M']];
+  for (const [comma, plain] of commaPairs) {
+    if (!modelOfCode(plain, book)) { console.log(`  ${YEL}…${RESET} เล่มนี้ไม่มีรุ่นของ ${plain} — ข้าม`); continue; }
+    const a = price(comma), b = price(plain);
+    const n = Number(comma.match(/x([\d,]+)/)![1]!.replace(/,/g, ''));
+    check(`${comma} = ${plain} (แกนยาว ${n} mm) · สถานะ/ราคาเท่ากัน · เตือนให้แก้รหัสใน Odoo · รหัสที่พิมพ์คงเดิม`,
+      a.p.cfg?.dims?.L1 === n && a.o?.status === b.o?.status && a.o?.unitPrice === b.o?.unitPrice && a.p.input === comma &&
+        a.p.warnings.some((w) => w.includes(`อ่าน ${comma.match(/x([\d,]+)/)![1]} เป็น ${n}`)) && !b.p.warnings.some((w) => /จุลภาค/.test(w)),
+      `${a.o?.status} ${a.o?.unitPrice} / ${b.o?.status} ${b.o?.unitPrice} · L1 ${a.p.cfg?.dims?.L1}`);
+  }
+  const keep = ['6,5x100', '1,00', '1,0000', '0.1,000', 'x,000'].filter((s) => thousandsAsPlain(s).fixed.length > 0);
+  check('รูปที่อ่านได้หลายทาง (`6,5` · `1,00` · `1,0000` · ทศนิยมนำหน้า) ไม่แปลง', keep.length === 0, keep.join(' · '));
+  const multi = thousandsAsPlain('5x2,500,000+1M');
+  check('หลายกลุ่ม `2,500,000` = 2500000', multi.text === '5x2500000+1M' && multi.fixed.join() === '2,500,000', multi.text);
+  const bhc = price('BH-03 178x65-230-750W,750W(HPT)');
+  check('BH ไม่แตะจุลภาค (`750W,750W` คั่นสองค่า) — ไม่มีคำเตือนจุลภาค', !bhc.p.warnings.some((w) => /จุลภาค/.test(w)) && bhc.p.normalized.includes(','),
+    bhc.p.normalized);
 }
 
 main()
