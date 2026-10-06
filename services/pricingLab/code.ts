@@ -36,7 +36,7 @@ import type { PriceBook, PriceModel, Predicate, ProductConfig } from './types.js
 import { resolveModel } from './engine.js';
 import { findSubCode, subCodeOption } from './subcodes.js';
 import { ADDONS, AMP, BH_CATALOG, SHAPE_AXIS, bhSpec, buildBhCode, sameBhCode, type BhFamily, type BhForm, type HoleSpec, type SizeKey } from './catalogBh.js';
-import { MAT_PRICE_AS, MODEL_SUFFIX, NTC_HEADS, OFF_CATALOG_SUFFIX, askSlotKey, NTC_NUMBERS, TS_ADDONS, TS_CATALOG, readTsForm, readTsFormLoose, tsFamilyOfModel, tsSpec, type TsFamily, type TsFamilySpec, type TsForm } from './catalogTs.js';
+import { MAT_PRICE_AS, MODEL_SUFFIX, NTC_HEADS, OFF_CATALOG_SUFFIX, SUFFIX_ADDON, askSlotKey, NTC_NUMBERS, TS_ADDONS, TS_CATALOG, readTsForm, readTsFormLoose, tsFamilyOfModel, tsSpec, type TsFamily, type TsFamilySpec, type TsForm } from './catalogTs.js';
 
 /** หนึ่งรหัสย่อยในรหัสสินค้า พร้อมคำอธิบายว่าระบบอ่านมันว่าอะไร — ใช้โชว์ให้คนตรวจก่อนเชื่อราคา */
 export interface CodePart {
@@ -1473,7 +1473,10 @@ function readBh(c: Ctx, num: string, suffix: string, rest: string, picks: CodePi
  *   3. ไม่มีใครตั้งค่าให้                            ⇒ **ห้ามกลืนทิ้ง**
  * ข้อ 3 เคยกลืนข้อ 2 ไปด้วย: `BH-02C`/`BH-03C` (12 รหัสที่ขายจริง) ตกไปคิดเป็นรุ่นฐาน
  * เปล่า ๆ ไม่บวก 20% แล้วคืนราคาหน้าตาปกติออกมา ไม่มีอะไรฟ้อง (เจอ 2026-09-22)
- * ส่วนข้อ 3 ของจริงยังมีอยู่: `11P` 1,465 รหัส · `11L` 211 · `11LP` 112
+ * ส่วนข้อ 3 ของจริงยังมีอยู่ (นอกจากที่ตั้งความหมายไว้ข้างล่าง)
+ * ตัวที่รู้ความหมาย (`readSuffixLetter`): หัก L ของทุกรุ่นที่มีกฎ (`SUFFIX_ADDON`) · Spring P ของ TS_-11 (`MODEL_SUFFIX`) · นอกแคตตาล็อก (`OFF_CATALOG_SUFFIX`)
+ * หลายตัวติดกัน (`TSK-11LP` = หัก L + None Spring · `TSK-03LP` = L + P · เจ้าของยืนยัน 2026-10-06) ⇒ อ่านทีละตัวเมื่อทั้งก้อนไม่มีความหมาย
+ * แต่มีอย่างน้อยหนึ่งตัวที่รู้จัก · ตัวที่ไม่รู้จักขึ้นเป็นท่อนของตัวเอง (`LPS` → S ไม่รู้จัก แต่ L ยังบวก) ไม่ใช่ทิ้งทั้งก้อน
  *
  * `quiet` = คืนคำอธิบายของข้อ 2 ให้ผู้เรียกรวมเข้าท่อนของตัวเอง แทนการเพิ่มท่อนใหม่ (C ของ BH-02 คือทั้ง
  * รูปทรงและตัวเลือก — ขึ้นสองท่อนชื่อ C ซ้ำกันคนอ่านจะงง)
@@ -1495,19 +1498,17 @@ function readModelSuffix(c: Ctx, suffix: string, quiet = false): string | undefi
       (extra ? ` · ของแถม ${extra} รายการคิดคนละราคากับรุ่นปกติ` : '');
     if (quiet) return reads;
     add(c, { text: suffix, reads, kind: 'model' });
-  } else if (suffix !== '' && MODEL_SUFFIX[model.code]?.[suffix] && !quiet) {
-    // ตัวอักษรท้ายเลขรุ่นที่แคตตาล็อกบอกความหมาย (TS_-11 Spring P = None Spring) — `catalogTs.ts`
-    add(c, { text: suffix, reads: MODEL_SUFFIX[model.code]![suffix]!, kind: 'noPrice' });
-  } else if (suffix !== '' && OFF_CATALOG_SUFFIX[model.code]?.letters.includes(suffix) && !quiet) {
-    // ตัวอักษรที่แคตตาล็อกไม่มีแต่ขายจริง (`TSJ-02S` · เจ้าของเคาะ 2026-10-05) — คิดตามรุ่นฐาน + เตือน · ตั้งราคาทีหลังที่ตารางรหัสย่อย
-    // ชื่อ `02S` (เลขรุ่น + ตัวอักษร) ไม่ใช่ `S` — `S` ท้ายสายของรุ่นเดียวกันเป็นคนละเรื่อง (ดู `OFF_CATALOG_SUFFIX`)
-    const { num, head } = OFF_CATALOG_SUFFIX[model.code]!;
-    const key = `${num}${suffix}`;
-    if (!readFromTable(c, key, suffix)) {
-      add(c, { text: suffix, reads: `ตัว ${suffix} ต่อท้ายเลขรุ่น ${num} — นอกแคตตาล็อก ${head} ยังไม่ได้คิดเงินส่วนนี้ (ตั้งราคาได้ที่ตารางรหัสย่อย ชื่อ ${key})`, kind: 'unknown', subCode: key });
-      c.warnings.push(`ตัว ${suffix} ต่อท้ายเลขรุ่น ${num} ไม่อยู่ในแคตตาล็อก ${head} — ราคานี้คิดเท่ารุ่นที่ไม่มีตัว ${suffix} ยังไม่รวมส่วนของตัว ${suffix}`);
+  } else if (suffix === '' || quiet) {
+    // ไม่มีตัวอักษร / ผู้เรียกขอแค่คำอธิบายของตัวเลือก (ข้อ 2) — ไม่เพิ่มท่อน
+  } else if (readSuffixLetter(c, suffix)) {
+    // ทั้งก้อนมีความหมายในตัวเอง (`P` ของ TS_-11 · `S` ของ TS_-02 · `L`)
+  } else if (suffix.length > 1 && [...suffix].some((l) => suffixLetterKnown(model, l))) {
+    for (const l of suffix) {
+      if (!readSuffixLetter(c, l)) {
+        add(c, { text: l, reads: `ตัว ${l} ท้ายเลขรุ่น — สมุดราคามีแต่ตารางของ ${model.code} ยังไม่ได้ตั้งค่าว่า ${l} ต่างจากรุ่นฐานยังไง`, kind: 'unknown' });
+      }
     }
-  } else if (suffix !== '' && !model.code.toUpperCase().endsWith(suffix) && !quiet) {
+  } else if (!model.code.toUpperCase().endsWith(suffix)) {
     add(c, {
       text: suffix,
       reads: `ตัวอักษรท้ายเลขรุ่น — สมุดราคามีแต่ตารางของ ${model.code} ยังไม่ได้ตั้งค่าว่า ${suffix} ต่างจากรุ่นฐานยังไง`,
@@ -1515,6 +1516,45 @@ function readModelSuffix(c: Ctx, suffix: string, quiet = false): string | undefi
     });
   }
   return undefined;
+}
+
+/** ตัวอักษรท้ายเลขรุ่นตัวนี้รู้ความหมายไหม (ไม่เพิ่มท่อน) — ชุดเดียวกับที่ `readSuffixLetter` อ่านได้ */
+function suffixLetterKnown(model: PriceModel, s: string): boolean {
+  const addon = SUFFIX_ADDON[s];
+  return (!!addon && hasOptionAdder(model, addon)) || !!MODEL_SUFFIX[model.code]?.[s] || !!OFF_CATALOG_SUFFIX[model.code]?.letters.includes(s);
+}
+
+/**
+ * ตัวอักษรท้ายเลขรุ่นหนึ่งท่อน (ทั้งก้อน หรือทีละตัวของ `LP`) — คืน true เมื่อรู้ความหมายและเพิ่มท่อนแล้ว
+ * ลำดับ: กฎบวกเพิ่มของรุ่น (`SUFFIX_ADDON` · หัก L) → ความหมายตามแคตตาล็อก (`MODEL_SUFFIX`) → นอกแคตตาล็อก (`OFF_CATALOG_SUFFIX`)
+ */
+function readSuffixLetter(c: Ctx, s: string): boolean {
+  const model = c.model;
+  const addon = SUFFIX_ADDON[s];
+  if (addon && hasOptionAdder(model, addon)) {
+    // หัก L — เงินอยู่ที่กฎ `bend_l` ของรุ่น (ชีตทุกแผ่น "สำหรับรุ่นหัก L ดัดงอ บวกเพิ่ม 100") · เจ้าของสั่ง 2026-10-06
+    c.cfg.options = [...(c.cfg.options ?? []), addon];
+    const label = TS_ADDONS.find((a) => a.code === addon)?.label ?? addon;
+    add(c, { text: s, reads: `${label} — ตัว ${s} ต่อท้ายเลขรุ่น (ชีต ${model.sheet ?? model.code}: บวกเพิ่มตามกฎ "${label}")`, kind: 'option' });
+    return true;
+  }
+  if (MODEL_SUFFIX[model.code]?.[s]) {
+    // ตัวอักษรท้ายเลขรุ่นที่แคตตาล็อกบอกความหมาย (TS_-11 Spring P = None Spring) — `catalogTs.ts`
+    add(c, { text: s, reads: MODEL_SUFFIX[model.code]![s]!, kind: 'noPrice' });
+    return true;
+  }
+  if (OFF_CATALOG_SUFFIX[model.code]?.letters.includes(s)) {
+    // ตัวอักษรที่แคตตาล็อกไม่มีแต่ขายจริง (`TSJ-02S` · เจ้าของเคาะ 2026-10-05) — คิดตามรุ่นฐาน + เตือน · ตั้งราคาทีหลังที่ตารางรหัสย่อย
+    // ชื่อ `02S` (เลขรุ่น + ตัวอักษร) ไม่ใช่ `S` — `S` ท้ายสายของรุ่นเดียวกันเป็นคนละเรื่อง (ดู `OFF_CATALOG_SUFFIX`)
+    const { num, head } = OFF_CATALOG_SUFFIX[model.code]!;
+    const key = `${num}${s}`;
+    if (!readFromTable(c, key, s)) {
+      add(c, { text: s, reads: `ตัว ${s} ต่อท้ายเลขรุ่น ${num} — นอกแคตตาล็อก ${head} ยังไม่ได้คิดเงินส่วนนี้ (ตั้งราคาได้ที่ตารางรหัสย่อย ชื่อ ${key})`, kind: 'unknown', subCode: key });
+      c.warnings.push(`ตัว ${s} ต่อท้ายเลขรุ่น ${num} ไม่อยู่ในแคตตาล็อก ${head} — ราคานี้คิดเท่ารุ่นที่ไม่มีตัว ${s} ยังไม่รวมส่วนของตัว ${s}`);
+    }
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -1588,6 +1628,8 @@ function readNtcHead(c: Ctx, head: string): void {
 function readTsAddons(c: Ctx, picks: CodePicks): void {
   for (const a of TS_ADDONS) {
     if (!picks.addons?.includes(a.code) || !hasOptionAdder(c.model, a.code)) continue;
+    // รหัสบอกเองแล้ว (ตัว L ท้ายเลขรุ่น · `SUFFIX_ADDON`) — ติ๊กซ้ำไม่คิดสองครั้ง และวิธีคิดยังบอกว่ามาจากรหัส
+    if (c.cfg.options?.includes(a.code)) continue;
     c.cfg.options = [...(c.cfg.options ?? []), a.code];
     c.cfg.offCode = [...(c.cfg.offCode ?? []), a.code];
     add(c, { text: '', reads: `${a.label} (ติ๊กในช่องบวกเพิ่ม — รหัสไม่ได้บอก)`, kind: 'option' });
@@ -1773,16 +1815,20 @@ function tsFormOf(c: Ctx, input: string, family: TsFamily): TsForm {
   const spans: [number, number][] = [];
   let cursor = 0;
   let modelEnd = -1;
+  /** ตำแหน่งถัดไปของตัวอักษรท้ายเลขรุ่นที่ยังไม่ถูกจับคู่ (`TSK-11LPS` → L · P · S ทีละท่อน) */
+  let sufAt = -1;
   for (const p of c.parts) {
     if (!p.text) continue;
     const t = norm(p.text).toUpperCase();
     if (p.kind === 'model') {
       const at = loose.canon.indexOf(t);
-      if (at >= 0) { cursor = at + t.length; modelEnd = cursor; }
+      if (at >= 0) { cursor = at + t.length; modelEnd = cursor; sufAt = at + t.search(/[A-Z]*$/); }
       continue;
     }
-    if (p.kind === 'unknown' && modelEnd >= t.length && cursor === modelEnd && loose.canon.slice(modelEnd - t.length, modelEnd) === t) {
-      spans.push([modelEnd - t.length, modelEnd]);
+    // ท่อนของตัวอักษรท้ายเลขรุ่นอยู่ในข้อความของท่อนรุ่นเอง ⇒ ผูกกับตำแหน่งนั้น ไม่ให้ตัวชี้กระโดดไปจับ P ของสาย `-PU` ข้างหลัง
+    if (cursor === modelEnd && sufAt >= 0 && sufAt + t.length <= modelEnd && loose.canon.slice(sufAt, sufAt + t.length) === t) {
+      if (p.kind === 'unknown') spans.push([sufAt, sufAt + t.length]);
+      sufAt += t.length;
       continue;
     }
     const from = (start: number) => {
