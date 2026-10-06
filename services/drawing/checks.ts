@@ -29,7 +29,9 @@ export type LooseKind =
   | 'issue' | 'omit' | 'tail' | 'extras' | 'written' | 'clUnit' | 'cableNoDash'
   | 'bhLoose' | 'bhExtras' | 'bhAddons' | 'bhHoles' | 'bhWattText'
   /** ท่อนท้ายที่เป็นค่าของช่องที่ตัวอ่านปล่อยว่าง = ระบบเดาช่องนั้น (ตารางสเปกจะพิมพ์ผิด) — ส่งไม่ได้เสมอ */
-  | 'guessedField';
+  | 'guessedField'
+  /** ท่อนตัวอักษรต่อท้ายสาย TS_-11 ที่ยังไม่รู้ความหมาย (อาจเป็นหัวต่อปลายสาย ซึ่งแบบวาดจริง) — ส่งไม่ได้จนกว่าจะรู้ */
+  | 'cableEnd';
 
 /**
  * ความหลวมที่เป็นแค่ "วิธีเขียนคนละแบบ" — ไม่ปิดการส่ง
@@ -71,6 +73,13 @@ const TS_EMPTY_FIELD: { slot: string; looksLike: (token: string) => boolean }[] 
   { slot: 'elem', looksLike: (t) => /^2(?![\d.])/.test(t) },
   { slot: 'cl', looksLike: (t) => /^\d+(\.\d+)?(M|CM|MM)$/i.test(t) },
 ];
+/**
+ * ท่อนตัวอักษรต่อท้ายสาย TS_-11 (หลังช่องสายที่มีค่าแล้ว เช่น `-T-MP` · `-PU-SP`) ที่ **รู้แล้วว่าไม่เปลี่ยนปลายสาย** — ยืนยันได้
+ * วันนี้ว่าง: `MP` / `SP` ยังไม่รู้ความหมาย (ถามเจ้าของ 2026-10-06) และปลายสายเป็นส่วนที่แบบวาดจริง (ลวดแยก + หางปลา)
+ * ⇒ ระหว่างรอ = ส่งไม่ได้ (`cableEnd`) · เจ้าของตอบว่าท่อนไหนไม่ใช่หัวต่อ = เติมชื่อท่อนลงรายการนี้ที่เดียว แล้วกลับเป็นชั้นยืนยัน
+ */
+const CABLE_END_HARMLESS: readonly string[] = [];
+
 /** ความยาวสายที่ขั้วไฟแบบออกสายของ BH หมายถึง (เมตร) — `''` = สาย 30 cm */
 const BH_WIRE_METRES: Record<string, number> = { '': 0.3, '1': 1, '2': 2, '3': 3 };
 
@@ -94,6 +103,8 @@ export function loosenessOf(reading: PricingReading): Looseness[] {
       const token = raw.replace(/^[-+]+/, '');
       const hit = TS_EMPTY_FIELD.find((f) => f.slot in ts.values && ts.values[f.slot] === '' && !ts.issues?.[f.slot] && !shape.includes(f.slot) && f.looksLike(token));
       if (hit) out.push({ kind: 'guessedField', key: `guessed:${hit.slot}`, reason: `ท้ายรหัส «${raw}» น่าจะเป็น${SLOT_LABEL[hit.slot] ?? hit.slot} แต่ช่องนั้นว่าง — ตารางสเปกจะพิมพ์ผิด` });
+      else if (ts.family === 'TS_-11' && ts.values.cable && /^[A-Z]/i.test(token) && !/^S\d+$/i.test(token) && !CABLE_END_HARMLESS.includes(token.toUpperCase()))
+        out.push({ kind: 'cableEnd', key: 'tail:cableEnd', reason: `ท่อน «${raw}» ต่อท้ายสาย — ยังไม่รู้ว่าเปลี่ยนปลายสายหรือไม่` });
     }
   }
   const bh = reading.form;
