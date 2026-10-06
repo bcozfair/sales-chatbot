@@ -706,6 +706,44 @@ async function main(): Promise<void> {
         Number.isNaN(r) ? noRate(c3.o) : c3.o?.status === 'priced' && line(c3.o, /สาย/) === r * 2, `${c3.o?.status} ${line(c3.o, /สาย/)}`);
     }
   }
+
+  // ── 14. TS_-06 — ตรวจทั้งซีรีส์ 2026-10-06 ─────────────────────────────────────────────────────────────
+  // แกนนอกตาราง = ขอราคา + แถวสีส้ม (แนว TS_-02/03/04/05) · ตัวอักษรวัสดุท้ายขนาดแกนต้องไม่ไปชนแถวหัวกระโหลก `B`/`S` ของรุ่น
+  section('14. TS_-06 — แกนนอกตาราง = ขอราคา · วัสดุ B/S ไม่ชนหัวกระโหลก B/S (ตรวจ 2026-10-06)');
+  const k06 = book.models['TSK-06'];
+  if (!k06) {
+    console.log(`  ${YEL}…${RESET} เล่มนี้ไม่มี TSK-06 — ข้าม`);
+  } else {
+    const cell06 = (d: string, thread: string) => k06.base.kind === 'matrix'
+      ? Object.entries(k06.base.cells).find(([k]) => k.startsWith(`${d} | `) && k.includes(thread))?.[1] : undefined;
+    const headB = k06.adders.find((a) => a.id === 'head_alu_l')?.amount ?? NaN;
+    const std = price('TSK-06(S4)6x100');
+    check('ราคาตั้ง = ชีต แกน 6 × เกลียว 1/2” (Standard TS_-06(S_) 6x100) ไม่มีบรรทัดอื่น', std.o?.status === 'priced' &&
+      std.o.unitPrice === cell06('6', '1/2') && std.o.breakdown.length === 1, `${std.o?.unitPrice}`);
+    const b = price('TSK-06(S4)15.97Bx200-B');
+    check('หัว B = กฎ "หัวกระโหลก อลูมิเนียม ใหญ่" · แกน 15.97B (310S) ได้ราคาเต็ม', b.o?.status === 'priced' &&
+      b.o.unitPrice === (cell06('15.97B', '1/2') ?? NaN) + (k06.adders.find((a) => a.id === 'len_l1')?.rates?.['15.97B'] ?? NaN) + headB, `${b.o?.unitPrice}`);
+    const d102 = price('TSK-06(S4)10.2Ax100-B');
+    check('แกน 10.2A (ไม่มีทั้งแคตตาล็อกและชีต) = ต้องขอราคา + ราคาเท่าที่คิดได้ (หัว B) · ช่องกรอกขึ้น ask · เดิม "รหัสไม่ได้บอกขนาดแกน"',
+      d102.o?.status === 'quoteOnRequest' && d102.o.violations.some((v) => v.askPrice && v.level === 'quoteOnRequest') && !d102.o.violations.some((v) => v.missing) &&
+        d102.o.unitPrice === headB && d102.p.tsForm?.issues?.d === 'ask', `${d102.o?.status} ${d102.o?.unitPrice} ${JSON.stringify(d102.p.tsForm?.issues)}`);
+    check('แอดมินเพิ่มแกน 10.2A เป็นแถวสีส้มที่หน้าชีตได้', askValueProblem(k06, 'd', '10.2A') === undefined, askValueProblem(k06, 'd', '10.2A'));
+    check('แถวของชีตไม่มีตัวไหนขึ้นเป็นแถวสีส้ม "ราคาที่แอดมินใส่" (2.5S · 7TN · 15.97B · 21.3I …)', !(offCatalogValues(k06).D ?? []).length,
+      JSON.stringify(offCatalogValues(k06)));
+    const s25 = price('TSK-06(S1)2.5Sx100');
+    check('แถว 2.5S ของชีต (แคตตาล็อกไม่มีแกน 2.5) ได้ราคาเต็ม ไม่เตือน "ราคาที่แอดมินใส่"', s25.o?.status === 'priced' &&
+      s25.o.unitPrice === cell06('2.5S', '1/8') && !s25.o.violations.some((v) => v.askPrice), `${s25.o?.status} ${s25.o?.unitPrice}`);
+    for (const code of ['TSK-06(S4)15.8Bx200', 'TSK-06(S4)4Sx1000']) {
+      const r = price(code);
+      const dPart = r.p.parts.find((x) => /^[0-9.]+[BS]$/.test(x.text));
+      check(`${code}: วัสดุ ${dPart?.text.slice(-1)} = ท่อนขนาดแกน ไม่ใช่หัวกระโหลก (แถว B/S ของรุ่น) · ยังไม่มีราคา · ไม่คิดเงินหัว`,
+        dPart?.kind === 'axis' && noRate(r.o) && !r.o?.breakdown.some((l) => /หัวกระโหลก/.test(l.label)),
+        `${dPart?.text}:${dPart?.kind} ${r.o?.status} ${r.o?.breakdown.map((l) => l.label).join('|')}`);
+    }
+    const b158 = price('TSK-06(S4)15.8Bx200-B');
+    check('15.8B + หัว B = หัว B คิดครั้งเดียว (ท่อนหลังขีด) · ราคาเท่าที่คิดได้ = ค่าหัว',
+      b158.o?.breakdown.filter((l) => /หัวกระโหลก/.test(l.label)).length === 1 && b158.o?.unitPrice === headB, `${b158.o?.unitPrice}`);
+  }
 }
 
 main()
