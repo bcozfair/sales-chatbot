@@ -27,13 +27,12 @@ import { catalogRulesFromMaps } from '../pricebook/catalogRules.js';
 import { loadCatalogSubcodes } from '../pricebook/seedCatalogSubcodes.js';
 import { listSubCodes } from '../../db/pricingLabRepo.js';
 import { withSubCodes } from '../../services/pricingLab/bookStore.js';
-import { askValueProblem, modelOfCode, offCatalogValues, parseProductCode, type CodePicks } from '../../services/pricingLab/code.js';
+import { askValueProblem, modelOfCode, offCatalogValues, parseProductCode, thousandsAsPlain, type CodePicks } from '../../services/pricingLab/code.js';
 import { computePrice } from '../../services/pricingLab/engine.js';
 import { TS_CATALOG, buildTsCode, readTsForm, sameTsCode, slotOptions, tsFamilyOfModel, type TsForm } from '../../services/pricingLab/catalogTs.js';
 import { EditRejected, applySheetEdit } from '../../services/pricingLab/modelEditor.js';
 import { checkPriceModel } from '../../services/pricingLab/modelShape.js';
 import { axisValues } from '../../services/pricingLab/code.js';
-import { findSubCode } from '../../services/pricingLab/subcodes.js';
 import type { PriceBook, SubCode } from '../../services/pricingLab/types.js';
 
 const GREEN = '\x1b[32m', RED = '\x1b[31m', YEL = '\x1b[33m', DIM = '\x1b[2m', BOLD = '\x1b[1m', RESET = '\x1b[0m';
@@ -557,14 +556,11 @@ async function main(): Promise<void> {
         !!shTT.o.violations.some((v) => v.noRate && v.id === 'PRICE_AS_OPTION:sensor:T') && shTT.o.unitPrice === cell12('3.2'), `${shTT.o?.status} ${shTT.o?.unitPrice}`);
       check('วัสดุ S แกนที่ TSK-12 ไม่มีแถว (4 · แคตตาล็อก TS_-03 มี) = ยังไม่มีราคา', noRate(price('TSK-03 4Sx100+1M').o));
     }
-    if (findSubCode(book, k03, '03L')) {
-      const l = price('TSK-03L 6x100+1M');
-      check('ตัว L ต่อท้ายเลขรุ่น (รหัสย่อย 03L) = เปิดกฎหัก L +100 ตามชีต B7', l.o?.status === 'priced' && l.o.unitPrice === (std.o?.unitPrice ?? NaN) + 100, `${l.o?.unitPrice}`);
-      const lTick = price('TSK-03L 6x100+1M', { addons: ['bend:L'] });
-      check('ตัว L + ติ๊กหัก L นอกรหัสซ้ำ = ไม่คิดสองครั้ง', lTick.o?.unitPrice === l.o?.unitPrice, `${lTick.o?.unitPrice}`);
-    } else {
-      console.log(`  ${YEL}…${RESET} ตารางรหัสย่อยยังไม่มี 03L — ข้ามข้อตัว L`);
-    }
+    const lp = price('TSK-03LP 6x100+1M');
+    check('TSK-03LP = หัก L (+100) + P นอกแคตตาล็อก (ยังไม่คิด · ตั้งราคาที่รหัสย่อย 03P) · เจ้าของ 2026-10-06 "L + P"',
+      lp.o?.unitPrice === (std.o?.unitPrice ?? NaN) + 100 && lp.p.parts.some((x) => x.text === 'L' && x.kind === 'option') &&
+      lp.p.parts.some((x) => x.text === 'P' && x.kind === 'unknown' && x.subCode === '03P') && lp.p.warnings.some((w) => /ตัว P/.test(w)),
+      `${lp.o?.unitPrice} ${lp.p.parts.map((x) => `${x.text}:${x.kind}`).join(' ')}`);
     for (const [sub, cable] of [['C', 'สายซิลิโคน'], ['TS', 'สายเทปล่อนหุ้มชีลด์']] as const) {
       const r = rate03('cable_over_1m', cable);
       const c3 = price(`TSK-03 6x100+3M${sub}`);
@@ -572,6 +568,60 @@ async function main(): Promise<void> {
         Number.isNaN(r) ? noRate(c3.o) : c3.o?.status === 'priced' && line(c3.o, /สาย/) === r * 2, `${c3.o?.status} ${line(c3.o, /สาย/)}`);
     }
   }
+
+  // ── 10. ตัว L ท้ายเลขรุ่น = หัก L ของทุกรุ่นที่มีกฎ (เจ้าของสั่ง 2026-10-06 "ทุกรหัสที่มีกฎหัก L เหมือนกัน ให้บวกตามที่ excel ระบุ") ──
+  // เทียบรหัสคู่ที่ต่างกันแค่ตัว L — ต่างกันเท่าเงินของกฎ `bend_l` ในเล่ม (ไม่ใช่เลขที่จดไว้) · รุ่นที่ไม่มีกฎ = ตัว L ยังเป็นท่อนนอกแคตตาล็อก
+  section('10. ตัว L ท้ายเลขรุ่น = กฎหัก L ของรุ่น (SUFFIX_ADDON) — ทุกรุ่นที่มีกฎ');
+  const pairs: [string, string][] = [
+    ['TSK-11 6x100+1M', 'TSK-11L 6x100+1M'],
+    ['TSK-11P 6x100+1M', 'TSK-11LP 6x100+1M'],
+    ['TSP-12 6x100+1M', 'TSP-12L 6x100+1M'],
+    ['TSP-10(S2)5x160+1M', 'TSP-10L(S2)5x160+1M'],
+    ['TSP-08(S2)6x100', 'TSP-08L(S2)6x100'],
+    ['TSK-06(S2)6x100+1M', 'TSK-06L(S2)6x100+1M'],
+    ['TSK-03 6x100+1M', 'TSK-03L 6x100+1M'],
+  ];
+  for (const [plain, withL] of pairs) {
+    const m = modelOfCode(withL, book);
+    if (!m) { console.log(`  ${YEL}…${RESET} เล่มนี้ไม่มีรุ่นของ ${withL} — ข้าม`); continue; }
+    const amt = m.adders.find((a) => a.id === 'bend_l' && !a.disabled)?.amount;
+    const a = price(plain), b = price(withL);
+    check(`${withL} = ${plain} + กฎหัก L ของ ${m.code} (${amt ?? 'ไม่มีกฎ'})`, amt !== undefined && a.o?.status === b.o?.status &&
+      b.o?.unitPrice === (a.o?.unitPrice ?? NaN) + amt && b.p.parts.some((x) => x.text === 'L' && x.kind === 'option'),
+      `${a.o?.status} ${a.o?.unitPrice} → ${b.o?.status} ${b.o?.unitPrice}`);
+  }
+  const lps = price('TSK-11LPS 6x100+1M');
+  check('TSK-11LPS = หัก L + None Spring + S ที่ยังไม่รู้จัก (ไม่ทิ้งทั้งก้อน)', lps.o?.unitPrice === (price('TSK-11P 6x100+1M').o?.unitPrice ?? NaN) + 100 &&
+    lps.p.parts.some((x) => x.text === 'S' && x.kind === 'unknown') && lps.p.parts.some((x) => x.text === 'P' && x.kind === 'noPrice'),
+    lps.p.parts.map((x) => `${x.text}:${x.kind}`).join(' '));
+  const tick = price('TSK-11L 6x100+1M', { addons: ['bend:L'] });
+  check('ตัว L + ติ๊กหัก L นอกรหัสซ้ำ = ไม่คิดสองครั้ง · วิธีคิดบอกว่ามาจากรหัส', tick.o?.unitPrice === price('TSK-11L 6x100+1M').o?.unitPrice &&
+    !tick.o?.trace?.inputs.some((x) => x.key === 'bend:L' && /นอกรหัส/.test(x.from)), `${tick.o?.unitPrice}`);
+  const j02 = price('TSJ-02L(12)5x10+1M');
+  check('TSJ-02L (TS_-02 ไม่มีกฎหัก L) = ตัว L ยังเป็นท่อนนอกแคตตาล็อก (รหัสย่อย 02L) ราคาเท่ารุ่นที่ไม่มี L',
+    !book.models['TSK-02'] || (j02.p.parts.some((x) => x.text === 'L' && x.kind === 'unknown' && x.subCode === '02L') &&
+      j02.o?.unitPrice === price('TSJ-02(12)5x10+1M').o?.unitPrice), j02.p.parts.map((x) => `${x.text}:${x.kind}`).join(' '));
+
+  // ── 11. จุลภาคคั่นหลักพัน `1,000` = 1000 (เจ้าของสั่ง 2026-10-06 "อ่าน 1,000 เป็น 1000 mm พร้อมเตือน") ──
+  // เดิมตัวอ่านหยุดที่จุลภาค ⇒ แกนยาว 1 mm ราคาต่ำไปเงียบ ๆ · รับเฉพาะรูปที่อ่านได้ทางเดียว · BH ไม่แตะ (จุลภาคคั่นสองค่า)
+  section('11. จุลภาคคั่นหลักพัน — อ่าน 1,000 เป็น 1000 พร้อมเตือน · รูปที่อ่านได้หลายทางไม่แตะ');
+  const commaPairs: [string, string][] = [['TSK-11 6x1,200+1M', 'TSK-11 6x1200+1M'], ['TSK-12 1.5x10,000+2MP', 'TSK-12 1.5x10000+2MP'], ['TSK-03 5x1,000+1M', 'TSK-03 5x1000+1M']];
+  for (const [comma, plain] of commaPairs) {
+    if (!modelOfCode(plain, book)) { console.log(`  ${YEL}…${RESET} เล่มนี้ไม่มีรุ่นของ ${plain} — ข้าม`); continue; }
+    const a = price(comma), b = price(plain);
+    const n = Number(comma.match(/x([\d,]+)/)![1]!.replace(/,/g, ''));
+    check(`${comma} = ${plain} (แกนยาว ${n} mm) · สถานะ/ราคาเท่ากัน · เตือนให้แก้รหัสใน Odoo · รหัสที่พิมพ์คงเดิม`,
+      a.p.cfg?.dims?.L1 === n && a.o?.status === b.o?.status && a.o?.unitPrice === b.o?.unitPrice && a.p.input === comma &&
+        a.p.warnings.some((w) => w.includes(`อ่าน ${comma.match(/x([\d,]+)/)![1]} เป็น ${n}`)) && !b.p.warnings.some((w) => /จุลภาค/.test(w)),
+      `${a.o?.status} ${a.o?.unitPrice} / ${b.o?.status} ${b.o?.unitPrice} · L1 ${a.p.cfg?.dims?.L1}`);
+  }
+  const keep = ['6,5x100', '1,00', '1,0000', '0.1,000', 'x,000'].filter((s) => thousandsAsPlain(s).fixed.length > 0);
+  check('รูปที่อ่านได้หลายทาง (`6,5` · `1,00` · `1,0000` · ทศนิยมนำหน้า) ไม่แปลง', keep.length === 0, keep.join(' · '));
+  const multi = thousandsAsPlain('5x2,500,000+1M');
+  check('หลายกลุ่ม `2,500,000` = 2500000', multi.text === '5x2500000+1M' && multi.fixed.join() === '2,500,000', multi.text);
+  const bhc = price('BH-03 178x65-230-750W,750W(HPT)');
+  check('BH ไม่แตะจุลภาค (`750W,750W` คั่นสองค่า) — ไม่มีคำเตือนจุลภาค', !bhc.p.warnings.some((w) => /จุลภาค/.test(w)) && bhc.p.normalized.includes(','),
+    bhc.p.normalized);
 }
 
 main()
