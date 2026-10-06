@@ -455,6 +455,8 @@ docker compose exec -T db psql -U "$PG_USER" -d "$PG_DATABASE" -c "SELECT …"  
 · `saleOrderV3Smoke.ts` (2026-10-05 · ส่วน ข = ตารางชั่วคราว + ROLLBACK · ส่วน ค = รอบกวาดจริงกับ gateway จำลองที่ COMMIT ลง
   **ตารางชั่วคราวระดับ session** (`sync_state`/`sale_orders`/`sale_order_details`) แล้วทิ้ง connection · ข้อ ข0/ค0 หยุดก่อนเขียน
   ถ้าตารางไม่ใช่ของชั่วคราว · ของจริงที่แตะคือ advisory lock `sync:sale_order_v3` ชั่วขณะ ⇒ รันบน PMSV ได้ · ไม่ยิง gateway จริง)
+· `drawingPort.ts` (2026-10-06 · grep ได้ 0 · SELECT `products.model` อย่างเดียวใน READ ONLY + statement_timeout · เขียนแค่ tmpdir ของเครื่อง
+  (`git archive` ของรีโป Appsale แบบอ่านอย่างเดียว) แล้วลบใน `finally` ⇒ รันบน PMSV ได้)
 
 **`scripts/dev/` คือของที่ห้ามรันบน PMSV ทั้งโฟลเดอร์** — ต่างจาก `scripts/diag/` ตรงที่มันตั้งใจ
 เขียนข้อมูลปลอมลงฐานและ commit เพื่อ **จำลองสถานการณ์** (`seedPhaseH.ts` เพิ่ม/ลบแถวใน
@@ -614,6 +616,7 @@ TS ไต่ `node_modules` ขึ้นไปตามลำดับ ⇒ `<ท
 | แตะ `className` ของหน้าแอดมิน | `npm run diag:dead-classes` — **ต้อง `npm --prefix frontend run build` ก่อน** ด่านนี้อ่าน CSS ที่ออกมาจริง · ซอร์สใหม่กว่าบิลด์ = **บอกให้ไป build แล้วหยุด ไม่ตัดสิน** (ถ้าตัดสินจะด่าคลาสที่ถูกต้อง เพราะ Tailwind ออก CSS ให้เฉพาะคลาสที่มีคนใช้ตอน build) · **"ผ่าน" = ไม่เจอในสิ่งที่ตรวจ ไม่ใช่สะอาดแน่นอน** — ไม่ตรวจโทเคนที่ประกอบในนิพจน์ JS (ขอบเขตและตัวเลขอยู่หัวไฟล์) |
 | บัญชีเสนอในนาม PM / จุดที่ตัดสินว่าใบเป็น PM หรือ THT (`resolveQuoteCompany` · `quote_company_override`) | `npm run diag:customer-quote-company` — **เขียนแล้วลบ** (ร่างของ user ทดสอบ + แถวตั้งค่าของบริษัทที่ไม่มีใบในปีนี้) · ออกเลขใน transaction แล้ว ROLLBACK ไม่กินเลขจริง · ต้องมี API ที่ `QPM_PORT` (3099) สำหรับส่วนหน้าจริง · ด่านนับจุดเรียก `resolveQuoteCompany(` ต่อไฟล์ — เพิ่มจุดใหม่แล้วล้ม ให้ตัดสินว่าต้องอ่านค่าที่ตรึงไว้ก่อนไหม **บวก `diag:web-quote-source` · `diag:shipping-fee` · `diag:company-name`** |
 | ลบใบเสนอราคา / audit ของการลบ | `npm run diag:quote-delete` — สร้างใบทดสอบเองแล้ว ROLLBACK เสมอ **ห้ามเปลี่ยนเป็น COMMIT** · ข้อที่ห้ามล้มคือ "พิมพ์ไม่ตรงแล้วใบต้องยังอยู่" (คืน null พร้อมใบที่หายไปแล้วคือบั๊กที่ร้ายที่สุดของฟีเจอร์นี้) และ "ใบที่มีเลขที่ + ส่งค่าว่าง → ไม่ลบ" (ตั้งแต่ 2026-09-21 ค่าว่างคือคำยืนยันของใบที่ยังไม่ออกเลข ⇒ ถ้าข้อนี้ล้ม ค่าว่างกลายเป็นกุญแจผีของทุกใบ) |
+| โมดูลแบบ 3 มิติ (`services/drawing/`) | `npm run diag:drawing-port` — ค่าชุดเดียวกันเข้าโมดูลเรากับต้นฉบับ Appsale ที่คอมมิตต้นแบบ (`git archive` สด ไม่มีไฟล์เฉลย) → **ทุกชิ้นและ STEP ต้องตรงทุกไบต์** (ยกเว้นบรรทัด FILE_NAME) · ไม่ตรง = หาสาเหตุ ห้ามผ่อนเกณฑ์ · ไม่มีรีโป Appsale = ตอบไม่ได้ (exit 1) · `-- --quick` ไม่แตะฐาน · อ่านฐานอย่างเดียว รันบน PMSV ได้ |
 
 รายการเต็มอยู่ใน `package.json` (วัด 2026-09-21: 65 รายการใน `scripts/diag/` — 60 `.ts` ·
 2 `.mjs` · 2 `.sql` · โฟลเดอร์ `fixtures`)
