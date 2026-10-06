@@ -25,6 +25,12 @@
 //    · งานที่จะเขียน **แถวรหัสย่อยจาก catalog-subcodes.json** ด้วย (`seedCatalogSubcodes --apply` · รุ่นใหม่ TS_-02 2026-10-05)
 //      ใส่ `--head-seed-subcodes` ⇒ ฝั่งปัจจุบันเติมแถวที่ฐานยังไม่มี (แถวในฐานชนะไฟล์) · ฝั่งก่อนแก้ใช้ตารางในฐานล้วนเหมือนเดิม
 //
+//  **เทียบราคาในฐาน** (เจ้าของสั่ง 2026-10-06 · `services/pricingLab/README.md` "รายงานผลกับรหัสจริง") — พิมพ์ต่อท้ายทุกครั้ง:
+//  รหัสที่เปลี่ยนแล้ว "ได้ราคาเต็ม" เทียบกับ `products.sales_price` ของรหัสเดียวกัน · **ไม่ใช่เฉลย** (ราคายึด Excel) ไม่มีผลกับผ่าน/ตก
+//  ใช้หาความผิดปกติ (`TSK-03 5x1,000+1M` ระบบ 450 / ฐาน 1,400 = อ่าน `1,000` เป็น 1 mm — diff มองไม่เห็นเพราะได้ราคาเต็ม)
+//    · `--near-all`                 เทียบรหัสที่ได้ราคาเต็มทั้งชุด (ไม่ใช่แค่ที่เปลี่ยน) — ดูภาพรวมของทั้งตระกูล
+//    · `--near-group <ชื่อ>=<regex>` แยกกลุ่มย่อยตามเรื่องที่แก้ (ใส่ได้หลายครั้ง) เช่น `--near-group 'ตัว L=-\d{2}L'`
+//
 //  รัน:  npm run diag:pricing-diff                         (บน host — ต้องมี git · ~1 นาที)
 //        npm run diag:pricing-diff -- --base <ref>
 //        npm run diag:pricing-diff -- --head-book <เล่ม.json> [--head-seed-subcodes] [--base HEAD]
@@ -51,6 +57,15 @@ const HEAD_SEED = argv.includes('--head-seed-subcodes');
 const JSON_OUT = val('--json');
 const EXAMPLES = Number(val('--examples') ?? 5);
 const EXPECT_PRICE_CHANGE = argv.includes('--expect-price-change');
+const NEAR_ALL = argv.includes('--near-all');
+/** `--near-group <ชื่อ>=<regex>` (ใส่ได้หลายครั้ง) — กลุ่มย่อยของส่วนเทียบราคาในฐาน */
+const NEAR_GROUPS: [string, RegExp][] = argv.flatMap((a, i) => {
+  if (a !== '--near-group' || !argv[i + 1]) return [];
+  const v = argv[i + 1]!;
+  const eq = v.indexOf('=');
+  if (eq < 1) throw new Error(`--near-group ต้องเป็น <ชื่อ>=<regex> (ได้ "${v}")`);
+  return [[v.slice(0, eq), new RegExp(v.slice(eq + 1), 'i')] as [string, RegExp]];
+});
 
 const git = (root: string, ...args: string[]) =>
   execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -84,6 +99,95 @@ const TH: Record<string, string> = {
 };
 const baht = (n: number | null) => (n === null ? '—' : n.toLocaleString());
 const show = (r: Row | undefined) => (r ? `${TH[r[0]] ?? r[0]} ${baht(r[1])}${r[2] ? ` ${DIM}[${r[2]}]${RESET}` : ''}` : TH.missing);
+
+/** ร้อยละห่างจากราคาในฐาน (ระบบ − ฐาน) ÷ ฐาน */
+const pctOf = (sys: number, base: number) => (sys - base) / base;
+const fmtPct = (x: number) => `${x > 0 ? '+' : ''}${(x * 100).toFixed(x !== 0 && Math.abs(x) < 0.1 ? 1 : 0)}%`;
+const isExact = (sys: number, base: number) => Math.abs(sys - base) < 0.005;
+
+interface NearStats {
+  n: number; withDb: number; noDb: number; multi: number;
+  exact: number; le5: number; le20: number; over20: number; low: number; high: number; median: number | null;
+}
+
+/** สถิติความใกล้เคียงของชุดรหัสที่ได้ราคาเต็ม — นิยามเดียวกับ `services/pricingLab/README.md` "รายงานผลกับรหัสจริง" */
+function nearStats(list: string[], price: (c: string) => number | null, db: Record<string, number[]>): NearStats & { pairs: [string, number, number, number][] } {
+  const pairs: [string, number, number, number][] = [];
+  let noDb = 0, multi = 0;
+  for (const code of list) {
+    const sys = price(code);
+    if (sys === null) continue;
+    const p = db[code] ?? [];
+    if (p.length === 0) { noDb++; continue; }
+    if (p.length > 1) { multi++; continue; }
+    pairs.push([code, sys, p[0]!, pctOf(sys, p[0]!)]);
+  }
+  const ratios = pairs.map(([, s, b]) => s / b).sort((x, y) => x - y);
+  const mid = ratios.length >> 1;
+  return {
+    pairs, n: list.length, withDb: pairs.length, noDb, multi,
+    exact: pairs.filter(([, s, b]) => isExact(s, b)).length,
+    le5: pairs.filter(([, s, b, x]) => !isExact(s, b) && Math.abs(x) <= 0.05).length,
+    le20: pairs.filter(([, , , x]) => Math.abs(x) > 0.05 && Math.abs(x) <= 0.2).length,
+    over20: pairs.filter(([, , , x]) => Math.abs(x) > 0.2).length,
+    low: pairs.filter(([, , , x]) => x < -0.2).length,
+    high: pairs.filter(([, , , x]) => x > 0.2).length,
+    median: ratios.length ? (ratios.length % 2 ? ratios[mid]! : (ratios[mid - 1]! + ratios[mid]!) / 2) : null,
+  };
+}
+
+/**
+ * พิมพ์ส่วน "เทียบราคาในฐาน" — ขอบเขต: รหัสที่เปลี่ยนแล้วได้ราคาเต็ม (ทั้งชุดเมื่อ `--near-all`) · ขอราคา = บอกแค่จำนวน
+ * (ราคาเท่าที่คิดได้ไม่ใช่ราคาทั้งชิ้น) · ราคาเดิมที่ขยับบอกว่าใกล้ฐานขึ้นหรือห่างขึ้น · คืนก้อนสรุปไว้ลงไฟล์ `--json`
+ */
+function reportNear(codes: string[], before: Capture, after: Capture, db: Record<string, number[]>, groups: Map<string, string[]>) {
+  const changed = new Set([...groups.values()].flat());
+  const inScope = (c: string) => NEAR_ALL || changed.has(c);
+  const scope = codes.filter((c) => inScope(c) && after.rows[c]?.[0] === 'priced');
+  const asked = codes.filter((c) => inScope(c) && after.rows[c]?.[0] === 'quoteOnRequest').length;
+  const priceAfter = (c: string) => after.rows[c]?.[1] ?? null;
+  console.log(`${BOLD}เทียบราคาในฐาน (products.sales_price)${RESET} ${DIM}— ไม่ใช่เฉลย (ราคายึด Excel) · ใช้หาความผิดปกติ · ไม่มีผลกับผ่าน/ตก${RESET}`);
+  if (!Object.keys(db).length) {
+    console.log(`  ${YEL}ตัวเก็บผลไม่ได้ส่งราคาในฐานมา — ข้าม${RESET}\n`);
+    return null;
+  }
+  const all = nearStats(scope, priceAfter, db);
+  const line = (st: NearStats) =>
+    `ตรงเป๊ะ ${st.exact} · ห่าง ≤ 5% ${st.le5} · 5–20% ${st.le20} · > 20% ${st.over20} (ระบบต่ำกว่า ${st.low} / สูงกว่า ${st.high})` +
+    ` · มัธยฐาน ระบบ÷ฐาน ${st.median === null ? '—' : st.median.toFixed(2)}`;
+  console.log(`  ขอบเขต: ${NEAR_ALL ? 'รหัสที่ได้ราคาเต็มทั้งชุด' : 'รหัสที่เปลี่ยนแล้วได้ราคาเต็ม'} ${all.n.toLocaleString()} · มีราคาในฐาน ${all.withDb.toLocaleString()}` +
+    ` (ไม่มี ${all.noDb} · หลายราคา ${all.multi}) · ขอราคา ${asked.toLocaleString()} ไม่เทียบ`);
+  const { pairs, ...summary } = all;
+  if (!pairs.length) { console.log(''); return { scope: NEAR_ALL ? 'all-priced' : 'changed-priced', asked, ...summary, top: [] }; }
+  console.log(`  ${line(all)}`);
+  // แยกกลุ่ม: ตามการเปลี่ยนสถานะ (ไม่มีรุ่น → ได้ราคา · ได้ราคา → ได้ราคา …) + กลุ่มที่ผู้รันตั้งเอง (`--near-group`)
+  const sub: [string, string[]][] = [
+    ...(NEAR_ALL ? [] : [...groups.entries()].filter(([k]) => k.endsWith('→ priced'))
+      .map(([k, l]) => [`${TH[k.split(' → ')[0]!] ?? k} → ได้ราคา`, l] as [string, string[]])),
+    ...NEAR_GROUPS.map(([name, re]) => [name, scope.filter((c) => re.test(c))] as [string, string[]]),
+  ];
+  if (sub.length > 1 || NEAR_GROUPS.length) {
+    for (const [name, list] of sub) {
+      const st = nearStats(list, priceAfter, db);
+      if (st.withDb) console.log(`    ${DIM}${name}${RESET} ${st.withDb.toLocaleString()} ตัว: ${line(st)}`);
+    }
+  }
+  // ราคาเดิมขยับ (ตั้งใจ) — การแก้ทำให้ใกล้ราคาที่ขายจริงขึ้นหรือห่างขึ้น
+  const moved = pairs.filter(([c]) => before.rows[c]?.[0] === 'priced' && before.rows[c]?.[1] !== after.rows[c]?.[1]);
+  if (moved.length) {
+    let closer = 0, further = 0, even = 0;
+    for (const [c, s, b] of moved) {
+      const d0 = Math.abs((before.rows[c]![1] ?? 0) - b), d1 = Math.abs(s - b);
+      if (d1 < d0) closer++; else if (d1 > d0) further++; else even++;
+    }
+    console.log(`  ราคาเดิมที่ขยับ ${moved.length.toLocaleString()} ตัว: ใกล้ฐานขึ้น ${closer} · ห่างขึ้น ${further} · เท่าเดิม ${even}`);
+  }
+  const top = [...pairs].sort((x, y) => Math.abs(y[3]) - Math.abs(x[3])).slice(0, EXAMPLES);
+  console.log(`  ห่างที่สุด ${top.length} ตัว ${DIM}(ดูทุกครั้งก่อนรายงาน — ต่างโดยตั้งใจ / อ่านรหัสพลาด / ยังไม่รู้)${RESET}`);
+  for (const [c, s, b, x] of top) console.log(`    ${c}  ${DIM}ระบบ${RESET} ${baht(s)} ${DIM}/ ฐาน${RESET} ${baht(b)}  ${Math.abs(x) > 0.2 ? YEL : ''}${fmtPct(x)}${RESET}`);
+  console.log('');
+  return { scope: NEAR_ALL ? 'all-priced' : 'changed-priced', asked, ...summary, top: top.map(([code, sys, base, pct]) => ({ code, sys, base, pct })) };
+}
 
 async function main(): Promise<void> {
   const root = git(process.cwd(), 'rev-parse', '--show-toplevel');
@@ -146,10 +250,14 @@ async function main(): Promise<void> {
     console.log('');
   }
 
+  // ── เทียบราคาในฐาน (products.sales_price) — เจ้าของสั่ง 2026-10-06 · ไม่ใช่เฉลย ไม่มีผลกับผ่าน/ตก ──────────
+  const db = after.db ?? before.db ?? {};
+  const near = reportNear(codes, before, after, db, groups);
+
   if (JSON_OUT) {
     const full = Object.fromEntries([...groups.entries()].map(([k, list]) =>
-      [k, list.map((code) => ({ code, before: before.rows[code] ?? null, after: after.rows[code] ?? null }))]));
-    fs.writeFileSync(JSON_OUT, JSON.stringify({ base: baseSha, books: { before: before.book, after: after.book }, changed: full }, null, 2));
+      [k, list.map((code) => ({ code, before: before.rows[code] ?? null, after: after.rows[code] ?? null, db: db[code] ?? null }))]));
+    fs.writeFileSync(JSON_OUT, JSON.stringify({ base: baseSha, books: { before: before.book, after: after.book }, changed: full, near }, null, 2));
     console.log(`${DIM}รายการเปลี่ยนทั้งหมดเขียนลง ${JSON_OUT}${RESET}\n`);
   }
 

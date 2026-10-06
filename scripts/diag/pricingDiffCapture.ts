@@ -9,7 +9,8 @@
 //  listSubCodes · loadBookFrom) — ตัวนี้ถูกวางลงทรีเก่าด้วย ใช้ของใหม่เมื่อไหร่ฝั่งเก่ารันไม่ขึ้น
 //
 //  รัน:  tsx scripts/diag/pricingDiffCapture.ts <ไฟล์ผล.json> [--source json --book <เล่ม.json>] [--seed-subcodes]
-//  อ่านฐานอย่างเดียว (SELECT products + สมุดราคา + ตารางรหัสย่อย)
+//  อ่านฐานอย่างเดียว (SELECT products + สมุดราคา + ตารางรหัสย่อย) · เก็บ `products.sales_price` ของรหัสเดียวกันไว้ให้ส่วน
+//  "เทียบราคาในฐาน" ของ pricingDiff (เจ้าของสั่ง 2026-10-06 · ไม่ใช่เฉลย)
 // ─────────────────────────────────────────────────────────────────────────────
 import { writeFileSync } from 'node:fs';
 import { pool } from '../../config/db.js';
@@ -20,14 +21,19 @@ import { withSubCodes } from '../../services/pricingLab/bookStore.js';
 import { parseProductCode } from '../../services/pricingLab/code.js';
 import { computePrice } from '../../services/pricingLab/engine.js';
 
-/** ตระกูลที่เครื่องคิดราคารับผิดชอบ — ตรงกับ diag:pricing-coverage */
-const FAMILY_RE = /^(TS|BH)/;
+/**
+ * ตระกูลที่เครื่องคิดราคารับผิดชอบ — TS/BH (ตรงกับ diag:pricing-coverage) + หัว NTC/PTC ตามแคตตาล็อก (`N10-11P` · `P2-03`)
+ * หัว N/P เพิ่ม 2026-10-06 — เดิมด่านไม่นับเลย 451 รหัส (รายงานต้องเขียนกำกับแยกทุกงาน) · ตัวนี้ถูกวางทับในทรีเก่าด้วย ⇒ สองฝั่งนับชุดเดียวกัน
+ */
+const FAMILY_RE = /^(TS|BH|[NP]\d{1,2}-\d{2})/;
 
 /** ผลย่อของหนึ่งรหัส: [สถานะ, ราคา, ลายเซ็นของข้อติด] · `noModel` = ไม่มีรุ่นในสมุด (ไม่ได้คิด) */
 export type Row = [status: string, price: number | null, sig: string];
 export interface Capture {
   book: string;
   rows: Record<string, Row>;
+  /** ราคาขายในฐาน (`products.sales_price` > 0 ไม่ซ้ำ) ของรหัสนั้น — ว่าง = ไม่มีราคาในฐาน · มากกว่าหนึ่ง = ฐานไม่ตรงกันเอง */
+  db?: Record<string, number[]>;
 }
 
 async function main(): Promise<void> {
@@ -43,10 +49,14 @@ async function main(): Promise<void> {
   const subs = process.argv.includes('--seed-subcodes') ? [...dbSubs, ...loadCatalogSubcodes().filter((s) => !have.has(key(s)))] : dbSubs;
   const book = withSubCodes(loaded.book, subs);
 
-  const { rows } = await pool.query<{ model: string }>(
-    `SELECT DISTINCT btrim(model) AS model FROM products WHERE model IS NOT NULL AND btrim(model) <> ''`,
+  const { rows } = await pool.query<{ model: string; prices: string[] | null }>(
+    `SELECT btrim(model) AS model, array_agg(DISTINCT sales_price) FILTER (WHERE sales_price > 0) AS prices
+       FROM products WHERE model IS NOT NULL AND btrim(model) <> '' GROUP BY btrim(model)`,
   );
-  const codes = rows.map((r) => r.model).filter((m) => FAMILY_RE.test(m)).sort();
+  const fam = rows.filter((r) => FAMILY_RE.test(r.model));
+  const codes = fam.map((r) => r.model).sort();
+  const db: Record<string, number[]> = {};
+  for (const r of fam) if (r.prices?.length) db[r.model] = r.prices.map(Number);
 
   const res: Record<string, Row> = {};
   for (const code of codes) {
@@ -69,7 +79,7 @@ async function main(): Promise<void> {
       res[code] = ['throw', null, String((e as Error)?.message ?? e).slice(0, 120)];
     }
   }
-  const capture: Capture = { book: loaded.label, rows: res };
+  const capture: Capture = { book: loaded.label, rows: res, db };
   writeFileSync(out, JSON.stringify(capture));
 }
 
