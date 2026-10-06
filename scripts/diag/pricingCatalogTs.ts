@@ -100,7 +100,7 @@ async function main(): Promise<void> {
   // ── 1. รหัสจริงทุกตัว: อ่าน → ช่อง → ประกอบกลับ → ราคาเท่าเดิม ─────────────────────
   section('1. รหัสจริงในฐาน (products) — อ่านเป็นช่องแล้วประกอบกลับต้องได้รหัสเดิมและราคาเท่าเดิม');
   const { rows } = await pool.query<{ model: string }>(
-    `SELECT DISTINCT model FROM products WHERE model ~* '^(TS[A-Z]*|[NP][0-9]{1,2})-(01|02|04|06|08|10|11|12|14|18)'`
+    `SELECT DISTINCT model FROM products WHERE model ~* '^(TS[A-Z]*|[NP][0-9]{1,2})-(01|02|03|04|06|08|10|11|12|14|18)'`
   );
   // ตั้งแต่ 2026-10-01 ทุกรหัสได้ช่อง (เจ้าของ: "ใช้หน้าตา ui เป็นมาตรฐานเดียวกัน อะไรไม่ตรงก็แค่แจ้งเตือน") —
   // ตรงแคตตาล็อกทุกตัวอักษร (`readTsForm`) = เกณฑ์เดิมทุกข้อ · นอกรูปแบบ (`readTsFormLoose`) = ประกอบกลับเป็นรหัสเดิมเกือบทุกตัว
@@ -500,6 +500,43 @@ async function main(): Promise<void> {
     const none02 = price('TSP-02(12)5x10+3M');
     const ss02 = k02.adders.find((a) => a.id === 'cable_over_1m')?.rates?.['สายสแตนเลสถัก'];
     check('สายไม่ระบุชนิด = สแตนเลสถัก ตามแคตตาล็อก (แม้ PT100)', none02.o?.status === 'priced' && line(none02.o, /สาย/) === (ss02 ?? NaN) * 2, `${line(none02.o, /สาย/)}`);
+  }
+
+  // ── 9. TS_-03 (2026-10-06) — ตามแนวที่เจ้าของเคาะไว้กับ TS_-04/11 แล้ว · เทียบกับช่องของชีต ไม่ใช่ตัวเลขที่จดไว้ ──────────
+  section('9. TS_-03 — ชีต TS-03 + แคตตาล็อก TS_-03 (แนวเดียวกับ TS_-04 · 11)');
+  const k03 = book.models['TSK-03'];
+  if (!k03) {
+    console.log(`  ${YEL}…${RESET} เล่มนี้ยังไม่มี TSK-03 — ข้าม (ตรวจก่อนเขียนฐานด้วย -- --book <ไฟล์จาก importer.ts --new-models --out>)`);
+  } else {
+    const cell03 = (d: string) => k03.base.kind === 'matrix' ? k03.base.cells[`${d} | Type K/J`] : undefined;
+    const rate03 = (id: string, key: string) => k03.adders.find((a) => a.id === id)?.rates?.[key] ?? NaN;
+    const std = price('TSK-03 6x100+1M');
+    check('ราคาตั้ง = แถวแกน 6 ของชีต (TS_- 03 6x100+1M · A9) ไม่มีบรรทัดอื่น', std.o?.status === 'priced' && std.o.unitPrice === cell03('6') && std.o.breakdown.length === 1,
+      `${std.o?.unitPrice}`);
+    check('ได้ช่องตามแคตตาล็อก TS_-03 ตรงทุกตัวอักษร · ประกอบกลับเป็นรหัสเดิม (เว้นวรรคหลังเลขรุ่น)',
+      std.p.tsForm?.family === 'TS_-03' && !!readTsForm('TSK-03 6x100+1M', 'TS_-03') && buildTsCode(std.p.tsForm!) === 'TSK-03 6x100+1M', std.p.tsForm ? buildTsCode(std.p.tsForm) : '—');
+    const l300 = price('TSK-03 6Ax300+1M');
+    check('แกน 300 = ราคาตั้งของ 6A + 2 ช่วง 100 mm ของแกน 6A', l300.o?.unitPrice === (cell03('6A') ?? NaN) + 2 * rate03('len_l1', '6A'), `${l300.o?.unitPrice}`);
+    const t = price('TST-03 3.2x100+1M');
+    check('Type T = ราคาตั้ง K/J + คอลัมน์ "Type T บวกเพิ่ม"', t.o?.status === 'priced' && t.o.unitPrice === (cell03('3.2') ?? NaN) + rate03('sensor_t', '3.2'), `${t.o?.unitPrice}`);
+    const n10 = price('N10-03 6x100+1MPU');
+    check('หัว N10-03 (แคตตาล็อก "N_-03") = ตาราง K/J + กฎ NTC/PTC · ช่องหัววัด N', n10.p.model === 'TSK-03' && n10.o?.status === 'priced' &&
+      n10.o.unitPrice === (cell03('6') ?? NaN) + rate03('sensor_ntc', '6') && n10.p.tsForm?.values.probe === 'N', `${n10.o?.unitPrice}`);
+    check('NTC แกนต่ำกว่า 5 mm (ชีตไม่มีอัตรา · แคตตาล็อก 5 mm ขึ้นไป) = ยังไม่มีราคา ไม่ใช่ไม่รับผลิต', noRate(price('N2-03 3.2Ax300+2MPU').o));
+    const tf = price('TSK-03 4Tx200+1M');
+    check('วัสดุ T = แกน 4 + หุ้มเทปล่อนเต็มความยาวแกน (2 ช่วง 100 mm)', tf.o?.status === 'priced' && line(tf.o, /เทปล่อน/) === 2 * rate03('coat_teflon', '4'), `${line(tf.o, /เทปล่อน/)}`);
+    const cab = price('TSK-03 6x100+3M');
+    check('สายไม่ระบุชนิด = สแตนเลสถัก (แคตตาล็อก None) · ราคาตั้งรวมสาย 1 M (A9) เกิน 2 M คิดสองเมตร',
+      line(cab.o, /สาย/) === rate03('cable_over_1m', 'สายสแตนเลสถัก') * 2, `${line(cab.o, /สาย/)}`);
+    const bend = price('TSK-03 6x100+1M', { addons: ['bend:L'] });
+    check('หัก L = ช่องติ๊กนอกรหัส +100 ตามชีต B7', bend.o?.unitPrice === (std.o?.unitPrice ?? NaN) + 100, `${bend.o?.unitPrice}`);
+    const d102 = price('TSK-03 10.2x300+2M');
+    check('แกน 10.2 (ไม่มีทั้งแคตตาล็อกและชีต) = ต้องขอราคา + ราคาเท่าที่คิดได้ · ช่องกรอกขึ้น ask', d102.o?.status === 'quoteOnRequest' &&
+      d102.p.tsForm?.issues?.d === 'ask', `${d102.o?.status} ${JSON.stringify(d102.p.tsForm?.issues)}`);
+    const sh = price('TSJ-03 3.2Sx200+1M');
+    check('วัสดุ S (Sheath · แคตตาล็อกมี ชีตไม่มีแถว) = ยังไม่มีราคา ไม่ใช่ "รหัสไม่ได้บอกขนาดแกน"', noRate(sh.o) &&
+      !sh.o!.violations.some((v) => v.missing), sh.o?.violations.map((v) => v.message).join(' | '));
+    check('แกน 7 (Titanium · แคตตาล็อกมี ชีตไม่มีแถว) = ยังไม่มีราคา', noRate(price('TSK-03 7x100+1M').o));
   }
 }
 
