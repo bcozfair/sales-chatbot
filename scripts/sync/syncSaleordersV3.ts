@@ -245,6 +245,23 @@ export interface V3SweepResult {
   write: V3WriteResult;
 }
 
+/**
+ * ผลการเขียนต่อท้ายบรรทัด ✓ — แสดงเฉพาะตัวที่ไม่เป็น 0 (ความหมายของแต่ละตัวอยู่ที่ V3WriteResult)
+ * "รายละเอียด" แสดงเฉพาะเมื่อไม่เท่ากับจำนวนใบที่เก็บ (ปกติเท่ากัน) · "ข้าม" = ใบก่อนวันตัดที่ไม่มีในฐาน
+ */
+function fmtV3Write(total: V3SweepResult) {
+  const w = total.write;
+  const parts: string[] = [];
+  const add = (label: string, n: number) => { if (n > 0) parts.push(`${label} ${fmtNum(n)}`); };
+  add('ใหม่', w.inserted);
+  add('ค่าเปลี่ยน', w.changed);
+  add('แค่เวลา', w.metaOnly);
+  add('เท่าเดิม', w.untouched);
+  if (w.detailsWritten !== w.orders) parts.push(`รายละเอียด ${fmtNum(w.detailsWritten)}`);
+  add('ข้ามใบก่อน 2022', total.skippedByCutoff);
+  return parts.length ? parts.join(' · ') : 'ไม่มีอะไรต้องเขียน';
+}
+
 export async function runSaleOrderV3Sweep(opts: V3SweepOptions = {}, deps: V3SweepDeps = {}): Promise<V3SweepResult> {
   const label = opts.label || 'saleorders';
   const gatewayGet = deps.gatewayGet ?? v3Gateway(!!opts.patient);
@@ -345,8 +362,9 @@ export async function runSaleOrderV3Sweep(opts: V3SweepOptions = {}, deps: V3Swe
         cursorTimestamp = savedTs;
         const last = orders[orders.length - 1];
         prevPageLast = last ? { saleOrderId: last.saleOrderId, sourceUpdatedAt: last.sourceUpdatedAt } : prevPageLast;
-        tick(total.pages, total.rows, total.orders);
+        // หน้าสุดท้ายไม่ต้องพิมพ์ progress — บรรทัด ✓ ตามมาทันที (หน้า v3 ช้า 6–15 วิ จึงเกินเกณฑ์ 10 วิ แทบทุกหน้า)
         if (done) break;
+        tick(total.pages, total.rows, total.orders);
       } catch (err) {
         await db.query('ROLLBACK').catch(() => {});
         throw err;
@@ -357,12 +375,8 @@ export async function runSaleOrderV3Sweep(opts: V3SweepOptions = {}, deps: V3Swe
     logResourceDone({
       resource: label, units: total.orders, unitLabel: 'orders', rows: total.rows,
       pages: total.pages, ms: Date.now() - startTime, cursorTimestamp,
+      extra: total.orders > 0 ? fmtV3Write(total) : undefined,
     });
-    const w = total.write;
-    if (total.orders > 0) {
-      slog(`  ${label} (v3): ใหม่ ${fmtNum(w.inserted)} · ค่าเปลี่ยน ${fmtNum(w.changed)} · เปลี่ยนแค่เวลา ${fmtNum(w.metaOnly)} · ` +
-        `เท่าเดิม ${fmtNum(w.untouched)} · รายละเอียด ${fmtNum(w.detailsWritten)} · ข้าม (สั่งก่อน 2022 และไม่มีในฐาน) ${fmtNum(total.skippedByCutoff)}`);
-    }
     return total;
   } finally {
     setSyncCtx(null);

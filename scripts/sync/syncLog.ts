@@ -129,9 +129,12 @@ export function logResourceDone(args: {
   pages: number;
   ms: number;
   cursorTimestamp?: string | null;
+  /** ต่อท้ายบรรทัดเดียวกัน (เช่น ผลการเขียนของ v3) — ไม่ต้องแยกบรรทัดสรุปที่สอง */
+  extra?: string;
 }) {
   const head = `✓ ${padId(args.resource)}`;
-  const tail = `${args.pages} หน้า · ${fmtDur(args.ms)} · ${fmtCursorTime(args.cursorTimestamp)}`;
+  const tail = `${args.pages} หน้า · ${fmtDur(args.ms)} · ${fmtCursorTime(args.cursorTimestamp)}` +
+    (args.extra ? ` · ${args.extra}` : '');
   if (args.rows === 0) {
     slog(`${head} ไม่มีข้อมูลใหม่ · ${tail}`);
     return;
