@@ -273,7 +273,7 @@ function computeBase(
           amount: 0,
           label: 'ฐานราคา',
           noRate: true,
-          reason: `ตารางราคาตั้งของ ${model.code} ยังไม่มีแถว${listedOnly.map((a) => `${axisLabel(a)} ${axes[a]}`).join(' · ')} — แคตตาล็อกมีขนาดนี้แต่ชีต Excel ยังไม่มีราคา`,
+          reason: `ตารางราคาตั้งของ ${model.code} ยังไม่มี${listedOnly.map((a) => `${axisLabel(a)} ${axes[a]}`).join(' · ')} — แคตตาล็อกมีค่านี้แต่ชีต Excel ยังไม่มีราคา`,
           steps: [...steps, `${listedOnly.map((a) => `${axisLabel(a)} ${axes[a]}`).join(' · ')} อยู่ในแคตตาล็อก แต่ตารางราคาไม่มีแถวนี้ (ยังไม่มีราคา ไม่ใช่ไม่รับผลิต)`],
         };
       }

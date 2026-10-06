@@ -410,6 +410,14 @@ function matchSensor(values: string[], prefix: string, letter: string): string |
     const hits = values.filter((v) => tokens(v).includes('PT100') && tokens(v).includes(cls));
     if (hits.length === 1) return hits[0];
   }
+  // หัวคอลัมน์ที่เขียน `PT100` เฉย ๆ ไม่มีคลาสกำกับ (TS-05!G11) — ใช้ได้กับ **Class B เท่านั้น** ตามมาตรฐานของแคตตาล็อก
+  // ("Type for RTD": P = PT100 CLASS B · PA = CLASS A · Z = PT1000 CLASS B · เจ้าของสั่ง 2026-10-06 "ใช้ตามมาตรฐาน เหมือนรุ่นอื่นๆ")
+  // และต้องไม่มีคอลัมน์ PT100 ที่บอกคลาสอยู่ในตารางเดียวกันเลย — ไม่งั้นชีตตั้งใจแยกคลาส ห้ามเดา
+  if (cls === 'B') {
+    const pt = values.filter((v) => tokens(v).includes('PT100'));
+    const classed = pt.some((v) => /CLASS|\([AB]\)/.test(v.toUpperCase()));
+    if (pt.length === 1 && !classed) return pt[0];
+  }
   const exact = values.find((v) => v.toUpperCase() === letter.toUpperCase());
   if (exact) return exact;
   // 'Type K/J' — ชีตรวม K กับ J ไว้ช่องเดียวเพราะราคาเท่ากัน
@@ -495,6 +503,17 @@ function readSensor(c: Ctx, prefix: string, letter: string): void {
         kind: 'axis',
         guess: addon.guess !== undefined
       });
+      return;
+    }
+    // หัววัดที่แคตตาล็อกของตารางนี้มี แต่ชีตไม่มีคอลัมน์ (TSPA-05 · ชีต TS-05 มีแค่ PT100 ไม่บอกคลาส = Class B) —
+    // "ยังไม่มีราคา" ไม่ใช่ "ไม่รับผลิต" (เจ้าของ 2026-10-05 · แบบขนาดแกนที่แคตตาล็อกมีแต่ชีตไม่มีแถว `catalogOnly`)
+    const fam = tsFamilyOfModel(c.model.code);
+    const spec = fam ? tsSpec(fam) : undefined;
+    const listed = spec ? (spec.slots.sensor?.options ?? []).find((o) => `TS${o.code}` === prefix) : undefined;
+    if (listed) {
+      c.cfg.axes = { ...c.cfg.axes, sensor: listed.label };
+      c.cfg.catalogOnly = { ...c.cfg.catalogOnly, sensor: listed.label };
+      add(c, { text: prefix, reads: `หัววัด ${listed.label} — แคตตาล็อก ${spec!.head} มี แต่ตารางราคา ${c.model.sheet ?? c.model.code} ยังไม่มีคอลัมน์นี้`, kind: 'axis' });
       return;
     }
     add(c, { text: prefix, reads: `ไม่มีหัววัดชนิด ${prefix} ในตารางราคา ${c.model.sheet ?? c.model.code}`, kind: 'unknown' });

@@ -984,7 +984,8 @@ npx tsx scripts/pricebook/seedCatalogSubcodes.ts --apply --by admin
 
 **TS_-05** (2026-10-06 · `docs/pricing-code-ts-catalog.md` หัวข้อ TS_-05) — **รุ่นใหม่** `TSK-05` จากชีต `TS-05` (แมป 23) + แถวรหัสย่อย 7 แถว
 (สาย T/P/F/C/TS + U + 2 Element ค่าว่าง) · เพิ่มรุ่นด้วย `--new-models` (**ห้าม `--replace-all`**) · โค้ดใหม่กับฐานเก่า = ราคาไม่เปลี่ยนสักรหัส ·
-**ยังไม่ได้เขียนฐาน PMSV** · สำรอง `pricing_*` + `pricing_subcodes` ก่อน:
+**ฐาน PMSV เขียนแล้ว 2026-10-06** (r23 รุ่น · 7 แถวรหัสย่อย · r24 สาย C 120 / TS 160 · สำรอง `backup/pricing-before-ts05-2026-10-06-1540.dump`) ⇒ deploy ไม่ต้องทำซ้ำ ·
+ฐานอื่น: สำรอง `pricing_*` + `pricing_subcodes` ก่อน:
 ```bash
 npx tsx scripts/pricebook/importer.ts --data <โฟลเดอร์ Excel> --new-models --out /tmp/ts05-book.json   # รายงาน — ต้องเห็น + TSK-05 รุ่นเดียว · ราคาตั้ง 16 ช่อง
 npm run diag:pricing-diff -- --head-book /tmp/ts05-book.json --head-seed-subcodes --base HEAD          # ราคาเดิมห้ามขยับ · ไม่มีรุ่น → ได้ราคา 32 / ขอราคา 9
@@ -994,7 +995,8 @@ npx tsx scripts/pricebook/seedCatalogSubcodes.ts                                
 npx tsx scripts/pricebook/seedCatalogSubcodes.ts --apply --by admin
 ```
 ตรวจ: หน้าคำนวณราคา `TSK-05(12)4.8x20+1M` = 825 · `TSJ-05(15.5)6Ax50+1M` = 1,445 · `TST-05(12)6x20+1M` = 885 (Excel 13-05-69) ·
-`diag:pricing-catalog-ui` ช่อง "รุ่น" กลุ่ม TS +1 · รันซ้ำต้องได้ "ไม่มีอะไรต้องเขียน" · ราคาสาย C/TS ของ TSK-05 ยังว่าง (ถามเจ้าของก่อนกรอก)
+`TSP-05(12)4.8x20+1M` = 1,650 · `TSZ-05(12)6x20+1M` = 2,400 · `diag:pricing-catalog-ui` ช่อง "รุ่น" กลุ่ม TS +1 · รันซ้ำต้องได้ "ไม่มีอะไรต้องเขียน" ·
+**แล้วค่อย** หน้าสมุดราคา → ชีต TS-05 → แถบราคาสาย `สายซิลิโคน` 120 · `สายเทปล่อนหุ้มชีลด์` 160 → บันทึก (ช่องโผล่เพราะแถว C/TS — กลับลำดับ = ค่าถูกทิ้งเงียบ) ⇒ `TSK-05(12)4.8x20+3MC` = 1,065
 
 **ถอยกลับ** (หลัง dump): `TRUNCATE pricing_model_history, pricing_models, pricing_book_revisions;` — หน้าจอกลับไปขึ้น
 "ยังไม่มีสมุดราคาในระบบ" เท่ากับก่อนนำเข้า · ⚠️ `db:restore` / `pg_restore` ของ dump เก่าก็พาราคาย้อนไปตามวันของ dump ด้วย

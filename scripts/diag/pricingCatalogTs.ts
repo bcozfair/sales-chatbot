@@ -688,6 +688,23 @@ async function main(): Promise<void> {
       `${d5.o?.status} ${JSON.stringify(d5.p.tsForm?.issues)}`);
     const e2 = price('TSJ-05(12)6Ax20-2+1M');
     check('2 Element (ชีตไม่มีราคา) = ต้องขอราคา ไม่ใช่ไม่รับผลิต', e2.o?.status === 'quoteOnRequest', `${e2.o?.status}`);
+    // คำตอบเจ้าของ 2026-10-06 — "ใช้ตามมาตรฐาน เหมือนรุ่นอื่นๆ" (Type for RTD: P = PT100 Class B · PA = Class A · Z = PT1000 Class B)
+    const cellPt = (d: string) => k05.base.kind === 'matrix' ? k05.base.cells[`${d} | PT100`] : undefined;
+    const tsp = price('TSP-05(12)4.8x20+1M');
+    check('TSP = คอลัมน์ PT100 ของชีต (หัวไม่บอกคลาส = Class B ตามมาตรฐาน) · ช่อง Sensor = P', tsp.o?.status === 'priced' &&
+      tsp.o.unitPrice === cellPt('4.8') && tsp.p.tsForm?.values.sensor === 'P' && !tsp.p.tsForm.issues, `${tsp.o?.status} ${tsp.o?.unitPrice}`);
+    const tsz = price('TSZ-05(12)6x20+1M');
+    check('TSZ = คอลัมน์ PT100 + "PT1000 บวกเพิ่ม PT100" (คอลัมน์ J)', tsz.o?.status === 'priced' &&
+      tsz.o.unitPrice === (cellPt('6') ?? NaN) + rate05('sensor_pt1000', '6'), `${tsz.o?.unitPrice}`);
+    const tspa = price('TSPA-05(12)4.8x20+1M');
+    check('TSPA (แคตตาล็อกมี · ชีตไม่มีคอลัมน์ Class A) = ยังไม่มีราคา ไม่ใช่ไม่รับผลิต', noRate(tspa.o) && tspa.p.tsForm?.values.sensor === 'PA',
+      `${tspa.o?.status} ${tspa.o?.violations.map((v) => v.message).join('|')}`);
+    for (const [sub, cable] of [['C', 'สายซิลิโคน'], ['TS', 'สายเทปล่อนหุ้มชีลด์']] as const) {
+      const r = rate05('cable_over_1m', cable);
+      const c3 = price(`TSK-05(12)4.8x20+3M${sub}`);
+      check(`สาย ${sub} คิดตามอัตราในกฎสายของรุ่น (${Number.isNaN(r) ? 'ว่าง = ยังไม่มีราคา' : `${r}/ม.`} · เจ้าของสั่ง 120/160 ใส่ในฐาน)`,
+        Number.isNaN(r) ? noRate(c3.o) : c3.o?.status === 'priced' && line(c3.o, /สาย/) === r * 2, `${c3.o?.status} ${line(c3.o, /สาย/)}`);
+    }
   }
 }
 
