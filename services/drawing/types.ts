@@ -71,8 +71,39 @@ export interface Ts11Spec {
   ground: 'NONE' | 'U';
 }
 
+/**
+ * BH-01 / BH-01C (แคตตาล็อก BH-01/BH-01C หน้า 2–3) — ช่องตามแคตตาล็อก · `'NONE'` = None ของแคตตาล็อก
+ * แยกเป็น union ต่อตระกูล (ไม่ใช่ `family: 'BH-01' | 'BH-01C'` ช่องเดียว) เพื่อให้ registry จับคู่ตระกูลกับ spec ได้
+ */
+interface BandSpecFields {
+  /** เส้นผ่านศูนย์กลางใน ID (mm) */
+  id: number;
+  /** ความสูง H (mm) */
+  h: number;
+  /** ความหนา T (mm) — **ค่าคงที่ของตระกูล 4 mm ตามแคตตาล็อก** ("ความหนา T Standard 4 mm.") ไม่ใช่ค่าที่เติมจากรหัส */
+  t: number;
+  /** แรงดันตามที่เขียน (`'220'`) · `null` = รหัสไม่ได้บอก — ไม่มีผลกับรูปทรง */
+  v: string | null;
+  /** กำลังไฟ (W) · `null` = รหัสไม่ได้บอก/เขียนนอกรูปแบบ — ไม่มีผลกับรูปทรง */
+  w: number | null;
+  /** การออกขั้วไฟ · `NONE` = สายยาว 30 cm · `1`/`2`/`3` = สายยาว 1/2/3 M (วาดเหมือนกัน — สายวาดย่อ) */
+  term: 'NONE' | '1' | '2' | '3' | 'N' | 'PL2' | 'PL5' | 'T';
+  /** `NONE` = SUS304 · `Z` = สังกะสี (สีของแถบ) */
+  mat: 'NONE' | 'Z';
+  /** การต่อใช้งานของ BH-01C (`''` = ไม่ระบุ) · BH-01 = `null` — ไม่มีผลกับรูปทรง */
+  conn: 'PL' | 'SE' | '' | null;
+  /**
+   * ตำแหน่งขั้วไฟ (mm) — BH-01 วัดตามเส้นรอบวงจากรอยผ่า · BH-01C วัดตามแนวแกน
+   * `null` = ค่าอ้างอิงของ Appsale (BH-01 ที่ 152° · BH-01C กลางแนวแกน) — **ไม่ได้มาจากแคตตาล็อก**
+   */
+  termPos: number | null;
+  /** รูเจาะพร้อมตำแหน่ง (mm · x ตามเส้นรอบวงจากรอยผ่า · y ตามแนว H) — ผลอ่านรหัสไม่มีตำแหน่ง จึงเป็น `[]` เสมอ */
+  holes: { x: number; y: number; d: number }[];
+}
+export type BandSpec = (BandSpecFields & { family: 'BH-01' }) | (BandSpecFields & { family: 'BH-01C' });
+
 /** union ของทุกตระกูลที่มีแบบ — เพิ่มตระกูล = เพิ่มที่นี่ แล้ว registry บังคับให้ลงทะเบียน */
-export type DrawingSpec = Ts11Spec;
+export type DrawingSpec = Ts11Spec | BandSpec;
 
 /** หนึ่งตระกูลของแบบ */
 export interface DrawingFamily<S extends DrawingSpec> {

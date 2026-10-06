@@ -7,10 +7,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { DrawingFamily, DrawingModel, DrawingSpec } from '../types.js';
+import { BH01, BH01C } from './bh-01.js';
 import { TS11 } from './ts-11.js';
 
 export const FAMILIES: { [K in DrawingSpec['family']]: DrawingFamily<Extract<DrawingSpec, { family: K }>> } = {
   'TS_-11': TS11,
+  'BH-01': BH01,
+  'BH-01C': BH01C,
 };
 
 /** โมเดลของ spec — ทางเดียวที่ส่วนอื่นเรียก (ไม่ต้องรู้ว่าตระกูลไหนอยู่ไฟล์ไหน) */

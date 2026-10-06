@@ -28,7 +28,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { pool } from '../../config/db.js';
 import { buildModel } from '../../services/drawing/families/registry.js';
-import type { DrawingSpec, Ts11Spec } from '../../services/drawing/types.js';
+import type { BandSpec, DrawingSpec, Ts11Spec } from '../../services/drawing/types.js';
 import { writeStep } from '../../services/drawing/writers/step.js';
 
 const GREEN = '\x1b[32m', RED = '\x1b[31m', DIM = '\x1b[2m', BOLD = '\x1b[1m', RESET = '\x1b[0m';
@@ -52,13 +52,21 @@ interface AppProduct {
   modelParts(v: AppValues): AppPart[];
   exportStep(v: AppValues): string;
 }
+interface AppSolid { name: string; colour: number[]; positions: number[]; triangles: number[] }
 interface AppRegistry { PRODUCTS: AppProduct[]; canonical(code: string): string; findProduct(code: string): AppProduct | null }
-interface Appsale { registry: AppRegistry }
+interface AppBandMesh { buildBandMesh(v: AppValues, split: boolean): { parts: AppPart[] } }
+interface Appsale { registry: AppRegistry; band: AppBandMesh }
 
-/** ตระกูลของ Appsale ที่ด่านนี้ครอบ → ตัวแปลงค่าของ Appsale เป็น spec ของเรา + คีย์รูปทรง */
+/**
+ * ตระกูลของ Appsale ที่ด่านนี้ครอบ → ตัวแปลงค่าของ Appsale เป็น spec ของเรา + คีย์รูปทรง (= cache key ของต้นฉบับ)
+ * + คู่ที่ต้องเทียบ: ชิ้นดิบของต้นฉบับ ↔ `model.parts` และ (ถ้ามี) ชิ้นที่ต้นฉบับส่งเข้า STEP ↔ `model.solids`
+ */
 interface Coverage {
   toSpec(v: AppValues): DrawingSpec;
   shapeKey(v: AppValues): string;
+  rawParts(app: Appsale, p: AppProduct, v: AppValues): AppPart[];
+  /** null = STEP ใช้ชิ้นเดียวกับชิ้นดิบ (TS) */
+  stepSolids: ((p: AppProduct, v: AppValues) => AppSolid[]) | null;
 }
 
 // ── ตัวแปลง (ค่าที่ไม่ใช่ของ type เรา = แปลงไม่ได้ ⇒ รายงาน ไม่เดา) ──────────────────────────
@@ -93,9 +101,35 @@ const TS11_COVER: Coverage = {
     };
   },
   shapeKey: (v) => JSON.stringify(['TS-11', v.dia, v.tubeLen, v.spring, v.cable, TS11_LEADS[String(v.sensor)]]),
+  rawParts: (_app, p, v) => p.modelParts(v),
+  stepSolids: null,
 };
 
-const COVERED: Record<string, Coverage> = { 'TS-11': TS11_COVER };
+/** BH-01 / BH-01C — ชิ้นดิบจาก `buildBandMesh` · STEP จาก `modelParts` (weldSolid) */
+function bandCover(family: BandSpec['family']): Coverage {
+  const split = family === 'BH-01C';
+  return {
+    toSpec(v): BandSpec {
+      const holes = Array.isArray(v.holes) ? (v.holes as Record<string, unknown>[]).map((q, i) => ({ x: num(q.x, `holes[${i}].x`), y: num(q.y, `holes[${i}].y`), d: num(q.d, `holes[${i}].d`) })) : [];
+      const fields = {
+        id: num(v.id, 'id'), h: num(v.h, 'h'), t: num(v.t, 't'),
+        v: v.v === undefined || v.v === null ? null : String(v.v),
+        w: v.w === undefined || v.w === null ? null : num(v.w, 'w'),
+        term: pick(v.term, ['NONE', '1', '2', '3', 'N', 'PL2', 'PL5', 'T'], 'term'),
+        mat: pick(v.mat, ['NONE', 'Z'], 'mat'),
+        conn: v.conn === null || v.conn === undefined ? null : pick(v.conn, ['PL', 'SE', ''], 'conn'),
+        termPos: v.termPos === null || v.termPos === undefined ? null : num(v.termPos, 'termPos'),
+        holes,
+      };
+      return split ? { family: 'BH-01C', ...fields } : { family: 'BH-01', ...fields };
+    },
+    shapeKey: (v) => JSON.stringify([family, v.id, v.h, v.t, v.term, v.mat, v.termPos, v.holes]),
+    rawParts: (app, _p, v) => app.band.buildBandMesh(v, split).parts,
+    stepSolids: (p, v) => p.modelParts(v),
+  };
+}
+
+const COVERED: Record<string, Coverage> = { 'TS-11': TS11_COVER, 'BH-01': bandCover('BH-01'), 'BH-01C': bandCover('BH-01C') };
 
 /** เคสสังเคราะห์ — ขอบของรูปทรงที่รหัสจริงอาจไม่มี */
 const SYNTHETIC: { family: string; label: string; values: AppValues }[] = [
@@ -106,6 +140,21 @@ const SYNTHETIC: { family: string; label: string; values: AppValues }[] = [
   { family: 'TS-11', label: 'L1 = 10', values: { tubeLen: 10 } },
   { family: 'TS-11', label: 'ไม่มีสปริง (P) แกน 3.2', values: { spring: 'P', dia: '3.2', tubeLen: 40 } },
   { family: 'TS-11', label: 'แกน 4.8 L1 ทศนิยม', values: { dia: '4.8', tubeLen: 37.5 } },
+  { family: 'BH-01', label: 'รูเดียวกลางแถบ', values: { holes: [{ x: 50, y: 30, d: 8 }] } },
+  { family: 'BH-01', label: 'รูแตะขอบบนพอดี (ขยาย 2 ไมครอน)', values: { holes: [{ x: 100, y: 4, d: 8 }] } },
+  { family: 'BH-01', label: 'รูคร่อมรอยผ่า (x ใกล้ 0 / ติดลบ)', values: { holes: [{ x: 2, y: 30, d: 10 }, { x: -5, y: 20, d: 6 }] } },
+  { family: 'BH-01', label: 'สองรูแตะกัน', values: { holes: [{ x: 100, y: 30, d: 10 }, { x: 110, y: 30, d: 10 }] } },
+  { family: 'BH-01', label: 'รูใหญ่ ขั้วน็อต สังกะสี', values: { holes: [{ x: 200, y: 25, d: 30 }], term: 'N', mat: 'Z' } },
+  { family: 'BH-01', label: 'termPos 100', values: { termPos: 100 } },
+  { family: 'BH-01', label: 'termPos 0 ขั้วเต๋า', values: { termPos: 0, term: 'T' } },
+  { family: 'BH-01', label: 'ปลั๊ก PL2 สูง 100 (น็อตยึด 3 ตัว)', values: { term: 'PL2', h: 100 } },
+  { family: 'BH-01', label: 'ปลั๊ก PL5', values: { term: 'PL5' } },
+  { family: 'BH-01', label: 'สาย 30 cm ขนาดเล็กสุด 25x25', values: { term: 'NONE', id: 25, h: 25 } },
+  { family: 'BH-01', label: 'ขนาดทศนิยม', values: { id: 66.5, h: 37.5, term: '1' } },
+  { family: 'BH-01C', label: 'termPos 20 ตามแนวแกน', values: { termPos: 20 } },
+  { family: 'BH-01C', label: 'รูบนแถบผ่าครึ่ง', values: { holes: [{ x: 30, y: 40, d: 12 }, { x: 300, y: 80, d: 6 }] } },
+  { family: 'BH-01C', label: 'ขั้วน็อต SE สังกะสี', values: { term: 'N', conn: 'SE', mat: 'Z', h: 60 } },
+  { family: 'BH-01C', label: 'ขั้วเต๋า termPos เกิน H (ถูกบีบ)', values: { term: 'T', termPos: 500 } },
 ];
 
 // ── โหลดต้นฉบับ ─────────────────────────────────────────────────────────────
@@ -137,7 +186,8 @@ async function loadAppsale(dir: string): Promise<Appsale> {
   const root = join(dir, APP_DIR);
   writeFileSync(join(root, 'package.json'), '{"type":"module"}\n');
   const registry = (await import(pathToFileURL(join(root, 'src/registry.js')).href)) as AppRegistry;
-  return { registry };
+  const band = (await import(pathToFileURL(join(root, 'src/products/bh-01-mesh.js')).href)) as AppBandMesh;
+  return { registry, band };
 }
 
 // ── เทียบ ───────────────────────────────────────────────────────────────────
@@ -262,7 +312,9 @@ async function main(): Promise<void> {
         const spec = COVERED[c.family].toSpec(c.values);
         const model = buildModel(spec);
         const name = p.build(c.values);
-        problem = diffParts(p.modelParts(c.values), model.parts, ['positions', 'normals', 'triangles', 'edges']);
+        const cover = COVERED[c.family];
+        problem = diffParts(cover.rawParts(app, p, c.values), model.parts, ['positions', 'normals', 'triangles', 'edges']);
+        if (!problem && cover.stepSolids) problem = diffParts(cover.stepSolids(p, c.values), model.solids, ['positions', 'triangles']);
         if (!problem) {
           const appStep = p.exportStep(c.values);
           const ourStep = writeStep(model.solids, name);
