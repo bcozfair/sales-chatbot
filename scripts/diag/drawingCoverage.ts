@@ -29,7 +29,8 @@
 //         (ข) ส่วนท้ายที่ยืนยันได้ (TS ท้ายรหัส/`S###` · BH ท่อนนอกแคตตาล็อก) ⇒ ต้องอยู่ใน `confirm` ครบทุกชนิด และ `confirm`
 //             มีของได้เฉพาะเมื่อผลอ่านมีส่วนนั้นจริง — ห้ามหลุดเป็น "ส่งได้" โดยไม่มีอะไรให้ผู้เสนอราคาติ๊ก (เจ้าของเคาะ 2026-10-06)
 //      7. ทุกรหัสของตระกูลที่มีแบบได้คำตัดสิน · ตรวจ 0 รหัส = **ตอบไม่ได้** (ไม่ใช่ผ่าน)
-//      8. ทิศการพึ่งพา: services/drawing/** ไม่ import pricingLab / pdfGenerator / puppeteer / routes และไม่มีโค้ดเดิม import มัน
+//      8. ทิศการพึ่งพา: services/drawing/** ไม่ import pricingLab / pdfGenerator / puppeteer / routes · โค้ดเดิมเข้าโมดูลได้ทาง routes/drawing.ts
+//         ทางเดียว (เฟส 1) และไฟล์นั้นห้าม import ตัวคิดราคา (ฉีดที่ index.ts)
 //         + ตัวยืนยัน keyof สองทางระหว่าง type ที่โมดูลแบบประกาศเอง กับ TsForm / BhForm (บรรทัดล่าง — ล้มที่ tsc)
 //
 //  ฐาน: SELECT อย่างเดียว (READ ONLY + statement_timeout) · ไม่เขียนไฟล์ ⇒ รันบน PMSV ได้ · `--data <dir>` ใช้สมุดจากไฟล์ได้
@@ -95,10 +96,13 @@ function dependencyProblems(): string[] {
   for (const f of walk(mod))
     for (const spec of importsOf(f))
       if (/pricingLab|pdfGenerator|puppeteer|(^|\/)routes\//.test(spec)) out.push(`${relative(ROOT, f)} import ${spec}`);
+  // เฟส 1: ทางเข้าเดียวของโค้ดเดิมคือ routes/drawing.ts (index.ts mount + ฉีดตัวคิดราคา) — และไฟล์นั้นห้าม import ตัวคิดราคาเอง
+  const gate = join('routes', 'drawing.ts');
+  for (const spec of importsOf(join(ROOT, gate))) if (/pricingLab|pdfGenerator|puppeteer/.test(spec)) out.push(`${gate} import ${spec} (ต้องฉีดเข้ามาที่ index.ts)`);
   for (const f of walk(ROOT)) {
     const rel = relative(ROOT, f);
-    if (rel.startsWith(join('services', 'drawing')) || rel.startsWith(join('scripts', 'diag'))) continue;
-    for (const spec of importsOf(f)) if (/services\/drawing\//.test(spec)) out.push(`${rel} import ${spec} (โค้ดเดิมห้ามพึ่งโมดูลแบบในเฟส 0)`);
+    if (rel.startsWith(join('services', 'drawing')) || rel.startsWith(join('scripts', 'diag')) || rel === gate) continue;
+    for (const spec of importsOf(f)) if (/services\/drawing\//.test(spec)) out.push(`${rel} import ${spec} (โค้ดเดิมพึ่งโมดูลแบบได้ผ่าน routes/drawing.ts ทางเดียว)`);
   }
   return out;
 }

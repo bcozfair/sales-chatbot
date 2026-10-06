@@ -185,7 +185,8 @@ import { apiLogMiddleware, getRequestId } from './config/apiLogger.js';
 import { insertQuotationDeleteAudit } from './db/logRepositories.js';
 import { logsRouter } from './routes/logs.js';
 import { dataDirectoryRouter } from './routes/dataDirectory.js';
-import { pricingLabRouter, pricebookRouter, pricingQuoteHandler } from './routes/pricingLab.js';
+import { pricingLabRouter, pricebookRouter, pricingQuoteHandler, quoteForCode } from './routes/pricingLab.js';
+import { createDrawingRouter } from './routes/drawing.js';
 import { localContactsRouter } from './routes/localContacts.js';
 import { localProductsRouter } from './routes/localProducts.js';
 import {
@@ -291,6 +292,9 @@ app.use('/api/admin/data', adminAuthMiddleware, dataDirectoryRouter);
 app.use('/api/admin/pricing', adminAuthMiddleware, requireCapability('page.pricing'), pricingLabRouter);
 // หน้า "สมุดราคา" — ทุกเส้นที่แก้ราคา แยกสิทธิ์จากหน้าคิดราคา (เจ้าของสั่ง 2026-09-23)
 app.use('/api/admin/pricebook', adminAuthMiddleware, requireCapability('page.pricebook'), pricebookRouter);
+// แบบ 3 มิติ (docs/plan-product-drawing-3d.md · เฟส 1 ใช้ภายใน) — การ์ดในหน้าคำนวณราคา จึงใช้สิทธิ์เดียวกับหน้านั้น
+// ตัวคิดราคาฉีดเข้าไปตรงนี้ (`quoteForCode`) ⇒ โมดูลแบบไม่ import pricingLab · ถอดโมดูลแบบ = ลบสองบรรทัดนี้ + import
+app.use('/api/admin/drawing', adminAuthMiddleware, requireCapability('page.pricing'), createDrawingRouter({ quote: quoteForCode }));
 
 // ── "เพิ่มผู้ติดต่อใหม่เอง" (local_contacts) — ดู routes/localContacts.ts ────────────────────
 // แผน: docs/plan-local-contacts.md ก้อน I2 · ยังไม่มี UI เรียก (ปุ่มมาที่ I3 · หน้ารายการที่ I4)

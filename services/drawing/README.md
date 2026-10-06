@@ -3,8 +3,8 @@
 สร้างโมเดล 3 มิติของสินค้าสั่งทำจาก **ผลอ่านรหัสของหน้าคำนวณราคา** แล้วเขียนเป็นไฟล์ STEP (ส่งลูกค้า/เปิดใน CAD)
 และ GLB (หน้าเว็บหมุนดูได้) · แผนรวมและเหตุผลทั้งหมด: `docs/plan-product-drawing-3d.md`
 
-**สถานะ (2026-10-06): เฟส 0 ส่วนหลังบ้านเสร็จ** — TS_-11 · BH-01 · BH-01C · ไม่มีหน้าจอ ไม่มี route ไม่มีตาราง ·
-ยังไม่มีใครในระบบเรียกโมดูลนี้นอกจากด่านใน `scripts/diag/` · เฟส 1 จะต่อเข้าหน้าคำนวณราคาผ่านการฉีดที่ `index.ts` (แผน §4.3)
+**สถานะ (2026-10-06): เฟส 1 ก้อน 1** — TS_-11 · BH-01 · BH-01C · การ์ด "แบบ 3 มิติ" ในหน้าคำนวณราคา (ภาพหมุนได้ · แยกชิ้น ·
+ป้ายชื่อ/ขนาด · โหลด STEP) ผ่าน `routes/drawing.ts` ที่ index.ts ฉีดตัวคิดราคาเข้าไป (`quoteForCode`) · ยังไม่มี PDF/PNG/ลิงก์ลูกค้า/ตาราง
 
 ---
 
@@ -14,9 +14,11 @@
 | --- | --- |
 | `services/drawing/` | โฟลเดอร์นี้ |
 | `scripts/diag/drawingPort.ts` · `drawingGlb.ts` · `drawingGlbLib.ts` · `drawingCoverage.ts` · `gltf-validator.d.ts` | ด่านของโมดูล |
+| `routes/drawing.ts` + 2 บรรทัดใน `index.ts` (import + mount `/api/admin/drawing`) | API ของการ์ด |
+| `frontend/src/drawing-viewer/` · `frontend/src/admin/pricingLab/DrawingCard.tsx` + 2 บรรทัดใน `PricingLab.tsx` · dependency `three` ของ frontend | ตัวดู + การ์ด |
 | ใน `package.json` | `diag:drawing-port` · `diag:drawing-glb` · `diag:drawing-coverage` · devDependency `gltf-validator` |
 
-**สิ่งที่ทำให้ตารางนี้จริง: การพึ่งพาเป็นทางเดียว** — ไม่มีโค้ดเดิมตัวไหน import โฟลเดอร์นี้ และโฟลเดอร์นี้
+**สิ่งที่ทำให้ตารางนี้จริง: การพึ่งพาเป็นทางเดียว** — โค้ดเดิมเข้าโฟลเดอร์นี้ได้ทาง `routes/drawing.ts` ทางเดียว (ไฟล์นั้นก็ไม่ import ตัวคิดราคา) และโฟลเดอร์นี้
 **ไม่ import** `services/pricingLab/` · `routes/` · `pdfGenerator.ts` · `puppeteer` (ผลอ่านรหัสของหน้าคำนวณราคา
 เข้ามาเป็น type ที่ประกาศเองใน `types.ts` · เฟส 1 ฉีดตัวคิดราคาและฟังก์ชันพิมพ์เข้ามาที่ `index.ts`)
 — **ด่าน `diag:drawing-coverage` ข้อ 8 อ่านซอร์สตรวจทั้งสองทิศทุกครั้ง** ไม่ใช่แค่ความตั้งใจ
@@ -27,13 +29,16 @@
 types.ts  ←  geometry/tsPrimitives.ts  ←  families/tsParts.ts  ←  families/ts-11.ts  ─┐
          ←  families/bh-01.ts (ชุดเวกเตอร์ของตัวเอง + weldSolid)  ─────────────────────┴─  families/registry.ts
          ←  spec/fromReading.ts (ผลอ่านรหัส → spec · วาดได้ไหม)  ←  checks.ts (ส่งลูกค้าได้ไหม)
+annotate.ts      (spec → ป้ายชื่อ ไทย/อังกฤษ · ทิศ/ระยะแยกชิ้น · ป้ายขนาด — ตัวเลขจาก spec · ตัวดูไม่รู้จักตระกูล)
 writers/step.ts  (รับ StepSolid[] — ไม่รู้จักตระกูล)
 writers/glb.ts   (รับ DrawingModel — ใช้ parts ที่มี normal)
 ```
 
 `registry.ts` คือทางเดียวที่ส่วนอื่นได้โมเดล (`buildModel(spec)`) · type ของ `FAMILIES` ผูกกับ union `DrawingSpec`
 ⇒ เพิ่มตระกูลใน union แล้วลืมลงทะเบียน = typecheck ล้ม · เส้นทางของหนึ่งรหัส (เฟส 1):
-`quote(code)` (ฉีดเข้ามา) → `judge(parsed, outcome)` → `buildModel(spec)` → `writeGlb` / `writeStep`
+`quote(code)` (ฉีดเข้ามา) → `judge(parsed, outcome)` → `buildModel(spec)` → `writeGlb` + `annotate(spec)` / `writeStep`
+· หน้าจอโหลด three.js แยกก้อน (`viewer-*.js` ~656 KB) เฉพาะตอนการ์ดมีภาพ — ก้อนหลักของแอดมินโต +9 KB (วัด 2026-10-06)
+· ป้ายขนาดของ BH-01C ยังไม่มี (โมเดลของ Appsale วางเอียง ต้องหาแกนก่อน)
 
 ## ผลอ่านรหัส → แบบ (`spec/fromReading.ts`) และกติกาส่งลูกค้า (`checks.ts`)
 

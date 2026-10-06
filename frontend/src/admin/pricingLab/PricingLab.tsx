@@ -9,6 +9,7 @@ import { LocalProductModal, type FromPricing } from '../LocalProductModal';
 import { isFullPrice } from '../localProducts';
 import { SubCodeModal } from './SubCodeModal';
 import { CalcTrace } from './CalcTrace';
+import { DrawingCard } from './DrawingCard';
 import { CatalogTemplate, NoModelTemplate, TsCatalogTemplate, type FamilyChoice } from './CatalogTemplate';
 import { formForFamily, tsFormForFamily } from './catalogForm';
 import {
@@ -376,6 +377,9 @@ export const PricingLab: React.FC<Props> = ({
           </div>
         )}
       </div>
+
+      {/* ── 3. แบบ 3 มิติ — ถามด้วยรหัส + ตัวเลือกชุดเดียวกับที่คิดราคา (docs/plan-product-drawing-3d.md เฟส 1) ── */}
+      {result?.code && <DrawingCard code={result.code} picks={picks} headers={jsonHeaders} />}
 
       {/* ── 4. วิธีคำนวณทีละขั้น — เต็มความกว้าง เพราะบรรทัดสูตรยาว ────────── */}
       {result?.outcome && <CalcTrace outcome={result.outcome} />}
