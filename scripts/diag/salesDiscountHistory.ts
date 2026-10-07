@@ -21,7 +21,7 @@ import puppeteer, { type Page, type HTTPRequest } from 'puppeteer';
 import { pool } from '../../config/db.js';
 import { createLiffVerifier, liffChannelIdsFromEnv, bearerToken, requireLiffSalesperson } from '../../config/liffAuth.js';
 import { isRegisteredSalesperson } from '../../db/repositories.js';
-import { discountPctText, getRecentDiscountSummary, getCompanyDetail } from '../../services/dataDirectoryService.js';
+import { discountPctText, getRecentDiscountSummary, getCompanyDetail, summarizeDiscounts } from '../../services/dataDirectoryService.js';
 import { getCustomerDiscountHistory } from '../../services/webQuoteService.js';
 import { getQuotationSummaryMessage } from '../../utils/flexTemplates.js';
 
@@ -36,6 +36,16 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 console.log('\n── 1. % จำนวนเต็ม ──');
 for (const [v, want] of [[30, '30%'], [29.97, '30%'], [27.5, '28%'], [12.49, '12%'], [0, '0%'], [null, '—']] as const) {
   ok(`${v} → ${want}`, discountPctText(v) === want, discountPctText(v));
+}
+
+{
+  const row = (pct: number, i: number) => ({ order_reference: `R${i}`, order_date: '2026-09-01', order_total_amount: '100', order_total_discount: String(pct), invoice_status: null });
+  const a = summarizeDiscounts([row(30, 1), row(29.97, 2), row(30.2, 3)]);
+  ok('30 · 29.97 · 30.2 → "คงที่" (เลขที่เห็นเท่ากันหมด)', a?.same === true && a?.trend === 0);
+  const b = summarizeDiscounts([row(30, 1), row(29.97, 2), row(25, 3)]);
+  ok('30 · 29.97 · 25 → ไม่เท่ากัน แต่ทิศทางเทียบ 30 กับ 30 = 0 (ไม่ใช่ "เพิ่มขึ้น")', b?.same === false && b?.trend === 0);
+  const c = summarizeDiscounts([row(31, 1), row(29.97, 2)]);
+  ok('31 กับ 29.97 → เพิ่มขึ้น', c?.trend === 1);
 }
 
 // ── 2. ด่านยืนยันตัวตน (LINE จำลอง) ─────────────────────────────────────────
@@ -235,6 +245,7 @@ const HIST = {
     { ref: 'OP-DIAG-02', date: '2026-08-21', amount: 8950, discount: 2682.32, pct: 29.97, invoiceStatus: null },
     { ref: 'OP-DIAG-01', date: '2026-07-02', amount: 4200, discount: 1050, pct: 25, invoiceStatus: null },
   ],
+  latestPct: 30, same: false, trend: 0,
 };
 type Reply = { status: number; body: any; delay?: number };
 let discountReplies: Record<string, Reply[]> = {};
@@ -299,7 +310,7 @@ const until = async (fn: () => Promise<boolean>, ms = 4000) => {
   }));
   ok('กางแล้วได้ตาราง 3 ใบ', panel.rows.length === 3 && panel.expanded === 'true');
   ok('แถวแรก: เลขใบ · วันที่ พ.ศ. · ยอด · %', JSON.stringify(panel.rows[0]) === JSON.stringify(['OP-DIAG-03', '29/09/69', '12,400.00', '30%']), JSON.stringify(panel.rows[0]));
-  ok('"ไม่เท่ากัน" ตัดสินจากเลขที่ปัดแล้ว', panel.ft === 'ส่วนลดไม่เท่ากัน · ข้อมูลให้ดูเท่านั้น ไม่พิมพ์ลงใบ', panel.ft);
+  ok('"ไม่เท่ากัน" มาจาก same ของ server', panel.ft === 'ส่วนลดไม่เท่ากัน · ข้อมูลให้ดูเท่านั้น ไม่พิมพ์ลงใบ', panel.ft);
   ok('ไม่ล้นแนวนอนที่ 390px', panel.over <= 0, String(panel.over));
   await page.click('#disc-chip');
   ok('แตะอีกครั้ง → พับ', await page.evaluate(() => !document.getElementById('disc-panel')));
