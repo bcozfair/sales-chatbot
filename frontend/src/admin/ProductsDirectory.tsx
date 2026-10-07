@@ -116,7 +116,7 @@ const RuleTags: React.FC<{ rules: ProductRules }> = ({ rules }) => {
   return (
     <div className="flex flex-wrap gap-1 mt-1">
       {tags.map((t) => (
-        <span key={t.text} className={`inline-block px-1.5 py-0.5 rounded-md border text-[10px] font-semibold ${t.cls}`}>
+        <span key={t.text} className={`inline-block whitespace-nowrap px-1.5 py-0.5 rounded-md border text-[10px] font-semibold ${t.cls}`}>
           {t.text}
         </span>
       ))}
@@ -378,13 +378,18 @@ export const ProductsDirectory: React.FC = () => {
                           onClick={() => setSelected(p)}
                           className="cursor-pointer hover:bg-slate-50 transition-colors"
                         >
-                          <td className={`${tdCls} font-mono text-xs text-[var(--brand-fg)] font-semibold whitespace-nowrap`}>
-                            {p.internal_reference ?? '—'}
+                          {/* ป้ายกฎอยู่ใต้รหัส ไม่ใช่ใต้ชื่อ — ช่องชื่อมีสองบรรทัดอยู่แล้ว
+                              ป้ายเป็นบรรทัดที่สามที่ทำให้ทั้งแถวสูงขึ้น ส่วนช่องรหัสมีบรรทัดเดียว */}
+                          <td className={tdCls}>
+                            <div className="font-mono text-xs text-[var(--brand-fg)] font-semibold whitespace-nowrap">
+                              {p.internal_reference ?? '—'}
+                            </div>
+                            {/* จำกัดความกว้าง ไม่งั้นแถวที่มีหลายป้ายจะดันช่องรหัสให้กว้างตามป้ายทั้งแถว */}
+                            <div className="max-w-[170px]"><RuleTags rules={p.rules} /></div>
                           </td>
                           <td className={tdCls}>
                             <div className="font-medium text-slate-800 max-w-[250px] truncate">{p.name}</div>
                             <div className="font-mono text-[11px] text-slate-400 max-w-[250px] truncate">{p.model}</div>
-                            <RuleTags rules={p.rules} />
                           </td>
                           <td className={tdCls}>
                             <div className="text-slate-700">{p.brand ?? <span className="text-slate-400">—</span>}</div>
