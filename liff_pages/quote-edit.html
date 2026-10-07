@@ -3377,10 +3377,8 @@
               <td class="pc">${discountPctText(r.pct)}</td></tr>`,
           )
           .join("");
-        // "เท่ากันทุกใบ" ตัดสินจากตัวเลขที่แสดง (ปัดแล้ว) — 29.97 กับ 30 โชว์ 30% ทั้งคู่ ต้องไม่บอกว่าไม่เท่ากัน
-        const shown = rows.map((r) => discountPctText(r.pct));
-        const same = shown.every((v) => v === shown[0]);
-        const sameTxt = rows.length > 1 ? (same ? "ส่วนลดเท่ากันทุกใบ · " : "ส่วนลดไม่เท่ากัน · ") : "";
+        // same มาจาก server (summarizeDiscounts) ซึ่งตัดสินจากเลขที่ปัดแล้ว — 29.97 กับ 30 = เท่ากัน
+        const sameTxt = rows.length > 1 ? (st.data.same ? "ส่วนลดเท่ากันทุกใบ · " : "ส่วนลดไม่เท่ากัน · ") : "";
         return `<div class="disc-panel" id="disc-panel" role="region" aria-label="ส่วนลดทั้งบิลของใบสั่งขายล่าสุด">
           <div class="cap">ส่วนลดทั้งบิล · ${rows.length} ใบสั่งขายล่าสุดของรหัสลูกค้านี้</div>
           <table>

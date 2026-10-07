@@ -135,7 +135,7 @@ export interface DiscountSummary {
   rows: { ref: string; date: string | null; amount: number; discount: number; pct: number | null; invoiceStatus: string | null }[];
   /** % ของใบล่าสุด — null เมื่อยอดก่อนลดเป็น 0 (หารไม่ได้) */
   latestPct: number | null;
-  /** ทั้ง N ใบได้ส่วนลด % เท่ากันหรือไม่ — 83% ของบริษัทเป็นแบบนี้ */
+  /** ทั้ง N ใบได้ส่วนลด % (จำนวนเต็มที่แสดง) เท่ากันหรือไม่ — 77% ของบริษัทที่เคยมีใบ (วัด 2026-10-07) */
   same: boolean;
   /** 1 = ใบล่าสุดได้มากกว่าใบก่อนหน้า · -1 = น้อยกว่า · 0 = เท่ากัน/เทียบไม่ได้ */
   trend: 1 | 0 | -1;
@@ -163,12 +163,16 @@ export function summarizeDiscounts(orders: DiscountOrderRow[]): DiscountSummary 
       invoiceStatus: o.invoice_status,
     };
   });
-  const pcts = rows.map((r) => r.pct).filter((v): v is number => v != null);
+  // "คงที่" และทิศทาง ตัดสินจาก % ที่คนเห็น (จำนวนเต็ม · discountPctText) ไม่ใช่ค่าดิบ — ทุกจอแสดงจำนวนเต็มแล้ว
+  // (เจ้าของสั่ง 2026-10-07) ⇒ 29.97 กับ 30 ต้องเป็น "คงที่ 30%" ไม่ใช่ "ลดลง · ใบก่อนหน้า 30%"
+  const shown = (v: number) => Math.round(v);
+  const pcts = rows.map((r) => r.pct).filter((v): v is number => v != null).map(shown);
   const latestPct = rows[0]?.pct ?? null;
-  const same = pcts.length > 0 && pcts.every((v) => Math.abs(v - pcts[0]) < 0.01);
+  const same = pcts.length > 0 && pcts.every((v) => v === pcts[0]);
   let trend: 1 | 0 | -1 = 0;
   if (!same && latestPct != null && rows[1]?.pct != null) {
-    trend = latestPct > rows[1].pct ? 1 : latestPct < rows[1].pct ? -1 : 0;
+    const a = shown(latestPct), b = shown(rows[1].pct);
+    trend = a > b ? 1 : a < b ? -1 : 0;
   }
   return { rows, latestPct, same, trend };
 }
@@ -188,8 +192,8 @@ export async function getRecentDiscountSummary(companyId: number): Promise<Disco
 /**
  * % ส่วนลดที่คนออกใบเห็น — **จำนวนเต็มเท่านั้น ปัดครึ่งขึ้น** (เจ้าของสั่ง 2026-10-07: 29.97 → 30 · 27.5 → 28)
  * ปัดลงจะทำให้ 29.97% กลายเป็น 29% ซึ่งหลอกตากว่า · `null` (ยอดก่อนลดเป็น 0) = "—"
- * หน้าเว็บ (`QuoteRequest.tsx`) และ LIFF (`quote-edit.html`) มีสำเนาของบรรทัดนี้เพราะ import ข้ามไม่ได้
- * ⚠️ ใช้เฉพาะแถว "ส่วนลดเดิม" — หน้า "ข้อมูลลูกค้า" ยังแสดงทศนิยมตามเดิม
+ * หน้าเว็บ (`QuoteRequest.tsx` · `CustomersDirectory.tsx`) และ LIFF (`quote-edit.html`) มีสำเนาของบรรทัดนี้เพราะ import ข้ามไม่ได้
+ * ใช้กับทุกจอที่แสดงส่วนลดเดิม รวมหน้า "ข้อมูลลูกค้า" และไฟล์ส่งออกของหน้านั้น (เจ้าของสั่ง 2026-10-07)
  */
 export function discountPctText(pct: number | null): string {
   return pct == null ? '—' : `${Math.round(pct)}%`;

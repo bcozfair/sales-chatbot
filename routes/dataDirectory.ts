@@ -254,7 +254,8 @@ dataDirectoryRouter.get('/customers/export/csv', async (req: Request, res: Respo
       // ชื่อคอลัมน์ต้องไม่เขียนว่า "ซื้อล่าสุด" — คอลัมน์นี้นับเฉพาะใบที่ออกบิลแล้ว
       // และเฉพาะลูกค้าเครดิต ⇒ ลูกค้า Cash ที่ซื้อทุกเดือนก็ได้ค่าว่าง
       credit_gate_at: c.last_order_at ?? '',
-      discount_latest_pct: c.discount?.latestPct != null ? c.discount.latestPct.toFixed(2) : '',
+      // จำนวนเต็มเหมือนบนจอ (เจ้าของสั่ง 2026-10-07) — "คงที่" ในคอลัมน์ถัดไปก็ตัดสินจากเลขที่ปัดแล้ว
+      discount_latest_pct: c.discount?.latestPct != null ? String(Math.round(c.discount.latestPct)) : '',
       discount_same: c.discount ? (c.discount.same ? 'คงที่' : 'ไม่เท่ากัน') : '',
     }));
 

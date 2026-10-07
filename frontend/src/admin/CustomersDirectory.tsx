@@ -115,11 +115,16 @@ const GateCell: React.FC<{ iso: string | null }> = ({ iso }) => {
   );
 };
 
-const pctText = (v: number) => `${v % 1 === 0 ? v.toFixed(0) : v.toFixed(2)}%`;
+/**
+ * % ส่วนลด — **จำนวนเต็ม ปัดครึ่งขึ้น** (เจ้าของสั่ง 2026-10-07) · สำเนาของ `discountPctText()` ใน
+ * services/dataDirectoryService.ts ⇒ ตรงกับหน้าขอใบเสนอราคา การ์ดในแชท และหน้าแก้ใบ LIFF ·
+ * "คงที่"/ทิศทาง (`same`/`trend`) ฝั่ง server ก็ตัดสินจากเลขที่ปัดแล้ว ⇒ ไม่มีทาง "ลดลง · ใบก่อนหน้า 30%" คู่กับ 30%
+ */
+const pctText = (v: number) => `${Math.round(v)}%`;
 
 /**
  * ส่วนลดในหนึ่งเซลล์
- * 83% ของบริษัทได้ส่วนลดเท่ากันทั้ง 3 ใบ ⇒ ตัวเลขเดียวพอ · ที่เหลือต้องเห็นว่า "ขยับ"
+ * 77% ของบริษัทที่เคยมีใบได้ส่วนลดเท่ากันทุกใบ (วัด 2026-10-07 · หลังปัดเป็นจำนวนเต็ม) ⇒ ตัวเลขเดียวพอ · ที่เหลือต้องเห็นว่า "ขยับ"
  * ทิศทางบอกด้วยไอคอน + ตัวเลขใบก่อนหน้า ไม่ใช่สีอย่างเดียว
  */
 const DiscountCell: React.FC<{ d: DiscountSummary | null | undefined }> = ({ d }) => {
@@ -623,7 +628,7 @@ const CompanyDetail: React.FC<{ companyId: number; token: string | null; onClose
                 {!d || !d.rows.length ? (
                   <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-800">
                     บริษัทนี้<b>ยังไม่เคยมีใบสั่งขาย</b>ในระบบ — ไม่ใช่ความผิดพลาด
-                    มีบริษัทที่เคยมีใบจริงแค่ <b>19,059 จาก 53,490</b> ราย
+                    มีบริษัทที่เคยมีใบจริงแค่ <b>19,157 จาก 53,627</b> ราย
                   </div>
                 ) : (
                   <>
@@ -658,7 +663,7 @@ const CompanyDetail: React.FC<{ companyId: number; token: string | null; onClose
                       </div>
                     ) : (
                       <div className="mt-2 bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800">
-                        ส่วนลด<b>ไม่เท่ากันทั้ง {d.rows.length} ใบ</b> — มีบริษัทแบบนี้ <b>3,228 จาก 19,059</b> ราย
+                        ส่วนลด<b>ไม่เท่ากันทั้ง {d.rows.length} ใบ</b> — มีบริษัทแบบนี้ <b>4,480 จาก 19,157</b> ราย
                       </div>
                     )}
                     <div className="mt-2 bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-800">

@@ -1294,7 +1294,7 @@ const ServiceNameField: React.FC<{
 /**
  * % ของแถว "ส่วนลดเดิม" — **จำนวนเต็ม ปัดครึ่งขึ้น** (เจ้าของสั่ง 2026-10-07 · 29.97 → 30 · 27.5 → 28)
  * สำเนาของ `discountPctText()` ใน services/dataDirectoryService.ts ⇒ หน้าเว็บ · การ์ดในแชท · หน้าแก้ใบ LIFF
- * เห็นเลขเดียวกัน · หน้า "ข้อมูลลูกค้า" ยังแสดงทศนิยมตามเดิม (คนละฟังก์ชัน)
+ * และหน้า "ข้อมูลลูกค้า" เห็นเลขเดียวกัน
  */
 const pctText = (v: number) => `${Math.round(v)}%`;
 
@@ -1390,9 +1390,7 @@ const DiscountHistoryField: React.FC<{ state: DiscountState; onRetry: () => void
   const d = state.data;
   if (!d || d.rows.length === 0) return <span className="text-slate-500">ยังไม่เคยมีใบสั่งขาย</span>;
 
-  const shown = d.rows.map((r) => (r.pct != null ? pctText(r.pct) : '—'));
-  const summary = shown.join(', ');
-  const sameShown = shown.every((v) => v === shown[0]);
+  const summary = d.rows.map((r) => (r.pct != null ? pctText(r.pct) : '—')).join(', ');
   return (
     <>
       <div ref={shellRef} className="inline-flex max-w-full">
@@ -1450,8 +1448,8 @@ const DiscountHistoryField: React.FC<{ state: DiscountState; onRetry: () => void
               </tbody>
             </table>
             <p className="mt-1.5 pt-1.5 border-t border-slate-100 text-[10.5px] text-slate-500">
-              {/* ตัดสินจากเลขที่แสดง (ปัดแล้ว) ไม่ใช่ d.same — 29.97 กับ 30 โชว์ 30% ทั้งคู่ ต้องไม่บอกว่าไม่เท่ากัน */}
-              {d.rows.length > 1 && (sameShown ? 'ส่วนลดเท่ากันทุกใบ · ' : 'ส่วนลดไม่เท่ากัน · ')}
+              {/* d.same ตัดสินจากเลขที่ปัดแล้วฝั่ง server (summarizeDiscounts) — 29.97 กับ 30 = เท่ากัน */}
+              {d.rows.length > 1 && (d.same ? 'ส่วนลดเท่ากันทุกใบ · ' : 'ส่วนลดไม่เท่ากัน · ')}
               ข้อมูลให้ดูเท่านั้น ไม่พิมพ์ลงใบ
             </p>
           </div>,
