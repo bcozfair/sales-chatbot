@@ -28,22 +28,21 @@ export const FilterRow: React.FC<{ children: React.ReactNode }> = ({ children })
 );
 
 /**
- * ช่องกรอง 1 ช่อง = ป้ายกำกับ + ตัวควบคุม
- * ป้ายอยู่ "เหนือ" ช่องเสมอ ไม่ใช้ placeholder แทนป้าย — placeholder หายไปตอนพิมพ์
- * แล้วผู้ใช้จะจำไม่ได้ว่าค่าที่ค้างอยู่ในช่องนั้นคือตัวกรองอะไร
+ * ช่องกรอง 1 ช่อง — กำหนดแค่ความกว้างในแถว **ไม่มีป้ายเหนือช่องแล้ว**
+ *
+ * เดิมช่องนี้วางป้ายเหนือช่องโดยตั้งใจ (placeholder หายตอนพิมพ์) แต่เจ้าของสั่ง 2026-10-07
+ * ให้ทั้งแอปใช้แบบเดียวกับ FilterBar.tsx คือแถวเดียวไม่มีป้าย ⇒ ชื่อของตัวกรองต้องอยู่ในตัวควบคุมเอง:
+ * ช่องพิมพ์ = placeholder + aria-label · dropdown = ตัวเลือกแรกบอกชื่อ ("ทุกสถานะ") + ไอคอน + aria-label
+ * ใครเพิ่มช่องใหม่แล้วไม่ใส่สองอย่างนี้ ช่องนั้นจะไม่มีอะไรบอกว่ากรองอะไรเลย
  */
 export const FilterField: React.FC<{
-  label: string;
   /** กินพื้นที่ว่างที่เหลือในแถว — ใช้กับช่องค้นหาช่องเดียวต่อแถว */
   grow?: boolean;
   /** ความกว้าง (คลาส tailwind) — ช่องวันที่/dropdown ที่ไม่ควรหดจนอ่านไม่ออก */
   width?: string;
   children: React.ReactNode;
-}> = ({ label, grow, width = 'w-40', children }) => (
-  <div className={grow ? 'flex-1 min-w-56' : width}>
-    <label className="block text-[11px] font-medium text-slate-500 mb-1">{label}</label>
-    {children}
-  </div>
+}> = ({ grow, width = 'w-40', children }) => (
+  <div className={grow ? 'flex-1 min-w-56' : width}>{children}</div>
 );
 
 /** ช่องค้นหาพร้อมไอคอนแว่น — รูปแบบเดียวกันทุกหน้า (ทุกหน้ากด / เพื่อโฟกัสได้เหมือนกัน) */
@@ -51,13 +50,15 @@ export const SearchField = React.forwardRef<HTMLInputElement, {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
-}>(({ value, onChange, placeholder }, ref) => (
+  'aria-label'?: string;
+}>(({ value, onChange, placeholder, 'aria-label': ariaLabel }, ref) => (
   <div className="relative">
     <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
     <input
       ref={ref}
       className={inputCls + ' pl-10'}
       placeholder={placeholder}
+      aria-label={ariaLabel ?? placeholder}
       value={value}
       onChange={(e) => onChange(e.target.value)}
     />
@@ -65,22 +66,8 @@ export const SearchField = React.forwardRef<HTMLInputElement, {
 ));
 SearchField.displayName = 'SearchField';
 
-/** dropdown ที่หน้าตาเท่ากับ input ช่องอื่น (ลูกศรของ native select แต่ละ OS ไม่เหมือนกัน) */
-export const SelectField: React.FC<{
-  value: string;
-  onChange: (v: string) => void;
-  children: React.ReactNode;
-  'aria-label'?: string;
-}> = ({ value, onChange, children, 'aria-label': ariaLabel }) => (
-  <select
-    aria-label={ariaLabel}
-    className={inputCls + ' appearance-none cursor-pointer pr-9'}
-    value={value}
-    onChange={(e) => onChange(e.target.value)}
-  >
-    {children}
-  </select>
-);
+/* dropdown ของตัวกรองใช้ FilterSelect ของ FilterBar.tsx (ไอคอนบอกชนิดตัวกรองทางขวา) ตัวเดียวทั้งแอป
+   — SelectField เดิมของไฟล์นี้ถูกลบเมื่อ 2026-10-07 ตอนเลิกใช้ป้ายเหนือช่อง */
 
 /** ช่องติ๊ก 1 บรรทัด — ใช้กับตัวกรองแบบเปิด/ปิด เช่น "เฉพาะที่ช้า" */
 export const CheckField: React.FC<{

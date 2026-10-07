@@ -2,10 +2,10 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { PageHeader } from '../PageHeader';
 import { Button } from '../Button';
-import { FilterDateRange } from '../FilterBar';
+import { FilterDateRange, FilterSelect } from '../FilterBar';
 import {
   Terminal, Download, AlertTriangle,
-  ChevronDown, ChevronRight as ChevronRightSmall, Link2, CalendarDays } from 'lucide-react';
+  ChevronDown, ChevronRight as ChevronRightSmall, Link2, Boxes, Gauge, CalendarDays } from 'lucide-react';
 import { useHashState } from './useHashState';
 import { TAB_SLUG } from '../navHash';
 import {
@@ -14,7 +14,7 @@ import {
 } from './format';
 import {
   EmptyState, ErrorBox, FilterCard, FilterField, FilterFooter, FilterRow,
-  Pagination, SearchField, SelectField, SkeletonRows, TimeSortToggle,
+  Pagination, SearchField, SkeletonRows, TimeSortToggle,
 } from './ui';
 import { RequestTimeline } from './RequestTimeline';
 
@@ -262,32 +262,35 @@ export const SystemLogs: React.FC = () => {
       {/* ── ตัวกรอง ── */}
       <FilterCard>
         <FilterRow>
-          <FilterField label="ค้นหาในข้อความ" grow>
+          <FilterField grow>
             <SearchField
               ref={searchRef}
               value={state.q}
               onChange={v => set({ q: v, page: '1' })}
-              placeholder="พิมพ์เพื่อค้นหา… (กด / เพื่อโฟกัส)"
+              placeholder="ค้นหาในข้อความ"
+              aria-label="ค้นหาในข้อความ"
             />
           </FilterField>
           {/* ช่วงวันที่กล่องเดียว — แบบเดียวกับหน้าประวัติใบเสนอราคา/โปรโมชัน (เจ้าของสั่ง 2026-10-02) */}
-          <FilterField label="ช่วงวันที่" width="w-72">
+          <FilterField width="w-72">
             <FilterDateRange from={state.dateFrom} to={state.dateTo} icon={CalendarDays}
                              onFrom={v => set({ dateFrom: v, page: '1' })} onTo={v => set({ dateTo: v, page: '1' })}
                              fromLabel="ตั้งแต่วันที่" toLabel="ถึงวันที่" />
           </FilterField>
-          <FilterField label="ระดับ" width="w-44">
-            <SelectField value={state.minLevel} onChange={v => set({ minLevel: v, page: '1' })}>
+          <FilterField width="w-44">
+            <FilterSelect value={state.minLevel} onChange={v => set({ minLevel: v, page: '1' })}
+                          icon={Gauge} aria-label="ระดับ">
               {MIN_LEVELS.map(l => <option key={l.key} value={l.key}>{l.label}</option>)}
-            </SelectField>
+            </FilterSelect>
           </FilterField>
-          <FilterField label="โมดูล" width="w-44">
-            <SelectField value={state.source} onChange={v => set({ source: v, page: '1' })}>
-              <option value="">ทั้งหมด</option>
+          <FilterField width="w-44">
+            <FilterSelect value={state.source} onChange={v => set({ source: v, page: '1' })}
+                          icon={Boxes} aria-label="โมดูล">
+              <option value="">ทุกโมดูล</option>
               {sourceFacets.filter(f => f.value !== '(ไม่ระบุ)').map(f => (
                 <option key={f.value} value={f.value}>{f.value} ({f.n})</option>
               ))}
-            </SelectField>
+            </FilterSelect>
           </FilterField>
         </FilterRow>
 
