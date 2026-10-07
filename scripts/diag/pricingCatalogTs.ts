@@ -859,6 +859,13 @@ async function main(): Promise<void> {
     check('2 Element แกน 5 = ไม่รับผลิต (แคตตาล็อก: 6 mm ขึ้นไป)', e5.o?.status === 'notManufacturable', `${e5.o?.status}`);
     const s = price('TSP-08(S4)6x100-SU');
     check('หัว S (Excel ไม่มีราคา · แถวรหัสย่อยค่าว่าง) = ยังไม่มีราคา', noRate(s.o), `${s.o?.status}`);
+    // เจ้าของ 2026-10-07 "ตั้งราคาทีหลัง" — ทรานสมิตเตอร์ในหัว (`-TM000`) เดิมเป็นท่อนไม่รู้จัก ⇒ ได้ราคาเต็มที่ขาดค่าทรานสมิตเตอร์ ~4,000
+    {
+      const tm = price('TSP-08(S4)6x100-KBU-TM000');
+      check('-TM000 = ทรานสมิตเตอร์ในหัว (แถวรหัสย่อย TM### ค่าว่าง) = ยังไม่มีราคา · ราคาเท่าที่คิดได้ = ราคาตั้ง + หัว KB', noRate(tm.o) &&
+        tm.o?.unitPrice === cell08('6', '1/2”', 'TSP') + amt08('head_blacklite_l') && tm.p.parts.some((x) => x.text === 'TM000' && x.kind !== 'unknown'),
+        `${tm.o?.status} ${tm.o?.unitPrice} ${tm.p.parts.map((x) => `${x.text}:${x.kind}`).join(" ")}`);
+    }
   }
 }
 
