@@ -382,6 +382,10 @@ npm run logworker                                          # worker เขีย
   ⇒ **เห็นสองที่ไม่ตรงกันแล้วห้าม "แก้ให้เหมือนกัน" ต้องถามเจ้าของก่อน**
   · ตรรกะอยู่ที่ `getCompanyDiscountHistory()` ใน `db/dataDirectoryRepo.ts` ที่เดียว
   · gate: `npm run diag:data-directory` มีข้อที่พิสูจน์ว่าสองรหัสที่เลขภาษีเดียวกันไม่เห็นใบของกัน
+  · **"ส่วนลดเดิม" 3 ใบล่าสุดมีสามทางเข้า ใช้ `getRecentDiscountSummary()` ตัวเดียว** (2026-10-07): หน้าขอใบเสนอราคา ·
+  การ์ดสรุปร่างใน LINE · หน้าแก้ใบ LIFF — % เป็น **จำนวนเต็ม ปัดครึ่งขึ้น** (`discountPctText`) เฉพาะแถวนี้ (หน้า "ข้อมูลลูกค้า"
+  ยังทศนิยม) · `GET /api/liff/discount-history` เป็น API ของ LIFF ตัวแรกที่ **ตรวจ access token กับ LINE**
+  (`config/liffAuth.ts` · API เดิมของ LIFF ยังไม่มีด่าน) · gate: `npm run diag:sales-discount`
 
 - **`sale_orders` เป็น 1 แถว = 1 ใบ แต่ยอด/`model`/`quantity` เป็นของ "บรรทัดแรก" ไม่ใช่ทั้งใบ**
   (วัด 2026-09-17: 320,090 แถว / 320,090 `order_reference` · 2026-10-05: OP-260900178 ในฐาน 70,400 ใบจริง ~296,000)

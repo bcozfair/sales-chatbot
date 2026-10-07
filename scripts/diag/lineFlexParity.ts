@@ -73,8 +73,9 @@ function resolveBase(root: string): { ref: string; why: string } {
 /** รัน lineFlexCapture ในทรี `dir` (โปรเซสแยก — import ของแต่ละทรีจะได้ไม่ปนกัน) */
 function capture(dir: string, label: string): Capture {
   const out = path.join(os.tmpdir(), `line-parity-${label}-${process.pid}-${Date.now()}.json`);
-  const tsx = path.join(dir, 'node_modules', '.bin', 'tsx');
-  const r = spawnSync(tsx, [CAPTURE_REL, out], { cwd: dir, env: process.env, encoding: 'utf8', timeout: 300_000 });
+  // เรียก cli ของ tsx ผ่าน node ตรง ๆ — `.bin/tsx` บน Windows เป็น shim (.cmd) ที่ spawnSync เปิดไม่ได้ (exit null)
+  const tsxCli = path.join(dir, 'node_modules', 'tsx', 'dist', 'cli.mjs');
+  const r = spawnSync(process.execPath, [tsxCli, CAPTURE_REL, out], { cwd: dir, env: process.env, encoding: 'utf8', timeout: 300_000 });
   if (r.status !== 0 || !fs.existsSync(out)) {
     throw new Error(`รันเคสบน${label}ไม่สำเร็จ (exit ${r.status ?? r.signal})\n${(r.stderr || r.stdout || '').slice(-2000)}`);
   }
@@ -119,7 +120,8 @@ async function main() {
   try {
     fs.rmSync(wt, { recursive: true, force: true });
     git(root, 'worktree', 'add', '--detach', wt, base.ref);
-    fs.symlinkSync(fs.realpathSync(path.join(root, 'node_modules')), path.join(wt, 'node_modules'));
+    // 'junction' — symlink ของโฟลเดอร์บน Windows ต้องใช้สิทธิ์ (EPERM) ส่วน junction ไม่ต้อง · OS อื่นไม่สนค่านี้
+    fs.symlinkSync(fs.realpathSync(path.join(root, 'node_modules')), path.join(wt, 'node_modules'), 'junction');
     if (fs.existsSync(path.join(root, '.env'))) fs.copyFileSync(path.join(root, '.env'), path.join(wt, '.env'));
     // ตัวรันเคสของ "ปัจจุบัน" ไปวางใน base ⇒ ทั้งสองฝั่งยิงเคสชุดเดียวกัน normalize แบบเดียวกัน
     fs.copyFileSync(path.join(root, CAPTURE_REL), path.join(wt, CAPTURE_REL));
@@ -155,6 +157,10 @@ async function main() {
       }
     }
   } finally {
+    // ถอดลิงก์ node_modules ก่อนเสมอ — `git worktree remove` บน Windows ลบทะลุ junction เข้าไปกินของจริง
+    // (AGENTS.md A6) · unlink/rmdir แบบไม่ recursive ลบเฉพาะตัวลิงก์
+    const nm = path.join(wt, 'node_modules');
+    try { fs.unlinkSync(nm); } catch { try { fs.rmdirSync(nm); } catch { /* ไม่มีลิงก์ */ } }
     try { git(root, 'worktree', 'remove', '--force', wt); } catch { fs.rmSync(wt, { recursive: true, force: true }); git(root, 'worktree', 'prune'); }
     // กันตกค้างถ้าโปรเซสลูกถูกฆ่ากลางคัน (ลูกลบเองใน finally อยู่แล้ว)
     await pool.query('DELETE FROM quotations WHERE user_id = $1', [TEST_USER]);

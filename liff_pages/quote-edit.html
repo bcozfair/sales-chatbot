@@ -227,6 +227,121 @@
         border: 1px solid var(--border);
       }
 
+      /* ─── ส่วนลดเดิม (แถวในการ์ดข้อมูลลูกค้า · mockup sdh-liff 2026-10-07) ───
+         ใช้โทเคนที่มีอยู่แล้วเท่านั้น ไม่เพิ่มสีใหม่ */
+      .disc-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        min-height: 28px;
+        padding: 2px 11px;
+        border-radius: 999px;
+        border: 1.5px solid var(--border-strong);
+        background: var(--green-light);
+        color: var(--green-dark);
+        font: inherit;
+        font-size: 13px;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        cursor: pointer;
+      }
+      .disc-chip[aria-expanded="true"] {
+        border-color: var(--green);
+        background: var(--green-pale);
+      }
+      .disc-chip .car {
+        font-size: 10px;
+        transition: transform 0.15s;
+      }
+      .disc-chip[aria-expanded="true"] .car {
+        transform: rotate(180deg);
+      }
+      .disc-muted {
+        color: var(--text-muted);
+        font-weight: 500;
+      }
+      .disc-err {
+        color: var(--danger);
+        font-weight: 600;
+      }
+      .disc-err button {
+        font: inherit;
+        color: var(--danger);
+        font-weight: 700;
+        text-decoration: underline;
+        background: none;
+        border: 0;
+        padding: 0 0 0 8px;
+        cursor: pointer;
+      }
+      .disc-panel {
+        border: 1.5px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--green-pale);
+        padding: 9px 11px;
+        animation: slideIn 0.2s ease;
+      }
+      .disc-panel .cap {
+        font-size: 11.5px;
+        font-weight: 700;
+        color: var(--text-mid);
+      }
+      .disc-panel table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 6px;
+        font-size: 12.5px;
+      }
+      .disc-panel th {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-align: right;
+        padding: 0 0 4px;
+      }
+      .disc-panel th:first-child,
+      .disc-panel td:first-child {
+        text-align: left;
+      }
+      .disc-panel td {
+        text-align: right;
+        padding: 5px 0;
+        border-top: 1px solid var(--border);
+        font-variant-numeric: tabular-nums;
+        color: var(--text);
+        white-space: nowrap;
+      }
+      .disc-panel td.ref {
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-size: 11.5px;
+        color: var(--green-dark);
+      }
+      .disc-panel td.dt {
+        color: var(--text-muted);
+      }
+      .disc-panel td.pc {
+        font-weight: 700;
+        padding-left: 8px;
+      }
+      .disc-panel .ft {
+        margin-top: 6px;
+        padding-top: 6px;
+        border-top: 1px solid var(--border);
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+      .disc-spin {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border: 2px solid var(--border);
+        border-top-color: var(--green);
+        border-radius: 50%;
+        animation: spin 0.7s linear infinite;
+        vertical-align: -1px;
+        margin-right: 5px;
+      }
+
       /* ─── SECTION TITLE ─── */
       .section-title {
         font-weight: 700;
@@ -3174,11 +3289,114 @@
         }
       }
 
+      // ── ส่วนลดเดิม (3 ใบสั่งขายล่าสุด) — แถวใต้ 💳 เครดิต (เจ้าของเคาะ mockup sdh-liff 2026-10-07) ──
+      // ข้อมูลชุดเดียวกับแถว "ส่วนลดเดิม" ของหน้าเว็บและการ์ดสรุปในแชท (getRecentDiscountSummary ฝั่ง server)
+      // · ต้องแนบ access token ของ LINE เพราะเป็นข้อมูลการค้า (config/liffAuth.ts) — userId ใน query ปลอมได้
+      // · ยิงเฉพาะตอนบริษัทเปลี่ยน (เทียบ forId) · ผลที่กลับมาหลังเปลี่ยนบริษัทไปแล้วทิ้งเสมอ
+      // · แตะปุ่มเพื่อกางตาราง · เปลี่ยนบริษัทแล้วพับกลับ · ข้อมูลให้ดูเท่านั้น ไม่แตะตัวเลขในใบ
+      // สถานะ: none (ยังไม่เลือกบริษัท) · loading · ok (data = null คือไม่เคยมีใบ) · error (ลองใหม่ได้) · auth (ไม่ใช่เซลส์)
+      let discountState = { forId: "", status: "none", data: null, open: false };
+
+      // ⚠️ mirror ของ discountPctText() ใน services/dataDirectoryService.ts — จำนวนเต็ม ปัดครึ่งขึ้น
+      // (เจ้าของสั่ง 2026-10-07) หน้านี้ไม่มี bundler จึง import ไม่ได้
+      function discountPctText(pct) {
+        return pct == null ? "—" : `${Math.round(pct)}%`;
+      }
+
+      function escDisc(v) {
+        return String(v == null ? "" : v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+      }
+
+      /** วันที่แบบเดียวกับหน้าเว็บ: วว/ดด/ปป (พ.ศ.) — server ส่งมาเป็นวันไทย YYYY-MM-DD แล้ว */
+      function discountDateText(s) {
+        const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || ""));
+        return m ? `${m[3]}/${m[2]}/${String(Number(m[1]) + 543).slice(-2)}` : "—";
+      }
+
+      function ensureDiscountHistory() {
+        const id = String((quotesData[0] && quotesData[0].customer_id) || "");
+        if (id === discountState.forId) return;
+        discountState = { forId: id, status: id ? "loading" : "none", data: null, open: false };
+        if (id) loadDiscountHistory(id);
+      }
+
+      async function loadDiscountHistory(id) {
+        let status = "error";
+        let data = null;
+        try {
+          let token = "";
+          try {
+            token = liff.getAccessToken() || "";
+          } catch (e) {}
+          if (!token) {
+            status = "auth";
+          } else {
+            const resp = await fetch(
+              `/api/liff/discount-history?customer_id=${encodeURIComponent(id)}`,
+              { headers: { Authorization: `Bearer ${token}` } },
+            );
+            if (resp.status === 401 || resp.status === 403) status = "auth";
+            else if (resp.ok) {
+              data = (await resp.json()).discount || null;
+              status = "ok";
+            }
+          }
+        } catch (e) {
+          console.error("discount-history error:", e);
+        }
+        if (discountState.forId !== id) return; // บริษัทเปลี่ยนไประหว่างรอ
+        discountState.status = status;
+        discountState.data = data;
+        updateCustomerDetailsUI();
+      }
+
+      function discountValueHtml() {
+        const st = discountState;
+        if (st.status === "loading")
+          return '<span class="disc-muted"><span class="disc-spin" aria-hidden="true"></span>กำลังโหลด...</span>';
+        if (st.status === "error")
+          return '<span class="disc-err">โหลดไม่สำเร็จ<button type="button" id="disc-retry">ลองใหม่</button></span>';
+        if (st.status === "auth")
+          return '<span class="disc-muted">🔒 ดูได้เฉพาะเซลส์ที่ลงทะเบียนแล้ว</span>';
+        if (st.status !== "ok") return CUSTOMER_PLACEHOLDER;
+        if (!st.data || !st.data.rows || !st.data.rows.length)
+          return '<span class="disc-muted">ยังไม่เคยมีใบสั่งขาย</span>';
+        const summary = st.data.rows.map((r) => discountPctText(r.pct)).join(", ");
+        return `<button type="button" class="disc-chip" id="disc-chip" aria-expanded="${st.open}" aria-controls="disc-panel"
+          aria-label="ส่วนลดทั้งบิลของ ${st.data.rows.length} ใบสั่งขายล่าสุด ${summary} — แตะเพื่อดูรายละเอียด">${summary} <span class="car" aria-hidden="true">▼</span></button>`;
+      }
+
+      function discountPanelHtml() {
+        const st = discountState;
+        if (st.status !== "ok" || !st.open || !st.data || !st.data.rows || !st.data.rows.length) return "";
+        const rows = st.data.rows;
+        const body = rows
+          .map(
+            (r) => `<tr><td class="ref">${escDisc(r.ref)}</td><td class="dt">${discountDateText(r.date)}</td>
+              <td>${Number(r.amount || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+              <td class="pc">${discountPctText(r.pct)}</td></tr>`,
+          )
+          .join("");
+        // "เท่ากันทุกใบ" ตัดสินจากตัวเลขที่แสดง (ปัดแล้ว) — 29.97 กับ 30 โชว์ 30% ทั้งคู่ ต้องไม่บอกว่าไม่เท่ากัน
+        const shown = rows.map((r) => discountPctText(r.pct));
+        const same = shown.every((v) => v === shown[0]);
+        const sameTxt = rows.length > 1 ? (same ? "ส่วนลดเท่ากันทุกใบ · " : "ส่วนลดไม่เท่ากัน · ") : "";
+        return `<div class="disc-panel" id="disc-panel" role="region" aria-label="ส่วนลดทั้งบิลของใบสั่งขายล่าสุด">
+          <div class="cap">ส่วนลดทั้งบิล · ${rows.length} ใบสั่งขายล่าสุดของรหัสลูกค้านี้</div>
+          <table>
+            <thead><tr><th>เลขที่ใบ</th><th>วันที่</th><th>ยอดก่อนลด</th><th>ส่วนลด</th></tr></thead>
+            <tbody>${body}</tbody>
+          </table>
+          <div class="ft">${sameTxt}ข้อมูลให้ดูเท่านั้น ไม่พิมพ์ลงใบ</div>
+        </div>`;
+      }
+
       function updateCustomerDetailsUI() {
         if (!quotesData.length) return;
         const meta = parseCustomerMeta(quotesData[0]);
         const container = document.getElementById("customer-details-global");
         if (!container) return;
+        ensureDiscountHistory();
         // ค่าที่ยังไม่มีข้อมูล (null/ว่าง) แสดงเป็น placeholder เดียวกับ Flex ในแชท
         const show = (v) => (v === null || v === undefined || v === "" || v === "-" ? CUSTOMER_PLACEHOLDER : v);
         container.innerHTML = `
@@ -3189,7 +3407,22 @@
         <div class="info-row"><span class="info-label">🏠 ที่อยู่</span><span class="info-value">${show(meta.address)}</span></div>
         <div class="info-row"><span class="info-label">🚚 สถานที่ส่ง</span><span class="info-value">${show(meta.delivery)}</span></div>
         <div class="info-row"><span class="info-label">💳 เครดิต</span><span class="info-value">${show(quotesData[0].payment_terms)}</span></div>
+        <div class="info-row"><span class="info-label">🏷️ ส่วนลดเดิม</span><span class="info-value">${discountValueHtml()}</span></div>
+        ${discountPanelHtml()}
       `;
+        const chip = document.getElementById("disc-chip");
+        if (chip)
+          chip.addEventListener("click", () => {
+            discountState.open = !discountState.open;
+            updateCustomerDetailsUI();
+          });
+        const retry = document.getElementById("disc-retry");
+        if (retry)
+          retry.addEventListener("click", () => {
+            discountState.status = "loading";
+            updateCustomerDetailsUI();
+            loadDiscountHistory(discountState.forId);
+          });
       }
 
       async function fetchAndRenderContacts(customerId, selectedContactName) {

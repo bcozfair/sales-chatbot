@@ -7,7 +7,7 @@
        · บริษัทที่ไม่เคยมีใบสั่งขาย → null · customer_id ผิดรูป → 400
      หน้าจริง (1280 และ 390px)
        · ยังไม่เลือกบริษัท → "—"
-       · บริษัทที่มีใบ → ปุ่ม "30%, 30%, 25%" ตรงกับ server · กดแล้วกางเลขใบครบ · Esc ปิด
+       · บริษัทที่มีใบ → ปุ่ม "30%, 30%, 25%" (จำนวนเต็ม) ตรงกับ server · กดแล้วกางเลขใบครบ · Esc ปิด
        · บริษัทที่ไม่เคยมีใบ → "ยังไม่เคยมีใบสั่งขาย"
        · ใบแยก PM/THT → บล็อกผู้ซื้อ (ช่องเลือกบริษัท/ผู้ติดต่อ/ส่วนลดเดิม) มีชุดเดียว ·
          ใบที่สองเหลือบรรทัด "ข้อมูลลูกค้าและผู้ติดต่อเดียวกับใบ PM ด้านบน"
@@ -20,7 +20,7 @@ import jwt from 'jsonwebtoken';
 import { pool } from '../../config/db.js';
 import { getJwtSecret } from '../../config/jwt.js';
 import { getCustomerDiscountHistory } from '../../services/webQuoteService.js';
-import { getCompanyDetail } from '../../services/dataDirectoryService.js';
+import { getCompanyDetail, discountPctText } from '../../services/dataDirectoryService.js';
 import { resolveQuoteCompany } from '../../services/quotationService.js';
 
 const PORT = process.env.DH_PORT || '3099';
@@ -32,7 +32,8 @@ const ok = (msg: string, cond: boolean, extra = '') => {
   if (cond) console.log(`  ✓ ${msg}${extra ? ' · ' + extra : ''}`);
   else { fail++; console.log(`  ✗ ${msg}${extra ? ' · ' + extra : ''}`); }
 };
-const pctText = (v: number) => `${v % 1 === 0 ? v.toFixed(0) : v.toFixed(2)}%`;
+// จำนวนเต็ม ปัดครึ่งขึ้น (เจ้าของสั่ง 2026-10-07) — ตัวเดียวกับการ์ดในแชทและหน้าแก้ใบ LIFF
+const pctText = (v: number) => discountPctText(v);
 
 // ── บริษัทตัวอย่าง: มีใบ ≥ 3 ใบ / ไม่เคยมีใบ ───────────────────────────────────
 // สแกนแค่บริษัทล่าสุด 3,000 รายก่อน — ทั้งตาราง (82k แถว) เกินเพดาน 15 วิของ pool
