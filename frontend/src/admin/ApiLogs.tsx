@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { FilterDateRange } from './FilterBar';
+import { FilterDateRange, FilterSelect } from './FilterBar';
 import { FilterCombo, type FilterOption } from './DataFilterBar';
 import { PageHeader } from './PageHeader';
 import { Button } from './Button';
@@ -15,7 +15,7 @@ import {
 } from './logs/format';
 import {
   CheckField, Duration, EmptyState, ErrorBox, FilterCard, FilterChip, FilterField,
-  FilterFooter, FilterRow, MethodTag, Pagination, SearchField, SelectField,
+  FilterFooter, FilterRow, MethodTag, Pagination, SearchField,
   SkeletonRows, SortHeader, StatTile, StatusPill, TableCard, TableScroll,
 } from './logs/ui';
 import { useTableSort } from './logs/useTableSort';
@@ -23,7 +23,7 @@ import type { SortAccessors } from './logs/useTableSort';
 import { AreaChart, ChartLegend, Donut } from './logs/charts';
 import {
   Activity, AlertTriangle, Check, ChevronDown, ChevronUp, Copy, Info, Link2,
-  Loader2, MessageSquare, RefreshCw, SlidersHorizontal, CalendarDays } from 'lucide-react';
+  Code2, Loader2, MessageSquare, RefreshCw, SlidersHorizontal, CalendarDays } from 'lucide-react';
 
 /**
  * หน้าดูบันทึกการเรียก API — ใครเรียกอะไร เมื่อไหร่ ได้ status อะไร และช้าตรงไหน
@@ -768,30 +768,33 @@ export function ApiLogs() {
       {/* ══════════ 2. ตัวกรอง ══════════ */}
       <FilterCard>
         <FilterRow>
-          <FilterField label="ค้นหา path" grow>
+          <FilterField grow>
             <SearchField
               ref={searchRef}
               value={state.q}
               onChange={(v) => set({ q: v, page: '1' })}
-              placeholder="เช่น /api/quotation … (กด / เพื่อโฟกัส)"
+              placeholder="ค้นหา path เช่น /api/quotation"
+              aria-label="ค้นหา path"
             />
           </FilterField>
-          <FilterField label="method" width="w-36">
-            <SelectField value={state.method} onChange={(v) => set({ method: v, page: '1' })}>
+          <FilterField width="w-36">
+            <FilterSelect value={state.method} onChange={(v) => set({ method: v, page: '1' })}
+                          icon={Code2} aria-label="method">
               <option value="">ทุก method</option>
               {METHODS.map(m => <option key={m} value={m}>{m}{m === 'TASK' ? ' (งานเบื้องหลัง)' : ''}</option>)}
-            </SelectField>
+            </FilterSelect>
           </FilterField>
-          <FilterField label="สถานะ" width="w-40">
-            <SelectField value={state.status} onChange={(v) => set({ status: v, page: '1' })}>
-              <option value="">ทุก status</option>
+          <FilterField width="w-44">
+            <FilterSelect value={state.status} onChange={(v) => set({ status: v, page: '1' })}
+                          icon={Activity} aria-label="สถานะ">
+              <option value="">ทุกสถานะ</option>
               <option value="2xx">2xx สำเร็จ</option>
               <option value="4xx">4xx ผิดฝั่งผู้เรียก</option>
               <option value="5xx">5xx ผิดฝั่งระบบ</option>
-            </SelectField>
+            </FilterSelect>
           </FilterField>
           {/* ช่วงวันที่กล่องเดียว — แบบเดียวกับหน้าประวัติใบเสนอราคา/โปรโมชัน (เจ้าของสั่ง 2026-10-02) */}
-          <FilterField label="ช่วงวันที่" width="w-72">
+          <FilterField width="w-72">
             <FilterDateRange from={state.dateFrom} to={state.dateTo} icon={CalendarDays}
                              onFrom={v => set({ dateFrom: v, page: '1' })} onTo={v => set({ dateTo: v, page: '1' })}
                              fromLabel="ตั้งแต่วันที่" toLabel="ถึงวันที่" />
@@ -818,14 +821,14 @@ export function ApiLogs() {
 
         {showAdvanced && (
           <FilterRow>
-            <FilterField label="Request ID" grow>
+            <FilterField grow>
               <input value={state.requestId} onChange={(e) => set({ requestId: e.target.value, page: '1' })}
-                placeholder="ค้นได้โดยไม่ต้องรู้วันที่"
+                placeholder="Request ID — ค้นได้โดยไม่ต้องรู้วันที่" aria-label="Request ID"
                 className={`${inputCls} font-mono text-xs`} />
             </FilterField>
             {/* แทนช่อง LINE User ID เดิม (เจ้าของเลือกแบบ B · mockup log-caller-filter 2026-10-05)
                 — เลือกจากรายชื่อแทนการพิมพ์ไอดี · กรองแอดมินได้ด้วย · วางไอดี LINE เต็มในช่องค้นก็เจอ */}
-            <FilterField label="ผู้เรียก" grow>
+            <FilterField grow>
               <div className="flex">
                 <FilterCombo
                   label="ผู้เรียก"
@@ -847,15 +850,15 @@ export function ApiLogs() {
             </FilterField>
             {/* กรองด้วย IP = ดูว่า "เครื่องเดียวกันนี้" เรียกอะไรไปบ้างในช่วงเวลานั้น ซึ่งเป็นวิธีเดียว
                 ที่พอจะบอกได้ว่าคนที่กดลิงก์ PDF สาธารณะเป็นเซลล์เจ้าของใบเองหรือคนอื่น */}
-            <FilterField label="IP ต้นทาง" grow>
+            <FilterField grow>
               <input value={state.ip} onChange={(e) => set({ ip: e.target.value, page: '1' })}
-                placeholder="กดที่ IP ในตารางเพื่อกรองได้เลย"
+                placeholder="IP ต้นทาง — กดที่ IP ในตารางเพื่อกรองได้เลย" aria-label="IP ต้นทาง"
                 className={`${inputCls} font-mono text-xs`} />
             </FilterField>
-            <FilterField label="ช้ากว่า (ms)" width="w-32">
+            <FilterField width="w-44">
               <input value={state.minDuration} inputMode="numeric"
                 onChange={(e) => set({ minDuration: e.target.value.replace(/\D/g, ''), page: '1' })}
-                placeholder="1000"
+                placeholder="ช้ากว่า (ms) เช่น 1000" aria-label="ช้ากว่า (ms)"
                 className={inputCls} />
             </FilterField>
           </FilterRow>
