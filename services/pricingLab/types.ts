@@ -533,6 +533,13 @@ export interface PriceOutcome {
 // ⇒ ทุกข้อความในนี้ถูกเขียน **ในจุดเดียวกับที่คิดเงินจริง** (`computePrice`) จากตัวแปรชุดเดียวกัน
 // ห้ามเขียนตัวคิดคำอธิบายแยกอีกชุด ไม่งั้นวันหนึ่งคำอธิบายกับตัวเลขจะไม่ตรงกันแล้วคนตรวจจะเชื่อคำอธิบาย
 
+/**
+ * ค่านี้มาจากไหน แบบที่หน้าจอใช้ติดป้าย — `from` คือประโยคเต็มของเรื่องเดียวกัน (CLI + ด่านอ่าน)
+ * code = อ่านจากรหัส · default = ระบบเติมค่าตั้งต้น (รวมมาตรฐานของรุ่น) · calc = คำนวณจากค่าอื่น
+ * · sub = รหัสย่อยตั้งให้ · offCode = กรอกในช่องนอกรหัส · missing = ไม่มีค่า / ยังไม่ได้กำหนด
+ */
+export type TraceOrigin = 'code' | 'default' | 'calc' | 'sub' | 'offCode' | 'missing';
+
 /** หนึ่งค่าที่ใช้คิด และมาจากไหน (ในรหัส · ค่ามาตรฐานของรุ่น · รหัสย่อย · คำนวณจากค่าอื่น) */
 export interface TraceInput {
   kind: 'axis' | 'dim' | 'option';
@@ -540,11 +547,16 @@ export interface TraceInput {
   label: string;
   value: string;
   from: string;
+  origin: TraceOrigin;
+  /** มาตรฐานของรุ่น (เฉพาะขนาดที่รหัสระบุเอง) — "150 (มาตรฐาน 100)" บอกได้ทันทีว่าเกินเท่าไหร่ */
+  std?: string;
 }
 
 export interface TraceBase {
   ok: boolean;
   label: string;
+  /** ประโยคเดียวว่าราคาตั้งมาจากไหน ("ตาราง TS-03 · 3.2A × Type K/J") หรือทำไมหาไม่ได้ — ขึ้นจอเสมอ */
+  why: string;
   steps: string[];
   amount?: Money;
 }
@@ -559,11 +571,20 @@ export interface TraceRule {
   status: 'applied' | 'skipped' | 'blocked' | 'waiting' | 'off';
   /** ประโยคสั้น ๆ ว่าทำไมได้สถานะนี้ (ไม่มีเมื่อ applied) */
   reason?: string;
+  /** ประโยคเดียวว่าเงินก้อนนี้คิดยังไง ("เกิน 50 mm → 1 ช่วง × 150") — มีเฉพาะ applied · ขั้นเต็มอยู่ใน `steps` */
+  why?: string;
+  /**
+   * ข้ามเพราะอะไร (คู่กับ skipped) — หน้าจอรวมเป็นกลุ่มบรรทัดเดียวแทนแถวละข้อ
+   * notInCode = รหัสไม่มีตัวเลือกที่กฎนี้ต้องการ · withinStd = ยาว/ใหญ่ไม่เกินมาตรฐาน · other = เหตุอื่น (ดู `reason`)
+   */
+  skip?: 'notInCode' | 'withinStd' | 'other';
   steps: string[];
   amount?: Money;
   running?: Money;
-  /** ที่มาในชีต (`Adder.source`) */
+  /** ที่มาในชีต (`Adder.source`) — ประโยคเต็มรวมเหตุผลของการตั้งกฎ (CLI พิมพ์ทั้งหมด) */
   source?: string;
+  /** ตำแหน่งช่องในชีตที่ดึงจาก `source` ("TS-03!B11") — หน้าจอโชว์แค่นี้ (เจ้าของเลือก 2026-10-07) */
+  cells?: string[];
 }
 
 export interface TraceCheck {
@@ -571,6 +592,13 @@ export interface TraceCheck {
   hit: boolean;
   level: Constraint['level'];
   condition: string;
+  /**
+   * ข้อที่ไม่ติดแยกเป็นสองแบบ — pass = ใบนี้อยู่ในขอบเขตของข้อห้ามแต่ค่าไม่เข้าข่าย ·
+   * na = ใบนี้ไม่มีตัวเลือกที่ข้อห้ามพูดถึง (ไม่เกี่ยว) · เดิมขึ้น "ผ่าน" ทั้งคู่ซึ่งทำให้ดูเหมือนตรวจแล้วจริงทุกข้อ
+   */
+  verdict: 'hit' | 'pass' | 'na';
+  /** ค่าของใบนี้ที่ตัดสิน ("ใบนี้ 100" · "ใบนี้ไม่มี 2 element") — แทนการพิมพ์เงื่อนไขเต็ม */
+  note: string;
   source?: string;
 }
 

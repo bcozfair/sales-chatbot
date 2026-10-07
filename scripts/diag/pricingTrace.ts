@@ -63,6 +63,15 @@ function inconsistency(o: PriceOutcome): string {
     if (v.level === 'block' && ruleIds.has(v.id) && !blockedIds.has(v.id)) return `คำเตือน ${v.id} แต่กฎนั้นไม่ได้ขึ้นคิดไม่ได้`;
     if (v.partial && t.rules.find((r) => r.id === v.id)?.status !== 'waiting') return `คำเตือน ${v.id} (ยังไม่รวม) แต่กฎนั้นไม่ได้ขึ้นยังไม่รวม`;
   }
+  // ข้อความบรรทัดเดียวของการ์ดต้องมีครบ — การ์ดไม่มีทางแต่งเองแทน (ห้ามเขียนคำอธิบายฝั่งจอ)
+  if (!t.base.why) return 'ราคาตั้งไม่มีประโยคบรรทัดเดียว (base.why)';
+  for (const r of t.rules) {
+    if (r.status === 'skipped' && !r.skip) return `กฎ "${r.label}" ข้ามแต่ไม่บอกกลุ่ม (skip)`;
+    if (r.status === 'skipped' && !r.reason) return `กฎ "${r.label}" ข้ามแต่ไม่บอกเหตุผล`;
+    if (r.status !== 'skipped' && r.skip) return `กฎ "${r.label}" ไม่ได้ข้ามแต่มีกลุ่ม skip`;
+  }
+  for (const c of t.checks) if ((c.verdict === 'hit') !== c.hit) return `ข้อห้าม "${c.message}" verdict=${c.verdict} แต่ hit=${c.hit}`;
+  if (t.inputs.some((i) => !i.origin)) return 'ค่าที่ใช้คิดบางตัวไม่มี origin';
   const hits = t.checks.filter((c) => c.hit).length;
   // คำเตือนจากค่านอกแคตตาล็อก (`askPrice` · TS_-01 2026-09-29) ไม่ได้มาจากข้อห้าม — ตรวจแยกข้างล่าง
   const fromConstraints = o.violations.filter((v) => !ruleIds.has(v.id) && !v.id.startsWith('SUBCODE_') && v.id !== 'NO_BASE_PRICE' && !v.askPrice).length;
@@ -112,11 +121,12 @@ async function main(): Promise<void> {
   check('ค่าที่พิมพ์มาบอกมาตรฐานของรุ่นด้วย', t.inputs.some((i) => i.key === 'L2' && i.from.includes('ระบุในรหัส') && i.from.includes('50')));
   check('ราคาตั้งบอกช่องที่เปิด', t.base.steps.some((s) => s.includes('ขนาดแกน = 6')) && t.base.amount === 1000);
   check('ราคาตั้งบอกว่ารวมสเปกมาตรฐานไว้แล้ว', t.base.steps.some((s) => s.includes('รวมสเปกมาตรฐานไว้แล้ว')));
-  check('ปัดขึ้น: 2.5 → 3 ช่วง', rule('len').steps.some((s) => s.includes('250 ÷ 100 = 2.5') && s.includes('ปัดขึ้น') && s.includes('= 3 ช่วง')),
+  check('ปัดขึ้น: 2.5 → 3 ช่วง', rule('len').steps.some((s) => s.includes('250 ÷ 100 = 2.5') && s.includes('ปัดขึ้น') && s.includes('→ 3 ช่วง')),
     rule('len').steps.join(' | '));
   check('สูตรเงิน 3 × 300 = 900', rule('len').steps.some((s) => s.includes('3 × 300 = 900')));
   check('over ที่ไม่ได้ตั้งในกฎ = มาตรฐานของรุ่น (ไม่ใช่ 0)', rule('cab').steps.some((s) => s.includes('มาตรฐานของรุ่น 1')));
-  check('ปัดลง: 1.5 → 1 ช่วง', rule('cab').steps.some((s) => s.includes('1.5 ÷ 1 = 1.5') && s.includes('ปัดลง') && s.includes('= 1 ช่วง')));
+  check('ปัดลง: 1.5 → 1 ช่วง', rule('cab').steps.some((s) => s.includes('1.5 ÷ 1 = 1.5') && s.includes('ตัดเศษ') && s.includes('→ 1 ช่วง')),
+    rule('cab').steps.join(' | '));
   check('ที่มาในชีตติดมาด้วย', rule('len').source === 'TOY!A1');
   check('เงื่อนไขไม่ตรง ⇒ ขึ้น "ไม่คิด" พร้อมเหตุผล', rule('thr').status === 'skipped' && rule('thr').steps[0]?.includes('ใบนี้ไม่มี') === true);
   check('กฎที่ปิดไว้ยังโผล่ แต่ขึ้น "ปิดไว้"', rule('old').status === 'off' && rule('old').amount === undefined);
@@ -124,7 +134,22 @@ async function main(): Promise<void> {
   check('trace ตรงกับเงิน (ตัวตรวจข้อ 2)', inconsistency(o) === '', inconsistency(o));
 
   const within = computePrice({ model: 'TOY-1', axes: { D: '6' }, dims: { L1: 50 } }, toy);
-  check('ไม่เกินมาตรฐาน ⇒ ขึ้น "ไม่คิด" ไม่ใช่หายไป', within.trace!.rules.find((r) => r.id === 'len')?.reason?.includes('ไม่เกินมาตรฐาน') === true);
+  const wLen = within.trace!.rules.find((r) => r.id === 'len');
+  check('ไม่เกินเกณฑ์ ⇒ ขึ้น "ไม่คิด" กลุ่มไม่เกินมาตรฐาน พร้อมค่าจริง ไม่ใช่หายไป',
+    wLen?.status === 'skipped' && wLen.skip === 'withinStd' && wLen.reason === 'ความยาวรวม 100 mm เท่ากับเกณฑ์', wLen?.reason);
+
+  // ── ข้อความบรรทัดเดียวของการ์ด (ปรับใหม่ 2026-10-07 · เจ้าของเลือกแบบ A "ใบเสร็จ") ──
+  check('ราคาตั้งมีประโยคเดียวบอกช่อง', t.base.why === 'ช่อง 6', t.base.why);
+  check('กฎที่คิดเงินมีประโยคเดียว: เกิน 250 mm → 3 ช่วง × 300', rule('len').why === 'เกิน 250 mm → 3 ช่วง × 300', rule('len').why);
+  check('ตัวเลือกที่ใบนี้ไม่มี ⇒ กลุ่ม "ใบนี้ไม่มี"', rule('thr').skip === 'notInCode' && rule('thr').reason === 'ใบนี้ไม่มี รุ่นมีเกลียว', rule('thr').reason);
+  check('ที่มาในชีตแยกตำแหน่งช่องได้', JSON.stringify(rule('len').cells) === '["TOY!A1"]', JSON.stringify(rule('len').cells));
+  check('ข้อห้ามที่ไม่ติดแต่ค่าอยู่ในขอบเขต = "ผ่าน" พร้อมค่าของใบนี้', t.checks[0]?.verdict === 'pass' && t.checks[0]?.note === 'ใบนี้ ความยาวรวม 350', t.checks[0]?.note);
+  check('ที่มาของค่า: พิมพ์มา / มาตรฐาน / คำนวณ', t.inputs.find((i) => i.key === 'L1')?.origin === 'code' && t.inputs.find((i) => i.key === 'L1')?.std === '100'
+    && t.inputs.find((i) => i.key === 'L_total')?.origin === 'calc' && within.trace!.inputs.find((i) => i.key === 'L2')?.origin === 'default');
+  const toyNa: PriceBook = structuredClone(toy);
+  toyNa.models['TOY-1']!.constraints = [{ id: 'NA', when: { all: [{ option: 'thread' }, { dim: 'L1', lt: 500 }] }, level: 'block', message: 'เกลียวต้องยาว 500 ขึ้นไป' }];
+  const na = computePrice({ model: 'TOY-1', axes: { D: '6' }, dims: { L1: 200 } }, toyNa).trace!.checks[0];
+  check('ข้อห้ามของตัวเลือกที่ใบนี้ไม่มี = "ไม่เกี่ยว" ไม่ใช่ "ผ่าน"', na?.verdict === 'na' && na.note === 'ใบนี้ไม่มี รุ่นมีเกลียว', `${na?.verdict} ${na?.note}`);
   const tooLong = computePrice({ model: 'TOY-1', axes: { D: '6' }, dims: { L1: 2000 } }, toy);
   check('ข้อห้ามที่ติด ⇒ ขึ้น "ติด"', tooLong.trace!.checks[0]?.hit === true && inconsistency(tooLong) === '', inconsistency(tooLong));
   // ช่องว่าง = ยังไม่มีราคา ⇒ กฎคิดต่อเป็นราคาเท่าที่คิดได้ ไม่ใช่ไม่รับผลิต (เจ้าของสั่ง 2026-10-05)

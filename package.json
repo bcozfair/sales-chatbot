@@ -75,6 +75,7 @@
     "diag:pricing": "tsx scripts/diag/pricingLab.ts && tsx scripts/diag/pricingGolden.ts && tsx scripts/diag/pricingRoundtrip.ts && tsx scripts/diag/pricingImport.ts && tsx scripts/diag/pricingModelEdit.ts && tsx scripts/diag/pricingDbRoundtrip.ts && tsx scripts/diag/pricingTrace.ts && tsx scripts/diag/pricingCatalogBh.ts && tsx scripts/diag/pricingCatalogTs.ts",
     "diag:pricing-db": "tsx scripts/diag/pricingDbRoundtrip.ts",
     "diag:pricing-trace": "tsx scripts/diag/pricingTrace.ts",
+    "diag:pricing-trace-ui": "tsx scripts/diag/pricingTraceUi.ts",
     "diag:pricing-catalog": "tsx scripts/diag/pricingCatalogBh.ts",
     "diag:pricing-catalog-ts": "tsx scripts/diag/pricingCatalogTs.ts",
     "diag:pricing-catalog-ui": "tsx scripts/diag/pricingCatalogUi.ts",

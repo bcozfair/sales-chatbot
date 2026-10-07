@@ -229,20 +229,43 @@ export interface PriceOutcome {
   trace?: PriceTrace;
 }
 
+/**
+ * ฝั่ง backend: `PriceTrace` ใน services/pricingLab/types.ts — ช่องที่เป็นประโยค (`why` · `reason` · `note` · `steps`)
+ * เขียนที่เซิร์ฟเวอร์ในจุดเดียวกับที่คิดเงินทั้งหมด หน้าจอแค่จัดวาง
+ */
 export interface PriceTrace {
-  inputs: { kind: 'axis' | 'dim' | 'option'; key: string; label: string; value: string; from: string }[];
-  base: { ok: boolean; label: string; steps: string[]; amount?: number };
+  inputs: {
+    kind: 'axis' | 'dim' | 'option';
+    key: string;
+    label: string;
+    value: string;
+    from: string;
+    origin: 'code' | 'default' | 'calc' | 'sub' | 'offCode' | 'missing';
+    std?: string;
+  }[];
+  base: { ok: boolean; label: string; why: string; steps: string[]; amount?: number };
   rules: {
     id: string;
     label: string;
     status: 'applied' | 'skipped' | 'blocked' | 'waiting' | 'off';
     reason?: string;
+    why?: string;
+    skip?: 'notInCode' | 'withinStd' | 'other';
     steps: string[];
     amount?: number;
     running?: number;
     source?: string;
+    cells?: string[];
   }[];
-  checks: { message: string; hit: boolean; level: 'block' | 'quoteOnRequest' | 'warn'; condition: string; source?: string }[];
+  checks: {
+    message: string;
+    hit: boolean;
+    level: 'block' | 'quoteOnRequest' | 'warn';
+    condition: string;
+    verdict: 'hit' | 'pass' | 'na';
+    note: string;
+    source?: string;
+  }[];
 }
 
 /** `GET /api/admin/pricebook/unread` — ท่อนที่ตัวอ่านรหัสยังอ่านไม่ออก นับสดจากรหัสสินค้าจริง (`subcodeView.ts`) */
