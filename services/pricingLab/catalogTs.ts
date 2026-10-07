@@ -446,12 +446,18 @@ export const TS_CATALOG: TsFamilySpec[] = [
       { sep: '-' }, { slot: 'elem' }, { sep: '-' }, { slot: 'hd' }, { slot: 'ground' }],
     slots: {
       sensor: ch('ชนิดของ Sensor', RTD), thread: ch('ขนาดเกลียว', [...INCH, ...METRIC]),
-      d: ch('ขนาดแกน', mm(D_RTD, TITANIUM)), mat: ch('วัสดุ', MAT_RTD),
+      // B / I = ตาราง Diameter Tube ของแคตตาล็อก TS_-08 (15.8 = SUS 310S · 21.3 = SUS 310S, Inconel) — ไม่ได้อยู่ในช่อง Type of Material
+      // แต่ไม่มีสองตัวนี้ แถว `21.3B`/`21.3I` ของชีตจะกลายเป็นแถวสีส้ม "ราคาที่แอดมินใส่" และเพิ่มแถว `15.8B` จากหน้าชีตไม่ได้ (ตรวจ 2026-10-07)
+      d: ch('ขนาดแกน', mm(D_RTD, TITANIUM)),
+      mat: ch('วัสดุ', [...MAT_RTD.slice(0, 2), o('B', 'SUS 310S (แกน 15.8 · 21.3)'), o('I', 'Inconel (แกน 21.3)'), ...MAT_RTD.slice(2)]),
       l1: L1, elem: ch('จำนวน Element', ELEMENT, 'ทำ 2 Element ได้ตั้งแต่แกน 6 mm'),
       hd: ch('ชนิดหัวกระโหลก', HEADS), ground: ch('Ground', GROUND_RTD),
     },
     defaults: { sensor: 'P', thread: 'S4', d: '6', mat: '', l1: '100', elem: '', hd: '', ground: 'U' },
     addons: TS_ADDONS,
+    // ขนาดแกนที่ทั้งแคตตาล็อกและชีตไม่มี (`10.2` · `10.2A` · `12` · `9` …) = ต้องขอราคา + แถวสีส้ม แบบ TS_-02–07
+    // (ตรวจ TS_-08 2026-10-07 · เดิมขึ้น "รหัสไม่ได้บอกขนาดแกน" ทั้งที่รหัสบอกแล้ว) · เกลียวไม่อยู่ในนี้ — แนวเดียวกับ TS_-04/06
+    askPrice: { d: 'D' },
   },
   {
     family: 'TS_-10', head: 'TS_-10', name: 'RTD · Thread + Spring + Cable', model: 'TSP-10',

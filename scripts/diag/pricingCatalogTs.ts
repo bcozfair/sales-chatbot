@@ -824,6 +824,42 @@ async function main(): Promise<void> {
         `${r.o?.status} ${r.o?.unitPrice} L1=${r.p.cfg?.dims?.L1}`);
     }
   }
+
+  // ── 16. TS_-08 — ตรวจทั้งซีรีส์ 2026-10-07 ─────────────────────────────────────────────────────────────
+  // แกนนอกตาราง = ขอราคา + แถวสีส้ม (แนว TS_-02–07) · วัสดุ B/I ของแคตตาล็อก (15.8 · 21.3) อยู่ในช่องวัสดุ ⇒ แถว 21.3B/21.3I ของชีตไม่ส้ม
+  section('16. TS_-08 — แกนนอกตาราง = ขอราคา · วัสดุ B/I ตามตาราง Diameter Tube (ตรวจ 2026-10-07)');
+  const p08 = book.models['TSP-08'];
+  if (!p08) {
+    console.log(`  ${YEL}…${RESET} เล่มนี้ไม่มี TSP-08 — ข้าม`);
+  } else {
+    const cell08 = (d: string, thread: string, sensor: string) => p08.base.kind === 'matrix'
+      ? p08.base.cells[`${d} | ${thread} | ${sensor}`] ?? NaN : NaN;
+    const rate08 = (id: string, key: string) => p08.adders.find((a) => a.id === id)?.rates?.[key] ?? NaN;
+    const amt08 = (id: string) => p08.adders.find((a) => a.id === id)?.amount ?? NaN;
+    const std = price('TSP-08(S4)6x100');
+    check('ราคาตั้ง = ชีต แกน 6 × เกลียว 1/2” × TSP (Standard TS_- 08(S_) 6x100) ไม่มีบรรทัดอื่น', std.o?.status === 'priced' &&
+      std.o.unitPrice === cell08('6', '1/2”', 'TSP') && std.o.breakdown.length === 1, `${std.o?.unitPrice}`);
+    const full = price('TSPA-08(S2)6Ax300-2-KB');
+    check('TSPA + ความยาว (ปัดขึ้นทุก 100) + 2 Element + หัว KB = ชีตทุกช่อง', full.o?.status === 'priced' &&
+      full.o.unitPrice === cell08('6A', '1/4”', 'TSPA') + 2 * rate08('len_l1', '6A') + rate08('element_2', '6A') + amt08('head_blacklite_l'), `${full.o?.unitPrice}`);
+    const b213 = price('TSZ-08(S8)21.3Bx500-B');
+    check('แกน 21.3B (SUS 310S) ได้ราคาเต็ม · ช่องวัสดุ = B', b213.o?.status === 'priced' && b213.p.tsForm?.values.mat === 'B' && !b213.p.tsForm?.issues &&
+      b213.o.unitPrice === cell08('21.3B', '1”', 'TSZ') + 4 * rate08('len_l1', '21.3B') + amt08('head_alu_l'), `${b213.o?.unitPrice} ${JSON.stringify(b213.p.tsForm?.issues)}`);
+    check('แถวของชีตไม่มีตัวไหนขึ้นเป็นแถวสีส้ม "ราคาที่แอดมินใส่" (21.3B · 21.3I · 3.2A · 4.8 …)', !(offCatalogValues(p08).D ?? []).length,
+      JSON.stringify(offCatalogValues(p08)));
+    const d102 = price('TSP-08(S3)10.2Ax100-U');
+    check('แกน 10.2A (ไม่มีทั้งแคตตาล็อกและชีต) = ต้องขอราคา · ช่องกรอกขึ้น ask · เดิม "รหัสไม่ได้บอกขนาดแกน"',
+      d102.o?.status === 'quoteOnRequest' && d102.o.violations.some((v) => v.askPrice) && !d102.o.violations.some((v) => v.missing) &&
+        d102.p.tsForm?.issues?.d === 'ask', `${d102.o?.status} ${JSON.stringify(d102.p.tsForm?.issues)}`);
+    check('แอดมินเพิ่มแกน 10.2A เป็นแถวสีส้มที่หน้าชีตได้', askValueProblem(p08, 'd', '10.2A') === undefined, askValueProblem(p08, 'd', '10.2A'));
+    const b158 = price('TSP-08(S6)15.8Bx300-BU');
+    check('แกน 15.8B (แคตตาล็อกมี · ชีตไม่มีแถว) = ยังไม่มีราคา · หัว B คิดครั้งเดียว · เพิ่มแถวจากหน้าชีตได้', noRate(b158.o) &&
+      b158.o?.unitPrice === amt08('head_alu_l') && askValueProblem(p08, 'd', '15.8B') === undefined, `${b158.o?.status} ${b158.o?.unitPrice}`);
+    const e5 = price('TSP-08(S4)5x100-2-BU');
+    check('2 Element แกน 5 = ไม่รับผลิต (แคตตาล็อก: 6 mm ขึ้นไป)', e5.o?.status === 'notManufacturable', `${e5.o?.status}`);
+    const s = price('TSP-08(S4)6x100-SU');
+    check('หัว S (Excel ไม่มีราคา · แถวรหัสย่อยค่าว่าง) = ยังไม่มีราคา', noRate(s.o), `${s.o?.status}`);
+  }
 }
 
 main()
