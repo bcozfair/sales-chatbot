@@ -1,0 +1,138 @@
+{
+  "file": "ราคาTC อัพเดต (13-05-69).xlsx",
+  "sheet": "TS-07",
+  "code": "TSK-07",
+  "label": "Thermocouple / NTC / PTC TS-07 (หน้าแปลนปีกนก + หัวกระโหลก)",
+  "aliases": ["TSJ-07", "TST-07", "TSN-07"],
+  "standard": { "L1": 100 },
+  "base": {
+    "kind": "matrix",
+    "axes": ["D", "sensor"],
+    "rowHeaderCol": "A",
+    "rows": [14, 50],
+    "colHeaderRow": 13,
+    "cols": ["C"]
+  },
+  "adders": [
+    {
+      "id": "len_l1",
+      "label": "ความยาวแกน L1",
+      "order": 20,
+      "kind": "perUnit",
+      "dim": "L1",
+      "step": 100,
+      "round": "ceil",
+      "unit": "mm",
+      "byAxis": "D",
+      "ratesFrom": { "col": "B", "keyCol": "A", "rows": [14, 50] },
+      "source": "TS-07!B13 'บวกเพิ่ม 100 mm ละ' — ราคาตั้งที่ 100 mm (A11 'ราคาตั้ง Standard TS_- 07 6x100' = แคตตาล็อก Standard 100 mm)"
+    },
+    {
+      "id": "sensor_t",
+      "label": "Type T (บวกเพิ่มจาก Type K/J)",
+      "order": 30,
+      "kind": "flat",
+      "when": { "option": "sensor:T" },
+      "byAxis": "D",
+      "ratesFrom": { "col": "D", "keyCol": "A", "rows": [14, 50] },
+      "source": "TS-07!D13 'Type T บวกเพิ่ม' — แถวแกนสำเร็จ (S) ว่าง = ยังไม่มีราคา"
+    },
+    {
+      "id": "sensor_ntc",
+      "label": "NTC / PTC (บวกเพิ่มจาก Type K/J)",
+      "order": 30,
+      "kind": "flat",
+      "when": { "option": "sensor:NTC" },
+      "byAxis": "D",
+      "ratesFrom": { "col": "E", "keyCol": "A", "rows": [14, 50] },
+      "source": "TS-07!E13 'NTC / PTC บวกเพิ่ม' — ช่องว่างของแกนต่ำกว่า 5 mm (แคตตาล็อก TS_-07 '***NTC/PTC Diameter 5 mm. ขึ้นไป')"
+    },
+    {
+      "id": "element_2",
+      "label": "2 element (Type K/J)",
+      "order": 35,
+      "kind": "flat",
+      "when": { "option": "element:2" },
+      "byAxis": "D",
+      "ratesFrom": { "col": "F", "keyCol": "A", "rows": [14, 50] },
+      "source": "TS-07!F13 '2 element บวกเพิ่ม' — ชีตมีราคาตั้งแต่แกน 6 mm ตรงกับแคตตาล็อก · แกนเล็กกว่าถูกห้ามที่ข้อจำกัด ELEM2_MIN_DIA"
+    },
+    {
+      "id": "coat_teflon",
+      "label": "หุ้มเทปล่อน",
+      "order": 40,
+      "kind": "perUnit",
+      "when": { "option": "coat:teflon" },
+      "dim": "teflon_mm",
+      "over": 0,
+      "step": 100,
+      "round": "ceil",
+      "unit": "mm",
+      "byAxis": "D",
+      "ratesFrom": { "col": "J", "keyCol": "A", "rows": [14, 50] },
+      "source": "TS-07!J13 'หุ้มเทปล่อน เพิ่ม 100มม. ละ' — มีอัตราเฉพาะแกน 4 · 4A · 6 · 6A ตรงกับแคตตาล็อก 'แกนเคลือบเทปล่อน (เฉพาะแกน 4mm และ 6mm)'"
+    },
+    {
+      "id": "head_blacklite_s",
+      "label": "หัวกระโหลก Blacklite เล็ก",
+      "order": 50,
+      "kind": "flat",
+      "when": { "option": "head:blacklite_s" },
+      "byAxis": "D",
+      "ratesFrom": { "col": "G", "keyCol": "A", "rows": [14, 50] },
+      "source": "TS-07!G13 'Blacklite เล็ก' — ชีตเว้นว่างแกน 17.5A ขึ้นไป = ยังไม่มีราคา"
+    },
+    {
+      "id": "head_alu_l",
+      "label": "หัวกระโหลก อลูมิเนียม ใหญ่",
+      "order": 50,
+      "kind": "flat",
+      "when": { "option": "head:alu_l" },
+      "byAxis": "D",
+      "ratesFrom": { "col": "H", "keyCol": "A", "rows": [14, 50] },
+      "source": "TS-07!H13 'อลูมิเนียม ใหญ่'"
+    },
+    {
+      "id": "head_blacklite_l",
+      "label": "หัวกระโหลก Blacklite ใหญ่",
+      "order": 50,
+      "kind": "flat",
+      "when": { "option": "head:blacklite_l" },
+      "byAxis": "D",
+      "ratesFrom": { "col": "I", "keyCol": "A", "rows": [14, 50] },
+      "source": "TS-07!I13 'Blackliteใหญ่'"
+    },
+    {
+      "id": "bend_l",
+      "label": "หัก L ดัดงอ",
+      "order": 55,
+      "kind": "flat",
+      "when": { "option": "bend:L" },
+      "amount": 100,
+      "source": "TS-07!B9 'สำหรับรุ่นหัก L ดัดงอ บวกเพิ่ม 100 บาท'"
+    },
+    {
+      "id": "bend_square",
+      "label": "หักฉาก (เชื่อมฉาก)",
+      "order": 55,
+      "kind": "flat",
+      "when": { "option": "bend:square" },
+      "amount": 200,
+      "source": "TS-07!B9 'แบบฉาก (เชื่อมฉาก) บวกเพิ่ม 200 บาท'"
+    }
+  ],
+  "constraints": [
+    {
+      "id": "ELEM2_MIN_DIA",
+      "when": {
+        "all": [
+          { "option": "element:2" },
+          { "axis": "D", "in": ["2", "2.5S", "3", "3A", "3S", "3.2", "3.2A", "3.2S", "4", "4A", "4.8", "4.8A", "4.8S", "5"] }
+        ]
+      },
+      "level": "block",
+      "message": "2 element ทำได้ตั้งแต่แกน 6 mm ขึ้นไป",
+      "source": "แคตตาล็อก TS_-07 '*สำหรับรุ่น 2 Element สามารถผลิตรุ่นขนาดแกน 6 mm ขึ้นไป' · ชีต TS-07 คอลัมน์ F ว่างทุกแถวที่เล็กกว่า 6"
+    }
+  ]
+}

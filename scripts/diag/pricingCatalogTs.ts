@@ -100,7 +100,7 @@ async function main(): Promise<void> {
   // ── 1. รหัสจริงทุกตัว: อ่าน → ช่อง → ประกอบกลับ → ราคาเท่าเดิม ─────────────────────
   section('1. รหัสจริงในฐาน (products) — อ่านเป็นช่องแล้วประกอบกลับต้องได้รหัสเดิมและราคาเท่าเดิม');
   const { rows } = await pool.query<{ model: string }>(
-    `SELECT DISTINCT model FROM products WHERE model ~* '^(TS[A-Z]*|[NP][0-9]{1,2})-(01|02|03|04|06|08|10|11|12|14|18)'`
+    `SELECT DISTINCT model FROM products WHERE model ~* '^(TS[A-Z]*|[NP][0-9]{1,2})-(01|02|03|04|05|06|07|08|10|11|12|14|18)'`
   );
   // ตั้งแต่ 2026-10-01 ทุกรหัสได้ช่อง (เจ้าของ: "ใช้หน้าตา ui เป็นมาตรฐานเดียวกัน อะไรไม่ตรงก็แค่แจ้งเตือน") —
   // ตรงแคตตาล็อกทุกตัวอักษร (`readTsForm`) = เกณฑ์เดิมทุกข้อ · นอกรูปแบบ (`readTsFormLoose`) = ประกอบกลับเป็นรหัสเดิมเกือบทุกตัว
@@ -766,6 +766,57 @@ async function main(): Promise<void> {
       check('เพิ่มแถวที่มีอยู่แล้ว (15.97B) ยังถูกปฏิเสธ', (() => {
         try { applySheetEdit(book, k06.sheet!, { 'TSK-06': { addValues: { D: ['15.97B'] } } }); return false; } catch (e) { return e instanceof EditRejected; }
       })());
+    }
+  }
+
+  // ── 15. TS_-07 (2026-10-07) — รุ่นใหม่ TSK-07 · หน้าแปลนปีกนก + หัวกระโหลก · เทียบกับช่องของชีต ไม่ใช่ตัวเลขที่จดไว้ ──
+  section('15. TS_-07 — ชีต TS-07 + แคตตาล็อก TS_-07 (หัวกระโหลกรายขนาดแกน · แกนสองขนาด = ขอราคา)');
+  const k07 = book.models['TSK-07'];
+  if (!k07) {
+    console.log(`  ${YEL}…${RESET} เล่มนี้ยังไม่มี TSK-07 — ข้าม (ตรวจก่อนเขียนฐานด้วย -- --book <ไฟล์จาก importer.ts --new-models --out>)`);
+  } else {
+    const cell07 = (d: string) => k07.base.kind === 'matrix' ? k07.base.cells[`${d} | Type K/J`] ?? NaN : NaN;
+    const rate07 = (id: string, key: string) => k07.adders.find((a) => a.id === id)?.rates?.[key] ?? NaN;
+    const std = price('TSK-07 6x100');
+    check('ราคาตั้ง = แถวแกน 6 ของชีต (A11 "TS_- 07 6x100") ไม่มีบรรทัดอื่น', std.o?.status === 'priced' && std.o.unitPrice === cell07('6') &&
+      std.o.breakdown.length === 1, `${std.o?.unitPrice}`);
+    check('ได้ช่องตามแคตตาล็อก TS_-07 ตรงทุกตัวอักษร · ประกอบกลับเป็นรหัสเดิม (เว้นวรรคหลังเลขรุ่น)',
+      std.p.tsForm?.family === 'TS_-07' && !!readTsForm('TSK-07 6x100', 'TS_-07') && buildTsCode(std.p.tsForm!) === 'TSK-07 6x100',
+      std.p.tsForm ? buildTsCode(std.p.tsForm) : '—');
+    const len = price('TSK-07 21.3Bx250');
+    check('ความยาวแกน = ทุก 100 mm ที่เกิน ปัดขึ้น (21.3B: 2 ช่วง)', len.o?.unitPrice === cell07('21.3B') + 2 * rate07('len_l1', '21.3B'), `${len.o?.unitPrice}`);
+    for (const [hd, id] of [['B', 'head_alu_l'], ['K', 'head_blacklite_s'], ['KB', 'head_blacklite_l']] as const) {
+      const r = price(`TSK-07 8x100-${hd}`);
+      check(`หัว ${hd} = คอลัมน์ ${id} ของแถวแกน 8 (ราคาหัวรายขนาดแกน ไม่ใช่ช่องเดียวแบบ TS-06)`, r.o?.status === 'priced' &&
+        r.o.unitPrice === cell07('8') + rate07(id, '8'), `${r.o?.unitPrice}`);
+    }
+    const k175 = price('TSK-07 17.5Ax100-K');
+    check('หัว K ของแกน 17.5A (ชีตเว้นว่าง) = ยังไม่มีราคา ไม่ใช่ไม่รับผลิต', noRate(k175.o), `${k175.o?.status}`);
+    const ss = price('TSK-07 6x100-SS');
+    check('หัว SS (Excel ไม่มีราคา · แถวรหัสย่อยค่าว่าง) = ยังไม่มีราคา', noRate(ss.o), `${ss.o?.status}`);
+    const e2 = price('TSK-07 6x150-2-B');
+    check('2 Element + หัว B = ราคาตั้ง + ความยาว + คอลัมน์ F + หัว B', e2.o?.status === 'priced' &&
+      e2.o.unitPrice === cell07('6') + rate07('len_l1', '6') + rate07('element_2', '6') + rate07('head_alu_l', '6'), `${e2.o?.unitPrice}`);
+    const e2s = price('TSK-07 4x100-2');
+    check('2 Element แกน 4 = ไม่รับผลิต (แคตตาล็อก: 6 mm ขึ้นไป)', e2s.o?.status === 'notManufacturable', `${e2s.o?.status}`);
+    const t = price('TST-07 6x100');
+    check('Type T = ราคาตั้ง K/J + คอลัมน์ D', t.o?.status === 'priced' && t.o.unitPrice === cell07('6') + rate07('sensor_t', '6'), `${t.o?.unitPrice}`);
+    const ntc = price('N10-07 6x100-U');
+    check('หัว N10-07 (แคตตาล็อก "N_-07") = NTC บวกเพิ่มคอลัมน์ E · U ไม่มีราคาเพิ่ม', ntc.o?.status === 'priced' &&
+      ntc.o.unitPrice === cell07('6') + rate07('sensor_ntc', '6'), `${ntc.o?.status} ${ntc.o?.unitPrice}`);
+    const tn = price('TSK-07 7TNx100');
+    check('แกน 7TN (ชีตมีแถวแต่ราคาตั้งว่าง) = ไม่ได้ราคาเต็ม และไม่ใช่ไม่รับผลิต', tn.o?.status === 'quoteOnRequest', `${tn.o?.status}`);
+    const lj = price('TSK-07L 6x100');
+    check('ตัว L = หัก L +100 ตามชีต B9 (กฎกลาง SUFFIX_ADDON)', lj.o?.unitPrice === cell07('6') + 100, `${lj.o?.unitPrice}`);
+    const d102 = price('TSK-07 10.2x400');
+    check('แกน 10.2 (ไม่มีทั้งแคตตาล็อกและชีต) = ต้องขอราคา · ช่องกรอกขึ้น ask', d102.o?.status === 'quoteOnRequest' && d102.p.tsForm?.issues?.d === 'ask',
+      `${d102.o?.status} ${JSON.stringify(d102.p.tsForm?.issues)}`);
+    // แกนสองขนาด — เดิมอ่านแกนแรกแล้ว `-6x900` ตกเป็นท่อนไม่รู้จัก ⇒ ได้ราคาแกน 2.5S ยาว 100 mm (770 / ฐาน 4,355)
+    for (const code of ['TSJ-07 2.5S-6x900+100-S000', 'TSK-07 3-10Ax80+130-S000', 'TSK-07 15.8-21.3Bx430+270-B-S000', 'TSK-06(S4)6S-15.97Bx50+490-S000']) {
+      const r = price(code);
+      check(`${code}: แกนสองขนาด = ต้องขอราคา (ไม่คิดราคาแกนแรกแบบเงียบ ๆ) · อ่านความยาวแกนได้`, r.o?.status === 'quoteOnRequest' &&
+        r.o.violations.some((v) => v.askPrice && v.level === 'quoteOnRequest') && r.p.cfg?.dims?.L1 !== undefined,
+        `${r.o?.status} ${r.o?.unitPrice} L1=${r.p.cfg?.dims?.L1}`);
     }
   }
 }

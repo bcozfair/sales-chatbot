@@ -929,7 +929,21 @@ function readTsGeneric(c: Ctx, rest: string, prefix: string, letter = ''): void 
     threadText = threadCol ?? '';
   }
 
-  const core = rest.match(/^([0-9.]+[A-WYZ]*)(?:x([0-9.]+))?/i);
+  // แกนสองขนาดต่อกัน (`2.5S-6x900` · `3-10Ax80` · `15.8-21.3Bx430` — แกนลดขนาด · ตรวจ TS_-07 2026-10-07) ไม่มีในแคตตาล็อกและชีต
+  // เดิมอ่านแกนแรกแล้วตกไปท่อนไม่รู้จักทั้ง `-6x900` ⇒ ได้ราคาแกนแรกยาว 100 mm (770 / ฐาน 4,355) = ขอราคา · เฉพาะรุ่นที่ขนาดแกนเป็นแถว
+  const stepped = ask?.askPrice?.d && dIsRow(c.model, ask) ? rest.match(/^([0-9.]+[A-WYZ]*)-([0-9.]+[A-WYZ]*)x([0-9.]+)/i) : null;
+  if (stepped) {
+    const v = `${stepped[1]}-${stepped[2]}`.toUpperCase();
+    c.cfg.axes = { ...c.cfg.axes, D: v };
+    c.cfg.askPrice = { ...c.cfg.askPrice, D: v };
+    add(c, { text: `${stepped[1]}-${stepped[2]}`, reads: `แกนสองขนาด ${stepped[1]} → ${stepped[2]} mm — ไม่อยู่ในแคตตาล็อก ${ask!.head} ⇒ ต้องขอราคาจากฝ่ายผลิต`, kind: 'axis' });
+    if (c.model.adders.some((a) => a.dim === 'L1')) {
+      c.cfg.dims = { ...c.cfg.dims, L1: Number(stepped[3]) };
+      add(c, { text: `x${stepped[3]}`, reads: `ความยาวแกน L1 = ${stepped[3]} mm`, kind: 'dim' });
+    }
+    rest = rest.slice(stepped[0].length);
+  }
+  const core = stepped ? null : rest.match(/^([0-9.]+[A-WYZ]*)(?:x([0-9.]+))?/i);
   let teflon = false;
   if (core) {
     const dText = core[1] ?? '';

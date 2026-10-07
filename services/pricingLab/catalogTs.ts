@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-//  "การสั่งซื้อ" ของแคตตาล็อก TS — ลำดับท่อนของรหัส + ตัวเลือกของแต่ละท่อน (15 ตาราง · TS_-02 กับ TS_-02-SI ใช้รุ่นเดียวกัน)
+//  "การสั่งซื้อ" ของแคตตาล็อก TS — ลำดับท่อนของรหัส + ตัวเลือกของแต่ละท่อน (16 ตาราง · TS_-02 กับ TS_-02-SI ใช้รุ่นเดียวกัน)
 //
 //  โมดูล "คิดราคาสินค้า" — ถอดออกได้ทั้งก้อน ดู services/pricingLab/README.md · docs/pricing-code-ts-catalog.md
 //
@@ -27,7 +27,7 @@
 
 import type { CatalogOption } from './catalogBh.js';
 
-export type TsFamily = 'TS_-01' | 'TS_-01-0' | 'TS_-02' | 'TS_-02-SI' | 'TS_-03' | 'TS_-04' | 'TS_-05' | 'TS_-06' | 'TS_-08' | 'TS_-10' | 'TS_-11' | 'TS_-12' | 'TS_-12R' | 'TS_-14' | 'TS_-18';
+export type TsFamily = 'TS_-01' | 'TS_-01-0' | 'TS_-02' | 'TS_-02-SI' | 'TS_-03' | 'TS_-04' | 'TS_-05' | 'TS_-06' | 'TS_-07' | 'TS_-08' | 'TS_-10' | 'TS_-11' | 'TS_-12' | 'TS_-12R' | 'TS_-14' | 'TS_-18';
 
 export interface TsSlot {
   label: string;
@@ -167,16 +167,17 @@ const CL: TsSlot = { label: 'ความยาวสาย', kind: 'number', un
 const ch = (label: string, options: CatalogOption[], hint?: string): TsSlot => ({ label, kind: 'choice', options, ...(hint ? { hint } : {}) });
 const sensorByProbe = (tc: CatalogOption[]): TsSlot => ({ label: 'ชนิด Sensor', kind: 'choice', optionsByProbe: { TS: tc, N: NTC_TYPES, P: NTC_TYPES } });
 
-/** หัก L / หักฉาก — ชีต TS-03 · 05 · 06 · 08 · 10 · 11 · TSP-12 มีราคา แต่รหัสไม่มีท่อนนี้ (เจ้าของเคาะข้อ 8 · 2026-09-29) */
+/** หัก L / หักฉาก — ชีต TS-03 · 05 · 06 · 07 · 08 · 10 · 11 · TSP-12 มีราคา แต่รหัสไม่มีท่อนนี้ (เจ้าของเคาะข้อ 8 · 2026-09-29) */
 export const TS_ADDONS: CatalogOption[] = [o('bend:L', 'หัก L ดัดงอ'), o('bend:square', 'หักฉาก (เชื่อมฉาก)')];
 
-/** หัว NTC/PTC ตามแคตตาล็อก TS_-03 · 04 · 06 · 11 ("N_-04/P_-04") = ชนิดหัววัด + ชนิด Sensor (2 = 2K · 10 = 10K) — เจ้าของเคาะข้อ 1 */
+/** หัว NTC/PTC ตามแคตตาล็อก TS_-03 · 04 · 06 · 07 · 11 ("N_-04/P_-04") = ชนิดหัววัด + ชนิด Sensor (2 = 2K · 10 = 10K) — เจ้าของเคาะข้อ 1 */
 export const NTC_HEADS: Record<string, string> = { N2: 'NTC 2K', N10: 'NTC 10K', P2: 'PTC 2K', P10: 'PTC 10K' };
 /**
  * เลขรุ่นที่แคตตาล็อกมีหัว NTC/PTC — ตารางอื่นไม่มี (TSN-18 ของ Excel ยังพิมพ์เป็น TSN ได้เหมือนเดิม)
  * · `03` เพิ่ม 2026-10-06 พร้อมรุ่น TSK-03 (หัวแคตตาล็อก "TS_-03 / N_-03/P_-03" · รหัสจริง N2/N10/P2-03 15 ตัว)
+ * · `07` เพิ่ม 2026-10-07 พร้อมรุ่น TSK-07 (หัวแคตตาล็อก "TS_-07 / N_-07/P_-07" · รหัสจริง N10-07 8 · P2-07 1)
  */
-export const NTC_NUMBERS = ['03', '04', '06', '11'];
+export const NTC_NUMBERS = ['03', '04', '06', '07', '11'];
 
 /**
  * ตัวอักษรท้ายเลขรุ่นที่แคตตาล็อกบอกความหมาย — วันนี้ตัวเดียวคือ Spring ของ TS_-11 (P = None Spring)
@@ -418,6 +419,26 @@ export const TS_CATALOG: TsFamilySpec[] = [
     askPrice: { d: 'D' },
   },
   {
+    // แคตตาล็อก `Catalogue_Thermocouple_TS_-07.pdf` + ชีต `TS-07` (2026-10-07 · docs/pricing-code-ts-catalog.md หัวข้อ TS_-07) —
+    // หน้าแปลนปีกนก + หัวกระโหลก · ท่อนเหมือน TS_-06 แต่ไม่มีเกลียว · รหัสจริงเว้นวรรคหลังเลขรุ่น (`TSK-07 6x100` · ทุกตัวในฐาน)
+    // ราคาหัวกระโหลกของชีตนี้เป็นรายขนาดแกน (คอลัมน์ G–I) ไม่ใช่ช่องเดียวแบบ TS-06
+    family: 'TS_-07', head: 'TS_-07', name: 'Thermocouple / NTC / PTC · Flange + Head', model: 'TSK-07',
+    layout: [{ slot: 'probe' }, { slot: 'sensor' }, { sep: '-07 ' }, { slot: 'd' }, { slot: 'mat' }, { sep: 'x' }, { slot: 'l1' },
+      { sep: '-' }, { slot: 'elem' }, { sep: '-' }, { slot: 'hd' }, { slot: 'ground' }],
+    slots: {
+      probe: ch('ชนิดของหัววัด', PROBE), sensor: sensorByProbe(TC_KJT),
+      // แกน 2.5 = แถว `2.5S` ของชีตที่แคตตาล็อกไม่มี (แบบ TS_-04/06) — ตัดออกแล้วแถวที่มีราคาจาก Excel จะกลายเป็นแถวสีส้ม
+      d: ch('ขนาดแกน', mm(['2', '2.5', ...D_TC.slice(1)], { '7': '(Titanium)', '2.5': '(Excel · Sheath 316 เท่านั้น)' }), 'NTC/PTC แกน 5 mm ขึ้นไป'),
+      mat: ch('วัสดุ', MAT_TC),
+      l1: L1, elem: ch('จำนวน Element', ELEMENT, 'ทำ 2 Element ได้ตั้งแต่แกน 6 mm'),
+      hd: ch('ชนิดหัวกระโหลก', HEADS), ground: ch('Ground', GROUND, 'NTC/PTC Unground เท่านั้น'),
+    },
+    defaults: { probe: 'TS', sensor: 'K', d: '6', mat: '', l1: '100', elem: '', hd: '', ground: '' },
+    addons: TS_ADDONS,
+    // ขนาดแกนที่ทั้งแคตตาล็อกและชีตไม่มี (`10.2` · `17` · `20.3I` …) = ต้องขอราคา + แถวสีส้ม แบบ TS_-02–06
+    askPrice: { d: 'D' },
+  },
+  {
     family: 'TS_-08', head: 'TS_-08', name: 'RTD · Thread + RTD Head', model: 'TSP-08',
     layout: [{ fixed: 'TS' }, { slot: 'sensor' }, { sep: '-08(' }, { slot: 'thread' }, { sep: ')' }, { slot: 'd' }, { slot: 'mat' }, { sep: 'x' }, { slot: 'l1' },
       { sep: '-' }, { slot: 'elem' }, { sep: '-' }, { slot: 'hd' }, { slot: 'ground' }],
@@ -601,6 +622,10 @@ export function buildTsCode(form: TsForm): string {
     case 'TS_-06':
       code = `${headOf(v)}-06${hj}${par('thread')}${s('d')}${s('mat')}${xl1}${elem}${headGround}`;
       break;
+    case 'TS_-07':
+      // เว้นวรรคหลังเลขรุ่นแบบรหัสจริง (`TSK-07 6x100` · ทุกตัวในฐาน 2026-10-07)
+      code = `${headOf(v)}-07${hj} ${s('d')}${s('mat')}${xl1}${elem}${headGround}`;
+      break;
     case 'TS_-08':
       code = `TS${s('sensor')}-08${hj}${par('thread')}${s('d')}${s('mat')}${xl1}${elem}${headGround}`;
       break;
@@ -693,6 +718,7 @@ function grammar(spec: TsFamilySpec, loose = false): RegExp {
     case 'TS_-04': body = `${head}${num('04')}${paren('thread')}${dm()}${L1}${elem}${cable()}`; break;
     case 'TS_-05': body = `${head}${num('05')}${paren('id')}${dm()}${L1}${elem}${cable()}`; break;
     case 'TS_-06': body = `${head}${num('06')}${paren('thread')}${dm()}${L1}${elem}${hd()}`; break;
+    case 'TS_-07': body = `${head}${num('07')}${dm()}${L1}${elem}${hd()}`; break;
     case 'TS_-08': body = `${head}${num('08')}${paren('thread')}${dm()}${L1}${elem}${hd()}`; break;
     case 'TS_-10': body = `${head}${num('10')}${paren('thread')}${dm()}${L1}${elem}${cable()}`; break;
     case 'TS_-11': body = `${head}-11(?<spring>P)?${hj}${dm()}${L1}${elem}\\+(?<cl>${NUM})${unit}(?:(?<dash>-)?(?=[A-Z])${g('cable', 'cable')}${g('ground', 'ground')})?`;
