@@ -610,7 +610,7 @@ export const PricingLab: React.FC<Props> = ({
       {/* ── 4. แบบ 3 มิติ — ถามด้วยรหัส + ตัวเลือกชุดเดียวกับที่คิดราคา (docs/plan-product-drawing-3d.md เฟส 1) ── */}
       {result?.code && <DrawingCard code={result.code} picks={picks} headers={jsonHeaders} form={form} tsForm={tsForm} />}
 
-      {/* ── 5. วิธีคำนวณทีละขั้น — เต็มความกว้าง เพราะบรรทัดสูตรยาว ────────── */}
+      {/* ── 5. วิธีคำนวณราคา — เต็มความกว้าง: ใบเสร็จ + แถบข้าง (ค่าที่ใช้คิด · ข้อห้าม) ────────── */}
       {result?.outcome && <CalcTrace outcome={result.outcome} />}
 
       {adding && (

@@ -83,8 +83,9 @@ function resolveBase(root: string): { ref: string; why: string } {
 /** รันตัวเก็บผลในทรี `dir` เป็นโปรเซสแยก — import ของสองทรีจะได้ไม่ปนกัน */
 function capture(dir: string, label: string, extra: string[] = []): Capture {
   const out = path.join(os.tmpdir(), `pricing-diff-${process.pid}-${Date.now()}.json`);
-  const tsx = path.join(dir, 'node_modules', '.bin', 'tsx');
-  const r = spawnSync(tsx, [CAPTURE_REL, out, ...extra], { cwd: dir, env: process.env, encoding: 'utf8', timeout: 600_000 });
+  // เรียก cli ของ tsx ผ่าน node ตรง ๆ — `.bin/tsx` เป็นสคริปต์ sh ซึ่ง Windows สั่งรันไม่ได้ (exit null บนเครื่อง dev · 2026-10-07)
+  const tsx = path.join(dir, 'node_modules', 'tsx', 'dist', 'cli.mjs');
+  const r = spawnSync(process.execPath, [tsx, CAPTURE_REL, out, ...extra], { cwd: dir, env: process.env, encoding: 'utf8', timeout: 600_000 });
   if (r.status !== 0 || !fs.existsSync(out)) {
     throw new Error(`คิดราคาบน${label}ไม่สำเร็จ (exit ${r.status ?? r.signal})\n${(r.stderr || r.stdout || '').slice(-2000)}`);
   }
@@ -202,7 +203,8 @@ async function main(): Promise<void> {
   try {
     fs.rmSync(wt, { recursive: true, force: true });
     git(root, 'worktree', 'add', '--detach', wt, base.ref);
-    fs.symlinkSync(fs.realpathSync(path.join(root, 'node_modules')), path.join(wt, 'node_modules'));
+    // 'junction' — บน Windows ลิงก์โฟลเดอร์แบบ symlink ต้องมีสิทธิ์พิเศษ (EPERM บนเครื่อง dev · 2026-10-07) · บน Linux ค่านี้ถูกข้าม
+    fs.symlinkSync(fs.realpathSync(path.join(root, 'node_modules')), path.join(wt, 'node_modules'), 'junction');
     if (fs.existsSync(path.join(root, '.env'))) fs.copyFileSync(path.join(root, '.env'), path.join(wt, '.env'));
     // ตัวเก็บผลของ "ปัจจุบัน" ไปวางใน base ⇒ ย่อผลแบบเดียวกันทั้งสองฝั่ง
     fs.copyFileSync(path.join(root, CAPTURE_REL), path.join(wt, CAPTURE_REL));
@@ -212,6 +214,9 @@ async function main(): Promise<void> {
       ...(HEAD_SEED ? ['--seed-subcodes'] : []),
     ]);
   } finally {
+    // ถอดลิงก์ node_modules ก่อนลบทรี — ตัวลบที่ไต่ตามลิงก์จะลบ node_modules ตัวจริงของทรีหลักไปด้วย
+    const nm = path.join(wt, 'node_modules');
+    try { fs.unlinkSync(nm); } catch { try { fs.rmdirSync(nm); } catch { /* ไม่มีลิงก์ = ไม่ต้องถอด */ } }
     try { git(root, 'worktree', 'remove', '--force', wt); } catch { fs.rmSync(wt, { recursive: true, force: true }); git(root, 'worktree', 'prune'); }
   }
   console.log(`${DIM}เล่มฝั่งก่อนแก้: ${before.book}${RESET}`);
