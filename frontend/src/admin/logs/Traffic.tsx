@@ -10,7 +10,7 @@ import { TAB_SLUG } from '../navHash';
 import {
   errMsg, formatDate, formatMs, formatNumber, formatBytes, delta, downloadCsv, theadRowCls,
 } from './format';
-import { ErrorBox, FilterCard, FilterField, FilterRow, SortHeader } from './ui';
+import { ErrorBox, FilterCard, FilterRow, SortHeader } from './ui';
 import { useTableSort } from './useTableSort';
 import type { SortAccessors } from './useTableSort';
 
@@ -348,48 +348,48 @@ export const Traffic: React.FC = () => {
         </Button>
       </PageHeader>
 
-      {/* ── ตัวเลือกช่วงเวลา ── */}
+      {/* ── ตัวเลือกช่วงเวลา ──
+          ไม่มีป้ายเหนือช่องแล้ว (เจ้าของสั่ง 2026-10-07 "ใช้ placeholder เหมือนหน้าอื่น ๆ") — ต่างจากหน้าอื่นในกลุ่มบันทึก
+          ที่ยังใช้ FilterField แบบมีป้าย · ทำได้เพราะทุกตัวควบคุมบอกตัวเองอยู่แล้ว: ปุ่มมุมมองเป็นคำ (วัน/สัปดาห์/…)
+          ช่องวันที่มีตัวหนังสือจางในช่อง ปุ่มเลื่อนช่วงมีลูกศร · ชื่อของแต่ละช่องย้ายไปอยู่ที่ aria-label ให้โปรแกรมอ่านจอ */}
       <FilterCard>
         <FilterRow>
-          <FilterField label="มุมมอง" width="w-auto">
-            <div className="flex rounded-xl border border-slate-200 overflow-hidden h-[42px]">
-              {GRANULARITIES.map(g => (
-                <button
-                  key={g.key}
-                  onClick={() => pickGranularity(g.key)}
-                  className={`px-3.5 text-sm font-medium transition ${
-                    granularity === g.key ? 'text-white' : 'text-slate-600 hover:bg-slate-50'}`}
-                  style={granularity === g.key ? { background: BRAND } : undefined}
-                  aria-pressed={granularity === g.key}
-                >
-                  {g.label}
-                </button>
-              ))}
-            </div>
-          </FilterField>
+          <div role="group" aria-label="มุมมอง"
+               className="flex rounded-xl border border-slate-200 overflow-hidden h-[42px]">
+            {GRANULARITIES.map(g => (
+              <button
+                key={g.key}
+                onClick={() => pickGranularity(g.key)}
+                className={`px-3.5 text-sm font-medium transition ${
+                  granularity === g.key ? 'text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+                style={granularity === g.key ? { background: BRAND } : undefined}
+                aria-pressed={granularity === g.key}
+              >
+                {g.label}
+              </button>
+            ))}
+          </div>
 
           {/* ช่วงวันที่กล่องเดียว — แบบเดียวกับหน้าประวัติใบเสนอราคา/โปรโมชัน (เจ้าของสั่ง 2026-10-02) */}
-          <FilterField label="ช่วงวันที่" width="w-72">
+          <div className="w-72">
             <FilterDateRange from={state.dateFrom} to={state.dateTo} icon={CalendarDays}
                              onFrom={v => set({ dateFrom: v })} onTo={v => set({ dateTo: v })}
                              fromLabel="ตั้งแต่วันที่" toLabel="ถึงวันที่" />
-          </FilterField>
+          </div>
 
-          <FilterField label="เลื่อนช่วง" width="w-auto">
-            <div className="flex gap-1">
-              <button onClick={() => shiftRange(-1)}
-                      className="h-[42px] px-3 rounded-xl border border-slate-200 text-sm text-slate-600 hover:bg-slate-50">
-                ← ช่วงก่อน
-              </button>
-              <button onClick={() => shiftRange(1)}
-                      className="h-[42px] px-3 rounded-xl border border-slate-200 text-sm text-slate-600 hover:bg-slate-50">
-                ช่วงถัดไป →
-              </button>
-            </div>
-          </FilterField>
+          <div role="group" aria-label="เลื่อนช่วง" className="flex gap-1">
+            <button onClick={() => shiftRange(-1)}
+                    className="h-[42px] px-3 rounded-xl border border-slate-200 text-sm text-slate-600 hover:bg-slate-50">
+              ← ช่วงก่อน
+            </button>
+            <button onClick={() => shiftRange(1)}
+                    className="h-[42px] px-3 rounded-xl border border-slate-200 text-sm text-slate-600 hover:bg-slate-50">
+              ช่วงถัดไป →
+            </button>
+          </div>
 
           {data?.coverage.first_day && (
-            <div className="text-xs text-slate-400 ml-auto pb-3">
+            <div className="text-xs text-slate-400 ml-auto self-center">
               มีข้อมูลตั้งแต่ {formatDate(data.coverage.first_day)} ถึง {formatDate(data.coverage.last_day)}
             </div>
           )}
