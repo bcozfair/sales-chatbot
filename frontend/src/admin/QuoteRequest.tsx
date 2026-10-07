@@ -234,6 +234,7 @@ interface QuoteItem {
 
 /** ใบที่หลังบ้านคืนมา — ใช้แค่ 2 จังหวะ: revise (ดึงรายการกลับเข้าฟอร์ม) และยืนยัน (ต้องรู้ id) */
 interface DraftQuote {
+  /** มีเฉพาะผลของ /drafts — ก้อนจาก /revise ไม่มีแถวในฐาน (ไม่บันทึกร่างตั้งแต่ 2026-10-07) จึงไม่มี id */
   id: string;
   customer_id?: number | null;
   contact_id?: number | null;
@@ -244,7 +245,7 @@ interface DraftQuote {
   quote_company?: 'PM' | 'THT';
   /** null = เครดิตของใบต้นทางคือของลูกค้าจริง ๆ ไม่ได้ถูกทับ */
   payment_terms_override?: string | null;
-  /** quotations.source_id — ร่าง revise ถือค่าของใบต้นทางมาให้ */
+  /** quotations.source_id — /revise ถือค่าของใบต้นทางมาให้ */
   source_id?: string | null;
   delivery_type_override?: string | null;
   delivery_days_override?: number | null;
@@ -3952,10 +3953,9 @@ export const QuoteRequest: React.FC<{ canAddProduct?: boolean }> = ({ canAddProd
   };
 
   // ── ส่วนที่ 3: revise → เติมรายการกลับเข้าฟอร์ม ──
-  //  หลังบ้านยังสร้าง "ร่าง revision" ไว้ใน DB เหมือนเดิม (มันคือด่านตรวจกฎของใบต้นทางไปในตัว)
-  //  แต่หน้านี้ไม่ยืนยันร่างตัวนั้น — มันเอา *รายการ* มาเปิดในฟอร์มให้แก้ได้เต็มรูปแบบ แล้วไป
-  //  ออกใบจริงที่ปุ่มยืนยันเส้นเดียวกับทางปกติ · ร่างที่ค้างไว้ถูก insertDraftQuotations ลบทิ้ง
-  //  ให้เองตอนสร้างใบจริง (คู่แอดมิน×เซลส์เดียวกัน) ⇒ ไม่มีร่างซ้อน
+  //  หลังบ้านตรวจกฎของใบต้นทาง แล้วคืน *รายการ* + ค่าที่ใบเดิมตั้งทับไว้ **โดยไม่บันทึกร่าง**
+  //  (ตั้งแต่ 2026-10-07 · เดิมสร้าง "ร่าง revision" ค้างไว้ทุกครั้งที่กด แม้คนจะเปลี่ยนใจไม่ออกใบ)
+  //  หน้านี้เปิดรายการในฟอร์มให้แก้ได้เต็มรูปแบบ แล้วไปออกใบจริงที่ปุ่มยืนยันเส้นเดียวกับทางปกติ
   //  คืน true เมื่อสำเร็จ ⇒ ช่องเลือกใบ (RevisePicker) ล้างตัวเอง ส่วนแถบ "revision ของ …" รับช่วงต่อ
   const doRevise = async (quotationNo: string): Promise<boolean> => {
     if (!quotationNo.trim() || (!canPickAnySp && !spUserId)) return false;

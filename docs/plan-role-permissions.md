@@ -214,7 +214,6 @@ admin_user_salespersons(admin_user_id, salesperson_id)     PK = ทั้งค�
 | `quote.revise` แก้ใบเดิม/ออกใหม่ | ✔ | ✔ | ✔ | **✔** | `POST /webquote/revise` |
 | `quote.view_all` เห็นใบของทุกคน | ✔ | ✔ | ✔ | **✘** | `GET /admin/quotations` (+ export, counts) |
 | `quote.export_odoo` ส่งออกไฟล์ | ✔ | ✔ | ✔ | **✘** | `GET /admin/quotations/export` |
-| `quote.unmark_export` ถอยเครื่องหมาย | ✔ | ✔ | ✔ | **✘** | `POST …/unmark-export` · `…/export-batches/:id/unmark` |
 | `quote.payment_terms_override` ตั้งเครดิตทับ | ✔ | ✔ | ✔ | **✘** | `webQuoteService` (propose/preview/drafts) |
 | `quote.act_as_any_salesperson` | ✔ | ✔ | ✔ | **✘** (เฉพาะตัวเอง) | `salespersonPicker` + ตอนสร้างร่าง |
 | `approval.decide` อนุมัติ/ไม่อนุมัติ | ✔ | ✔ | ✘ | **✘** | `canDecideApproval()` |
@@ -409,7 +408,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS admin_users_employee_quotation_id_key
 | `quote.create` | `/webquote/` **8 เส้น** (`makers` · `me` GET · `salespersons` · `payment-terms` · `propose` · `preview` · `preview-pdf` · `drafts`) — ทั้งชุดเป็นเครื่องมือของการออกใบใบเดียวกัน ปิดทีเดียวทั้งหน้า |
 | `quote.revise` | `POST /webquote/revise` |
 | `quote.export_odoo` | `GET /quotations/export` |
-| `quote.unmark_export` | `POST /quotations/:id/unmark-export` · `…/export-batches/:id/unmark` |
 | `quote.view_all` | **ไม่ใช่ 403** — เป็นตัวกรอง: `GET /quotations` (ทั้งรายการและตัวนับ) · `/quotations/export` · `/quotations/export-counts` (ตัวเลขในเมนูส่งออก · แทน `manual-review-counts` ตั้งแต่ 2026-10-01) |
 | `quote.payment_terms_override` | `webQuoteService` — `createDraft()` และ `previewDraft()` |
 | `quote.act_as_any_salesperson` | `webQuoteService.createDraft()` (`assertMayActAs`) |
@@ -679,7 +677,7 @@ Odoo จะว่าง ซึ่งเป็นพฤติกรรมเด�
 (ถูกปิด `quote.view_all` แล้วส่ง `mine=0` ก็ยังได้เฉพาะใบตัวเอง) · ทั้งสามเส้นข้างบนรับ `mine=1`
 และ **ไฟล์ส่งออกตามปุ่มที่เลือกอยู่** เหมือนตัวกรองอื่นบนจอ (เจ้าของเคาะ — เมนูส่งออกมีข้อความเตือน)
 · รายการใบตอบ `scope` · `view_all` (ซ่อนปุ่มเมื่อถูกปิดสิทธิ์) · `mine_total` (ตัวเลขบนปุ่ม)
-· ประวัติชุดการส่งออกและการถอยเครื่องหมาย **ไม่ตามปุ่ม** (เป็นของระดับชุด ไม่ใช่รายการใบ)
+· ประวัติชุดการส่งออก **ไม่ตามปุ่ม** (เป็นของระดับชุด ไม่ใช่รายการใบ) · ช่อง `quote.unmark_export` (ถอยเครื่องหมาย) ถูกถอดพร้อมปุ่มเมื่อ 2026-10-07
 · gate: `npm run diag:quote-history-mine`
 
 ---

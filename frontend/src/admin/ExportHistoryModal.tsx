@@ -14,9 +14,14 @@
 //
 //  ตัวกรองทำที่ SQL ไม่ใช่ที่จอ — ชุดแบ่งหน้าจาก server การกรองเฉพาะ 10 แถวที่เห็นจะได้ผลที่ผิด
 //  โดยดูเหมือนถูก · ช่องวันที่ตีความเป็น "วันไทย" ของเวลาส่งออก ด้วยเงื่อนไขชุดเดียวกับหน้าประวัติใบเสนอราคา
+//
+//  **ดูอย่างเดียว** (ตั้งแต่ 2026-10-07 · เจ้าของสั่ง) — ปุ่ม "ยกเลิกทั้งชุด" ถูกถอดพร้อมปุ่มถอยรายใบในตาราง
+//  เพราะระบบรู้เองแล้วว่าใบไหนเข้า Odoo (`odoo_imported_at`) และปุ่มนั้นพาใบที่นำเข้าแล้วกลับเข้าไฟล์ถัดไป
+//  ได้ (= ใบซ้ำใน Odoo) · จะส่งไฟล์ใหม่ ให้เลือกสถานะ Odoo "รอนำเข้า" ที่ตารางแล้วกดส่งออกตามปกติ
+//  (ใช้จริงครั้งเดียวตลอด 177 ชุด / 5,187 ใบ ตั้งแต่ 2026-08-05 · วัด 2026-10-07)
 // ─────────────────────────────────────────────────────────────────────────────
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertCircle, Building2, Calendar, FileSpreadsheet, Filter, History, Loader2, RotateCcw, User, X } from 'lucide-react';
+import { Building2, Calendar, FileSpreadsheet, Filter, History, Loader2, User, X } from 'lucide-react';
 import { Modal } from './Modal';
 import { FilterDateRange, FilterSearch, FilterSelect } from './FilterBar';
 import { EmptyState, ErrorBox, Pagination } from './logs/ui';
@@ -33,7 +38,7 @@ interface ExportBatch {
   format: string;
   quotation_count: number;
   row_count: number;
-  /** ใบในชุดที่ยังนับว่า "ส่งออกแล้ว" — น้อยกว่า quotation_count แปลว่าถูกถอยไปบางส่วน */
+  /** ใบในชุดที่ยังนับว่า "ส่งออกแล้ว" — น้อยกว่า quotation_count แปลว่าถูกถอยไปบางส่วน (ชุดก่อน 2026-10-07) */
   active_count: number;
   /** ตัวกรองที่ใช้ตอนกดส่งออก — ชุดที่ส่งออกก่อนแยก QP/QT จะไม่มีคีย์ company */
   filters?: { company?: string } | null;
@@ -50,8 +55,6 @@ interface Props {
   /** ตัวจัดรูปเวลาของหน้าแม่ — ให้เวลาในกล่องหน้าตาเดียวกับคอลัมน์วันที่ของตารางใบเสนอราคา */
   formatTime: (iso: string) => string;
   onClose: () => void;
-  /** ถอยทั้งชุดสำเร็จ — หน้าแม่แจ้งผลและโหลดตารางใบใหม่ (สถานะ "ส่งออกแล้ว" ของใบเปลี่ยน) */
-  onUnmarked: (reverted: number) => void;
 }
 
 /** จำนวนใบของชุด — ต่างจาก quotation_count แปลว่าบางใบถูกถอยเครื่องหมายไปแล้ว */
@@ -71,20 +74,7 @@ const MatchedChip: React.FC<{ b: ExportBatch }> = ({ b }) =>
     </span>
   ) : null;
 
-const UnmarkButton: React.FC<{ b: ExportBatch; busy: boolean; onClick: () => void }> = ({ b, busy, onClick }) => (
-  <button
-    type="button"
-    disabled={b.active_count === 0 || busy}
-    onClick={onClick}
-    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-card hover:bg-amber-50 text-slate-600 hover:text-amber-700 border border-slate-200 hover:border-amber-200 rounded-xl text-xs font-semibold transition-all active:scale-95 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
-    title="ยกเลิกเครื่องหมายส่งออกของทั้งชุด"
-  >
-    {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
-    ยกเลิกทั้งชุด
-  </button>
-);
-
-export const ExportHistoryModal: React.FC<Props> = ({ token, formatTime, onClose, onUnmarked }) => {
+export const ExportHistoryModal: React.FC<Props> = ({ token, formatTime, onClose }) => {
   const [q, setQ] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -99,8 +89,6 @@ export const ExportHistoryModal: React.FC<Props> = ({ token, formatTime, onClose
   const [loading, setLoading] = useState(true);
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [unmarkingId, setUnmarkingId] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   /** เลขลำดับคำขอ — พิมพ์รัวแล้วคำตอบกลับมาสลับลำดับ ต้องทิ้งคำตอบเก่า ไม่งั้นตารางแสดงผลของคำค้นก่อนหน้า */
@@ -153,27 +141,6 @@ export const ExportHistoryModal: React.FC<Props> = ({ token, formatTime, onClose
     scrollRef.current?.scrollTo({ top: 0 });
   };
 
-  // ถอยทั้งชุด — ใช้ตอนไฟล์ทั้งไฟล์นำเข้า Odoo ไม่ผ่าน
-  const handleUnmark = async (batch: ExportBatch) => {
-    if (!window.confirm(`ยกเลิกเครื่องหมายส่งออกของทั้งชุด (${batch.active_count} ใบ)?\nใบทั้งหมดในชุดนี้จะกลับมาอยู่ในชุดที่ส่งออกครั้งถัดไป`)) return;
-    setUnmarkingId(batch.id);
-    setActionError(null);
-    try {
-      const res = await fetch(`/api/admin/quotations/export-batches/${batch.id}/unmark`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error('ไม่สามารถยกเลิกเครื่องหมายส่งออกของชุดนี้ได้');
-      const result: { reverted: number } = await res.json();
-      onUnmarked(result.reverted);
-      void load();
-    } catch (e: unknown) {
-      setActionError(errMsg(e) || 'เกิดข้อผิดพลาดในการยกเลิกเครื่องหมายส่งออก');
-    } finally {
-      setUnmarkingId(null);
-    }
-  };
-
   const pages = Math.max(1, Math.ceil(total / size));
 
   return (
@@ -218,13 +185,6 @@ export const ExportHistoryModal: React.FC<Props> = ({ token, formatTime, onClose
         </div>
       </div>
 
-      {actionError && (
-        <div className="shrink-0 mx-4 mt-3 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
-          <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
-          <span className="flex-1 min-w-0 break-words">{actionError}</span>
-        </div>
-      )}
-
       {/* ── รายการ: ส่วนเดียวที่เลื่อน · หัวคอลัมน์ติดอยู่บนสุดของกล่องเลื่อน ── */}
       <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto">
         {loadError ? (
@@ -249,7 +209,6 @@ export const ExportHistoryModal: React.FC<Props> = ({ token, formatTime, onClose
                   <th className={`${stickyThCls} text-center`}>บริษัท</th>
                   <th className={`${stickyThCls} text-center`}>ไฟล์</th>
                   <th className={`${stickyThCls} text-right`}>จำนวนใบ</th>
-                  <th className={`${stickyThCls} text-right`}>การจัดการ</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -271,9 +230,6 @@ export const ExportHistoryModal: React.FC<Props> = ({ token, formatTime, onClose
                       <BatchCount b={b} />
                       <span className="block text-[10px] text-slate-400">{b.row_count} แถว</span>
                     </td>
-                    <td className="px-4 py-2.5 text-right">
-                      <UnmarkButton b={b} busy={unmarkingId === b.id} onClick={() => handleUnmark(b)} />
-                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -285,12 +241,9 @@ export const ExportHistoryModal: React.FC<Props> = ({ token, formatTime, onClose
                 <div key={b.id} className="px-4 py-3 grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 items-center">
                   <div className="text-sm font-semibold text-slate-800">{formatTime(b.exported_at)}</div>
                   <div className="justify-self-end text-sm font-bold text-slate-800">{b.filters?.company || '-'}</div>
-                  <div className="text-xs text-slate-500 min-w-0">
+                  <div className="col-span-2 text-xs text-slate-500 min-w-0">
                     {b.exported_by_username || '-'} · <span className="font-mono font-semibold text-slate-800"><BatchCount b={b} /></span> ใบ · {b.row_count} แถว
                     {b.matched_no && <div><MatchedChip b={b} /></div>}
-                  </div>
-                  <div className="justify-self-end">
-                    <UnmarkButton b={b} busy={unmarkingId === b.id} onClick={() => handleUnmark(b)} />
                   </div>
                 </div>
               ))}
@@ -311,10 +264,6 @@ export const ExportHistoryModal: React.FC<Props> = ({ token, formatTime, onClose
           onSize={(s) => { setSize(s); goPage(1); }}
         />
       </div>
-
-      <p className="shrink-0 px-5 py-3 text-[11px] leading-snug text-slate-500 border-t border-slate-100 bg-slate-50">
-        "ยกเลิกทั้งชุด" ใช้ตอนไฟล์ทั้งไฟล์นำเข้า Odoo ไม่ผ่าน — ใบทั้งหมดในชุดจะกลับมาอยู่ในชุดที่ส่งออกครั้งถัดไป
-      </p>
     </Modal>
   );
 };

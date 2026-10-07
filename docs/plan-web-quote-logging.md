@@ -103,7 +103,7 @@ SELECT คอลัมน์นี้ ⇒ เส้นทางเดิม **�
 | `web_propose` | ข้อความที่แอดมินวาง (ดิบ) | สรุปผลเป็นข้อความ ขึ้น `🏢` รูปแบบเดียวกับ LINE | `{intent, outcome, auto_customer_id, extracted, cust_candidates, contact_candidates, duration_ms}` |
 | `web_draft` | `เลือก <บริษัท> / <ผู้ติดต่อ>` | `📝 ร่างใบเสนอราคา` + `🏢` + `👤` + รหัสร่าง | `{propose_msg_id, chosen_customer_id, chosen_contact_id, chosen_rank, quote_ids, outcome, duration_ms}` |
 | `web_confirm` | `ยืนยัน` | `✅ ยืนยันสำเร็จ! …` | `{quotation_no, quotation_id, outcome}` |
-| `web_revise` | `แก้ไข <เลขใบ>` | `📝 ร่างใบเสนอราคา` + `🏢` + รหัสร่าง | `{revise_from, draft_quote_id, chosen_customer_id, chosen_contact_id, …}` |
+| `web_revise` | `แก้ไข <เลขใบ>` | `📝 เปิดใบเดิมในฟอร์ม` + `🏢` + เลขใบต้นทาง (ก่อน 2026-10-07: `📝 ร่างใบเสนอราคา` + รหัสร่าง) | `{revise_from, chosen_customer_id, chosen_contact_id, …}` — ไม่มี `draft_quote_id` แล้วตั้งแต่ 2026-10-07 (revise ไม่บันทึกร่าง) |
 
 **ทุกชนิด (รวม `web_approval_*`) มี `meta.api_request_id` ตั้งแต่ 2026-10-05** = id ของ request ใน `api_logs`
 (`getRequestId(req)` ส่งลงมาทางพารามิเตอร์ `apiRequestId`) ให้หน้าบันทึกผูกแถวกับ request ได้

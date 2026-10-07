@@ -98,7 +98,6 @@ export type QuoteCapability =
   | 'quote.revise'
   | 'quote.view_all'
   | 'quote.export_odoo'
-  | 'quote.unmark_export'
   | 'quote.payment_terms_override'
   | 'quote.manage_contacts'
   | 'quote.manage_products'
@@ -270,14 +269,6 @@ export const CAPABILITIES: readonly CapabilityDef[] = [
     modes: SWITCH,
     defaults: switchFor('allow', 'allow', 'allow', 'deny'),
     enforcedAt: 'GET /api/admin/quotations/export',
-  },
-  {
-    key: 'quote.unmark_export',
-    group: 'quote',
-    label: 'ถอยเครื่องหมาย "ส่งออกแล้ว"',
-    modes: SWITCH,
-    defaults: switchFor('allow', 'allow', 'allow', 'deny'),
-    enforcedAt: 'POST /api/admin/quotations/unmark-export · …/export-batches/:id/unmark',
   },
   {
     key: 'quote.manage_contacts',

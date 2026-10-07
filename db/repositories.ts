@@ -586,6 +586,36 @@ export async function deletePendingQuotations(userId: string): Promise<void> {
 }
 
 /**
+ * "ร่างจากหน้าเว็บที่ถูกทิ้งไว้" — เงื่อนไขชุดเดียวของตัวลบตามอายุ (services/webDraftSweeper.ts)
+ * ด่าน `diag:web-draft-sweep` อ่านค่าคงที่นี้ไปใช้ตรง ๆ ⇒ สิ่งที่ด่านพิสูจน์คือสิ่งที่ลบจริง
+ *
+ * ทุกข้อในนี้กันของที่ "ห้ามหาย" ไว้ข้อละกลุ่ม:
+ *   · `user_id LIKE 'web:%'` — **ร่างของ LINE ไม่ยุ่ง** เซลส์กดยืนยันจาก Flex ทีหลังได้ และฝั่งนั้น
+ *     ถูกกวาดเองตอนเซลส์เริ่มใบใหม่อยู่แล้ว
+ *   · `price_approval IS NULL` — ร่างที่รออนุมัติ/ถูกตีกลับ/อนุมัติแล้วแต่ยังออกใบไม่ได้
+ *     **ค้างโดยตั้งใจ** (กติกาเดียวกับตัวกวาดใน insertDraftQuotations)
+ *   · ไม่มีเลขที่ — กันเข็มขัดเส้นที่สอง ใบที่มีเลขที่แล้วไม่ใช่ร่าง ไม่ว่าสถานะจะเป็นอะไร
+ *   · อายุนับจาก `updated_at` — แถวที่มีคนแตะล่าสุดยังไม่ถือว่าทิ้ง (updated_at ไม่เคยว่างและไม่เคย
+ *     น้อยกว่า created_at · วัด 2026-10-07 ทั้ง 2,978 แถว)
+ * `$1` = จำนวนวัน
+ */
+export const STALE_WEB_DRAFT_SQL = `
+      user_id LIKE 'web:%'
+  AND status IN ('pending_company', 'pending_contact', 'draft')
+  AND price_approval IS NULL
+  AND COALESCE(TRIM(quotation_no), '') = ''
+  AND updated_at < CURRENT_TIMESTAMP - ($1::int * INTERVAL '1 day')`;
+
+/** ลบร่างจากหน้าเว็บที่ไม่มีใครแตะเกิน `days` วัน — คืนแถวที่ลบไป (ให้ผู้เรียกเขียน log ได้) */
+export async function deleteStaleWebDrafts(
+  db: DbExecutor, days: number
+): Promise<{ id: string; user_id: string; updated_at: Date }[]> {
+  const { rows } = await db.query(
+    `DELETE FROM quotations WHERE ${STALE_WEB_DRAFT_SQL} RETURNING id, user_id, updated_at`, [days]);
+  return rows;
+}
+
+/**
  * ท่อน JOIN ที่หา "ทีมขายของผู้ติดต่อ" ให้ช่อง Sales Team ของไฟล์นำเข้า Odoo
  *
  * ทีมขายเป็นคุณสมบัติของผู้ติดต่อ (customers_data_view.sales_team) ไม่ใช่สังกัดของเซลล์ที่ออกใบ
@@ -1116,36 +1146,6 @@ export async function insertExportLogRows(
 }
 
 /**
- * ยกเลิกเครื่องหมาย "ส่งออกแล้ว" ของใบเดียว (ใช้ตอนนำเข้า Odoo ไม่ผ่าน)
- * คืน false ถ้าไม่มีใบนั้น หรือใบนั้นยังไม่เคยถูกมาร์กอยู่แล้ว
- */
-export async function unmarkQuotationExport(db: DbExecutor, id: string): Promise<boolean> {
-  const upd = await db.query(
-    `UPDATE quotations SET odoo_exported_at = NULL
-      WHERE id = $1::uuid AND odoo_exported_at IS NOT NULL RETURNING id`, [id]);
-  if (!upd.rowCount) return false;
-  // ไม่ลบแถว log ทิ้ง — ประวัติว่า "เคยส่งแล้วถอย" ต้องตรวจย้อนหลังได้
-  await db.query(
-    `UPDATE quotation_export_log SET reverted_at = CURRENT_TIMESTAMP
-      WHERE quotation_id = $1::uuid AND reverted_at IS NULL`, [id]);
-  return true;
-}
-
-/** ยกเลิกเครื่องหมายทั้งชุด — คืนจำนวนใบที่ถูกถอยจริง (ใบที่ถูกถอยไปแล้วไม่นับซ้ำ) */
-export async function unmarkExportBatch(db: DbExecutor, batchId: string): Promise<number> {
-  const { rows } = await db.query(
-    `UPDATE quotation_export_log SET reverted_at = CURRENT_TIMESTAMP
-      WHERE batch_id = $1::uuid AND reverted_at IS NULL AND quotation_id IS NOT NULL
-      RETURNING quotation_id`, [batchId]);
-  const ids = rows.map((r: any) => String(r.quotation_id));
-  if (!ids.length) return 0;
-  const upd = await db.query(
-    `UPDATE quotations SET odoo_exported_at = NULL
-      WHERE id = ANY($1::uuid[]) AND odoo_exported_at IS NOT NULL`, [ids]);
-  return upd.rowCount || 0;
-}
-
-/**
  * ตัวกรองของกล่อง "ประวัติการส่งออก Odoo" — ทุกช่องไม่บังคับ · ค่าที่ส่งมาต้องผ่านการตรวจที่ endpoint แล้ว
  * (บริษัทอยู่ในรายการปิด · วันที่เป็น 'yyyy-mm-dd') ที่นี่ไม่ตรวจซ้ำ แค่ผูกเป็นพารามิเตอร์
  */
@@ -1182,6 +1182,7 @@ function exportBatchWhere(f: ExportBatchFilters, params: unknown[]): string {
 
 /**
  * ประวัติชุดการส่งออก — active_count = จำนวนใบที่ยังนับว่า "ส่งออกแล้ว" (ยังไม่ถูกถอย)
+ *   ปุ่มถอยเครื่องหมายถูกถอดไปแล้ว (2026-10-07) แต่ `reverted_at` ของชุดเก่ายังมีอยู่จริง ⇒ ยังต้องนับแบบนี้
  * ค้นด้วยเลขที่ใบแล้วได้ matched_no (เลขแรกที่เจอในชุด) + matched_count ไว้บอกบนจอว่าชุดนี้ติดมาเพราะใบไหน
  * ตัวนี้เป็น SELECT ล้วนนอก transaction จึงคืน [] เมื่อ error ตามกติกาหัวไฟล์
  */
@@ -1252,8 +1253,7 @@ export async function getExportBatchExporters(): Promise<string[]> {
  *
  * ของที่ "ไม่" หายตามใบไปด้วย และตั้งใจให้เป็นแบบนั้น:
  *   · `quotation_export_log` — FK เป็น `ON DELETE SET NULL` และตัวแถวเก็บ `quotation_no` ไว้เอง
- *     ⇒ ประวัติว่า "ใบนี้เคยอยู่ในไฟล์ส่งออกชุดไหน" ยังตรวจย้อนหลังได้ · `unmarkExportBatch`
- *     กรอง `quotation_id IS NOT NULL` อยู่แล้ว การถอยทั้งชุดจึงข้ามใบที่ถูกลบไปเงียบ ๆ ไม่พัง
+ *     ⇒ ประวัติว่า "ใบนี้เคยอยู่ในไฟล์ส่งออกชุดไหน" ยังตรวจย้อนหลังได้
  *   · `quotation_counters` — เลขเดินหน้าอย่างเดียว ⇒ เลขของใบที่ลบไป **ไม่ถูกนำกลับมาใช้ซ้ำ**
  *     ซึ่งถูกแล้วสำหรับเอกสารที่ออกไปถึงลูกค้าแล้ว
  */

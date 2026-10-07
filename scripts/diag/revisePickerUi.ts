@@ -137,7 +137,7 @@ const injectRow = (body: any) => {
   return body;
 };
 const REVISE_MOCK = {
-  web_user_id: 'web:0:diag', sp_user_id: '', draft_quote_id: 'diag', revise_from: 'QP-DIAG',
+  web_user_id: 'web:0:diag', sp_user_id: '', revise_from: 'QP-DIAG',
   quotes: [{ id: 'diag', items: [{ model: 'DIAG-1', name: 'DIAG-1', quantity: 2, price: 100 }], customer_id: null }],
 };
 

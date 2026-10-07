@@ -43,8 +43,6 @@ import {
   claimQuotationsForExport,
   insertExportBatch,
   insertExportLogRows,
-  unmarkQuotationExport,
-  unmarkExportBatch,
   getExportBatches,
   countExportBatches,
   getExportBatchExporters,
@@ -196,6 +194,7 @@ import {
   recordWebhookProcessing,
   type WebhookOutcome,
 } from './services/apiLogService.js';
+import { initWebDraftSweeper, stopWebDraftSweeper } from './services/webDraftSweeper.js';
 import {
   getTableDef,
   fetchPage,
@@ -3455,7 +3454,7 @@ app.get('/api/admin/webquote/revisable', adminAuthMiddleware, requireCapability(
   }
 });
 
-/** เลขที่ใบที่ยืนยันแล้ว → ร่าง revision · คืน `draft_quote_id` ให้ฟอร์มเปิดต่อในหน้าเดิม */
+/** เลขที่ใบที่ยืนยันแล้ว → รายการ + ค่าที่ตั้งทับของใบนั้น ให้ฟอร์มเติมกลับเข้าใบ (ไม่บันทึกร่าง · 2026-10-07) */
 app.post('/api/admin/webquote/revise', adminAuthMiddleware, requireCapability('quote.revise'), express.json(), async (req: any, res: any) => {
   try {
     res.json(await reviseWebQuotation({
@@ -4703,27 +4702,6 @@ app.get('/api/admin/quotations/export', adminAuthMiddleware, requireCapability('
   }
 });
 
-// --- API Endpoint: ยกเลิกเครื่องหมาย "ส่งออกแล้ว" ของใบเดียว ---
-//
-// ใช้ตอนนำเข้า Odoo ไม่ผ่าน หรือไฟล์หายระหว่างดาวน์โหลด — ใบจะกลับเข้าคิว export รอบถัดไป
-app.post('/api/admin/quotations/:id/unmark-export', adminAuthMiddleware, requireCapability('page.quotations'), requireCapability('quote.unmark_export'), async (req: any, res: any) => {
-  try {
-    const id = String(req.params.id || '').trim();
-    if (!UUID_RE.test(id)) {
-      return res.status(400).json({ error: 'รหัสใบเสนอราคาไม่ถูกต้อง' });
-    }
-
-    const ok = await withTransaction(client => unmarkQuotationExport(client, id));
-    if (!ok) {
-      return res.status(404).json({ error: 'ไม่พบใบเสนอราคานี้ หรือใบนี้ยังไม่ถูกทำเครื่องหมายว่าส่งออกแล้ว' });
-    }
-    res.json({ success: true });
-  } catch (err: any) {
-    console.error("POST /api/admin/quotations/:id/unmark-export error:", err);
-    res.status(500).json({ error: 'Internal Server Error' });
-  }
-});
-
 /**
  * --- API Endpoint: ลบใบเสนอราคาถาวร (แอดมินเท่านั้น) ---
  *
@@ -4870,22 +4848,6 @@ app.get('/api/admin/quotations/export-batches', adminAuthMiddleware, requireCapa
     res.json({ data, total, exporters });
   } catch (err: any) {
     console.error("GET /api/admin/quotations/export-batches error:", err);
-    res.status(500).json({ error: 'Internal Server Error' });
-  }
-});
-
-// --- API Endpoint: ยกเลิกเครื่องหมายทั้งชุด (ไฟล์ทั้งไฟล์นำเข้า Odoo ไม่ผ่าน) ---
-app.post('/api/admin/quotations/export-batches/:batchId/unmark', adminAuthMiddleware, requireCapability('page.quotations'), requireCapability('quote.unmark_export'), async (req: any, res: any) => {
-  try {
-    const batchId = String(req.params.batchId || '').trim();
-    if (!UUID_RE.test(batchId)) {
-      return res.status(400).json({ error: 'รหัสชุดการส่งออกไม่ถูกต้อง' });
-    }
-
-    const reverted = await withTransaction(client => unmarkExportBatch(client, batchId));
-    res.json({ success: true, reverted });
-  } catch (err: any) {
-    console.error("POST /api/admin/quotations/export-batches/:batchId/unmark error:", err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -5710,6 +5672,8 @@ const server = app.listen(port, () => {
   else initScheduler().catch((err) => console.error('[scheduler] init ล้มเหลว:', err));
   // เริ่มตัวเขียน api_logs แบบ batch + ตัวลบของเก่า (ทั้งคู่เป็น timer แยก ไม่แตะเส้นทางของ request)
   initApiLogWriter();
+  // ลบร่างจากหน้าเว็บที่ทิ้งค้างเกิน 7 วัน — ไม่เริ่มในพรีวิว (ฐานเดียวกับตัวจริง ให้ตัวจริงลบคนเดียว)
+  if (!PREVIEW_MODE) initWebDraftSweeper();
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -5745,6 +5709,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 
     // 2. หยุดตัวตั้งเวลา sync — ห้ามให้รอบใหม่เริ่มตอนนี้ มันกิน CPU 10-18 วิ แย่งงานที่กำลังจะตอบ
     stopScheduler();
+    stopWebDraftSweeper();
     if (isRunning()) {
       console.warn('[shutdown] มี sync ค้างอยู่ — ยกเลิกกลางคันไม่ได้ ต้องปล่อยให้ drain แข่งกับมัน');
     }

@@ -2018,7 +2018,7 @@ watermark 1 บรรทัดใน `refreshCustomerDirectory.ts` + rebuild `cu
 | `POST /api/admin/webquote/preview` | **M** | admin, subadmin | ฟอร์มที่เคาะแล้ว → **"ใบที่จะได้" โดยไม่เขียน DB สักแถว** (dry-run ของ `/drafts` · §M) |
 | `POST /api/admin/webquote/preview-pdf` | **P** | admin, subadmin | ฟอร์มเดียวกัน → **ไฟล์ PDF จริง** (`application/pdf`) ไม่เขียน DB ไม่ออกเลขที่ใบ · รับ `sp_user_id` แบบอ่านอย่างเดียว (§P.4) |
 | `POST /api/admin/webquote/drafts` | D | admin, subadmin | ฟอร์มที่เคาะแล้ว → สร้างร่างจริง คืน `quotes` |
-| `POST /api/admin/webquote/revise` | D | admin, subadmin | `quotationNo` → ร่าง revision คืน `draftQuoteId` |
+| `POST /api/admin/webquote/revise` | D | admin, subadmin | `quotationNo` → รายการ + ค่าที่ใบเดิมตั้งทับ ให้ฟอร์มเติมกลับ · **ไม่บันทึกร่างตั้งแต่ 2026-10-07** (เดิมสร้างร่าง revision คืน `draftQuoteId` แล้วค้างทุกครั้งที่ไม่ได้ออกใบต่อ) |
 | `GET /api/admin/webquote/payment-terms` | F | admin, subadmin | 15 ค่าเครดิตที่มีจริง (ฟีเจอร์ 1) |
 | `GET /api/admin/webquote/sales-owner` | **2026-09-24** | `quote.act_as_any_salesperson` | `customer_id` → เซลส์ที่ช่อง "ออกในนาม" ควรเติมให้ (ถอย 4 ขั้นใน `company_id` เดียวกัน) · `/propose` `/revise` รับ `sp_user_id` ว่างได้แล้ว — `docs/plan-web-quote-auto-salesperson.md` |
 | `PUT /api/admin/webquote/quotes/:id/credit` | G | admin, subadmin | เขียนทับเครดิตของใบนั้น — **400 ถ้าค่าไม่อยู่ในชุด** |
@@ -2411,7 +2411,7 @@ export function sourceFilterCondition(filter: SourceFilter): string {
    พิมพ์ผิดไม่มี candidate) และ**เรียงตามลำดับที่พิมพ์** · เรียกโดยไม่ส่ง `remainingMs`/`checkpoint` ต้องทำงานได้ **[C]**
 2. `proposeFromText()` — ต้อง**ไม่**เขียน `quotations` และ**ไม่**เรียก `deletePendingQuotations` **[D]**
 3. `createDraft()` → `PUT /api/quotation/:id` → `confirm` ครบวงจรด้วย `webUserId` **[D]**
-4. `reviseQuotation()` — ใบที่ยืนยันแล้ว → ได้ร่าง revision · ใบร่าง (ยังไม่มีเลข) → ต้องปฏิเสธ **[D]**
+4. `reviseQuotation()` — ใบที่ยืนยันแล้ว → ได้รายการกลับเข้าฟอร์ม (ไม่บันทึกร่าง · 2026-10-07) · ใบร่าง (ยังไม่มีเลข) → ต้องปฏิเสธ **[D]**
 
 `scripts/diag/webModeSmoke.ts` ของ v4 ยังใช้ตามเดิมสำหรับเฟส F–J (ข้อ 1–2 ที่ F · 3–4 ที่ G ·
 6 ที่ H · 5 · 7–9 ที่ I)

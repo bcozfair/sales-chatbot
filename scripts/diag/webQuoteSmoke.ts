@@ -6,7 +6,8 @@
 //     และเรียกได้โดยไม่ส่ง remainingMs/checkpoint                                    [เฟส C]
 //  2. proposeFromText() ต้อง **ไม่เขียน quotations** และ **ไม่ลบร่างที่ค้างอยู่**      [เฟส D]
 //  3. createDraft() → PUT /api/quotation/:id → confirm ครบวงจรด้วย webUserId          [เฟส D]
-//  4. reviseQuotation() — ใบที่ยืนยันแล้ว → ได้ร่าง revision · เลขที่ไม่มีจริง → ปฏิเสธ [เฟส D]
+//  4. reviseQuotation() — ใบที่ยืนยันแล้ว → ได้รายการกลับเข้าฟอร์ม **โดยไม่บันทึกร่าง** (2026-10-07)
+//     · เลขที่ไม่มีจริง → ปฏิเสธ                                                     [เฟส D]
 //     + เส้นทางของหน้าเว็บ: รายการกลับเข้าฟอร์ม → createDraft({reviseFrom}) → confirm
 //  5. ประวัติลง `messages` ครบ 4 ชนิด · chosen_rank คำนวณถูก · แถวของ LINE ไม่ปนเปื้อน
 //     (docs/plan-web-quote-logging.md §7)
@@ -14,7 +15,7 @@
 //     และบรรทัดค่าบริการที่แอดมินเพิ่มเองต้องรอดไปถึงใบจริง (บรรทัดเดียวเสมอ)
 //  7. เครดิต/กำหนดส่งที่แอดมินตั้งทับ — เปลี่ยนคำตอบของกฎค่าบริการจริง · ลงคอลัมน์/คีย์ถูกที่
 //     · ค่าที่ไม่รู้จักถูกปฏิเสธ 400 · ยืนยันแล้วถูกตรึงเป็น source 'override'
-//     · "แก้ใบเดิม" แล้วร่างยังมีเครดิต/กำหนดส่งที่ตั้งทับ (2026-09-25)
+//     · "แก้ใบเดิม" แล้วยังได้เครดิต/กำหนดส่งที่ตั้งทับกลับมา (2026-09-25)
 //  8. ทะลุด่านตรวจได้ (`rule_overrides`) + คิวแก้มือใน Odoo (`odoo_manual_review`)
 //     · ข้อสำคัญที่สุด: **ใบจาก LINE ต้องยังถูกบล็อกเหมือนเดิม** (ปลดล็อกผูกกับใบ ไม่ใช่ endpoint)
 //     · `SYSTEM_ERROR` ทะลุไม่ได้แม้กดรับทราบ · ข้อที่เพิ่งโผล่ยังปฏิเสธ 422
@@ -329,7 +330,7 @@ async function case3(): Promise<string | null> {
   return confirmed?.quotation_no ?? confirmBody?.quotation_no ?? null;
 }
 
-/** ข้อ 4 — reviseQuotation: ใบที่ยืนยันแล้วได้ร่าง · เลขที่ใช้ไม่ได้ต้องถูกปฏิเสธ */
+/** ข้อ 4 — reviseQuotation: ใบที่ยืนยันแล้วได้รายการกลับเข้าฟอร์มโดยไม่บันทึกร่าง · เลขที่ใช้ไม่ได้ต้องถูกปฏิเสธ */
 async function case4(quotationNo: string | null) {
   console.log(`\n${BOLD}4) reviseQuotation${RESET}`);
   if (!quotationNo) {
@@ -338,16 +339,18 @@ async function case4(quotationNo: string | null) {
     return;
   }
 
+  // ไม่บันทึกร่าง (2026-10-07) — เดิมขั้นนี้ INSERT "ร่าง revision" ทันทีที่เลือกใบ แล้วค้างอยู่ทุกครั้ง
+  // ที่คนเปลี่ยนใจ ⇒ นับแถวของ webUserId ก่อน/หลัง ต้องเท่ากันเป๊ะ
+  const countRows = async () => Number((await pool.query(
+    'SELECT COUNT(*)::int AS n FROM quotations WHERE user_id = $1', [webUserId])).rows[0].n);
+  const rowsBefore = await countRows();
   const revised = await reviseQuotation({ adminId, role: 'admin', spUserId: TEST_SP_USER, quotationNo });
-  ok('ใบที่ยืนยันแล้ว → ได้ร่าง revision', !!revised.draft_quote_id, revised.draft_quote_id);
-  ok('ร่างอ้างเลขที่ใบต้นทางถูกต้อง', revised.revise_from === quotationNo, revised.revise_from);
-
-  const draftRow = (await pool.query(
-    'SELECT user_id, status, quotation_no FROM quotations WHERE id = $1', [revised.draft_quote_id]
-  )).rows[0];
-  ok('ร่างเป็นของ webUserId และยังไม่มีเลขที่',
-    draftRow?.user_id === webUserId && draftRow?.status === 'draft' && !draftRow?.quotation_no,
-    `${draftRow?.status} / ${draftRow?.quotation_no ?? '(ไม่มีเลข)'}`);
+  const rowsAfter = await countRows();
+  ok('ใบที่ยืนยันแล้ว → ได้รายการกลับมาให้ฟอร์ม', (revised.quotes?.[0]?.items?.length ?? 0) > 0,
+    `${revised.quotes?.[0]?.items?.length ?? 0} บรรทัด`);
+  ok('ไม่บันทึกร่างลงฐาน (แถวของ webUserId ไม่เพิ่ม)', rowsAfter === rowsBefore, `${rowsBefore} → ${rowsAfter}`);
+  ok('ก้อนที่คืนมาไม่มี id (ไม่มีแถวให้ใครเผลอยืนยัน)', revised.quotes?.[0]?.id === undefined);
+  ok('อ้างเลขที่ใบต้นทางถูกต้อง', revised.revise_from === quotationNo, revised.revise_from);
 
   // ร่าง (ยังไม่มีเลขที่) ไม่มีทางถูกอ้างถึงได้เลย — ไม่มีเลขให้พิมพ์ ⇒ ต้องตอบ "ไม่พบ" ไม่ใช่ 500
   let code = '';
@@ -388,10 +391,11 @@ async function case4(quotationNo: string | null) {
   });
   ok('createDraft({reviseFrom}) คืนใบร่าง', (redraft.quotes?.length ?? 0) > 0, `${redraft.quotes?.length ?? 0} ใบ`);
 
-  const leftover = Number((await pool.query(
-    'SELECT COUNT(*)::int AS n FROM quotations WHERE id = $1', [revised.draft_quote_id]
+  const drafts = Number((await pool.query(
+    `SELECT COUNT(*)::int AS n FROM quotations WHERE user_id = $1 AND status = 'draft'`, [webUserId]
   )).rows[0].n);
-  ok('ร่างที่ revise เตรียมไว้ถูกล้างตอนออกใบจริง (ไม่มีร่างซ้อน)', leftover === 0, `เหลือ ${leftover} แถว`);
+  ok('ร่างของคู่นี้มีเท่าที่เพิ่งสร้างเท่านั้น (ไม่มีร่างซ้อน)', drafts === (redraft.quotes?.length ?? 0),
+    `ร่าง ${drafts} แถว / สร้าง ${redraft.quotes?.length ?? 0} ใบ`);
 
   const newQuote: any = redraft.quotes?.[0];
   // ธง revise_from อยู่ใน customer_details.revise_from — คอลัมน์ customer_name ไม่มีจริง
@@ -893,8 +897,9 @@ async function case7() {
     after?.pt === '30 Days', String(after?.pt));
 
   // ── จ) "แก้ใบเดิม" ต้องพาค่าที่ตั้งทับมาด้วย (2026-09-25) ──
-  //  ฟอร์มอ่านสองค่านี้จากร่าง revise ไปตั้งช่องให้ ⇒ ร่างได้ null = หน้าจอคืนเป็นค่าอัตโนมัติเงียบ ๆ
+  //  ฟอร์มอ่านสองค่านี้จากผลของ revise ไปตั้งช่องให้ ⇒ ได้ null = หน้าจอคืนเป็นค่าอัตโนมัติเงียบ ๆ
   //  (เคยพลาด: reviseQuotation ส่งไปแค่ sourceId · ใบที่ตั้ง Cash ให้ลูกค้าเครดิตเงียบกลับเป็นเครดิต)
+  //  ตั้งแต่ 2026-10-07 revise ไม่บันทึกร่าง ⇒ ตรวจจากก้อนที่คืนมา (ค่าที่หน้าจออ่านจริง) แทนแถวในฐาน
   const confirmedNo = (await pool.query('SELECT quotation_no FROM quotations WHERE id = $1', [target.id]))
     .rows[0]?.quotation_no;
   if (!confirmedNo) {
@@ -903,13 +908,9 @@ async function case7() {
     return;
   }
   const revised = await reviseQuotation({ adminId, role: 'admin', spUserId: TEST_SP_USER, quotationNo: confirmedNo });
-  const rev = (await pool.query(
-    `SELECT customer_details->>'payment_terms' AS pt,
-            customer_details->>'payment_terms_override' AS ov,
-            delivery_type_override, delivery_days_override
-       FROM quotations WHERE id = $1`, [revised.draft_quote_id])).rows[0];
-  ok('แก้ใบเดิม → ร่างยังมีเครดิตที่ตั้งทับ (ไม่คืนเป็นของลูกค้า)',
-    rev?.pt === '30 Days' && rev?.ov === '30 Days', `${rev?.pt} / ธง ${rev?.ov}`);
+  const rev: any = revised.quotes?.[0];
+  ok('แก้ใบเดิม → ได้เครดิตที่ตั้งทับกลับมา (ไม่คืนเป็นของลูกค้า)',
+    rev?.payment_terms_override === '30 Days', `ธง ${rev?.payment_terms_override}`);
   ok('  กำหนดส่งที่ตั้งเองตามมาด้วย',
     rev?.delivery_type_override === 'import' && Number(rev?.delivery_days_override) === 21,
     `${rev?.delivery_type_override} / ${rev?.delivery_days_override}`);
