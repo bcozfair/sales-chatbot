@@ -34,7 +34,7 @@ import { fileURLToPath } from 'node:url';
 import { extname, join, normalize } from 'node:path';
 
 const PUBLIC = fileURLToPath(new URL('../../public/', import.meta.url));
-const SHOTS = process.env.OP_SHOTS || fileURLToPath(new URL('../../mockup/shots/', import.meta.url));
+const SHOTS = process.env.OP_SHOTS || fileURLToPath(new URL('../../mockups/shots/', import.meta.url));
 const ORIGIN = 'http://op-probe.local';
 mkdirSync(SHOTS, { recursive: true });
 

@@ -462,7 +462,7 @@ map `23505` + ชื่อ constraint `pricing_book_revisions_parent_key` → `B
 **กันไม่ได้แล้ว** เพราะเซิร์ฟเวอร์ใน worktree บน PMSV ต่อฐานจริง ⇒ เปลี่ยนเป็นแบบของ `scripts/dev/seedPhaseH.ts`:
 `PG_HOST` เป็น localhost · `NODE_ENV ≠ production` · และต้องตั้ง `PB_UI_WRITE_OK=1` เอง
 (ในกล่อง prod `PG_HOST=db` `NODE_ENV=production` จึงโดนกันสองชั้น) · สถานะสุดท้ายอ่านจากฐาน
-· **รันบนเครื่อง dev เท่านั้น** · สคริปต์ `mockup/_pl-*.mjs` (git-ignore ไว้) ก็เขียนฐานผ่าน API เหมือนกัน
+· **รันบนเครื่อง dev เท่านั้น** · สคริปต์ `mockups/_pl-*.mjs` (git-ignore ไว้) ก็เขียนฐานผ่าน API เหมือนกัน
 
 ### 8.6 ด่านพื้นของทุกเฟส
 

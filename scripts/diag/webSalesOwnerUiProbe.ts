@@ -28,7 +28,7 @@ import { getJwtSecret } from '../../config/jwt.js';
 
 const PORT = process.env.SO_PORT || '3099';
 const BASE = `http://localhost:${PORT}`;
-const SHOTS = fileURLToPath(new URL('../../mockup/shots/', import.meta.url));
+const SHOTS = fileURLToPath(new URL('../../mockups/shots/', import.meta.url));
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 mkdirSync(SHOTS, { recursive: true });
 
@@ -119,7 +119,7 @@ async function pickCustomer(page: Page, ref: string) {
     await wait(250);
   }
   await page.screenshot({ path: `${SHOTS}so-pick-fail.png`, fullPage: true });
-  throw new Error(`ค้นบริษัท ${ref} ไม่เจอในช่องเลือกบริษัท (ภาพ: mockup/shots/so-pick-fail.png)`);
+  throw new Error(`ค้นบริษัท ${ref} ไม่เจอในช่องเลือกบริษัท (ภาพ: mockups/shots/so-pick-fail.png)`);
 }
 /** รอจนป้ายในช่องเป็นค่าที่ต้องการ ('' = ไม่มีป้าย) แล้วคืนข้อความทั้งช่อง */
 async function waitChip(page: Page, want: string, ms = 8000): Promise<string> {
@@ -249,5 +249,5 @@ for (const width of [1280, 390]) {
 
 await browser.close();
 await pool.end();
-console.log(`\n${fail === 0 ? 'ผ่านทั้งหมด' : `ล้ม ${fail} ข้อ`} · ภาพอยู่ที่ mockup/shots/so-*.png`);
+console.log(`\n${fail === 0 ? 'ผ่านทั้งหมด' : `ล้ม ${fail} ข้อ`} · ภาพอยู่ที่ mockups/shots/so-*.png`);
 process.exit(fail === 0 ? 0 : 1);

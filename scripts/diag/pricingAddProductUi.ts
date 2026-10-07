@@ -28,7 +28,7 @@ import { extname, join, normalize } from 'node:path';
 import { BH_CATALOG } from '../../services/pricingLab/catalogBh.js';
 
 const PUBLIC = fileURLToPath(new URL('../../public/', import.meta.url));
-const SHOTS = process.env.PA_SHOTS || fileURLToPath(new URL('../../mockup/shots/', import.meta.url));
+const SHOTS = process.env.PA_SHOTS || fileURLToPath(new URL('../../mockups/shots/', import.meta.url));
 const ORIGIN = 'http://pa-probe.local';
 mkdirSync(SHOTS, { recursive: true });
 

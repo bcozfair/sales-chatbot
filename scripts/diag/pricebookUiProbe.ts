@@ -16,7 +16,7 @@
       (ท่าเดียวกับ scripts/dev/seedPhaseH.ts): PG_HOST เป็น localhost · NODE_ENV ≠ production ·
       ตั้ง PB_UI_WRITE_OK=1 เอง — ในกล่อง prod PG_HOST=db และ NODE_ENV=production จึงโดนกันสองชั้น
       **รันบนเครื่อง dev เท่านั้น** · เซิร์ฟเวอร์กับด่านต้องอ่าน .env ชุดเดียวกัน (ด่านอ่านผลสุดท้ายจากฐานเอง)
-      สคริปต์ `mockup/_pl-*.mjs` ก็เขียนฐานผ่าน API แบบเดียวกัน
+      สคริปต์ `mockups/_pl-*.mjs` ก็เขียนฐานผ่าน API แบบเดียวกัน
 
    ต้องมี API รันอยู่ที่พอร์ตที่ส่งมาทาง PB_PORT (ค่าเริ่มต้น 3098)
      PORT=3098 npm run dev      (ในทรีของงานนี้)
@@ -52,7 +52,7 @@ import { bookToSheets } from '../pricebook/sheet.js';
 
 const PORT = process.env.PB_PORT || '3098';
 const BASE = `http://localhost:${PORT}`;
-const SHOTS = fileURLToPath(new URL('../../mockup/shots/', import.meta.url));
+const SHOTS = fileURLToPath(new URL('../../mockups/shots/', import.meta.url));
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 mkdirSync(SHOTS, { recursive: true });
 
@@ -312,5 +312,5 @@ await browser.close();
 await pool.end();
 rmSync(tmp, { recursive: true, force: true });
 
-console.log(`\n${fail ? `ล้ม ${fail} ข้อ` : 'ผ่านทั้งหมด'}  ·  ภาพอยู่ที่ mockup/shots/`);
+console.log(`\n${fail ? `ล้ม ${fail} ข้อ` : 'ผ่านทั้งหมด'}  ·  ภาพอยู่ที่ mockups/shots/`);
 process.exit(fail ? 1 : 0);
