@@ -67,6 +67,7 @@
     "diag:block-rule": "tsx scripts/diag/blockRuleSmoke.ts",
     "diag:line-parity": "tsx scripts/diag/lineFlexParity.ts",
     "diag:web-quote": "tsx scripts/diag/webQuoteSmoke.ts",
+    "diag:sales-discount": "tsx scripts/diag/salesDiscountHistory.ts",
     "diag:price-approval": "tsx scripts/diag/priceApprovalSmoke.ts",
     "diag:role-permissions": "tsx scripts/diag/rolePermissions.ts",
     "diag:pricing": "tsx scripts/diag/pricingLab.ts && tsx scripts/diag/pricingGolden.ts && tsx scripts/diag/pricingRoundtrip.ts && tsx scripts/diag/pricingImport.ts && tsx scripts/diag/pricingModelEdit.ts && tsx scripts/diag/pricingDbRoundtrip.ts && tsx scripts/diag/pricingTrace.ts && tsx scripts/diag/pricingCatalogBh.ts && tsx scripts/diag/pricingCatalogTs.ts",

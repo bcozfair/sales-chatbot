@@ -642,6 +642,50 @@ function formatDeliveryTime(quote: any): { text: string; allInStock: boolean } {
   };
 }
 
+type DiscountLine = { kind: 'rows'; pcts: string[] } | { kind: 'never' } | { kind: 'error' };
+
+/** ข้อความแบบตัวอักษรของแถวส่วนลดเดิม — ลงใน summaryText ให้บันทึกตรงกับที่เซลส์เห็น */
+function discountLineText(line: DiscountLine): string {
+  if (line.kind === 'rows') return line.pcts.join(', ');
+  return line.kind === 'never' ? 'ยังไม่เคยมีใบสั่งขาย' : 'โหลดไม่สำเร็จ';
+}
+
+/**
+ * แถว "🏷️ ส่วนลดเดิม" ในกล่องลูกค้าของการ์ดสรุป — ขนาด xs เท่าบรรทัดอื่น ตัวหนา แถวเดียว
+ * % ของแต่ละบิลเป็นป้ายน้ำเงินตัวขาว ใบล่าสุดอยู่ซ้าย (เจ้าของเคาะ mockup `sdh-flex` 2026-10-07)
+ * สีทุกตัวเป็นชุดเดิมของการ์ดนี้ · ขาวบน #2563EB 5.17:1 · แดง #DC2626 บนขาว 4.83:1
+ */
+function discountFlexRow(line: DiscountLine): any {
+  if (line.kind !== 'rows') {
+    return {
+      type: "text",
+      text: `🏷️ ส่วนลดเดิม: ${discountLineText(line)}`,
+      size: "xs",
+      weight: "bold",
+      color: line.kind === 'never' ? "#4B5563" : "#DC2626",
+      wrap: true
+    };
+  }
+  return {
+    type: "box",
+    layout: "horizontal",
+    spacing: "xs",
+    contents: [
+      { type: "text", text: "🏷️ ส่วนลดเดิม:", size: "xs", weight: "bold", color: "#1D4ED8", flex: 0 },
+      ...line.pcts.map((pct) => ({
+        type: "box",
+        layout: "vertical",
+        flex: 0,
+        backgroundColor: "#2563EB",
+        cornerRadius: "4px",
+        paddingStart: "6px",
+        paddingEnd: "6px",
+        contents: [{ type: "text", text: pct, size: "xs", weight: "bold", color: "#FFFFFF" }]
+      }))
+    ]
+  };
+}
+
 export async function getQuotationSummaryMessage(quotes: any[]) {
   const quoteIds = quotes.map(q => q.id).join(',');
 
@@ -774,6 +818,22 @@ export async function getQuotationSummaryMessage(quotes: any[]) {
     paymentTerms = customerDetails.payment_terms;
   }
 
+  // ส่วนลดเดิม 3 บิลล่าสุด — แถวเดียวต่อจาก 💳 เครดิต (เจ้าของเคาะ mockup `sdh-flex` 2026-10-07)
+  // ข้อมูลชุดเดียวกับหน้าเว็บและหน้าแก้ใบ LIFF (getRecentDiscountSummary) · % เป็นจำนวนเต็ม (discountPctText)
+  // ยังไม่ระบุลูกค้า / ใบเก่าที่ไม่มี customer_id = ไม่มีแถว · อ่านฐานไม่ได้ = "โหลดไม่สำเร็จ" แต่การ์ดส่วนอื่นยังตอบได้
+  let discountLine: DiscountLine | null = null;
+  const discountCompanyId = Number(quotes[0]?.customer_id);
+  if (!customerIncomplete && Number.isInteger(discountCompanyId) && discountCompanyId > 0) {
+    try {
+      const { getRecentDiscountSummary, discountPctText } = await import('../services/dataDirectoryService.js');
+      const d = await getRecentDiscountSummary(discountCompanyId);
+      discountLine = d ? { kind: 'rows', pcts: d.rows.map((r) => discountPctText(r.pct)) } : { kind: 'never' };
+    } catch (err) {
+      console.error('[getQuotationSummaryMessage] discount history failed (แสดง "โหลดไม่สำเร็จ"):', err);
+      discountLine = { kind: 'error' };
+    }
+  }
+
   // คิวรีข้อมูลลูกค้า (customer_type, reference) ด้วย pool.query (งด Supabase-style)
   let customerData = null;
   if (meta.company) {
@@ -820,6 +880,7 @@ export async function getQuotationSummaryMessage(quotes: any[]) {
   summaryText += `📧 ${show(meta.email)}\n`;
   summaryText += `📍 ${show(meta.address)}\n`;
   summaryText += `💳 เครดิต: ${show(paymentTerms)}\n`;
+  if (discountLine) summaryText += `🏷️ ส่วนลดเดิม: ${discountLineText(discountLine)}\n`;
   summaryText += `───────────────\n`;
 
   // Flex body contents array
@@ -903,6 +964,7 @@ export async function getQuotationSummaryMessage(quotes: any[]) {
       wrap: true
     }
   );
+  if (discountLine) customerBoxContents.push(discountFlexRow(discountLine));
 
   const bodyContents: any[] = [
     {

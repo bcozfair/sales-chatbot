@@ -141,6 +141,7 @@ import {
 } from './services/webhookRecorder.js';
 import { getJwtSecret } from './config/jwt.js';
 import { getAppUrl } from './config/appUrl.js';
+import { requireLiffSalesperson } from './config/liffAuth.js';
 import { adminAuthMiddleware, requireRole, requireCapability, type Role, type AdminIdentity } from './config/auth.js';
 import {
   listOdooQuotationMakers,
@@ -3135,6 +3136,19 @@ app.get('/api/admin/webquote/discount-history', adminAuthMiddleware, requireCapa
     res.json({ discount: await getCustomerDiscountHistory(req.query?.customer_id) });
   } catch (err: any) {
     sendWebQuoteError(res, 'GET /api/admin/webquote/discount-history', err);
+  }
+});
+
+/**
+ * ส่วนลดเดิมของบริษัทเดียวกัน สำหรับแถว "ส่วนลดเดิม" ในหน้าแก้ใบ LIFF (เจ้าของเคาะ 2026-10-07)
+ * ข้อมูลชุดเดียวกับเส้นบน · ต่างจาก API อื่นของ LIFF ตรงที่ **ต้องยืนยันตัวตนกับ LINE** (`config/liffAuth.ts`)
+ * เพราะเป็นข้อมูลการค้า และ API ของ LIFF ไม่มีด่านใด ๆ มาก่อน · เซลส์ดูได้ทุกลูกค้า ไม่จำกัดทีมขาย (เคาะ 2026-10-07)
+ */
+app.get('/api/liff/discount-history', requireLiffSalesperson, async (req: any, res: any) => {
+  try {
+    res.json({ discount: await getCustomerDiscountHistory(req.query?.customer_id) });
+  } catch (err: any) {
+    sendWebQuoteError(res, 'GET /api/liff/discount-history', err);
   }
 });
 

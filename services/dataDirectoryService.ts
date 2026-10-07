@@ -17,7 +17,7 @@ import {
   listProducts, getProductFacets, getProductSummary, getProductionSeriesCounts,
   countProductsMatchingSpecificRules,
   listCompanies, listContacts, getCustomerFacets,
-  getCompanyDiscountHistory, getDiscountHistoryForCompanies, getCompanyContacts,
+  getCompanyDiscountHistory, queryCompanyDiscountHistory, getDiscountHistoryForCompanies, getCompanyContacts,
   type ProductDirectoryFilter, type CustomerDirectoryFilter, type DiscountOrderRow,
 } from '../db/dataDirectoryRepo.js';
 import { loadProductBlockRules, findBlockingRule, normalizeProductScope } from './rules/index.js';
@@ -171,6 +171,28 @@ export function summarizeDiscounts(orders: DiscountOrderRow[]): DiscountSummary 
     trend = latestPct > rows[1].pct ? 1 : latestPct < rows[1].pct ? -1 : 0;
   }
   return { rows, latestPct, same, trend };
+}
+
+/**
+ * "ส่วนลดเดิม" — ส่วนลดทั้งบิลของ 3 ใบสั่งขายล่าสุดของรหัสลูกค้าเดียว (`company_id` · ไม่รวมสาขา เคาะ 2026-09-17)
+ *
+ * จุดเดียวที่สามทางเข้าเรียก: แถว "ส่วนลดเดิม" ของหน้าขอใบเสนอราคา (`webQuoteService`) ·
+ * การ์ดสรุปร่างใน LINE (`flexTemplates`) · หน้าแก้ใบ LIFF (`GET /api/liff/discount-history`)
+ * ⇒ สามที่ไม่มีทางเลือกใบคนละชุด · `null` = ไม่เคยมีใบสั่งขาย · อ่านฐานไม่ได้ = **throw**
+ * (ผู้เรียกต้องบอก "โหลดไม่สำเร็จ" ไม่ใช่ "ไม่เคยซื้อ")
+ */
+export async function getRecentDiscountSummary(companyId: number): Promise<DiscountSummary | null> {
+  return summarizeDiscounts(await queryCompanyDiscountHistory(companyId, 3));
+}
+
+/**
+ * % ส่วนลดที่คนออกใบเห็น — **จำนวนเต็มเท่านั้น ปัดครึ่งขึ้น** (เจ้าของสั่ง 2026-10-07: 29.97 → 30 · 27.5 → 28)
+ * ปัดลงจะทำให้ 29.97% กลายเป็น 29% ซึ่งหลอกตากว่า · `null` (ยอดก่อนลดเป็น 0) = "—"
+ * หน้าเว็บ (`QuoteRequest.tsx`) และ LIFF (`quote-edit.html`) มีสำเนาของบรรทัดนี้เพราะ import ข้ามไม่ได้
+ * ⚠️ ใช้เฉพาะแถว "ส่วนลดเดิม" — หน้า "ข้อมูลลูกค้า" ยังแสดงทศนิยมตามเดิม
+ */
+export function discountPctText(pct: number | null): string {
+  return pct == null ? '—' : `${Math.round(pct)}%`;
 }
 
 /**

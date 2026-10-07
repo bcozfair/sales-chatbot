@@ -74,8 +74,7 @@ import {
 } from './webIdentity.js';
 import { dedupeActingSalespersons, type PickedSalesperson } from './salespersonPicker.js';
 import { resolveCustomerSalesOwner, resolveQuotationSalesOwner, type SalesOwner } from './customerSalesOwner.js';
-import { queryCompanyDiscountHistory } from '../db/dataDirectoryRepo.js';
-import { summarizeDiscounts, type DiscountSummary } from './dataDirectoryService.js';
+import { getRecentDiscountSummary, type DiscountSummary } from './dataDirectoryService.js';
 import { checkCreditHold } from './creditHoldService.js';
 import { ODOO_SOURCE_OPTIONS, DEFAULT_ODOO_SOURCE } from './odooSaleOrderExport.js';
 
@@ -2103,7 +2102,7 @@ export async function getCustomerSalesOwner(customerId: unknown): Promise<SalesO
 
 /**
  * ส่วนลดทั้งบิลของ 3 ใบสั่งขายล่าสุดของบริษัทนี้ — **ตัวเดียวกับหน้า "ข้อมูลลูกค้า"**
- * (`summarizeDiscounts` + คิวรีเดียวกัน) ⇒ สองหน้าไม่มีทางโชว์ตัวเลขคนละชุด
+ * (`getRecentDiscountSummary` · ตัวเดียวกับการ์ดสรุปใน LINE และหน้าแก้ใบ LIFF) ⇒ ไม่มีทางโชว์ตัวเลขคนละชุด
  *
  * ขอบเขต = `company_id` เดียว ไม่ขยายเป็นนิติบุคคล (เจ้าของตัดสิน 2026-09-17 — เหตุผลอยู่ที่หัว
  * `getCompanyDiscountHistory`) · `null` = ไม่เคยมีใบสั่งขาย · อ่านฐานไม่ได้ = throw ⇒ จอบอก
@@ -2114,7 +2113,7 @@ export async function getCustomerDiscountHistory(customerId: unknown): Promise<D
   if (!Number.isInteger(id) || id <= 0) {
     throw new WebQuoteError('BAD_REQUEST', 'ต้องระบุ customer_id', 400);
   }
-  return summarizeDiscounts(await queryCompanyDiscountHistory(id, 3));
+  return getRecentDiscountSummary(id);
 }
 
 /**

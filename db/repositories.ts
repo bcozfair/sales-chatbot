@@ -322,6 +322,25 @@ export async function getSalespersonByUserId(userId: string): Promise<any | null
 }
 
 /**
+ * บัญชี LINE นี้เป็นเซลส์ที่ลงทะเบียนเสร็จแล้วหรือไม่ — ด่านของ API ฝั่ง LIFF ที่ส่งข้อมูลการค้า (เช่น ส่วนลดเดิม)
+ *
+ * "เสร็จแล้ว" = มีรหัสพนักงาน และไม่ได้ค้างอยู่ในขั้นลงทะเบียน (`pending_*` = เพิ่งกดลงทะเบียน ยังไม่ผ่านขั้นเลือกสาขา)
+ * · ตัดแถวพร็อกซีของหน้าเว็บ (`web:*`) ออก เพราะไม่ใช่บัญชี LINE
+ * ⚠️ **throw เมื่ออ่านฐานไม่ได้** ต่างจาก `getSalespersonByUserId` ที่คืน null — ฐานล่มต้องตอบ "ลองใหม่"
+ *    ไม่ใช่ "คุณไม่ใช่เซลส์"
+ */
+export async function isRegisteredSalesperson(userId: string): Promise<boolean> {
+  const { rows } = await pool.query(
+    `SELECT 1 FROM salesperson
+      WHERE user_id = $1 AND user_id NOT LIKE 'web:%'
+        AND COALESCE(TRIM(salesperson_id), '') <> '' AND status NOT LIKE 'pending%'
+      LIMIT 1`,
+    [userId],
+  );
+  return rows.length > 0;
+}
+
+/**
  * เซลส์ทุกคนที่ผูกกับผู้ติดต่อของ "บริษัท" นี้ตามข้อมูล Odoo — เรียงตาม `contact_id` น้อยสุดของแต่ละคน
  *
  * ตัวแรกของผลลัพธ์ = "คนแรกที่ไม่ว่างของบริษัท" (ขั้น 1 · เจ้าของเคาะ 2026-09-24) · ตัวถัดไป =
