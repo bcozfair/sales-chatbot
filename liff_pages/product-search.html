@@ -675,6 +675,17 @@
           return false;
         }
       };
+      // ขั้น 0 ของการยืนยันตัวตน LIFF (เจ้าของสั่ง 2026-10-07): แนบ access token ของ LINE ไปกับทุก request ที่ไปโดเมนตัวเอง
+      // server ยังไม่บังคับ แค่นับว่าตัวตนตรงกับ userId ที่หน้านี้ส่งไหม (config/liffAuthObserve.ts)
+      // ก่อน liff.init / ยังไม่ login = ไม่มี token ก็ไม่แนบ · มีคนแนบมาเองแล้ว (เช่น ส่วนลดเดิม) = ไม่ทับ
+      // ⚠️ ห้ามแนบไปโดเมนอื่นเด็ดขาด — token คือบัตรผ่านของผู้ใช้ (เงื่อนไข isSameOrigin ข้างบนกันไว้)
+      const liffToken = () => {
+        try {
+          return (window.liff && typeof window.liff.getAccessToken === "function" && window.liff.getAccessToken()) || "";
+        } catch (e) {
+          return "";
+        }
+      };
       window.fetch = function(url, options = {}) {
         if (!isSameOrigin(url)) return originalFetch(url, options);
         if (!options.headers) {
@@ -686,6 +697,18 @@
           options.headers.push(['ngrok-skip-browser-warning', 'true']);
         } else {
           options.headers['ngrok-skip-browser-warning'] = 'true';
+        }
+        const token = liffToken();
+        if (token) {
+          const bearer = "Bearer " + token;
+          if (options.headers instanceof Headers) {
+            if (!options.headers.has("Authorization")) options.headers.set("Authorization", bearer);
+          } else if (Array.isArray(options.headers)) {
+            if (!options.headers.some((h) => String(h[0]).toLowerCase() === "authorization"))
+              options.headers.push(["Authorization", bearer]);
+          } else if (!Object.keys(options.headers).some((k) => k.toLowerCase() === "authorization")) {
+            options.headers["Authorization"] = bearer;
+          }
         }
         return originalFetch(url, options);
       };

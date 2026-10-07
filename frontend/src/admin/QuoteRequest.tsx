@@ -34,6 +34,7 @@
 //  `web_user_id` ที่ได้จาก /drafts ไปด้วยทุกครั้ง (ขั้น 8′)
 // ──────────────────────────────────────────────────────────────────────────────
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { sharedApiFetch } from './sharedApiFetch';
 import { createPortal } from 'react-dom';
 import { useAuth } from '../context/AuthContext';
 import { PageHeader } from './PageHeader';
@@ -1493,7 +1494,7 @@ const ProductSearchBox: React.FC<{
     const timer = setTimeout(async () => {
       setLoading(true);
       try {
-        const res = await fetch(`/api/products/search?q=${encodeURIComponent(q)}&limit=12`);
+        const res = await sharedApiFetch(`/api/products/search?q=${encodeURIComponent(q)}&limit=12`);
         if (!res.ok) throw new Error(String(res.status));
         const data = await res.json();
         setHits(Array.isArray(data) ? data : []);
@@ -3003,7 +3004,7 @@ export const QuoteRequest: React.FC<{ canAddProduct?: boolean }> = ({ canAddProd
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`/api/customer/${customerId}/contacts`);
+        const res = await sharedApiFetch(`/api/customer/${customerId}/contacts`);
         const data = res.ok ? await res.json() : [];
         if (cancelled) return;
         const list: ContactRow[] = Array.isArray(data) ? data : [];
@@ -3157,7 +3158,7 @@ export const QuoteRequest: React.FC<{ canAddProduct?: boolean }> = ({ canAddProd
       // และผลที่ได้ดีกว่าด้วย: สปินเนอร์ขึ้นตอนยิงจริง ไม่ใช่กะพริบทุกตัวอักษรที่พิมพ์
       setCustSearching(true);
       try {
-        const res = await fetch(`/api/customers/search?q=${encodeURIComponent(q)}`);
+        const res = await sharedApiFetch(`/api/customers/search?q=${encodeURIComponent(q)}`);
         const data = res.ok ? await res.json() : [];
         if (!Array.isArray(data)) return;
         setCustomerOptions((prev) => {
@@ -3201,7 +3202,7 @@ export const QuoteRequest: React.FC<{ canAddProduct?: boolean }> = ({ canAddProd
     async (newId: number) => {
       setAddContactFor(null);
       try {
-        const res = await fetch(`/api/customer/${customerId}/contacts`);
+        const res = await sharedApiFetch(`/api/customer/${customerId}/contacts`);
         const data = res.ok ? await res.json() : [];
         if (Array.isArray(data)) setContacts(data as ContactRow[]);
       } catch {
@@ -3215,7 +3216,7 @@ export const QuoteRequest: React.FC<{ canAddProduct?: boolean }> = ({ canAddProd
   /** ดึงรายชื่อผู้ติดต่อของบริษัทที่เลือกอยู่ใหม่ — ใช้ร่วมกันหลังแก้ไขและหลังลบ */
   const reloadContacts = useCallback(async () => {
     try {
-      const res = await fetch(`/api/customer/${customerId}/contacts`);
+      const res = await sharedApiFetch(`/api/customer/${customerId}/contacts`);
       const data = res.ok ? await res.json() : [];
       if (Array.isArray(data)) setContacts(data as ContactRow[]);
     } catch {
@@ -3519,7 +3520,7 @@ export const QuoteRequest: React.FC<{ canAddProduct?: boolean }> = ({ canAddProd
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/shipping-fee/config');
+        const res = await sharedApiFetch('/api/shipping-fee/config');
         if (!res.ok) return;
         const d = await res.json();
         if (cancelled || !d?.product_id) return;
@@ -3795,7 +3796,7 @@ export const QuoteRequest: React.FC<{ canAddProduct?: boolean }> = ({ canAddProd
   };
 
   const confirmOne = async (quoteId: string, webId: string) => {
-    const res = await fetch(`/api/quotation/${quoteId}/confirm`, {
+    const res = await sharedApiFetch(`/api/quotation/${quoteId}/confirm`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       // userId = web_user_id เท่านั้น — isQuotationOwner ฝั่ง server เทียบกับเจ้าของใบ (ขั้น 8′)

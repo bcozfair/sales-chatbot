@@ -22,8 +22,8 @@
  *
  * ── สิ่งที่ต้องรู้ ─────────────────────────────────────────────────────────
  *   · LINE ล่ม/ช้า = 503 (หน้าจอขึ้น "โหลดไม่สำเร็จ" ให้ลองใหม่) **ไม่ใช่** 401/403 ที่จะบอกเซลส์ว่าไม่มีสิทธิ์
- *   · จำผลที่ผ่านไว้ 5 นาทีต่อ token — เปลี่ยนบริษัทในหน้าเดียวหลายรอบไม่ต้องถาม LINE ซ้ำ
- *     (ผลที่ไม่ผ่านไม่จำ) · ไม่ได้อยู่ในเส้นทาง webhook จึงไม่กินงบ 48 วินาที
+ *   · จำ "token นี้คือใคร" ไว้ 5 นาที — เปลี่ยนบริษัทหลายรอบไม่ต้องถาม LINE ซ้ำ (token ที่ไม่ผ่านไม่จำ)
+ *     ส่วน "เป็นเซลส์ไหม" ถามฐานทุกครั้ง · ไม่ได้อยู่ในเส้นทาง webhook จึงไม่กินงบ 48 วินาที
  *   · ไม่ได้ตั้ง LIFF ID เลย = ไม่มี channel ให้เทียบ ⇒ ปฏิเสธทุกคน (fail-closed)
  */
 import { isRegisteredSalesperson } from '../db/repositories.js';
@@ -60,6 +60,16 @@ export function bearerToken(header: unknown): string {
   return m ? m[1] : '';
 }
 
+export type LiffIdentity =
+  | { ok: true; userId: string }
+  | { ok: false; code: 'NO_TOKEN' | 'BAD_TOKEN' | 'VERIFY_FAILED' };
+
+/**
+ * สองชั้น ใช้ cache ร่วมกัน:
+ *   identify(token) — token นี้เป็นของ userId ไหน (ถาม LINE · จำผลที่ผ่าน 5 นาที) · ตัวสังเกตการณ์ขั้น 0 ใช้ชั้นนี้
+ *   verify(token)   — identify + ต้องเป็นเซลส์ที่ลงทะเบียนแล้ว (ถามฐานทุกครั้ง · ~1 ms) · route ที่บังคับใช้ชั้นนี้
+ * ถามฐานทุกครั้งไม่จำ ⇒ เซลส์ที่เพิ่งลงทะเบียนเสร็จเห็นผลทันที ไม่ต้องรอ cache หมด
+ */
 export function createLiffVerifier(deps: LiffVerifierDeps) {
   const cache = new Map<string, { userId: string; until: number }>();
 
@@ -70,8 +80,8 @@ export function createLiffVerifier(deps: LiffVerifierDeps) {
     return { status: res.status, body };
   }
 
-  return async function verify(token: string): Promise<LiffAuthResult> {
-    if (!token) return { ok: false, status: 401, code: 'NO_TOKEN' };
+  async function identify(token: string): Promise<LiffIdentity> {
+    if (!token) return { ok: false, code: 'NO_TOKEN' };
 
     const hit = cache.get(token);
     if (hit && hit.until > deps.now()) return { ok: true, userId: hit.userId };
@@ -82,49 +92,57 @@ export function createLiffVerifier(deps: LiffVerifierDeps) {
     try {
       const v = await lineJson(`https://api.line.me/oauth2/v2.1/verify?access_token=${encodeURIComponent(token)}`);
       // LINE ตอบ 400 กับ token ที่หมดอายุ/ไม่มีจริง — นั่นคือ "ไม่ผ่าน" ไม่ใช่ "LINE ล่ม"
-      if (v.status >= 400 && v.status < 500) return { ok: false, status: 401, code: 'BAD_TOKEN' };
-      if (v.status !== 200) return { ok: false, status: 503, code: 'VERIFY_FAILED' };
+      if (v.status >= 400 && v.status < 500) return { ok: false, code: 'BAD_TOKEN' };
+      if (v.status !== 200) return { ok: false, code: 'VERIFY_FAILED' };
       expiresInSec = Number(v.body?.expires_in);
       if (!deps.allowedChannelIds().has(String(v.body?.client_id ?? '')) || !(expiresInSec > 0)) {
-        return { ok: false, status: 401, code: 'BAD_TOKEN' };
+        return { ok: false, code: 'BAD_TOKEN' };
       }
       const p = await lineJson('https://api.line.me/v2/profile', { headers: { Authorization: `Bearer ${token}` } });
-      if (p.status >= 400 && p.status < 500) return { ok: false, status: 401, code: 'BAD_TOKEN' };
+      if (p.status >= 400 && p.status < 500) return { ok: false, code: 'BAD_TOKEN' };
       userId = typeof p.body?.userId === 'string' ? p.body.userId : '';
-      if (p.status !== 200 || !userId) return { ok: false, status: 503, code: 'VERIFY_FAILED' };
+      if (p.status !== 200 || !userId) return { ok: false, code: 'VERIFY_FAILED' };
     } catch (err: unknown) {
       console.error('[liffAuth] ถาม LINE ไม่สำเร็จ:', err instanceof Error ? err.message : err);
-      return { ok: false, status: 503, code: 'VERIFY_FAILED' };
+      return { ok: false, code: 'VERIFY_FAILED' };
     }
-
-    let isSales: boolean;
-    try {
-      isSales = await deps.isSalesperson(userId);
-    } catch (err: unknown) {
-      console.error('[liffAuth] อ่านตาราง salesperson ไม่สำเร็จ:', err instanceof Error ? err.message : err);
-      return { ok: false, status: 503, code: 'VERIFY_FAILED' };
-    }
-    if (!isSales) return { ok: false, status: 403, code: 'NOT_SALESPERSON' };
 
     if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value as string);
     cache.set(token, { userId, until: deps.now() + Math.min(CACHE_TTL_MS, expiresInSec * 1000) });
     return { ok: true, userId };
-  };
+  }
+
+  async function verify(token: string): Promise<LiffAuthResult> {
+    const id = await identify(token);
+    if (!id.ok) return { ok: false, status: id.code === 'VERIFY_FAILED' ? 503 : 401, code: id.code };
+    try {
+      if (!(await deps.isSalesperson(id.userId))) return { ok: false, status: 403, code: 'NOT_SALESPERSON' };
+    } catch (err: unknown) {
+      console.error('[liffAuth] อ่านตาราง salesperson ไม่สำเร็จ:', err instanceof Error ? err.message : err);
+      return { ok: false, status: 503, code: 'VERIFY_FAILED' };
+    }
+    return id;
+  }
+
+  return { identify, verify };
 }
 
-const verifyLiffToken = createLiffVerifier({
+const liffVerifier = createLiffVerifier({
   fetchImpl: (...args) => fetch(...args),
   allowedChannelIds: () => liffChannelIdsFromEnv(),
   isSalesperson: isRegisteredSalesperson,
   now: () => Date.now(),
 });
 
+/** token นี้เป็นของ userId ไหน — ไม่สนว่าเป็นเซลส์หรือไม่ (ตัวสังเกตการณ์ขั้น 0 · config/liffAuthObserve.ts) */
+export const identifyLiffToken = liffVerifier.identify;
+
 /**
  * Express middleware — ผ่านแล้วได้ `req.liffUserId` (userId ที่ LINE ยืนยันให้)
  * ตอบ `{ error, code }` เสมอ ให้หน้า LIFF แยก "ไม่มีสิทธิ์" (401/403) ออกจาก "ลองใหม่" (503)
  */
 export async function requireLiffSalesperson(req: any, res: any, next: () => void): Promise<void> {
-  const r = await verifyLiffToken(bearerToken(req.headers?.authorization));
+  const r = await liffVerifier.verify(bearerToken(req.headers?.authorization));
   if (!r.ok) {
     const error = r.status === 503 ? 'ยืนยันตัวตนกับ LINE ไม่สำเร็จ ลองใหม่อีกครั้ง' : 'ดูได้เฉพาะเซลส์ที่ลงทะเบียนแล้ว';
     res.status(r.status).json({ error, code: r.code });

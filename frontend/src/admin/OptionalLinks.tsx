@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { sharedApiFetch } from './sharedApiFetch';
 import { useAuth } from '../context/AuthContext';
 import { 
   Plus, 
@@ -88,7 +89,7 @@ const ProductComboBox: React.FC<ProductComboBoxProps> = ({
     const delayDebounceFn = setTimeout(async () => {
       setIsLoading(true);
       try {
-        const resp = await fetch(`/api/products/search?q=${encodeURIComponent(query)}`);
+        const resp = await sharedApiFetch(`/api/products/search?q=${encodeURIComponent(query)}`);
         if (resp.ok) {
           const data = await resp.json();
           setResults(data);

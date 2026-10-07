@@ -10,7 +10,7 @@
 |---|---|---|
 | GET | `/` | health check |
 | POST | `/callback` | LINE Webhook รับ events ทั้งหมด |
-| GET | `/api/liff/config?page=` | ดึง LIFF ID แบบ dynamic (register, quote-edit, product-search) |
+| GET | `/api/liff/config?page=` | คืน LIFF ID ตาม page — ไม่มีหน้าไหนเรียกแล้ว (หน้า LIFF ได้ ID จากการแทน `__LIFF_ID__` ตอนเสิร์ฟ) |
 | GET | `/liff/register`, `/liff/branch-select` | Serve หน้า LIFF ลงทะเบียน |
 | GET | `/liff/quote-edit` | Serve หน้า LIFF แก้ไขใบเสนอราคา |
 | GET | `/liff/product-search` | Serve หน้า LIFF ค้นหาสินค้า |
@@ -323,7 +323,7 @@ user_id, message_id, type, content, reply_token, reply_content, meta (jsonb), cr
 
 | Method | Path | Auth | คำอธิบาย |
 |--------|------|------|-----------|
-| GET | `/api/liff/config?page=` | - | ดึง LIFF ID ตาม page |
+| GET | `/api/liff/config?page=` | - | คืน LIFF ID ตาม page (ไม่มีหน้าไหนเรียกแล้ว) |
 | POST | `/api/quotations` | - | สร้างใบเสนอราคาใหม่ |
 | GET | `/api/quotations?ids=` | - | ดึงใบเสนอราคาหลายใบ |
 | GET | `/api/products/search?q=` | - | ค้นหาสินค้า real-time |
@@ -426,7 +426,7 @@ Auth: JWT เก็บใน localStorage, `AuthContext` wrap app ทั้ง�
 ### จุดสำคัญที่ควรระวัง
 
 1. **`dbClient.ts`** มี query builder ที่ทำ column mapping อัตโนมัติ (`branch_code` ↔ `branch`, `code` ↔ `model`, etc.) — ต้องเข้าใจ mapping ก่อนแก้ไขตาราง
-2. **LIFF ID** ดึงจาก `/api/liff/config?page=` เสมอ — ไม่ hardcode
+2. **LIFF ID** ไม่ hardcode — server แทน `__LIFF_ID__` ในหน้า LIFF ตอนเสิร์ฟ
 3. **ลายเซ็น** ใช้ `salesperson_employee_code` (ไม่ใช่ LINE user_id) เป็นชื่อไฟล์
 4. **การบล็อกสินค้า** อยู่ที่ `product_block_rules` ที่เดียว (5 ระดับ) — ตรวจทั้ง frontend + backend
    (เดิมคือ `quotation_rules.is_locked` ลบไปแล้วในเฟส 5 · ดู `docs/plan-product-block-rules.md`)

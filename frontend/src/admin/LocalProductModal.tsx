@@ -38,6 +38,7 @@
 //  · ปุ่มคิดราคาไม่ import `pricingLab` — ยิง `POST /price` ซึ่งเป็นตัวจัดการเดียวกับหน้าคำนวณราคา (§13.5)
 // ─────────────────────────────────────────────────────────────────────────────
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { sharedApiFetch } from './sharedApiFetch';
 import { Plus, Pencil, Calculator, Loader2, Lock, Search, ChevronRight } from 'lucide-react';
 import { Modal } from './Modal';
 import { Button } from './Button';
@@ -463,7 +464,7 @@ export const LocalProductModal: React.FC<Props> = ({
     if (!dup || !onUseExisting) return;
     setBusy(true);
     try {
-      const res = await fetch(`/api/products/search?q=${encodeURIComponent(dup.model)}&limit=12`);
+      const res = await sharedApiFetch(`/api/products/search?q=${encodeURIComponent(dup.model)}&limit=12`);
       const hits: PickedProduct[] = res.ok ? await res.json() : [];
       const hit = Array.isArray(hits) ? hits.find((h) => h.product_id === dup.product_template_id) ?? hits.find((h) => h.model === dup.model) : null;
       if (hit) onUseExisting(hit);
