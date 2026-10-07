@@ -811,6 +811,11 @@ async function main(): Promise<void> {
     const d102 = price('TSK-07 10.2x400');
     check('แกน 10.2 (ไม่มีทั้งแคตตาล็อกและชีต) = ต้องขอราคา · ช่องกรอกขึ้น ask', d102.o?.status === 'quoteOnRequest' && d102.p.tsForm?.issues?.d === 'ask',
       `${d102.o?.status} ${JSON.stringify(d102.p.tsForm?.issues)}`);
+    // เจ้าของ 2026-10-07 ข้อ 2 "ใส่ราคาทีหลัง" — ตัว S หลังเลขรุ่น (มีขีด) = นอกแคตตาล็อกแบบ TSJ-02S ไม่ใช่หัวกระโหลกเล็ก
+    const s07 = price('TSK-07-S 12.7x200');
+    check('TSK-07-S = ราคา 12.7x200 + เตือนว่ายังไม่รวมตัว S · ตั้งราคาที่รหัสย่อย 07S (ไม่ใช่หัว S)', s07.o?.status === 'priced' &&
+      s07.o.unitPrice === price('TSK-07 12.7x200').o?.unitPrice && s07.p.parts.some((x) => x.subCode === '07S') &&
+      s07.p.warnings.some((w) => /ตัว S/.test(w)), `${s07.o?.status} ${s07.o?.unitPrice} ${s07.p.parts.map((x) => `${x.text}:${x.subCode ?? ''}`).join(' ')}`);
     // แกนสองขนาด — เดิมอ่านแกนแรกแล้ว `-6x900` ตกเป็นท่อนไม่รู้จัก ⇒ ได้ราคาแกน 2.5S ยาว 100 mm (770 / ฐาน 4,355)
     for (const code of ['TSJ-07 2.5S-6x900+100-S000', 'TSK-07 3-10Ax80+130-S000', 'TSK-07 15.8-21.3Bx430+270-B-S000', 'TSK-06(S4)6S-15.97Bx50+490-S000']) {
       const r = price(code);

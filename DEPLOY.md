@@ -1003,9 +1003,10 @@ npx tsx scripts/pricebook/seedCatalogSubcodes.ts --apply --by admin
 ตรวจหลังขึ้น: `TSK-06(S4)10.2Ax100-B` = ต้องขอราคา (ราคาเท่าที่คิดได้ 500) · `TSK-06(S4)15.8Bx200` = ยังไม่มีราคา (ไม่ใช่ "รหัสไม่ได้บอกขนาดแกน") · `diag:pricing-catalog-ts` หัวข้อ 14
 
 **TS_-07** (ตรวจ 2026-10-07 · `docs/pricing-code-ts-catalog.md` หัวข้อ TS_-07) — **รุ่นใหม่** `TSK-07` จากชีต `TS-07` (แมป 24) + แถวรหัสย่อย 10 แถว
-(2 Element · หัว B/K/KB/S/E/SS/SB · U · TN) · เพิ่มรุ่นด้วย `--new-models` (**ห้าม `--replace-all`**) · **ฐานยังไม่ได้เขียน** ·
-ลำดับ: **ขึ้นโค้ดก่อน แล้วเขียนฐานต่อ** (โค้ดเก่าไม่มีช่อง TS_-07 · หัว `N10-07` · ตัวกันแกนสองขนาด) · โค้ดใหม่กับฐานเก่า = แกนสองขนาด 3 รหัสของ TS_-02/06 ได้ราคา → ขอราคา (ตั้งใจ) ที่เหลือไม่เปลี่ยน ·
-สำรอง `pricing_*` + `pricing_subcodes` ก่อน:
+(2 Element · หัว B/K/KB/S/E/SS/SB · U · TN) · เพิ่มรุ่นด้วย `--new-models` (**ห้าม `--replace-all`**) ·
+**ฐาน PMSV เขียนแล้ว 2026-10-07** ตามที่เจ้าของสั่ง (การบันทึกครั้งที่ 25 · 10 แถวรหัสย่อย · สำรอง `backup/pricing-before-ts07-2026-10-07.dump`) ⇒ deploy ไม่ต้องทำซ้ำ ·
+โค้ดใหม่กับฐานนี้ = แกนสองขนาด 3 รหัสของ TS_-02/06 ได้ราคา → ขอราคา (ตั้งใจ) · ระหว่างรอ deploy prod คิด TS_-07 ต่างจากหลัง deploy 61 รหัส (`docs/pricing-code-ts-catalog.md` คำตอบข้อ 3) ·
+ฐานอื่น (ลำดับปลอดภัยกว่า = ขึ้นโค้ดก่อน แล้วเขียนฐาน) · สำรอง `pricing_*` ก่อน:
 ```bash
 npx tsx scripts/pricebook/importer.ts --data <โฟลเดอร์ Excel> --new-models --out /tmp/ts07-book.json   # รายงาน — ต้องเห็น + TSK-07 รุ่นเดียว · ราคาตั้ง 36 ช่อง
 npm run diag:pricing-diff -- --head-book /tmp/ts07-book.json --head-seed-subcodes --base HEAD          # เปลี่ยนแค่ TS-07: ไม่มีรุ่น → ได้ราคา 279 / ขอราคา 47 (บนโค้ดที่ขึ้นแล้ว)
@@ -1015,7 +1016,7 @@ npx tsx scripts/pricebook/seedCatalogSubcodes.ts                                
 npx tsx scripts/pricebook/seedCatalogSubcodes.ts --apply --by admin
 ```
 ตรวจ: หน้าคำนวณราคา `TSK-07 6x100` = 660 · `TSK-07 21.3Bx200-B` = 3,855 · `TSK-07 6x150-2-B` = 1,680 · `TST-07 6x100` = 720 · `N10-07 6x100-U` = 760 (Excel 13-05-69) ·
-`TSJ-07 2.5S-6x900+100-S000` = ต้องขอราคา (แกนสองขนาด) · `diag:pricing-catalog-ui` ช่อง "รุ่น" กลุ่ม TS +1 · รันซ้ำต้องได้ "ไม่มีอะไรต้องเขียน"
+`TSJ-07 2.5S-6x900+100-S000` = ต้องขอราคา (แกนสองขนาด) · `TSK-07-S 12.7x200` = 1,505 + เตือนตัว S (ตั้งราคาที่รหัสย่อย `07S`) · `diag:pricing-catalog-ui` ช่อง "รุ่น" กลุ่ม TS +1 · รันซ้ำต้องได้ "ไม่มีอะไรต้องเขียน"
 
 **ถอยกลับ** (หลัง dump): `TRUNCATE pricing_model_history, pricing_models, pricing_book_revisions;` — หน้าจอกลับไปขึ้น
 "ยังไม่มีสมุดราคาในระบบ" เท่ากับก่อนนำเข้า · ⚠️ `db:restore` / `pg_restore` ของ dump เก่าก็พาราคาย้อนไปตามวันของ dump ด้วย
