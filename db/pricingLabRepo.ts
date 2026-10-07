@@ -188,3 +188,26 @@ export async function listCatalogCodes(db: DbExecutor = pool): Promise<string[]>
   );
   return rows.map((r) => r.model);
 }
+
+/** หนึ่งแถวของรายการ "ค้นรหัสในฐาน" ของหน้าคำนวณราคา — ราคาเป็นตัวเลขแล้ว (`numeric` ของ pg มาเป็นข้อความ) */
+export interface CatalogProductRow {
+  model: string;
+  internal_reference: string | null;
+  name: string | null;
+  sales_price: number;
+}
+
+/**
+ * สินค้าที่หัวรหัสอาจตกรุ่นในสมุดราคา — ช่องค้นรหัสของหน้าคำนวณราคา (เจ้าของเคาะ mockup `pricing-calc-redesign` 2026-10-07)
+ *
+ * กรองหยาบด้วยหัวรหัสแบบเดียวกับ `listCatalogCodes` + หัว NTC/PTC (`N10-04` · `P2-03`) ซึ่งตัวนั้นไม่นับ
+ * (หัวเดียวกับที่ `diag:pricing-diff` ใช้) — การตัดสินว่าตกรุ่นไหนทำที่ `modelOfCode` ฝั่ง service ไม่ใช่ SQL
+ */
+export async function listCatalogProducts(db: DbExecutor = pool): Promise<CatalogProductRow[]> {
+  const { rows } = await db.query<{ model: string; internal_reference: string | null; name: string | null; sales_price: string | null }>(
+    `SELECT model, internal_reference, name, sales_price
+       FROM products
+      WHERE model ~* '^\\s*(TS|BH|[NP][0-9]{1,2}-[0-9]{2})'`
+  );
+  return rows.map((r) => ({ ...r, sales_price: Number(r.sales_price) || 0 }));
+}

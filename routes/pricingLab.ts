@@ -11,6 +11,7 @@ import { TS_ADDONS, TS_CATALOG, buildTsCode, slotOptions, tsSpec, type TsForm } 
 import { AXIS_TH, displayName } from '../services/pricingLab/labels.js';
 import { productsPerModel } from '../services/pricingLab/bookCoverage.js';
 import { subCodeModels, unreadBySheet } from '../services/pricingLab/subcodeView.js';
+import { findCodeExamples } from '../services/pricingLab/codeExamples.js';
 import {
   EditRejected, applyModelEdit, applySheetEdit, modelEditorView, sheetModels,
 } from '../services/pricingLab/modelEditor.js';
@@ -367,6 +368,26 @@ pricingLabRouter.get('/overview', async (_req: AdminRequest, res: Response) => {
     // ต้องไม่มีตารางที่เลือกแล้วคิดราคาไม่ได้
     catalogTs: TS_CATALOG.filter((s) => !book || book.models[s.model]),
   });
+});
+
+/**
+ * ช่องค้นรหัสของหน้าคำนวณราคา — รหัสสินค้าจริงในฐานที่สมุดราคาเปิดรุ่นให้ (`services/pricingLab/codeExamples.ts`)
+ * `q` = ส่วนไหนของรหัสก็ได้ · `family` = ตัวอย่างของตารางนั้น · `exact` = รหัสนี้ตรงตัว (ราคาในฐานไว้เทียบหลังคิดราคา)
+ *
+ * **อ่านอย่างเดียว ไม่มีราคาของสมุดราคา** (มีแค่ราคาขายในฐานซึ่งคนในหน้านี้เห็นที่หน้าข้อมูลสินค้าอยู่แล้ว)
+ * ⇒ อยู่ฝั่ง `page.pricing` ได้ — ด่าน `diag:role-permissions` รู้จักเส้นนี้ในเซ็ตของฝั่งคิดราคา
+ * อ่านฐานไม่ได้ = 503 แล้วหน้าจอเงียบไป (ช่องค้นเป็นของช่วย ไม่ใช่ทางเดียวที่จะคิดราคาได้)
+ */
+pricingLabRouter.get('/examples', async (req: AdminRequest, res: Response) => {
+  const str = (v: unknown, max: number) => (typeof v === 'string' ? v.slice(0, max) : undefined);
+  const limit = Math.min(Math.max(Number(req.query.limit) || 8, 0), 50);
+  const state = await loadBookState();
+  if (!state) return noBook(res);
+  const found = await findCodeExamples(state, {
+    q: str(req.query.q, 120), family: str(req.query.family, 20), exact: str(req.query.exact, 200), limit,
+  });
+  if (!found) return res.status(503).json({ error: 'อ่านรหัสสินค้าในฐานไม่สำเร็จ' });
+  res.json(found);
 });
 
 /**

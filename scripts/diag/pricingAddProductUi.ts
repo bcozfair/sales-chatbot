@@ -122,6 +122,11 @@ async function route(req: HTTPRequest) {
     return json(req, quoteFor(String(b.code ?? '').trim()));
   }
   if (path === `${P}/suggest`) return json(req, suggestFor(url.searchParams.get('model') ?? ''));
+  // การ์ดแบบ 3 มิติ (เพิ่ม 2026-10-06) ไม่ใช่เรื่องของด่านนี้ — ตอบแบบ error ให้การ์ดขึ้นบรรทัดเดียว
+  // (เดิมตกไปที่ `{}` ข้างล่าง ⇒ การ์ดอ่าน `verdict` ไม่ได้แล้วหน้าขาวทั้งหน้า)
+  if (path.startsWith('/api/admin/drawing/')) return json(req, { error: 'ไม่ได้จำลองแบบ 3 มิติในด่านนี้' }, 404);
+  // ช่องค้นรหัสในฐาน (2026-10-07) — ไม่มีรหัสในฐานจำลอง ⇒ ไม่มีบรรทัดเทียบราคา
+  if (path === '/api/admin/pricing/examples') return json(req, { total: 0, rows: [] });
   if (path === `${P}/count`) return json(req, { pending: 1 });
   if (path === `${P}/list`) return json(req, { items: [], total: 0, pending: 1, conflicts: 0 });
   if (path === P && req.method() === 'POST') {
@@ -242,7 +247,7 @@ try {
   // ── ราคาครบ ──
   await quote(page, C.priced);
   let r = await addRow(page);
-  ok('1 · มีปุ่ม "เพิ่มเป็นสินค้าใหม่" และกดได้', r.hasBtn && r.disabled === false);
+  ok('1 · มีปุ่ม "เพิ่มเป็นสินค้าใหม่" และกดได้', r.hasBtn && r.disabled === false, `${r.hasBtn} · ${r.disabled} · ${r.why} · ${pageErrors.slice(0, 2).join(" | ")}`);
   ok('2 · ปุ่มรองสีน้ำเงิน + ไอคอนบวก', r.hasIcon && /rgb\(\s*(37|59|96), (99|130|165), (235|246|250)/.test(r.bg), r.bg);
   ok('   ราคาครบไม่มีข้อความข้างปุ่ม · ไม่มีแถบรหัสซ้ำ', r.why === '' && !r.dupBand, r.why);
   ok('5 · ตรวจรหัสซ้ำตั้งแต่ยังไม่กด (ยิง /suggest ของรหัสที่คิด)',

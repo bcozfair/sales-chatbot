@@ -7,7 +7,10 @@
    แต่ "แก้ช่องแล้วรหัสด้านบนเปลี่ยนตาม · คำตอบเก่ามาถึงทีหลังแล้วช่องเด้งกลับ · สลับรุ่นแล้วช่องเปลี่ยน"
    เป็นของฝั่งจอล้วน และ **build ผ่านทั้งที่ปุ่มไม่ทำงานได้** (AGENTS.md A9) ⇒ เปิดดูที่ความกว้างจริง 1280 / 390
 
-   **อ่านอย่างเดียว** — หน้านี้ยิงแค่ `GET /overview` กับ `POST /quote` (ไม่มีทางเขียนสมุดราคา) จึงไม่ต้องมีด่านกันเครื่อง
+   ตั้งแต่ 2026-10-07 (mockup `pricing-calc-redesign`): หน้าเปิดมาว่าง · ช่องรหัสค้นรหัสจริงจากฐาน · ช่อง "รุ่น" เป็นปุ่มเปิดรายการ
+   (ไม่ใช่ `<select>`) · สลับไปรุ่นที่ขนาดยังไม่ครบ = ไม่คิดราคาจนกรอก ⇒ ข้อที่เกี่ยวข้องข้างล่างปรับตาม
+
+   **อ่านอย่างเดียว** — หน้านี้ยิงแค่ `GET /overview` · `GET /examples` · `POST /quote` (ไม่มีทางเขียนสมุดราคา) จึงไม่ต้องมีด่านกันเครื่อง
    แบบ `diag:pb-ui` · ใช้บัญชี admin ตัวแรกในฐานออก token ชั่วคราว 1 ชั่วโมง
 
    ต้องมี API ของทรีนี้รันอยู่ที่ PB_PORT (ค่าเริ่มต้น 3099 · 3098 เป็นของโปรเซสอื่นบน PMSV) — **ห้ามใช้ 5180** (พรีวิวร่วมที่เจ้าของเปิด/ปิดเอง):
@@ -87,23 +90,82 @@ async function setNumber(label: string, value: string): Promise<void> {
   await page.type(sel, value, { delay: 30 });
   await settle();
 }
+/** ช่อง "รุ่น" เป็นปุ่มเปิดรายการ (2026-10-07) — ช่องอื่นยังเป็น `<select>` */
+const FAMILY_LIST = '[role="listbox"][aria-label="รุ่นทั้งหมดในสมุดราคา"]';
 async function choose(label: string, value: string): Promise<void> {
-  await page.select(`select[aria-label="${label}"]`, value);
+  if (label === 'รุ่น') {
+    await page.click('button[aria-label="รุ่น"]');
+    await page.waitForSelector(FAMILY_LIST);
+    await page.click(`${FAMILY_LIST} [data-value="${value}"]`);
+  } else {
+    await page.select(`select[aria-label="${label}"]`, value);
+  }
   await settle();
 }
+/** รายการในช่อง "รุ่น" — [กลุ่ม, ค่า][] ตามลำดับบนจอ (เปิดแล้วปิดคืน) */
+async function familyRows(): Promise<{ group: string; value: string; text: string }[]> {
+  await page.click('button[aria-label="รุ่น"]');
+  await page.waitForSelector(FAMILY_LIST);
+  const rows = await page.$eval(FAMILY_LIST, (box) => {
+    const out: { group: string; value: string; text: string }[] = [];
+    let group = '';
+    for (const el of [...box.children]) {
+      const v = el.getAttribute('data-value');
+      if (v === null) { if (el.tagName === 'DIV' && !el.querySelector('span')) group = el.textContent ?? ''; continue; }
+      out.push({ group, value: v, text: el.textContent ?? '' });
+    }
+    return out;
+  });
+  await page.keyboard.press('Escape');
+  await wait(100);
+  return rows;
+}
+const familyFace = () => page.$eval('button[aria-label="รุ่น"]', (el) => el.textContent ?? '');
 
 for (const width of [1280, 390]) {
   console.log(`\n── ${width}px ──────────────────────────────────────────────`);
   await page.setViewport({ width, height: 900 });
   await page.evaluateOnNewDocument((t: string, u: string) => {
-    sessionStorage.setItem('admin_token', t);
-    sessionStorage.setItem('admin_user', u);
+    // about:blank (ใช้บังคับโหลดหน้าใหม่ในรอบ 390) อ่าน storage ไม่ได้ — ข้ามเงียบ ๆ ไม่ให้นับเป็น error ของหน้า
+    try {
+      sessionStorage.setItem('admin_token', t);
+      sessionStorage.setItem('admin_user', u);
+      // รุ่นที่ใช้ล่าสุดจำในเบราว์เซอร์ — ล้างทุกรอบให้หน้าตอนเปิดเริ่มที่รุ่นแรกในสมุดเสมอ
+      localStorage.removeItem('pricingLab.family');
+    } catch { /* about:blank */ }
   }, token, JSON.stringify({ id: admin.id, username: admin.username, name: admin.name, role: admin.role }));
+  await page.goto('about:blank');
   await page.goto(`${BASE}/admin.html#pricing`, { waitUntil: 'networkidle0' });
   await wait(600);
 
-  await typeCode('BH-01C-600x150-380-4950W-PL-PL2');
+  // ── หน้าตอนเปิด + ค้นรหัสจากฐาน (mockup `pricing-calc-redesign` · 2026-10-07) ─────────────────────
   let body = await text();
+  ok('เปิดหน้ามาว่าง: ช่องรหัสว่าง · ราคา "—" · บอกว่าต้องกรอกอะไร · ไม่มีแถว "ตัวอย่างในชีต"',
+    (await codeValue()) === '' && body.includes('—') && /กรอก[\s\S]{0,40}เพื่อดูราคา/.test(body) && !body.includes('ตัวอย่างในชีต'));
+  ok('เปิดมาเห็นช่องของรุ่นเลย (ช่อง "รุ่น" + ช่องตัวเลขว่าง) และปุ่มเพิ่มสินค้าบอกเหตุผล',
+    (await page.$('button[aria-label="รุ่น"]')) !== null && body.includes('ยังไม่มีราคา'));
+  await page.click('#pl-code');
+  await page.type('#pl-code', 'BH-01C-600x150-380', { delay: 15 });
+  await settle();
+  const sugg = await page.$$eval('[role="listbox"][aria-label="รหัสในฐาน"] [role="option"]', (els) => els.map((e) => e.textContent ?? ''));
+  ok('พิมพ์ส่วนของรหัส → รายการรหัสในฐานพร้อมราคาในฐาน', sugg.some((t) => t.includes('BH-01C-600x150-380-4950W-PL-PL2') && t.includes('ราคาในฐาน')), `${sugg.length} แถว`);
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await settle();
+  body = await text();
+  ok('เลือกแถวด้วย ↓ + Enter → เติมรหัส คิดราคา 13,490 และเทียบราคาในฐาน (ตรงกัน)',
+    (await codeValue()) === 'BH-01C-600x150-380-4950W-PL-PL2' && body.includes('13,490') && body.includes('ในฐาน') && body.includes('ตรงกัน'), await codeValue());
+  await setNumber('ID', '610');
+  body = await text();
+  ok('แก้ ID → รหัสเปลี่ยน · บรรทัด "ดัดแปลงจาก" บอก ID 600 → 610',
+    (await codeValue()) === 'BH-01C-610x150-380-4950W-PL-PL2' && /ดัดแปลงจาก[\s\S]{0,80}600 → 610/.test(body), await codeValue());
+  await page.click('button[aria-label="ล้างรหัสและช่องทั้งหมด"]');
+  await settle();
+  ok('ปุ่ม ✕ → กลับเป็นหน้าว่าง (รหัสว่าง · ราคา "—" · ไม่มี "ดัดแปลงจาก")',
+    (await codeValue()) === '' && (await text()).includes('ยังไม่มีราคา') && !(await text()).includes('ดัดแปลงจาก'));
+
+  await typeCode('BH-01C-600x150-380-4950W-PL-PL2');
+  body = await text();
   ok('พิมพ์รหัส BH → ขึ้นช่องตามแคตตาล็อก (ไม่ใช่การ์ด "ระบบอ่านรหัสนี้ว่าอะไร")',
     (await page.$('select[aria-label="การออกขั้วไฟ"]')) !== null && !body.includes('ระบบอ่านรหัสนี้ว่าอะไร'));
   ok('ช่องได้ค่าจากรหัส (การต่อ PL · ขั้วไฟ PL2)',
@@ -114,10 +176,12 @@ for (const width of [1280, 390]) {
     const sel = el as HTMLSelectElement;
     return { face: el.nextElementSibling?.textContent ?? '', color: getComputedStyle(sel).color, opt: sel.selectedOptions[0]?.textContent ?? '' };
   });
-  const [m, t] = [await shown('รุ่น'), await shown('การออกขั้วไฟ')];
+  const t = await shown('การออกขั้วไฟ');
+  const famRows = await familyRows();
+  const famFace = await familyFace();
   ok('dropdown ปิดอยู่โชว์แค่รหัส · รายการมีคำอธิบาย · ชื่อรุ่นอังกฤษตามแคตตาล็อก',
-    m.face === 'BH-01C' && t.face === 'PL2' && /rgba\(0, 0, 0, 0\)|transparent/.test(t.color)
-      && m.opt === 'BH-01C · 2 Piece Band Heater' && t.opt.startsWith('PL2 · '), `${m.face} | ${t.face} | ${m.opt}`);
+    famFace === 'BH-01C' && t.face === 'PL2' && /rgba\(0, 0, 0, 0\)|transparent/.test(t.color)
+      && famRows.some((r) => r.value === 'BH-01C' && r.text.includes('2 Piece Band Heater')) && t.opt.startsWith('PL2 · '), `${famFace} | ${t.face}`);
   ok('ราคาตรงตัวอย่างในชีต 13,490', body.includes('13,490'));
 
   await setNumber('ความสูง H', '200');
@@ -149,7 +213,12 @@ for (const width of [1280, 390]) {
   await settle();
 
   // เจาะรู (ไม่อยู่ในรหัส · mockup แบบ B 2026-09-29) — เพิ่มแถวได้ · รวม mm ตามแถวที่ครบ · ราคาเปลี่ยน รหัสไม่เปลี่ยน
-  const addHole = async () => { await (await page.$('xpath/.//button[contains(., "เพิ่มขนาดรู")]'))!.click(); await settle(); };
+  // ยังไม่มีแถว = ปุ่ม "เจาะรู" ในแถว "นอกรหัส" · มีแถวแล้ว = "เพิ่มขนาดรู" ใต้แถว (2026-10-07)
+  const addHole = async () => {
+    const btn = (await page.$('xpath/.//button[contains(., "เพิ่มขนาดรู")]')) ?? (await page.$('xpath/.//button[normalize-space(.)="เจาะรู"]'));
+    await btn!.click();
+    await settle();
+  };
   const holeCode = await codeValue();
   const noHoles = await text();
   await addHole();
@@ -173,13 +242,15 @@ for (const width of [1280, 390]) {
   // ช่อง "รุ่น" ช่องเดียวรวม BH กับ TS แบ่งกลุ่ม (เจ้าของเคาะข้อ 9 · 2026-09-29) — TS 11 ตาราง (TS_-12 สองหน้า) + BH 4 รุ่น
   // + TS_-02 กับ TS_-02-SI (แคตตาล็อกคนละหน้า · รุ่นเดียวกัน) เมื่อเล่มในฐานมี TSK-02 แล้ว (ฐาน PMSV เขียน 2026-10-05) — เงื่อนไขเดียวกับขั้น TS_-02 ข้างล่าง
   // + TS_-03 เมื่อเล่มมี TSK-03 แล้ว (ฐาน PMSV เขียน 2026-10-06) · + TS_-05 เมื่อเล่มมี TSK-05 แล้ว · + TS_-07 เมื่อเล่มมี TSK-07 แล้ว
-  const groups = await page.$$eval('select[aria-label="รุ่น"] optgroup', (gs) => gs.map((g) => `${(g as HTMLOptGroupElement).label}:${g.children.length}`));
-  const hasTable = (v: string) => page.$eval('select[aria-label="รุ่น"]', (el, v) => [...(el as HTMLSelectElement).options].some((x) => x.value === v), v);
+  // ตั้งแต่ 2026-10-07 BH ขึ้นก่อน TS (mockup `pricing-calc-redesign` รอบ 4)
+  const fam = await familyRows();
+  const groupsOf = [...new Set(fam.map((r) => r.group))].map((g) => `${g}:${fam.filter((r) => r.group === g).length}`);
+  const hasTable = async (v: string) => fam.some((r) => r.value === v);
   const tsTables = 11 + ((await hasTable('TS_-02')) ? 2 : 0) + ((await hasTable('TS_-03')) ? 1 : 0) + ((await hasTable('TS_-05')) ? 1 : 0)
     + ((await hasTable('TS_-07')) ? 1 : 0);
-  ok(`เลือกรุ่นจาก dropdown ในช่อง "รุ่น" (ไม่มีการ์ดแยกแล้ว) · กลุ่ม TS ${tsTables} + BH 4`,
-    JSON.stringify(groups) === JSON.stringify([`TS — Temperature Sensor:${tsTables}`, 'BH — Heater:4'])
-      && (await page.$$('xpath/.//button[.//b[text()="BH-03"]]')).length === 0, groups.join(' · '));
+  ok(`เลือกรุ่นจาก dropdown ในช่อง "รุ่น" (ไม่มีการ์ดแยกแล้ว) · กลุ่ม BH 4 + TS ${tsTables}`,
+    JSON.stringify(groupsOf) === JSON.stringify(['HEATER · BH:4', `TEMPERATURE SENSOR · TS:${tsTables}`])
+      && (await page.$$('xpath/.//button[.//b[text()="BH-03"]]')).length === 0, groupsOf.join(' · '));
   await choose('รุ่น', 'BH-03');
   await choose('การออกขั้วไฟ', '1');
   ok('BH-03 เลือกออกสาย 1 M ได้ → รหัสลงท้าย -1', (await codeValue()).endsWith('-1') && !(await text()).includes('ระบบอ่านรหัสนี้ว่าอะไร'), await codeValue());
@@ -187,20 +258,21 @@ for (const width of [1280, 390]) {
   await choose('รุ่น', 'BH-02');
   ok('สลับเป็น BH-02 → มีช่อง Shape', (await page.$('select[aria-label="Shape"]')) !== null);
   await choose('Shape', 'C');
-  ok('Shape C → เหลือช่อง D1 ช่องเดียว · รหัสขึ้นต้น BH-02C',
+  // ช่องที่ยังไม่มีค่าเริ่มว่าง (2026-10-07 · ไม่เติม 200 ให้เอง) ⇒ ยังไม่คิดจนกรอก D1
+  ok('Shape C → เหลือช่อง D1 ช่องเดียว · ว่างอยู่ ยังไม่คิดราคา บอกให้กรอก D1',
     (await page.$('input[aria-label="D1"]')) !== null && (await page.$('input[aria-label="ยาว L"]')) === null
-    && (await codeValue()).startsWith('BH-02C '), await codeValue());
-  body = await text();
-  if (bookHasCatalog) ok('BH-02C คิดราคาได้ (สูตรวงกลม)', /\d,?\d{3}\s*บาท/.test(body) && !body.includes('ยังคิดราคาไม่ได้'));
-  else console.log(`  ${DIM}·  ข้ามราคา BH-02C — เล่มในฐานยังไม่มีสูตรพื้นที่ตามรูปทรง (DEPLOY.md 4.11ข)${RESET}`);
+    && (await codeValue()) === '' && /กรอก[\s\S]{0,20}D1/.test(await text()), await codeValue());
 
   // พิมพ์เร็ว ๆ แล้วคำตอบของตัวเลขก่อนหน้าต้องไม่ทับค่าล่าสุด
   await clear('input[aria-label="D1"]');
   await page.type('input[aria-label="D1"]', '215', { delay: 0 });
   await settle();
-  ok('พิมพ์ต่อกันเร็ว ๆ แล้วช่องไม่เด้งกลับเป็นค่าเก่า',
+  ok('พิมพ์ต่อกันเร็ว ๆ แล้วช่องไม่เด้งกลับเป็นค่าเก่า · รหัสขึ้นต้น BH-02C',
     (await page.$eval('input[aria-label="D1"]', (el) => (el as HTMLInputElement).value)) === '215' && (await codeValue()).startsWith('BH-02C 215-'),
     await codeValue());
+  body = await text();
+  if (bookHasCatalog) ok('BH-02C คิดราคาได้ (สูตรวงกลม)', /\d,?\d{3}\s*บาท/.test(body) && !body.includes('ยังคิดราคาไม่ได้'));
+  else console.log(`  ${DIM}·  ข้ามราคา BH-02C — เล่มในฐานยังไม่มีสูตรพื้นที่ตามรูปทรง (DEPLOY.md 4.11ข)${RESET}`);
 
   // ── ซีรีส์ TS (เจ้าของเคาะ mockup pricing-catalogue-ts 2026-09-29) ──────────────────────────
   const val = (label: string) => page.$eval(`select[aria-label="${label}"]`, (el) => (el as HTMLSelectElement).value);
@@ -208,7 +280,7 @@ for (const width of [1280, 390]) {
   body = await text();
   ok('พิมพ์รหัส TS → ขึ้นช่องตามแคตตาล็อก (ไม่ใช่การ์ด "ระบบอ่านรหัสนี้ว่าอะไร")',
     !body.includes('ระบบอ่านรหัสนี้ว่าอะไร') && (await val('ชนิดหัวกระโหลก')) === 'B' && (await val('Ground')) === 'U'
-      && (await shown('รุ่น')).face === 'TS_-14');
+      && (await familyFace()) === 'TS_-14');
   await typeCode('TSK-04(S2)6Ax300+3MP');
   ok('TS_-04 ช่องได้ค่าจากรหัส (หัววัด TS · Sensor K · เกลียว S2 · แกน 6 · วัสดุ A · สาย P)',
     (await val('ชนิดหัววัด')) === 'TS' && (await val('ชนิด Sensor')) === 'K' && (await val('ขนาดเกลียว')) === 'S2'
@@ -241,14 +313,14 @@ for (const width of [1280, 390]) {
   await settle();
   ok('กดเอา S000 ออก → รหัสไม่มี -S000', (await codeValue()) === 'TSP-11P 6x50+5M-PU', await codeValue());
   // TS_-02 / TS_-02-SI (2026-10-05) — อยู่ในช่อง "รุ่น" ต่อเมื่อเล่มในฐานมี TSK-02 แล้ว (`importer.ts --new-models`)
-  const has02 = await page.$eval('select[aria-label="รุ่น"]', (el) => [...(el as HTMLSelectElement).options].some((x) => x.value === 'TS_-02'));
+  const has02 = await hasTable('TS_-02');
   if (!has02) {
     console.log(`  ${DIM}… ช่อง "รุ่น" ยังไม่มี TS_-02 — เล่มในฐานยังไม่มี TSK-02 (ยังไม่ได้เติมลงฐาน) · ข้าม${RESET}`);
   } else {
     // แคตตาล็อก TS_-02-SI เป็นหน้าของตัวเอง (เจ้าของส่งมา 2026-10-05 "แก้ไข pattern ให้ตรงตามเอกสาร") — `-02-SI(` เป็นตัวอักษรตายตัว ไม่ใช่ช่องเลือก
     await typeCode('TSK-02-SI(11.5)5x10+2M');
     ok('TS_-02-SI เป็นรุ่นของตัวเองในช่อง "รุ่น" · ช่องได้ค่าจากรหัส (เขี้ยวล็อค 11.5 · แกน 5) · ไม่มีช่องรุ่นย่อย',
-      (await shown('รุ่น')).face === 'TS_-02-SI' && (await val('ขนาดเขี้ยวล็อค')) === '11.5' && (await val('ขนาดแกน')) === '5'
+      (await familyFace()) === 'TS_-02-SI' && (await val('ขนาดเขี้ยวล็อค')) === '11.5' && (await val('ขนาดแกน')) === '5'
         && (await page.$('select[aria-label="รุ่นย่อย"]')) === null && (await text()).includes('-02-SI('));
     const priceSi = await text();
     await choose('รุ่น', 'TS_-02');
@@ -257,7 +329,7 @@ for (const width of [1280, 390]) {
       (await codeValue()) === 'TSK-02(12)5x10+2M' && body !== priceSi && !body.includes('เฉพาะ TS-02-SI'), await codeValue());
     await typeCode('TSK-02(11.5)5x10+2M');
     ok('พิมพ์ TS_-02 ธรรมดากับเขี้ยวล็อค 11.5 → เตือนว่าทำได้เฉพาะ TS-02-SI (ราคาเท่าเดิม)',
-      (await shown('รุ่น')).face === 'TS_-02' && (await text()).includes('เฉพาะ TS-02-SI'));
+      (await familyFace()) === 'TS_-02' && (await text()).includes('เฉพาะ TS-02-SI'));
     // ขนาดแกนที่ตารางไม่มีแถว = ขอราคา + ช่องสีส้มบนหน้าสมุดราคา (เจ้าของสั่ง 2026-10-05) — เดิมขึ้น "รหัสไม่ได้บอกขนาดแกน"
     await typeCode('TSK-02(12.7)3.2x200+5M');
     body = await text();
@@ -274,7 +346,9 @@ for (const width of [1280, 390]) {
       !body.includes('63,840') && !body.includes('65,160') && body.includes('ความยาวสาย (mm)') && (await codeValue()) === 'TSP-02(12)5x11+400mm.-TSU', await codeValue());
   }
   await choose('รุ่น', 'BH-01');
-  ok('สลับจาก TS กลับไป BH ได้จากช่องเดียวกัน', (await page.$('select[aria-label="การออกขั้วไฟ"]')) !== null && (await codeValue()).startsWith('BH-01 '), await codeValue());
+  // มาจาก TS = ไม่มีขนาดให้ยก ⇒ ช่องว่าง ยังไม่คิดจนกรอก ID / ความสูง H (2026-10-07)
+  ok('สลับจาก TS กลับไป BH ได้จากช่องเดียวกัน · ช่องว่างรอกรอก', (await page.$('select[aria-label="การออกขั้วไฟ"]')) !== null
+    && (await codeValue()) === '' && /กรอก[\s\S]{0,20}ID/.test(await text()), await codeValue());
   // ── ตั้งแต่ 2026-10-01 ทุกรหัสใช้ช่องกรอกแบบเดียว อะไรไม่ตรงแค่แจ้งเตือน (mockup `pricing-one-form.html`) ──
   await typeCode('TSK-06(S4)12.7x110-2B');
   body = await text();
@@ -285,7 +359,7 @@ for (const width of [1280, 390]) {
   await typeCode('BH-02-S 406x330-220-2500W');
   body = await text();
   ok('รหัส BH ที่เขียนนอกรูปแบบ → ยังเป็นช่องกรอก + แถบ "ยังไม่รวมในราคา" · รหัสไม่ถูกเขียนทับ',
-    !body.includes('ระบบอ่านรหัสนี้ว่าอะไร') && (await page.$('select[aria-label="รุ่น"]')) !== null && body.includes('ยังไม่รวมในราคา')
+    !body.includes('ระบบอ่านรหัสนี้ว่าอะไร') && (await page.$('button[aria-label="รุ่น"]')) !== null && body.includes('ยังไม่รวมในราคา')
       && (await codeValue()) === 'BH-02-S 406x330-220-2500W', await codeValue());
 
   await typeCode('TSP-01-0(M5)+3MTU-S000');
