@@ -706,6 +706,13 @@
       const headers = Object.assign({}, options.headers || {}, {
         'ngrok-skip-browser-warning': 'true'
       });
+      // ขั้น 0 ของการยืนยันตัวตน LIFF (เจ้าของสั่ง 2026-10-07): แนบ access token ของ LINE ไปด้วย
+      // server ยังไม่บังคับ แค่นับ (config/liffAuthObserve.ts) · ยังไม่ login = ไม่มี token ก็ไม่แนบ
+      // apiFetch เรียกเฉพาะ /api ของโดเมนตัวเอง — ห้ามเอาไปใช้ยิงโดเมนอื่น (token คือบัตรผ่านของผู้ใช้)
+      try {
+        const token = window.liff && typeof window.liff.getAccessToken === 'function' ? window.liff.getAccessToken() : '';
+        if (token && !headers.Authorization) headers.Authorization = 'Bearer ' + token;
+      } catch (e) {}
       const fetchOptions = Object.assign({}, options, { headers });
       
       const response = await fetch(url, fetchOptions);

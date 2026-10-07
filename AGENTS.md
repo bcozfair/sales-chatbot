@@ -503,10 +503,11 @@ docker compose exec -T db psql -U "$PG_USER" -d "$PG_DATABASE" -c "SELECT …"  
 * [ ] **ห้ามใส่ `COMMENT ON`** ใน migration หรือยิงเข้า DB เว้นแต่ผู้ใช้สั่งเอง — ใช้ `--` แทน
 
 **Security**
-* [ ] ไม่มี hardcode secret / LIFF ID / DB connection string — LIFF ID ดึงจาก
-      `/api/liff/config?page=` เสมอ
-* [ ] `/api/admin/*` ผ่าน `adminAuthMiddleware` (JWT) · `/api/liff/*` ตรวจ LINE access token ·
-      `/api/sync/v1/*` ผ่าน `config/syncApiAuth.ts`
+* [ ] ไม่มี hardcode secret / LIFF ID / DB connection string — LIFF ID ให้ server แทน `__LIFF_ID__`
+      ตอนเสิร์ฟหน้า (`/api/liff/config` ไม่มีหน้าไหนเรียกแล้ว · ตรวจ 2026-10-07)
+* [ ] `/api/admin/*` ผ่าน `adminAuthMiddleware` (JWT) · `/api/sync/v1/*` ผ่าน `config/syncApiAuth.ts` ·
+      API ใหม่ของ LIFF ที่ส่งข้อมูลการค้า ต้อง `requireLiffSalesperson` (LINE access token) · API เดิมของ LIFF
+      ยังไม่บังคับ — อยู่ขั้น 0 "นับ ไม่บล็อก" (`config/liffAuthObserve.ts`) จนกว่าเจ้าของจะตัดสินจากรายงาน
 * [ ] Promotion / สิทธิ์ราคา ตรวจทั้งฝั่ง client (UI) และ Backend (API) — ห้ามตรวจแค่ฝั่งเดียว
 * [ ] อ่าน IP ด้วย `getClientIp()` เท่านั้น ห้ามอ่าน `req.socket.remoteAddress` ตรง ๆ
 
@@ -599,6 +600,7 @@ TS ไต่ `node_modules` ขึ้นไปตามลำดับ ⇒ `<ท
 | สินค้าที่แอดมินเพิ่มเอง (`local_products` · `LocalProductModal` · หน้า "สินค้าเพิ่มเอง") | `npm run diag:local-products` — ตารางชั่วคราวบังของจริงแล้ว **ROLLBACK เสมอ** รันบน PMSV ได้ (ห้ามเปลี่ยนเป็น COMMIT) · **บวก `diag:op-ui`** เมื่อแตะจอ (เปิดหน้าจริงด้วย API จำลอง ไม่แตะฐาน · Chrome ตั้งเป็นเมาส์ด้วย `--blink-settings` เพราะ headless ไม่มี hover) · **บวก `diag:pricing-add-ui`** เมื่อแตะหน้าต่างหรือปุ่ม "เพิ่มเป็นสินค้าใหม่" ของหน้าคำนวณราคา (ท่าเดียวกัน ไม่แตะฐาน) · **บวก `diag:role-permissions`** เมื่อแตะช่อง `quote.manage_products` / `page.odooproducts` · แตะ snapshot ของรายการในใบ (ธง `is_local_product`) = **บวก `diag:web-quote` + `diag:confirm-race`** ซึ่งเขียนฐานจริง ⇒ ขออนุญาตก่อน (ทั้งสองตัวออกเลขงวดสมมุติ 2099-12 ไม่กินเลขใบจริง — `web-quote` ตั้งแต่ 2026-10-02 ผ่าน `confirmFetch`) |
 | `prompt` ของการสกัด / Flex | `npm run diag:line-parity` — prompt เทียบ golden · Flex เทียบกับ **โค้ดก่อนแก้บนฐานเดียวกัน** (เลือก base เอง: จุดแยกจาก main / HEAD ถ้ามีไฟล์แก้ค้าง / HEAD^1 บน main สะอาด · `-- --base <ref>`) ⇒ สต็อก/ราคาเปลี่ยนไม่ทำให้ล้ม · ล้ม = โค้ดทำให้คำตอบเปลี่ยนจริง (ต่างทั้งสองรอบ) หรือได้ "ระบบขัดข้อง" |
 | หน้าเว็บขอใบเสนอราคา | `npm run diag:web-quote` · `diag:pdf-issuer` · `diag:sp-dedupe` · `diag:web-sales-owner` (เติม "ออกในนาม" จากลูกค้า/ใบเดิม · อ่านอย่างเดียว) |
+| ตัวตนของ API ฝั่ง LIFF (`config/liffAuth.ts` · `config/liffAuthObserve.ts` · `sharedApiFetch` · fetch ในหน้า LIFF) | `npm run diag:liff-auth` — ไม่เขียน DB (ตารางชั่วคราว + ROLLBACK) · ไม่ยิง LINE · เปิดหน้า LIFF ตัวจริงสามหน้าด้วย API จำลอง · อ่านซอร์สแอดมินว่าเส้นร่วมเรียกผ่าน `sharedApiFetch` · ผลจริงบน prod: `npm run diag:liff-auth-report` |
 | "ส่วนลดเดิม" (`getRecentDiscountSummary` · แถวในการ์ดสรุป LINE · แถวในหน้าแก้ใบ LIFF) · ด่านตัวตน LIFF (`config/liffAuth.ts`) | `npm run diag:sales-discount` — อ่านฐานอย่างเดียว · LINE จำลอง (ไม่ยิงเน็ต) · เปิด `quote-edit.html` ตัวจริงด้วย API จำลอง ไม่ต้องเปิด server · บวก `scripts/diag/webDiscountHistoryProbe.ts` ถ้าแตะแถวบนหน้าเว็บ |
 | ตัวลบร่างเว็บที่ค้างเกิน 7 วัน (`services/webDraftSweeper.ts` · `STALE_WEB_DRAFT_SQL`) | `npm run diag:web-draft-sweep` — ใบทดสอบของตัวเองแล้ว ROLLBACK เสมอ **ห้ามเปลี่ยนเป็น COMMIT** · ข้อที่ห้ามล้ม: ร่าง LINE · ร่างที่ผูกคำขออนุมัติ · ใบที่มีเลขที่ · ใบ `cancelled` **ต้องไม่ถูกลบ** · ท้ายด่านบอกว่าฐานจริงมีกี่ใบที่รอบแรกจะลบ |
 | ช่องเลือกใบที่จะแก้ไข (revise) ในหน้าขอใบเสนอราคา (`RevisePicker.tsx` · `GET /api/admin/webquote/revisable` · `searchRevisableQuotations`) | `npm run diag:revise-picker` — ข้อที่ห้ามล้ม: **ค้นเลขฐานของใบที่เคยแก้แล้วได้ใบเดียวกับที่ `loadActiveQuotation()` หยิบจริง** (ไม่งั้นคนกดใบหนึ่งแต่ระบบแก้อีกใบ) · หนึ่งเลขฐานหนึ่งแถว · ขอบเขต "ใบของฉัน" ตรงกับหน้าประวัติ · หน้าจอ 1280/390 (ป้าย R/“เข้า Odoo แล้ว” ใส่ในเบราว์เซอร์ · เตือนแทนที่รายการ · ทางพิมพ์เลขที่เองยังอยู่) · **อ่านอย่างเดียว** (`/revise` ถูกดักในเบราว์เซอร์) · ต้อง build ก่อน + API ของทรีนั้นที่ `RP_PORT` (3099) · บวก `diag:quote-history-mine` (นับจุดที่ถาม `quoteViewScopeOf` — เส้นนี้คือจุดที่ 3) |

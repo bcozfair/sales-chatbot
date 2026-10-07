@@ -457,8 +457,16 @@ npm run logworker                                          # worker เขีย
   **ค่าที่เปลี่ยนบ่อยแล้วไปฝังเป็นค่าคงที่ในโค้ดคือค่าที่ร้านแก้เองไม่ได้** — นั่นคือเหตุผลที่
   หลักการข้อ 2 ใน `AGENTS.md` บังคับให้มันลง DB/config
 
-- **LIFF ID ไม่ hardcode** — ดึงจาก `/api/liff/config?page=` เสมอ (ทั้งสามหน้า) เพราะ LIFF ID
-  ผูกกับ channel และเปลี่ยนตอนย้าย environment
+- **LIFF ID ไม่ hardcode** — server แทน `__LIFF_ID__` ใน HTML ตอนเสิร์ฟ `/liff/*` (`LIFF_ID` · `LIFF_QUOTE_ID` ·
+  `LIFF_PRODUCT_SEARCH_ID`) เพราะ LIFF ID ผูกกับ channel และเปลี่ยนตอนย้าย environment · `GET /api/liff/config`
+  ยังอยู่แต่ไม่มีหน้าไหนเรียกแล้ว (ตรวจ 2026-10-07)
+
+- **API ของหน้า LIFF ส่วนใหญ่ยังไม่บังคับตัวตน — อยู่ "ขั้น 0: ตรวจแล้วนับ ไม่บล็อก"** (เจ้าของสั่ง 2026-10-07)
+  ทุกหน้า LIFF แนบ access token ของ LINE · หน้าแอดมินเรียกเส้นที่ใช้ร่วมกับ LIFF ผ่าน `sharedApiFetch` (แนบ token แอดมิน)
+  · `config/liffAuthObserve.ts` นับลง `liff_auth_observations` ว่า userId จาก token ตรงกับที่หน้าเว็บส่งไหม
+  **ห้ามเปลี่ยนเป็นบล็อกก่อนเจ้าของดูรายงาน** (`npm run diag:liff-auth-report`) · เส้นที่บังคับจริงตอนนี้มีเส้นเดียว
+  (`/api/liff/discount-history` · `requireLiffSalesperson`) · เพิ่ม fetch ใหม่ในหน้า LIFF = เพิ่มเส้นใน `OBSERVED_ROUTES`
+  ด้วย ไม่งั้น `diag:liff-auth` ล้ม
 
 - **ชื่อโมเดล LLM ไม่ hardcode** — `createChatCompletion()` ตั้ง `thinking: disabled` +
   `temperature: 0` มาให้แล้ว (เร็วกว่าและผลคงที่) จะ override เฉพาะจุดก็ส่ง param เข้ามา

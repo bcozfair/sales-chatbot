@@ -142,6 +142,7 @@ import {
 import { getJwtSecret } from './config/jwt.js';
 import { getAppUrl } from './config/appUrl.js';
 import { requireLiffSalesperson } from './config/liffAuth.js';
+import { observeLiffIdentity } from './config/liffAuthObserve.js';
 import { adminAuthMiddleware, requireRole, requireCapability, type Role, type AdminIdentity } from './config/auth.js';
 import {
   listOdooQuotationMakers,
@@ -261,6 +262,10 @@ if (PREVIEW_MODE) {
 //    x-line-signature ถ้ามีใคร parse ก่อน ลายเซ็นจะตรวจไม่ผ่าน = บอทหยุดตอบทั้งระบบ
 //    (middleware ตัวนี้ปลอดภัยเพราะไม่แตะ stream ของ request เลย — ดู config/apiLogger.ts)
 app.use(apiLogMiddleware);
+
+// ── ขั้น 0 ของการยืนยันตัวตน LIFF: นับว่า API ของ LIFF ถูกเรียกด้วยตัวตนแบบไหน (เจ้าของสั่ง 2026-10-07)
+// ไม่บล็อก ไม่หน่วง ไม่ parse body — ตรวจหลังคำตอบออกไปแล้ว · รายละเอียด config/liffAuthObserve.ts
+app.use(observeLiffIdentity);
 
 // Serve static files from the public folder
 app.use(express.static(path.join(process.cwd(), 'public')));

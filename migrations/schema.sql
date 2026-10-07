@@ -26,6 +26,7 @@
 --   เขียนตามรูปที่ pg_dump พ่น ยังไม่ได้เทียบฐานจริง (migration ยังไม่ได้รัน ณ วันที่ยุบ)
 -- 2026-10-05: ยุบ 2026-10-05_01 (sale_orders + 7 คอลัมน์ · sale_order_details + pkey + index)
 --   เขียนตามรูปที่ pg_dump พ่น ยังไม่ได้เทียบฐานจริง (migration ยังไม่ได้รัน ณ วันที่ยุบ)
+-- 2026-10-07: ยุบ 2026-10-07_01 (liff_auth_observations + pkey) — รันบนฐาน dev แล้ว ตรวจด้วย \d ตรงไฟล์
 -- ตรวจล่าสุด 2026-08-25 (ผ่าน — ยุบ 2026-08-25_01 นิยาม last_order_at ใหม่ + 2026-08-25_02 ปลดโหมด warn เข้าไปแล้ว)
 -- ก่อนหน้า 2026-08-21 (รอบนั้นพบว่าขาด quotation_counters, sync_settings, index 6 ตัว
 -- และ role 'subadmin' — ยุบเข้าครบแล้ว)
@@ -2224,4 +2225,29 @@ CREATE INDEX idx_webhook_events_redelivered ON public.webhook_events USING btree
 --
 -- PostgreSQL database dump complete
 --
+
+
+--
+-- Name: liff_auth_observations; Type: TABLE; Schema: public; Owner: -
+--
+-- ตัวนับรายวันว่า API ของหน้า LIFF ถูกเรียกด้วยตัวตนแบบไหน (ขั้น 0 ของการยืนยันตัวตน · ไม่บล็อก)
+-- ที่มา: migrations/changes/2026-10-07_01_liff_auth_observations.sql · config/liffAuthObserve.ts
+
+CREATE TABLE public.liff_auth_observations (
+    day date NOT NULL,
+    route character varying(60) NOT NULL,
+    outcome character varying(20) NOT NULL,
+    n integer DEFAULT 0 NOT NULL,
+    last_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_claimed_user character varying(64),
+    last_token_user character varying(64)
+);
+
+
+--
+-- Name: liff_auth_observations liff_auth_observations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.liff_auth_observations
+    ADD CONSTRAINT liff_auth_observations_pkey PRIMARY KEY (day, route, outcome);
 

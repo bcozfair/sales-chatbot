@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { sharedApiFetch } from './sharedApiFetch';
 import { useAuth } from '../context/AuthContext';
 import { 
   Search, 
@@ -137,9 +138,9 @@ export function Salespersons() {
     return () => clearTimeout(timer);
   }, [fetchSalespersons]);
 
-  // รายชื่อพนักงานจริงจาก sale_orders (endpoint เดียวกับที่หน้า LIFF ใช้ — ไม่ต้องใช้ token)
+  // รายชื่อพนักงานจริงจาก sale_orders (endpoint เดียวกับที่หน้า LIFF ใช้ — แนบ token แอดมินผ่าน sharedApiFetch)
   useEffect(() => {
-    fetch('/api/salespeople')
+    sharedApiFetch('/api/salespeople')
       .then(res => res.ok ? res.json() : [])
       .then((data: RosterEntry[]) => setRoster(Array.isArray(data) ? data : []))
       .catch(err => console.error('โหลดรายชื่อพนักงานไม่สำเร็จ:', err));

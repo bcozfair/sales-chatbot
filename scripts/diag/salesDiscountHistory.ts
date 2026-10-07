@@ -56,6 +56,7 @@ ok('Bearer อ่านได้ · ผิดรูป = ว่าง', bearerTo
 type LineMode = { verify: number | 'throw'; clientId?: string; expiresIn?: number; profile?: number; userId?: string };
 function fakeVerifier(mode: LineMode, sales: boolean | 'throw' = true) {
   const calls: string[] = [];
+  let dbCalls = 0;
   let t = 1_000_000;
   const fetchImpl = (async (url: any) => {
     const u = String(url);
@@ -66,13 +67,13 @@ function fakeVerifier(mode: LineMode, sales: boolean | 'throw' = true) {
     }
     return new Response(JSON.stringify({ userId: mode.userId ?? 'Uabc' }), { status: mode.profile ?? 200 });
   }) as typeof fetch;
-  const v = createLiffVerifier({
+  const lv = createLiffVerifier({
     fetchImpl,
     allowedChannelIds: () => new Set(['1650']),
-    isSalesperson: async (uid) => { if (sales === 'throw') throw new Error('db down'); return sales && uid === 'Uabc'; },
+    isSalesperson: async (uid) => { dbCalls++; if (sales === 'throw') throw new Error('db down'); return sales && uid === 'Uabc'; },
     now: () => t,
   });
-  return { v, calls, advance: (ms: number) => { t += ms; } };
+  return { v: lv.verify, identify: lv.identify, calls, db: () => dbCalls, advance: (ms: number) => { t += ms; } };
 }
 {
   const r = await fakeVerifier({ verify: 200 }).v('');
@@ -122,8 +123,19 @@ function fakeVerifier(mode: LineMode, sales: boolean | 'throw' = true) {
 }
 {
   const f = fakeVerifier({ verify: 200 }, false);
+  const a = await f.v('t'); const b = await f.v('t');
+  ok('ไม่ใช่เซลส์ → ถาม LINE ครั้งเดียว แต่ถามฐานทุกครั้ง (ลงทะเบียนเสร็จแล้วเห็นผลทันที)',
+    !a.ok && !b.ok && f.calls.length === 2 && f.db() === 2, `LINE ${f.calls.length} · ฐาน ${f.db()}`);
+}
+{
+  const f = fakeVerifier({ verify: 400 });
   await f.v('t'); await f.v('t');
-  ok('ผลที่ไม่ผ่านไม่จำ', f.calls.length === 4, String(f.calls.length));
+  ok('token เสีย → ไม่จำ ถาม LINE ใหม่ทุกครั้ง', f.calls.length === 2, String(f.calls.length));
+}
+{
+  const f = fakeVerifier({ verify: 200 }, false);
+  const id = await f.identify('t');
+  ok('identify ไม่สนว่าเป็นเซลส์ (ตัวสังเกตการณ์ใช้)', id.ok && id.userId === 'Uabc' && f.db() === 0);
 }
 {
   let status = 0; let body: any = null; let nexted = false;

@@ -5,6 +5,7 @@
 //  ถ้าก๊อปเป็นตัวที่สองไว้ในไฟล์ใหม่ ทุกการแก้ต้องแก้สองที่ตลอดไป
 // ─────────────────────────────────────────────────────────────────────────────
 import React, { useState, useEffect, useRef } from 'react';
+import { sharedApiFetch } from './sharedApiFetch';
 import { Search, X, Loader2 } from 'lucide-react';
 
 export interface ProductSearchResult {
@@ -69,7 +70,7 @@ export const ProductComboBox: React.FC<ProductComboBoxProps> = ({
     const delayDebounceFn = setTimeout(async () => {
       setIsLoading(true);
       try {
-        const resp = await fetch(`/api/products/search?q=${encodeURIComponent(query)}`);
+        const resp = await sharedApiFetch(`/api/products/search?q=${encodeURIComponent(query)}`);
         if (resp.ok) {
           const data = await resp.json();
           setResults(data);
