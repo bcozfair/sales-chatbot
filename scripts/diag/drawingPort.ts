@@ -7,9 +7,12 @@
 //  ⇒ เกณฑ์คือ **ตรงทุกไบต์** · ไม่ตรงให้หาสาเหตุ ห้ามผ่อนเกณฑ์ (ทศนิยมที่เพี้ยนคือการพอร์ตที่จัดนิพจน์ใหม่)
 //
 //  ไม่มีไฟล์เฉลย — ต้นฉบับถูกรัน *สด* ทุกครั้ง (CLAUDE.md "ห้ามเทียบผลที่ขึ้นกับข้อมูลกับไฟล์ที่บันทึกไว้"):
-//    · `git -C $APPSALE_REPO archive <คอมมิต>` ลงโฟลเดอร์ชั่วคราวของเครื่อง แล้ว import แบบ ES module
-//      **ไม่ checkout · ไม่สร้าง ref · ไม่แตกลงในรีโปนี้** (asset 24 MB เสี่ยงหลุดเข้า git) · ลบทิ้งใน `finally`
-//    · ไม่มีรีโป/คอมมิต = **ตอบไม่ได้ (exit 1)** ไม่ใช่ข้ามแล้วเขียว — ด่านที่เขียวโดยไม่ได้ตรวจคือด่านที่โกหก
+//    · ต้นฉบับมาจากสองทาง เลือกตามลำดับ แล้วก๊อปลงโฟลเดอร์ชั่วคราวของเครื่องก่อน import แบบ ES module · ลบทิ้งใน `finally`
+//      1. **สำเนาในโปรเจค `vendor/appsale/heater-app/`** (หรือ `$APPSALE_DIR`) — ผลของ `git archive` คอมมิตต้นแบบ
+//         + `SOURCE.json` (คอมมิต + sha256 ทุกไฟล์) · **ไม่ขึ้น git** (รีโปนี้ public · asset 24 MB) ก๊อปทั้งโฟลเดอร์ไปเครื่องอื่นได้
+//         · คอมมิตไม่ตรง / ไฟล์ขาด เกิน หรือถูกแก้ = ตอบไม่ได้ (สำเนาที่ถูกแตะไม่ใช่ต้นแบบแล้ว)
+//      2. ไม่มีสำเนา ⇒ `git -C $APPSALE_REPO archive <คอมมิต>` **ไม่ checkout · ไม่สร้าง ref**
+//    · ไม่มีทั้งสองทาง = **ตอบไม่ได้ (exit 1)** ไม่ใช่ข้ามแล้วเขียว — ด่านที่เขียวโดยไม่ได้ตรวจคือด่านที่โกหก
 //
 //  ค่าที่ป้อน: ค่าเริ่มต้น + ตัวอย่างของแต่ละรุ่นใน Appsale · เคสสังเคราะห์ (ขอบของรูปทรง) · **รหัสจริงในฐาน**
 //  ที่ตัวอ่านของ Appsale เองอ่านได้ (`canonical → findProduct → parse` แล้ว `{...defaults, ...values}` แบบ app.js)
@@ -27,10 +30,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { dirname, join, relative } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { pool } from '../../config/db.js';
 import { listSubCodes } from '../../db/pricingLabRepo.js';
 import { loosenessOf } from '../../services/drawing/checks.js';
@@ -48,6 +52,8 @@ const APPSALE_COMMIT = '4dd24756282d5be91ba98bf607ddfd71dad2acaa';
 const QUICK = process.argv.includes('--quick');
 const REPO = process.env.APPSALE_REPO || '/home/app_sales/Appsale';
 const APP_DIR = 'frontend/public/heater-app';
+/** สำเนาต้นฉบับในโปรเจค (gitignore) — ทางแรกที่ด่านใช้ */
+const VENDOR = process.env.APPSALE_DIR || join(dirname(fileURLToPath(import.meta.url)), '../../vendor/appsale/heater-app');
 const MAX_REPORT = 5;
 
 // ── รูปของโมดูล Appsale (JS ไม่มี type — ประกาศเท่าที่ด่านใช้ ค่าข้างในเป็น unknown) ────────────
@@ -193,8 +199,30 @@ function extract(dest: string): Promise<void> {
   });
 }
 
-async function loadAppsale(dir: string): Promise<Appsale> {
-  const root = join(dir, APP_DIR);
+/** ตรวจสำเนาใน vendor เทียบ SOURCE.json — คืนข้อความปัญหาแรก หรือ null */
+function vendorProblem(): string | null {
+  let src: { commit?: string; files?: Record<string, string> };
+  try { src = JSON.parse(readFileSync(join(VENDOR, 'SOURCE.json'), 'utf8')); } catch { return 'อ่าน SOURCE.json ไม่ได้'; }
+  if (src.commit !== APPSALE_COMMIT) return `SOURCE.json เป็นคอมมิต ${src.commit} ไม่ใช่ ${APPSALE_COMMIT}`;
+  const want = src.files ?? {}, seen = new Set<string>();
+  const walk = (d: string): string | null => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const p = join(d, e.name), r = relative(VENDOR, p);
+      if (e.isDirectory()) { const x = walk(p); if (x) return x; continue; }
+      if (r === 'SOURCE.json') continue;
+      if (!(r in want)) return `มีไฟล์เกิน ${r}`;
+      if (createHash('sha256').update(readFileSync(p)).digest('hex') !== want[r]) return `ไฟล์ถูกแก้ ${r}`;
+      seen.add(r);
+    }
+    return null;
+  };
+  const bad = walk(VENDOR);
+  if (bad) return bad;
+  const missing = Object.keys(want).find((r) => !seen.has(r));
+  return missing ? `ไฟล์หาย ${missing}` : Object.keys(want).length ? null : 'SOURCE.json ไม่มีรายการไฟล์';
+}
+
+async function loadAppsale(root: string): Promise<Appsale> {
   writeFileSync(join(root, 'package.json'), '{"type":"module"}\n');
   const registry = (await import(pathToFileURL(join(root, 'src/registry.js')).href)) as AppRegistry;
   const band = (await import(pathToFileURL(join(root, 'src/products/bh-01-mesh.js')).href)) as AppBandMesh;
@@ -299,19 +327,30 @@ async function partC(clean: { raw: string; family: string; values: AppValues }[]
 }
 
 async function main(): Promise<void> {
-  console.log(`\n${BOLD}ด่านพอร์ตแบบ 3 มิติจาก Appsale${RESET} ${DIM}(คอมมิต ${APPSALE_COMMIT} · รีโป ${REPO})${RESET}\n`);
+  const useVendor = existsSync(join(VENDOR, 'SOURCE.json'));
+  console.log(`\n${BOLD}ด่านพอร์ตแบบ 3 มิติจาก Appsale${RESET} ${DIM}(คอมมิต ${APPSALE_COMMIT} · ${useVendor ? `สำเนา ${VENDOR}` : `รีโป ${REPO}`})${RESET}\n`);
 
-  if (run('git', ['-C', REPO, 'cat-file', '-e', `${APPSALE_COMMIT}^{commit}`]).status !== 0) {
-    console.log(`${RED}ตอบไม่ได้${RESET} — ไม่พบรีโป Appsale หรือคอมมิตต้นแบบที่ ${REPO}`);
-    console.log(`ตั้ง APPSALE_REPO=<path ของรีโป Appsale ที่มีคอมมิต ${APPSALE_COMMIT}> แล้วรันใหม่\n`);
+  if (useVendor) {
+    const bad = vendorProblem();
+    if (bad) {
+      console.log(`${RED}ตอบไม่ได้${RESET} — สำเนาต้นฉบับที่ ${VENDOR} ไม่ตรงคอมมิตต้นแบบ: ${bad}`);
+      console.log(`แตกใหม่จากรีโป Appsale (ดู vendor/appsale/README.md) แล้วรันใหม่\n`);
+      process.exitCode = 1;
+      return;
+    }
+  } else if (run('git', ['-C', REPO, 'cat-file', '-e', `${APPSALE_COMMIT}^{commit}`]).status !== 0) {
+    console.log(`${RED}ตอบไม่ได้${RESET} — ไม่พบสำเนา ${VENDOR} และไม่พบรีโป Appsale หรือคอมมิตต้นแบบที่ ${REPO}`);
+    console.log(`วางสำเนาที่ vendor/appsale/heater-app/ หรือตั้ง APPSALE_REPO=<path ของรีโป Appsale ที่มีคอมมิต ${APPSALE_COMMIT}> แล้วรันใหม่\n`);
     process.exitCode = 1;
     return;
   }
 
   const tmp = mkdtempSync(join(tmpdir(), 'drawing-port-'));
   try {
-    await extract(tmp);
-    const app = await loadAppsale(tmp);
+    const root = join(tmp, APP_DIR);
+    if (useVendor) cpSync(VENDOR, root, { recursive: true });
+    else await extract(tmp);
+    const app = await loadAppsale(root);
     const byId = (id: string) => {
       const p = app.registry.PRODUCTS.find((x) => x.id === id);
       if (!p) throw new Error(`Appsale ไม่มีรุ่น ${id}`);

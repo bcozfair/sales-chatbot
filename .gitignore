@@ -73,3 +73,8 @@ data/eval/extraction_truth_b.json
 # ทุกที่ ไม่ใช่แค่ data/ (2026-09-23) — แม่แบบที่ `pricebook:xlsx -- export` เคยเขียนลง scripts/pricebook/
 # ซึ่งไม่ได้ ignore ⇒ ไฟล์ราคาทั้งเล่มติด commit ได้โดยไม่มีอะไรฟ้อง · ไฟล์ .xlsx ที่ต้อง track มีค่อยเพิ่ม `!` เฉพาะตัว
 *.xlsx
+
+# สำเนาต้นแบบจาก Appsale ของโมดูลแบบ 3 มิติ (vendor/appsale/README.md) — ห้าม commit:
+# รีโปนี้ public (โค้ดและ CAD ของ Appsale ไม่ใช่ของสาธารณะ) และ mesh/CAD ~78 MB
+# diag:drawing-port อ่าน vendor/appsale/heater-app ก่อน · ก๊อปทั้งโฟลเดอร์โปรเจคไปเครื่องอื่นได้
+/vendor

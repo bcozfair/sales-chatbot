@@ -55,6 +55,8 @@
 
 ### 2.1 มันคืออะไร อยู่ที่ไหน
 
+สำเนาของทุกส่วนในตารางนี้อยู่ที่ `vendor/appsale/` ในโปรเจคแล้ว (2026-10-07 · ไม่ขึ้น git) — ไม่ต้องเปิดรีโป Appsale
+
 | ส่วน | ที่อยู่ (รีโป `/home/app_sales/Appsale`) | หมายเหตุ |
 | --- | --- | --- |
 | ตัวแอปวาดแบบ | `frontend/public/heater-app/` | static ES modules ไม่มี build · 8,594 บรรทัด JS + **~24 MB mesh** ใน `src/assets/` |
