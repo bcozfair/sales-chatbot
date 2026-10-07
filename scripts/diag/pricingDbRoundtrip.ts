@@ -118,7 +118,7 @@ function priceFingerprint(b: PriceBook): { text: string; priced: number } {
 
 function sourceFiles(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
-    if (['node_modules', '.git', '.claude', 'public', 'docs', 'frontend', 'mockup', 'backup', 'data'].includes(name)) continue;
+    if (['node_modules', '.git', '.claude', 'public', 'docs', 'frontend', 'mockups', 'backup', 'data'].includes(name)) continue;
     const p = join(dir, name);
     const st = statSync(p);
     if (st.isDirectory()) sourceFiles(p, out);

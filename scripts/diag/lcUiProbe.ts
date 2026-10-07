@@ -20,8 +20,8 @@ import { getJwtSecret } from '../../config/jwt.js';
 
 const PORT = process.env.LC_PORT || '3099';
 const BASE = `http://localhost:${PORT}`;
-// ภาพลงที่ mockup/shots ซึ่ง gitignore ไว้ — เขียนเป็น path สัมพัทธ์ ไม่ใช่ path ของเครื่องใครเครื่องหนึ่ง
-const SHOTS = fileURLToPath(new URL('../../mockup/shots/', import.meta.url));
+// ภาพลงที่ mockups/shots ซึ่ง gitignore ไว้ — เขียนเป็น path สัมพัทธ์ ไม่ใช่ path ของเครื่องใครเครื่องหนึ่ง
+const SHOTS = fileURLToPath(new URL('../../mockups/shots/', import.meta.url));
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 mkdirSync(SHOTS, { recursive: true });

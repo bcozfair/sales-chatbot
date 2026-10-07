@@ -20,7 +20,7 @@ import { getJwtSecret } from '../../config/jwt.js';
 
 const PORT = process.env.SVC_PORT || '3099';
 const BASE = `http://localhost:${PORT}`;
-const SHOTS = fileURLToPath(new URL('../../mockup/shots/', import.meta.url));
+const SHOTS = fileURLToPath(new URL('../../mockups/shots/', import.meta.url));
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 mkdirSync(SHOTS, { recursive: true });
 

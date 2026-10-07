@@ -149,7 +149,7 @@ const NAV_GROUPS: { key: string; label: string; icon: typeof LayoutDashboard; it
       // 16px** (ดู `renderNavItem`: `nested = !collapsed` ⇒ ตอนกางแถบได้ `w-4 h-4` · 18px
       // เกิดเฉพาะตอนหุบแถบ) **และปุ่มกด 7 จุดของ Calculator เป็น `h.01` ⇒ หายหมดที่ขนาดนั้น
       // เหลือเป็นกล่องสี่เหลี่ยมเปล่า** — ตัวแทนต้องเป็นทรงที่ยังอ่านออกตอนย่อ
-      // (เจ้าของเลือกจาก mockup/ic-index.html · ขนาดจริง 16px ยืนยันด้วย mockup/_pl-live.mjs)
+      // (เจ้าของเลือกจาก mockups/ic-index.html · ขนาดจริง 16px ยืนยันด้วย mockups/_pl-live.mjs)
       // ส่วน `Calculator` ย้ายไปอยู่บนปุ่ม "คิดราคา" ในหน้านั้นแทน ซึ่งใหญ่พอให้เห็นลายจริง
       { tab: 'pricing', label: 'คำนวณราคา', icon: CircleDollarSign, roles: ['admin'], cap: 'page.pricing' },
     ],
