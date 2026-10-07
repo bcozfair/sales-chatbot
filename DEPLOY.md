@@ -1005,6 +1005,7 @@ npx tsx scripts/pricebook/seedCatalogSubcodes.ts --apply --by admin
 **TS_-08** (ตรวจ 2026-10-07 · `docs/pricing-code-ts-catalog.md` หัวข้อ TS_-08) — **โค้ดอย่างเดียว ไม่มีงานฐาน** · แกนนอกตาราง = ขอราคา + แถวสีส้ม · ช่องวัสดุมี B/I ·
 `diag:pricing-diff`: ไม่รับผลิต → ขอราคา 168 · ได้ราคา → ขอราคา 1 (`TSP-08(S4)8-8x390…` แกนสองขนาด · ตั้งใจ ⇒ `--expect-price-change`) ·
 ตรวจหลังขึ้น: `TSP-08(S3)10.2Ax100-U` = ต้องขอราคา (ไม่ใช่ "รหัสไม่ได้บอกขนาดแกน") · หน้าสมุดราคา ชีต TS-08 แถว `21.3B`/`21.3I` ไม่เป็นสีส้ม · `diag:pricing-catalog-ts` หัวข้อ 16
+· แถวรหัสย่อย `TM###` (ทรานสมิตเตอร์ · ค่าว่าง) **ฐาน PMSV เขียนแล้ว 2026-10-07** · ฐานอื่น: `npx tsx scripts/pricebook/seedCatalogSubcodes.ts --apply --by admin` (เขียนเฉพาะแถวที่ยังไม่มี) ⇒ `TSP-08(S4)6x100-KBU-TM000` = ยังไม่มีราคา (ราคาเท่าที่คิดได้ 2,380)
 
 **TS_-07** (ตรวจ 2026-10-07 · `docs/pricing-code-ts-catalog.md` หัวข้อ TS_-07) — **รุ่นใหม่** `TSK-07` จากชีต `TS-07` (แมป 24) + แถวรหัสย่อย 10 แถว
 (2 Element · หัว B/K/KB/S/E/SS/SB · U · TN) · เพิ่มรุ่นด้วย `--new-models` (**ห้าม `--replace-all`**) ·
