@@ -13,6 +13,9 @@ RUN npm install
 
 # build → เขียนไปที่ /app/public ตาม vite.config.ts (outDir: ../public)
 COPY frontend/ ./
+# การ์ดแบบ 3 มิติสร้างชิ้นส่วนในเบราว์เซอร์ด้วยตัววาดชุดเดียวกับเซิร์ฟเวอร์ (import ../services/drawing · ภาพยืดหดตามทันที 2026-10-07)
+# โมดูลนี้ import แค่ภายในตัวเอง — ขาดบรรทัดนี้ = build หน้าแอดมินล้มบนเซิร์ฟเวอร์ทั้งที่บนเครื่อง dev ผ่าน
+COPY services/drawing/ ../services/drawing/
 RUN npm run build
 
 # =====================================================================

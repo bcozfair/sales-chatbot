@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  ตัวดูแบบ 3 มิติชุดเดียว (docs/plan-product-drawing-3d.md §4.6–4.7) — การ์ดแอดมินใช้วันนี้ · หน้าลูกค้าและภาพในกระดาษแบบใช้ตัวนี้ในเฟสถัดไป
 //
-//  **ไม่มี React ในไฟล์นี้** (หน้าลูกค้าเป็น Vite + TS ไม่มี React — หัวหน้าเคาะ §4.6) · รับ GLB + ป้ายต่อตระกูล (`annotations` จาก
+//  **ไม่มี React ในไฟล์นี้** (หน้าลูกค้าเป็น Vite + TS ไม่มี React — หัวหน้าเคาะ §4.6) · รับชิ้นส่วน (หรือ GLB) + ป้ายต่อตระกูล (`annotations` จาก
 //  services/drawing/annotate.ts) แล้ววาดเองทั้งหมด: วัสดุ PBR · RoomEnvironment + ACES · เงา · แยกชิ้นแบบลื่น · ป้ายชื่อ + ป้ายขนาด
 //
 //  กติกาป้าย (เจ้าของเคาะ mockup รอบ 4 · 2026-10-06 — พอร์ตจาก mockups/drawing-3d.html):
@@ -9,6 +9,9 @@
 //    · เส้นห้ามทับตัวสินค้า/ไขว้กัน/ผ่านป้ายอื่น — ตรวจกับ "หน้ากากชิ้นงาน" (วาดทุกชิ้นเป็นสีของกลุ่มแล้วอ่านพิกเซลกลับ)
 //      ลากไม่ได้จริง (ชิ้นถูกบังจากมุมนั้น) = ไม่วาดป้ายนั้น ดีกว่าลากทับสินค้า
 //    · ป้ายขนาดมีเฉพาะตอนประกอบ (ซ่อนตอนแยกชิ้น) · จอแคบ (< 560 px) ใช้เลขในวงกลม + รายการชื่อใต้ภาพ
+//
+//  ภาพยืดหดตามทันที (หัวหน้าสั่ง 2026-10-07 · แบบ Appsale): การ์ดสร้างชิ้นส่วนในเบราว์เซอร์แล้วเรียก `update()` —
+//  **มุมกล้องคงเดิม** (ทิศเดิม · สัดส่วนซูมเทียบระยะพอดีกรอบเดิม) ชิ้นงานยาวขึ้นก็ยังอยู่ในกรอบ · `reset()` กลับมุมตั้งต้นของโมเดลใหม่
 // ─────────────────────────────────────────────────────────────────────────────
 
 import * as THREE from 'three';
@@ -32,7 +35,14 @@ export interface Annotations {
   )[];
 }
 
+/** ชิ้นส่วนที่ตัวดูรับ — รูปเดียวกับ `Part` ของ services/drawing/types.ts (หน่วย mm) */
+export interface PartLike { name: string; positions: ArrayLike<number>; normals: ArrayLike<number>; triangles: ArrayLike<number> }
+/** ที่มาของโมเดล: ชิ้นส่วนที่การ์ดสร้างเอง (ยืดหดตามทันที) หรือไฟล์ GLB ที่ตรึงไว้ (หน้าลูกค้า เฟส 2) */
+export type ModelSource = { parts: PartLike[] } | { glb: ArrayBuffer };
+
 export interface ViewerApi {
+  /** เปลี่ยนโมเดล (+ ป้าย) โดยมุมกล้องไม่เปลี่ยน — ใช้ตอนแก้ช่องในหน้าคำนวณราคา */
+  update(src: ModelSource, ann: Annotations): Promise<void>;
   toggleExplode(): boolean;
   setLabels(on: boolean): void;
   setEdges(on: boolean): void;
@@ -96,24 +106,34 @@ function materialFor(name: string): THREE.MeshPhysicalMaterial {
   return metal(0xcfd3d8, 0.26);
 }
 
-async function buildModel(glb: ArrayBuffer, ann: Annotations): Promise<Model> {
-  const gltf = await new GLTFLoader().parseAsync(glb, '');
+/** ที่มา → รายการ (ชื่อชิ้น, geometry หน่วย mm) */
+async function meshesOf(src: ModelSource): Promise<{ name: string; geo: THREE.BufferGeometry }[]> {
+  if ('parts' in src) return src.parts.map((p) => {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(Float32Array.from(p.positions), 3));
+    geo.setAttribute('normal', new THREE.BufferAttribute(Float32Array.from(p.normals), 3));
+    geo.setIndex(new THREE.BufferAttribute(Uint32Array.from(p.triangles), 1));
+    return { name: p.name, geo };
+  });
+  const gltf = await new GLTFLoader().parseAsync(src.glb, '');
   // GLB เก็บเป็นเมตร (node ราก scale 0.001) — ตัวดูทำงานเป็น mm เหมือนป้าย (`annotations` หน่วย mm)
   gltf.scene.traverse((o) => { if (o.scale.x === 0.001) o.scale.set(1, 1, 1); });
   gltf.scene.updateMatrixWorld(true);
+  const out: { name: string; geo: THREE.BufferGeometry }[] = [];
+  gltf.scene.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) out.push({ name: m.name || m.parent?.name || '', geo: m.geometry.clone().applyMatrix4(m.matrixWorld) }); });
+  return out;
+}
+
+async function buildModel(src: ModelSource, ann: Annotations): Promise<Model> {
   const root = new THREE.Group(), edgeRoot = new THREE.Group();
   const groups: Group[] = ann.groups.map((g) => ({
     label: g.label, asm: g.asm, re: new RegExp(g.match), count: g.count ? new RegExp(g.count) : undefined,
     meshes: [], edges: [], ids: new Set(), box: new THREE.Box3(), dirV: new THREE.Vector3(), dist: 0,
     text: g.label, idMat: new THREE.MeshBasicMaterial(), rawDir: g.dir, d: g.d,
   }));
-  const parts: THREE.Mesh[] = [];
-  gltf.scene.traverse((o) => { if ((o as THREE.Mesh).isMesh) parts.push(o as THREE.Mesh); });
-  for (const src of parts) {
-    const name = src.name || src.parent?.name || '';
+  for (const { name, geo } of await meshesOf(src)) {
     const gi = groups.findIndex((G) => G.re.test(name));
-    if (gi < 0) continue; // ชิ้นที่ไม่มีกลุ่ม = ข้อมูลป้ายไม่ครบ — ไม่วาดดีกว่าวาดชิ้นลอยไม่มีชื่อ (annotate.ts ต้องครอบทุกชิ้น)
-    const geo = src.geometry.clone().applyMatrix4(src.matrixWorld);
+    if (gi < 0) { geo.dispose(); continue; } // ชิ้นที่ไม่มีกลุ่ม = ข้อมูลป้ายไม่ครบ — ไม่วาดดีกว่าวาดชิ้นลอยไม่มีชื่อ (annotate.ts ต้องครอบทุกชิ้น)
     const m = new THREE.Mesh(geo, materialFor(name));
     m.castShadow = true; m.userData.gi = gi;
     const e = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 28), new THREE.LineBasicMaterial({ color: 0x1b2730, transparent: true, opacity: 0.55 }));
@@ -157,11 +177,16 @@ function makeRenderer(canvas: HTMLCanvasElement) {
   r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFSoftShadowMap; r.setClearColor(0x000000, 0);
   return r;
 }
+/** ฉาก + แสงสภาพแวดล้อม — สร้างครั้งเดียวต่อตัวดู (PMREM แพง · ไม่ขึ้นกับโมเดล) */
 function buildScene(renderer: THREE.WebGLRenderer, model: Model) {
   const scene = new THREE.Scene();
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
   scene.environmentIntensity = 0.95;
+  return { scene, pmrem, ...stageModel(scene, model) };
+}
+/** วางโมเดล + พื้นรับเงา + แสงแดด (ขนาดตามโมเดล) — `update()` ถอดชุดนี้ออกแล้ววางชุดใหม่ */
+function stageModel(scene: THREE.Scene, model: Model) {
   scene.add(model.root, model.edgeRoot);
   const R = model.R, ebox = explodedBox(model);
   const shadowMat = new THREE.ShadowMaterial({ opacity: 0.28 });
@@ -173,7 +198,15 @@ function buildScene(renderer: THREE.WebGLRenderer, model: Model) {
   Object.assign(sun.shadow.camera, { left: -R * 1.4, right: R * 1.4, top: R * 1.4, bottom: -R * 1.4, near: R * 0.1, far: R * 5 });
   sun.shadow.camera.updateProjectionMatrix(); sun.shadow.bias = -0.0004;
   scene.add(sun);
-  return { scene, ebox, pmrem, ground, shadowMat };
+  return { ebox, ground, shadowMat, sun };
+}
+/** ถอดชุดของ `stageModel` ออกจากฉากแล้วคืนหน่วยความจำ */
+function unstageModel(scene: THREE.Scene, model: Model, ground: THREE.Mesh, sun: THREE.DirectionalLight) {
+  const tmp = new THREE.Scene();
+  tmp.add(model.root, model.edgeRoot, ground);
+  disposeScene(tmp);
+  for (const G of model.groups) G.idMat.dispose();
+  scene.remove(sun); sun.shadow.map?.dispose(); sun.dispose();
 }
 /** ระยะกล้องให้ชิ้นงานกินแนวนอน 1/mX และแนวตั้ง 1/mY ของกรอบ — เหลือที่เหนือ/ใต้ไว้วางแถวป้าย */
 function fitDist(camera: THREE.PerspectiveCamera, box: THREE.Box3, dir: Vec3, aspect: number, mX: number, mY: number) {
@@ -476,15 +509,23 @@ export interface ViewerOptions {
   title?: string;
 }
 
-/** สร้างตัวดูใน `host` (ต้องมีขนาด · position relative) — โหลด GLB แล้วคืนตัวควบคุม */
-export async function createViewer(host: HTMLElement, glb: ArrayBuffer, ann: Annotations, opts: ViewerOptions = {}): Promise<ViewerApi> {
-  const model = await buildModel(glb, ann);
+/** ทิ้ง geometry/วัสดุทั้งหมดของฉาก (WebGL ไม่คืนหน่วยความจำเอง) */
+function disposeScene(scene: THREE.Scene) {
+  scene.traverse((o) => { const m = o as THREE.Mesh; m.geometry?.dispose(); const mat = m.material; if (Array.isArray(mat)) mat.forEach((x) => x.dispose()); else mat?.dispose(); });
+}
+
+/** สร้างตัวดูใน `host` (ต้องมีขนาด · position relative) — สร้างโมเดลแล้วคืนตัวควบคุม */
+export async function createViewer(host: HTMLElement, src: ModelSource, annIn: Annotations, opts: ViewerOptions = {}): Promise<ViewerApi> {
+  let ann = annIn;
+  let model = await buildModel(src, ann);
   const canvas = document.createElement('canvas');
   canvas.setAttribute('aria-label', opts.title ?? 'ภาพ 3 มิติ');
   host.prepend(canvas);
   const renderer = makeRenderer(canvas);
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-  const { scene, ebox, pmrem, ground, shadowMat } = buildScene(renderer, model);
+  const built = buildScene(renderer, model);
+  const { scene, pmrem } = built;
+  let { ebox, ground, shadowMat, sun } = built;
   model.edgeRoot.visible = !!opts.edges;
   const camera = new THREE.PerspectiveCamera(28, 1, 1, 1000);
   const controls = new OrbitControls(camera, canvas);
@@ -496,25 +537,33 @@ export async function createViewer(host: HTMLElement, glb: ArrayBuffer, ann: Ann
   let anim: { t0: number; from: number; to: number } | null = null;
   let home: THREE.Vector3 | null = null, ectr = new THREE.Vector3();
   let settleTimer: ReturnType<typeof setTimeout> | undefined, lastCheck: LayoutCheck | null = null;
-  const dirN = new THREE.Vector3(...ann.view).normalize();
+  let dirN = new THREE.Vector3(...ann.view).normalize();
   const tgt = (x: number) => ectr.clone().multiplyScalar(x);
   const k = (x: number) => 1 + (kE - 1) * x;
   const narrow = () => host.clientWidth < 560;
   const shadowAt = (x: number) => { shadowMat.opacity = 0.28 * (1 - 0.8 * x); };
   const S0 = (): Settings => ({ narrow: narrow(), pad: 8, gap: 14, margin: 14, lgap: 3, stub: 8, lblPx: 12, dimPx: 12, dimGap: 8 });
 
+  /** ระยะพอดีกรอบของโมเดลปัจจุบัน → `home` (มุมตั้งต้น) · `kE`/`ectr` (ถอยกล้องตอนแยกชิ้น) */
+  function fit(w: number, h: number) {
+    const [mX, mY] = narrow() ? FIT.narrow : FIT.wide;
+    const a = fitDist(camera, model.box, ann.view, w / h, mX, mY);
+    const e = fitDist(camera, ebox, ann.view, w / h, mX, mY);
+    kE = Math.max(1, e.dist / a.dist); ectr = e.ctr;
+    home = dirN.clone().multiplyScalar(a.dist);
+    camera.near = a.dist / 50; camera.far = a.dist * 30; camera.aspect = w / h; camera.updateProjectionMatrix();
+  }
+  // สถานะให้ด่าน UI อ่านจาก DOM (diag:drawing-live-ui) — ขนาดโมเดล (mm) · จำนวนครั้งที่สร้าง · ทิศกล้อง
+  let builds = 0;
+  const mark = () => { host.dataset.dvBox = model.box.getSize(new THREE.Vector3()).toArray().map((x) => x.toFixed(1)).join(','); host.dataset.dvBuilds = String(++builds); };
+  const markCam = () => { host.dataset.dvCam = camera.position.clone().sub(controls.target).normalize().toArray().map((x) => x.toFixed(3)).join(','); };
   function dirty() { ov.style.opacity = '0'; clearTimeout(settleTimer); settleTimer = setTimeout(() => { if (!anim) layout(); }, 160); }
   function resize() {
     const w = host.clientWidth, h = host.clientHeight; if (!w || !h) return;
     renderer.setSize(w, h, false);
     if (!home) {
-      const [mX, mY] = narrow() ? FIT.narrow : FIT.wide;
-      const a = fitDist(camera, model.box, ann.view, w / h, mX, mY);
-      const e = fitDist(camera, ebox, ann.view, w / h, mX, mY);
-      kE = Math.max(1, e.dist / a.dist); ectr = e.ctr;
-      home = dirN.clone().multiplyScalar(a.dist);
-      controls.target.copy(tgt(t)); camera.position.copy(home).multiplyScalar(k(t)).add(controls.target);
-      camera.near = a.dist / 50; camera.far = a.dist * 30; camera.updateProjectionMatrix(); controls.update();
+      fit(w, h);
+      controls.target.copy(tgt(t)); camera.position.copy(home!).multiplyScalar(k(t)).add(controls.target); controls.update();
     } else { camera.aspect = w / h; camera.updateProjectionMatrix(); }
     need = true; dirty();
   }
@@ -554,8 +603,8 @@ export async function createViewer(host: HTMLElement, glb: ArrayBuffer, ann: Ann
     need = true;
   }
   const setHL = (i: number) => { if (i !== hl) { hl = i; applyHL(); } };
-  const ro = new ResizeObserver(resize); ro.observe(host); resize();
-  controls.addEventListener('change', () => { need = true; dirty(); });
+  const ro = new ResizeObserver(resize); ro.observe(host); resize(); mark(); markCam();
+  controls.addEventListener('change', () => { need = true; dirty(); markCam(); });
   const ray = new THREE.Raycaster(); const ndc = new THREE.Vector2();
   const pick = (e: PointerEvent) => {
     const r = canvas.getBoundingClientRect();
@@ -583,7 +632,32 @@ export async function createViewer(host: HTMLElement, glb: ArrayBuffer, ann: Ann
     requestAnimationFrame(loop);
   };
   requestAnimationFrame(loop);
+  let updating = 0;
   return {
+    async update(next, nextAnn) {
+      const mine = ++updating;
+      const nextModel = await buildModel(next, nextAnn);
+      if (!alive || mine !== updating) { const tmp = new THREE.Scene(); tmp.add(nextModel.root, nextModel.edgeRoot); disposeScene(tmp); return; }
+      // สัดส่วนของกล้องเดิมเทียบมุมตั้งต้น — ทิศ + ซูม (ระยะ ÷ ระยะพอดีกรอบ) · แพนจากจุดกลาง
+      const off = camera.position.clone().sub(controls.target);
+      const zoom = home ? off.length() / (home.length() * k(t)) : 1;
+      const pan = controls.target.clone().sub(tgt(t));
+      const edges = model.edgeRoot.visible;
+      unstageModel(scene, model, ground, sun);
+      ann = nextAnn; model = nextModel; dirN = new THREE.Vector3(...ann.view).normalize();
+      ({ ebox, ground, shadowMat, sun } = stageModel(scene, model));
+      model.edgeRoot.visible = edges;
+      setExplode(model, t); shadowAt(t);
+      const w = host.clientWidth, h = host.clientHeight;
+      if (w && h && home) {
+        const scaleOld = home.length();
+        fit(w, h);
+        controls.target.copy(tgt(t)).add(pan.multiplyScalar(home!.length() / scaleOld));
+        camera.position.copy(controls.target).add(off.normalize().multiplyScalar(home!.length() * k(t) * zoom));
+        controls.update();
+      }
+      hl = -1; need = true; dirty(); mark(); markCam();
+    },
     toggleExplode() { T = T ? 0 : 1; anim = { t0: performance.now(), from: t, to: T }; ov.style.opacity = '0'; return !!T; },
     setLabels(on) { labelsOn = on; layout(); },
     setEdges(on) { model.edgeRoot.visible = on; need = true; },
@@ -592,7 +666,7 @@ export async function createViewer(host: HTMLElement, glb: ArrayBuffer, ann: Ann
     checks: () => lastCheck,
     dispose() {
       alive = false; clearTimeout(settleTimer); ro.disconnect(); controls.dispose(); pmrem.dispose();
-      scene.traverse((o) => { const m = o as THREE.Mesh; m.geometry?.dispose(); const mat = m.material; if (Array.isArray(mat)) mat.forEach((x) => x.dispose()); else mat?.dispose(); });
+      disposeScene(scene);
       renderer.dispose(); renderer.forceContextLoss(); canvas.remove(); ov.remove();
     },
   };
