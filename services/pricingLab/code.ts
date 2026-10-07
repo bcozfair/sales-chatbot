@@ -338,8 +338,9 @@ export function askValueProblem(model: PriceModel, slot: 'sensor' | 'thread' | '
     if (catalogSensorHeads(spec).includes(value)) return `${value} อยู่ในแคตตาล็อกแล้ว`;
     if (axisValues(model, axis).some((v) => v.toUpperCase() === value)) return `มีแถว ${value} อยู่แล้ว`;
   } else if (row) {
-    // แถวของตารางราคาตั้ง (TS_-02) — ขนาดในแคตตาล็อกที่ตารางยังไม่มีแถว (`5A`) เพิ่มทางแม่แบบ Excel ไม่ใช่ช่องสีส้ม
-    if (catalogDRow(spec, value)) return `แกน ${value} mm อยู่ในแคตตาล็อกแล้ว — เพิ่มแถวนี้ทางแม่แบบ Excel`;
+    // แถวของตารางราคาตั้ง (TS_-02) — ขนาดในแคตตาล็อกที่ตารางยังไม่มีแถว (`15.8B` · `5A`) **เพิ่มจากหน้าชีตได้เหมือนค่านอกแคตตาล็อก**
+    // (เจ้าของสั่ง 2026-10-07 "ราคาที่ไม่มีใน excel แต่เป็นรหัสตามแคตตาล็อกหรือฐานข้อมูล ต้องระบุเพิ่มเติมทีหลังได้" · เดิมต้องไปทางแม่แบบ Excel)
+    // · ต่างกันแค่ตอนคิดราคา: แถวของแคตตาล็อกไม่เตือน "ราคาที่แอดมินใส่" (`catalogDRow`) · สีส้มอยู่จนกว่าจะมีตัวเลข (`offCatalogValues`)
     if (axisValues(model, axis).some((v) => v.toUpperCase() === value)) return `มีแถวแกน ${value} mm อยู่แล้ว`;
   } else {
     if ((spec.slots.d?.options ?? []).some((o) => Number(o.code) === Number(value))) return `แกน ${value} mm อยู่ในแคตตาล็อกแล้ว`;
@@ -372,7 +373,10 @@ export function offCatalogValues(model: PriceModel): Record<string, string[]> {
   if (d) {
     // แถวของตารางราคาตั้ง (TS_-02) + ขนาดในกฎที่แยกตามแกน (TS_-01) — `4.8A` ของ TS_-02 อยู่ในแคตตาล็อก (ขนาด + วัสดุ A)
     const keys = [...new Set([...axisValues(model, d), ...model.adders.filter((a) => a.byAxis === d).flatMap((a) => Object.keys(a.rates ?? {}))])];
-    const off = keys.filter((k) => !catalogDRow(spec, k));
+    // + แถวของแคตตาล็อกที่แอดมินเพิ่มจากหน้าชีตแล้วยังไม่มีตัวเลขสักช่อง (`unpriced` · `15.8B`) — ส้ม + เอาออกได้แบบเดียวกัน
+    // กรอกตัวเลขแล้ว `unpriced` ถอดมันออกเอง ⇒ กลายเป็นแถวปกติของตาราง (ไม่มีแมปไหนตั้ง `unpriced` ของแกน D · วัด 2026-10-07)
+    const waiting = model.base.kind === 'matrix' ? model.base.unpriced?.[d] ?? [] : [];
+    const off = keys.filter((k) => !catalogDRow(spec, k) || waiting.includes(k));
     if (off.length) out[d] = off;
   }
   return out;

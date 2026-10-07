@@ -743,6 +743,30 @@ async function main(): Promise<void> {
     const b158 = price('TSK-06(S4)15.8Bx200-B');
     check('15.8B + หัว B = หัว B คิดครั้งเดียว (ท่อนหลังขีด) · ราคาเท่าที่คิดได้ = ค่าหัว',
       b158.o?.breakdown.filter((l) => /หัวกระโหลก/.test(l.label)).length === 1 && b158.o?.unitPrice === headB, `${b158.o?.unitPrice}`);
+
+    // เจ้าของสั่ง 2026-10-07: "ราคาที่ไม่มีใน excel แต่เป็นรหัสตามแคตตาล็อกหรือฐานข้อมูล ต้องระบุเพิ่มเติมทีหลังได้"
+    // ⇒ แถวของแคตตาล็อกที่ชีตไม่มี (15.8B) เพิ่มจากหน้าชีตได้แบบเดียวกับค่านอกแคตตาล็อก (ตัวรับเดียวกับ PUT /sheet · ในหน่วยความจำ)
+    if (!axisValues(k06, 'D').includes('15.8B')) {
+      check('แถวของแคตตาล็อกที่ชีตไม่มี (15.8B) เพิ่มจากหน้าชีตได้ — เดิมบอกให้ไปเพิ่มทางแม่แบบ Excel', askValueProblem(k06, 'd', '15.8B') === undefined,
+        askValueProblem(k06, 'd', '15.8B'));
+      const empty = applySheetEdit(book, k06.sheet!, { 'TSK-06': { addValues: { D: ['15.8B'] } } }).models['TSK-06']!;
+      check('แถว 15.8B ที่เพิ่มแต่ยังว่าง = สีส้ม (รอใส่ราคา · เอาออกได้)', (offCatalogValues(empty).D ?? []).includes('15.8B'), JSON.stringify(offCatalogValues(empty)));
+      const bE: PriceBook = { ...book, models: { ...book.models, 'TSK-06': empty } };
+      const e1 = priceIn(bE, 'TSK-06(S4)15.8Bx200');
+      check('แถวว่าง = ยังขอราคา (ไม่ใช่ไม่รับผลิต) · ไม่เตือน "ราคาที่แอดมินใส่" เพราะเป็นค่าของแคตตาล็อก', e1.o?.status === 'quoteOnRequest' &&
+        !e1.o.violations.some((v) => v.askPrice), `${e1.o?.status} ${e1.o?.violations.map((v) => v.message).join('|')}`);
+      const col = Object.keys(k06.base.kind === 'matrix' ? k06.base.cells : {}).find((k) => k.includes('1/2'))?.split(' | ')[1] ?? '1/2”';
+      const filled = applySheetEdit(book, k06.sheet!, {
+        'TSK-06': { addValues: { D: ['15.8B'] }, cells: { [`15.8B | ${col}`]: 2222 }, adderRates: { len_l1: [{ value: '15.8B', rate: 333 }] } },
+      }).models['TSK-06']!;
+      const bF: PriceBook = { ...book, models: { ...book.models, 'TSK-06': filled } };
+      const f1 = priceIn(bF, 'TSK-06(S4)15.8Bx200');
+      check('กรอกตัวเลขแล้ว = ได้ราคาเต็มทันที (2,222 + 333) · แถวไม่เป็นสีส้มแล้ว (แถวปกติของแคตตาล็อก)', f1.o?.status === 'priced' && f1.o.unitPrice === 2555 &&
+        !f1.o.violations.some((v) => v.askPrice) && !(offCatalogValues(filled).D ?? []).includes('15.8B'), `${f1.o?.status} ${f1.o?.unitPrice}`);
+      check('เพิ่มแถวที่มีอยู่แล้ว (15.97B) ยังถูกปฏิเสธ', (() => {
+        try { applySheetEdit(book, k06.sheet!, { 'TSK-06': { addValues: { D: ['15.97B'] } } }); return false; } catch (e) { return e instanceof EditRejected; }
+      })());
+    }
   }
 }
 

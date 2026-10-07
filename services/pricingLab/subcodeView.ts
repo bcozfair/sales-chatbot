@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { listCatalogCodes } from '../../db/pricingLabRepo.js';
-import { modelOfCode, parseProductCode } from './code.js';
+import { askValueProblem, modelOfCode, parseProductCode } from './code.js';
 import { scopeRank } from './subcodes.js';
 import type { BookState } from './bookStore.js';
 import type { PriceBook, SubCode } from './types.js';
@@ -121,7 +121,11 @@ async function measure(book: PriceBook): Promise<UnreadSummary> {
     const bucket = perSheet.get(sheetOf(m))!;
     bucket.codes += 1;
     const parsed = parseProductCode(code, book);
-    for (const [axis, value] of Object.entries(parsed.cfg?.askPrice ?? {})) {
+    // + ขนาดแกนที่แคตตาล็อกมีแต่ตารางยังไม่มีแถว (`15.8B`) — เพิ่มเป็นแถวรอกรอกได้จากกล่องเดียวกัน (เจ้าของสั่ง 2026-10-07
+    // "ราคาที่ไม่มีใน excel แต่เป็นรหัสตามแคตตาล็อก ต้องระบุเพิ่มเติมทีหลังได้") · เฉพาะค่าที่ตัวรับยอมรับ (`askValueProblem`) ไม่งั้นปุ่มกดแล้วบันทึกไม่ผ่าน
+    const catalogOnlyD = parsed.cfg?.catalogOnly?.D;
+    const fillable = catalogOnlyD && !parsed.cfg?.priceAs && askValueProblem(m, 'd', catalogOnlyD) === undefined ? { D: catalogOnlyD } : {};
+    for (const [axis, value] of Object.entries({ ...parsed.cfg?.askPrice, ...fillable })) {
       const key = `${m.code}|${axis}|${value}`;
       const hit = bucket.ask.get(key);
       if (hit) hit.count += 1;

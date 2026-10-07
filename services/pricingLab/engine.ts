@@ -299,7 +299,7 @@ function computeBase(
           amount: 0,
           label: 'ฐานราคา',
           noRate: true,
-          reason: `ตารางราคาตั้งของ ${model.code} ยังไม่มีราคาของ${waiting.map((a) => `${axisLabel(a)} ${axes[a]}`).join(' · ')} — ใส่ราคาได้ที่หน้าสมุดราคา (แม่แบบ Excel)`,
+          reason: `ตารางราคาตั้งของ ${model.code} ยังไม่มีราคาของ${waiting.map((a) => `${axisLabel(a)} ${axes[a]}`).join(' · ')} — ใส่ราคาได้ที่หน้าสมุดราคา`,
           steps: [...steps, `${waiting.map((a) => `${axisLabel(a)} ${axes[a]}`).join(' · ')} ตั้งไว้ในตารางแล้วแต่ยังไม่ได้ใส่ราคา (ไม่ใช่ไม่รับผลิต)`],
         };
       }
