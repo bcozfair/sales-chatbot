@@ -63,6 +63,12 @@ export interface ModelBrief {
   axes?: Record<string, string[]>;
 }
 
+/**
+ * หนึ่งรหัสของ `GET /api/admin/pricing/examples` — รหัสสินค้าจริงในฐานที่สมุดราคาเปิดรุ่นให้ (ช่องค้นรหัส)
+ * `price` = ราคาขายในฐาน **ไว้เทียบเท่านั้น** ราคาที่ใช้ยึดสมุดราคา · 0 = ในฐานไม่มีราคา
+ */
+export interface CodeExample { model: string; ref: string; name: string; price: number; family?: string }
+
 /** `GET /api/admin/pricing/overview` — หน้าคิดราคาได้แค่นี้ ของงานแก้ราคาอยู่ที่ `Overview` */
 export interface QuoteOverview {
   book: { ok: boolean; message?: string; models?: number; version?: string };

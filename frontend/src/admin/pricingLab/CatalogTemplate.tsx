@@ -1,5 +1,5 @@
-import React from 'react';
-import { ChevronDown, Plus, Trash2, X } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { ChevronDown, Info, Plus, Trash2, X } from 'lucide-react';
 import type { BhForm, CatalogFamilySpec, CatalogOption, CatalogSlot, HoleRow, SizeKey, TsFamilySpec, TsForm, TsSlot } from './types';
 
 /**
@@ -23,6 +23,8 @@ interface Props {
   /** `now` = ช่องแบบเลือก ส่งทันที · ไม่ใส่ = ช่องพิมพ์ ให้ผู้เรียกหน่วงก่อนส่ง */
   onChange: (next: BhForm, now?: boolean) => void;
   onFamily: (family: string) => void;
+  /** ช่องที่ต่างจากรหัสต้นแบบที่เลือกจากฐาน — ระบายเขียว (mockup `pricing-calc-redesign` · "ดัดแปลงจาก …") */
+  changed?: ReadonlySet<string>;
 }
 
 const INPUT =
@@ -65,6 +67,8 @@ const TONE_BOX: Record<Tone, string> = {
   ask: `${TONE_FRAME.ask} !text-orange-700`,
   bad: `${TONE_FRAME.bad} !text-red-700`,
 };
+/** ช่องที่แก้ไปจากรหัสต้นแบบ — เขียวแบบเดียวกับ focus ring ของช่อง (ไม่ใช่ป้ายเตือน) · ป้ายเตือนชนะเสมอ */
+const CHANGED = '!bg-[var(--brand-soft)] !border-[var(--brand-border-strong)]';
 const TONE_CAP: Record<Tone, string> = { warn: '!text-amber-700 font-semibold', ask: '!text-orange-700 font-semibold', bad: '!text-red-700 font-semibold' };
 
 const CodeSelect: React.FC<{
@@ -72,7 +76,8 @@ const CodeSelect: React.FC<{
   /** ข้อความที่โชว์ในช่องแทนรหัสของตัวเลือก — ค่าตามที่รหัสเขียน (`M5` ของค่ามาตรฐาน · ค่านอกแคตตาล็อก) */
   shown?: string;
   tone?: Tone;
-}> = ({ label, value, options, placeholder, onChange, shown, tone }) => {
+  changed?: boolean;
+}> = ({ label, value, options, placeholder, onChange, shown, tone, changed }) => {
   const cur = options.find((o) => o.value === value);
   const ch = Math.max(placeholder?.length ?? 0, shown?.length ?? 0, ...options.map((o) => o.code.length)) + 4;
   const item = (o: CodeOption) => (
@@ -81,7 +86,7 @@ const CodeSelect: React.FC<{
   const groups = [...new Set(options.map((o) => o.group).filter((g): g is string => !!g))];
   return (
     <div className="relative font-mono text-[14px]" style={{ width: `${ch}ch` }}>
-      <select className={`${INPUT} w-full pl-2 pr-6 text-transparent appearance-none cursor-pointer ${tone ? TONE_FRAME[tone] : ''}`} value={value} aria-label={label}
+      <select className={`${INPUT} w-full pl-2 pr-6 text-transparent appearance-none cursor-pointer ${tone ? TONE_FRAME[tone] : changed ? CHANGED : ''}`} value={value} aria-label={label}
               onChange={(e) => onChange(e.target.value)}>
         {placeholder !== undefined && <option className="bg-card text-slate-900" value="">{placeholder}</option>}
         {groups.length
@@ -116,7 +121,7 @@ const HoleRows: React.FC<{ rows: HoleRow[]; onChange: (rows: HoleRow[], now?: bo
   const shown = (n: number) => (Number.isNaN(n) ? '' : String(n));
   return (
     <div className="mt-2 flex flex-col gap-1.5 text-[12.5px] text-slate-700">
-      <span className="text-slate-500">เจาะรู (ไม่อยู่ในรหัส)</span>
+      <span className="text-slate-500">เจาะรู</span>
       {rows.map((r, i) => (
         <span key={i} className="inline-flex flex-wrap items-center gap-1.5">
           <input type="number" inputMode="numeric" min={1} step={1} className={HOLE_INPUT} aria-label={`จำนวนรู แถว ${i + 1}`}
@@ -142,12 +147,82 @@ const HoleRows: React.FC<{ rows: HoleRow[]; onChange: (rows: HoleRow[], now?: bo
   );
 };
 
-/** ช่อง "รุ่น" — ช่องแรกของรหัส ใช้ร่วมกันทั้ง BH และ TS (สลับข้ามซีรีส์ได้จากช่องนี้) */
-const FamilySlot: React.FC<{ families: FamilyChoice[]; value: string; onFamily: (v: string) => void }> = ({ families, value, onFamily }) => (
-  <Slot cap={value ? 'รุ่น' : 'ไม่พบรุ่นในสมุดราคา'} tone={value ? undefined : 'bad'}>
-    <CodeSelect label="รุ่น" value={value} options={families} placeholder={value ? undefined : 'เลือกรุ่น'}
-                tone={value ? undefined : 'bad'} onChange={(v) => v && v !== value && onFamily(v)} />
-  </Slot>
+/**
+ * ช่อง "รุ่น" — ช่องแรกของรหัส ใช้ร่วมกันทั้ง BH และ TS (สลับข้ามซีรีส์ได้จากช่องนี้)
+ *
+ * ตั้งแต่ 2026-10-07 เป็นปุ่มเปิดรายการแทน `<select>` (เจ้าของเคาะ mockup `pricing-calc-redesign` รอบ 4) — หน้าว่างไม่มีปุ่มรุ่นเรียงเต็มจอ
+ * ("ถ้าอนาคตมีหลายรุ่นมันจะรก") ⇒ ช่องนี้คือทางเลือกรุ่นทางหนึ่ง อีกทางคือพิมพ์ชื่อรุ่นในช่องรหัสด้านบน (`CodeSearchBox`)
+ * รายการแบ่ง Heater / Temperature Sensor แถวละ รหัส + ชื่อ · รุ่นที่เลือกอยู่มีแถบสี · ปิดเมื่อกดที่อื่นหรือ Esc
+ * กล่องลอยกว้างไม่เกินจอ (`min(420px, 100vw − 48px)`) และยึดซ้ายของช่องซึ่งเป็นช่องแรกของแถวเสมอ ⇒ ไม่ล้นที่ 390px
+ */
+const FamilySlot: React.FC<{ families: FamilyChoice[]; value: string; onFamily: (v: string) => void }> = ({ families, value, onFamily }) => {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', away);
+    document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc); };
+  }, [open]);
+  const cur = families.find((f) => f.value === value);
+  const ch = Math.max(9, ...families.map((f) => f.code.length)) + 4;
+  const groups = [...new Set(families.map((f) => f.group))];
+  return (
+    <Slot cap={value ? 'รุ่น' : 'ไม่พบรุ่นในสมุดราคา'} tone={value ? undefined : 'bad'}>
+      <div ref={box} className="relative font-mono text-[14px]" style={{ width: `${ch}ch` }}>
+        <button type="button" aria-label="รุ่น" aria-haspopup="listbox" aria-expanded={open} data-value={value}
+                className={`${INPUT} w-full pl-2 pr-6 text-left cursor-pointer ${value ? '' : TONE_BOX.bad}`}
+                onClick={() => setOpen((o) => !o)}>
+          <span className={value ? 'text-slate-900' : 'text-red-700'}>{cur?.code ?? 'เลือกรุ่น'}</span>
+        </button>
+        <ChevronDown aria-hidden="true" className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+        {open && (
+          <div role="listbox" aria-label="รุ่นทั้งหมดในสมุดราคา"
+               className="absolute left-0 top-[42px] z-30 w-[min(420px,calc(100vw-48px))] max-h-[380px] overflow-y-auto overscroll-contain bg-card border border-slate-300 rounded-xl shadow-xl p-1.5 font-sans">
+            <div className="flex items-baseline gap-2 px-2.5 pt-1 pb-1.5 text-[11.5px] text-slate-500">
+              รุ่นทั้งหมดในสมุดราคา<span className="ml-auto text-slate-400 text-right">{families.length} รุ่น · พิมพ์ในช่องรหัสเพื่อค้น</span>
+            </div>
+            {groups.map((g) => (
+              <React.Fragment key={g}>
+                <div className="px-2.5 pt-2 pb-1 text-[10.5px] font-semibold tracking-wide text-slate-400">{g}</div>
+                {families.filter((f) => f.group === g).map((f) => (
+                  <button key={f.value} type="button" role="option" aria-selected={f.value === value} data-value={f.value}
+                          onClick={() => { setOpen(false); if (f.value !== value) onFamily(f.value); }}
+                          className={`w-full text-left rounded-lg px-2.5 py-2 flex flex-wrap items-baseline gap-x-3 ${
+                            f.value === value ? 'bg-[var(--brand-soft)]' : 'hover:bg-[var(--brand-soft)]'}`}>
+                    <span className="font-mono text-[13px] font-semibold text-slate-900">{f.code}</span>
+                    <span className="ml-auto text-[11px] text-slate-500 text-right">{f.text}</span>
+                  </button>
+                ))}
+              </React.Fragment>
+            ))}
+          </div>
+        )}
+      </div>
+    </Slot>
+  );
+};
+
+/**
+ * แถว "นอกรหัส" — ของที่ไม่พิมพ์ลงรหัสแต่มีผลกับราคา (สาย/ท่อที่ติ๊ก · เจาะรู · หัก L) รวมเป็นแถวเดียว
+ * คำอธิบายอยู่ใน tooltip ของคำว่า "นอกรหัส" (mockup `pricing-calc-redesign` · 2026-10-07) แทนประโยคยาวหน้าช่องติ๊ก
+ */
+const OffCodeRow: React.FC<{ hint: string; children: React.ReactNode }> = ({ hint, children }) => (
+  <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12.5px] text-slate-700">
+    <span className="inline-flex items-center gap-1 text-slate-500 cursor-help" title={hint}>
+      นอกรหัส<Info className="w-3.5 h-3.5" aria-label={hint} />
+    </span>
+    {children}
+  </div>
+);
+
+const AddonBox: React.FC<{ label: string; on: boolean; onToggle: () => void }> = ({ label, on, onToggle }) => (
+  <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
+    <input type="checkbox" className="h-4 w-4 accent-[var(--brand)]" checked={on} aria-label={label} onChange={onToggle} />
+    {label}
+  </label>
 );
 
 /**
@@ -160,7 +235,7 @@ export const NoModelTemplate: React.FC<{ families: FamilyChoice[]; onFamily: (fa
   </div>
 );
 
-export const CatalogTemplate: React.FC<Props> = ({ catalog, families, form, onChange, onFamily }) => {
+export const CatalogTemplate: React.FC<Props> = ({ catalog, families, form, onChange, onFamily, changed }) => {
   const spec = catalog.find((s) => s.family === form.family);
   if (!spec) return null;
   const set = (patch: Partial<BhForm>, now?: boolean) => onChange({ ...form, ...patch }, now);
@@ -172,7 +247,7 @@ export const CatalogTemplate: React.FC<Props> = ({ catalog, families, form, onCh
           tone={missing(key) ? 'warn' : undefined}>
       <input
         type="number" inputMode="decimal" min={0}
-        className={`${INPUT} px-1.5 text-center ${missing(key) ? TONE_BOX.warn : ''}`}
+        className={`${INPUT} px-1.5 text-center ${missing(key) ? TONE_BOX.warn : changed?.has(key) ? CHANGED : ''}`}
         style={{ width: `${ch}ch` }}
         value={form[key] ?? ''}
         aria-label={slot.label}
@@ -186,17 +261,16 @@ export const CatalogTemplate: React.FC<Props> = ({ catalog, families, form, onCh
       <CodeSelect
         label={slot.label}
         value={form[key] ?? ''}
+        changed={changed?.has(key)}
         placeholder={key === 'amp' ? '— เลือก —' : undefined}
         options={(slot.options ?? []).map((o) => (key === 'amp'
           ? { value: o.code, code: o.label }
           : { value: o.code, code: o.code || 'None', text: o.label }))}
         onChange={(v) => {
           if (key === 'shape') {
-            // เปลี่ยนรูปทรง = ขนาดคนละชุด (W×L · D1 · D1×D2) — เติมค่าที่ยังไม่มีให้คิดราคาได้ทันที
-            const dims = spec.shapes?.find((s) => s.code === v)?.dims ?? [];
-            const fill: Partial<BhForm> = { sizeText: undefined };
-            for (const d of dims) if (form[d] === undefined) fill[d] = d === 'd2' ? 100 : d === 'd1' ? 200 : 100;
-            set({ shape: v, ...fill }, true);
+            // เปลี่ยนรูปทรง = ขนาดคนละชุด (W×L · D1 · D1×D2) — ช่องที่ยังไม่มีค่าเริ่มว่าง (เจ้าของ 2026-10-07 "เริ่มด้วยค่าว่าง")
+            // ค่าเดิมที่รูปทรงใหม่ใช้ช่องเดียวกันยังอยู่ · ผู้เรียกคิดราคาเมื่อขนาดครบ
+            set({ shape: v, sizeText: undefined }, true);
           } else {
             set({ [key]: v || undefined, ...(key === 'term' && v !== 'T' ? { amp: undefined } : {}) }, true);
           }
@@ -271,7 +345,7 @@ export const CatalogTemplate: React.FC<Props> = ({ catalog, families, form, onCh
       items.push(
         <Slot key="volt" cap={slot.label} hint={slot.hint}>
           <input
-            className={`${INPUT} px-1.5 text-center`}
+            className={`${INPUT} px-1.5 text-center ${changed?.has('volt') ? CHANGED : ''}`}
             style={{ width: '8ch' }}
             list="catalog-volts"
             value={form.volt ?? ''}
@@ -304,29 +378,28 @@ export const CatalogTemplate: React.FC<Props> = ({ catalog, families, form, onCh
       <div className="flex flex-wrap items-start gap-1 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 pt-3 pb-2">
         {items}
       </div>
-      {/* ชีตมีราคาเมตรละ แต่แคตตาล็อกและรหัสไม่มีท่อนนี้ ⇒ ติ๊กแยกใต้รหัส และบอกว่าไม่ถูกพิมพ์ลงรหัส (แบบเดียวกับขนาดเต๋า) */}
-      {spec.addons?.length ? (
-        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12.5px] text-slate-700">
-          <span className="text-slate-500">บวกเพิ่ม (ไม่อยู่ในรหัส · คิดเมตรละตามสายส่วนที่เกินมาตรฐาน)</span>
-          {spec.addons.map((a) => {
+      {/* ชีตมีราคาเมตรละ แต่แคตตาล็อกและรหัสไม่มีท่อนนี้ ⇒ ติ๊กแยกใต้รหัส · เจาะรูอยู่แถวเดียวกัน (แถว "นอกรหัส") */}
+      {(spec.addons?.length || spec.holes) ? (
+        <OffCodeRow hint={`ไม่พิมพ์ลงรหัส${spec.addons?.length ? ' · สายคิดเมตรละ เฉพาะส่วนที่เกินสายมาตรฐาน' : ''}${spec.holes ? ' · เจาะรูคิดตามขนาดรูรวม (mm)' : ''}`}>
+          {(spec.addons ?? []).map((a) => {
             const on = form.addons?.includes(a.code) ?? false;
             return (
-              <label key={a.code} className="inline-flex items-center gap-1.5 cursor-pointer select-none">
-                <input
-                  type="checkbox" className="h-4 w-4 accent-[var(--brand)]" checked={on} aria-label={a.label}
-                  onChange={() => {
-                    const cur = form.addons ?? [];
-                    set({ addons: on ? cur.filter((x) => x !== a.code) : [...cur, a.code] }, true);
-                  }}
-                />
-                {a.label}
-              </label>
+              <AddonBox key={a.code} label={a.label} on={on} onToggle={() => {
+                const cur = form.addons ?? [];
+                set({ addons: on ? cur.filter((x) => x !== a.code) : [...cur, a.code] }, true);
+              }} />
             );
           })}
-        </div>
+          {spec.holes && !form.holes?.length && (
+            <button type="button" className="inline-flex items-center gap-1 font-medium text-[var(--brand-btn)] hover:underline cursor-pointer"
+                    onClick={() => set({ holes: [{ count: 1, mm: NaN }] })}>
+              <Plus className="h-3.5 w-3.5" />เจาะรู
+            </button>
+          )}
+        </OffCodeRow>
       ) : null}
-      {spec.holes && (
-        <HoleRows rows={form.holes ?? []} onChange={(holes, now) => set({ holes: holes.length ? holes : undefined }, now)} />
+      {spec.holes && !!form.holes?.length && (
+        <HoleRows rows={form.holes} onChange={(holes, now) => set({ holes: holes.length ? holes : undefined }, now)} />
       )}
     </div>
   );
@@ -347,6 +420,8 @@ interface TsProps {
   onFamily: (family: string) => void;
   /** ผลคิดราคาตอนนี้ — ช่อง "อ่านไม่ออก" เป็นแดงเมื่อคิดราคาไม่ได้ · ช่องนอกแคตตาล็อกเป็นส้มเมื่อต้องขอราคา */
   status?: 'priced' | 'quoteOnRequest' | 'notManufacturable';
+  /** ช่องที่ต่างจากรหัสต้นแบบที่เลือกจากฐาน — ระบายเขียว */
+  changed?: ReadonlySet<string>;
 }
 
 const tsOptions = (slot: TsSlot, values: Record<string, string>): CatalogOption[] =>
@@ -355,7 +430,7 @@ const tsOptions = (slot: TsSlot, values: Record<string, string>): CatalogOption[
 /** ค่าในช่องตามที่รหัสเขียนแต่ไม่อยู่ในรายการ — ใช้ค่านี้เป็นตัวเลือกพิเศษของ select ให้ค่าที่เลือกอยู่ถูกต้อง */
 const WRITTEN = '__written__';
 
-export const TsCatalogTemplate: React.FC<TsProps> = ({ spec, families, form, onChange, onFamily, status }) => {
+export const TsCatalogTemplate: React.FC<TsProps> = ({ spec, families, form, onChange, onFamily, status, changed }) => {
   /** ค่าใหม่ในช่อง = ทิ้งของ "ตามที่รหัสเขียน" ของช่องนั้น (ค่า · ป้ายเตือน · ช่องที่รหัสไม่ได้เขียน) */
   const forget = (key: string): Partial<TsForm> => {
     const drop = <T,>(r?: Record<string, T>) => {
@@ -417,7 +492,7 @@ export const TsCatalogTemplate: React.FC<TsProps> = ({ spec, families, form, onC
         <Slot key={key} cap={capOf(key, `${slot.label}${unit ? ` (${unit})` : ''}`)} hint={slot.hint} tone={tone}>
           <input
             inputMode="decimal"
-            className={`${INPUT} px-1.5 text-center placeholder:text-slate-400 placeholder:font-medium ${tone ? TONE_BOX[tone] : ''}`}
+            className={`${INPUT} px-1.5 text-center placeholder:text-slate-400 placeholder:font-medium ${tone ? TONE_BOX[tone] : changed?.has(key) ? CHANGED : ''}`}
             style={{ width: `${ch}ch` }}
             value={value}
             placeholder={slot.placeholder}
@@ -442,6 +517,7 @@ export const TsCatalogTemplate: React.FC<TsProps> = ({ spec, families, form, onC
           placeholder={form.issues?.[key] === 'missing' ? '?' : undefined}
           shown={written !== undefined && (outside || value === '') ? written : undefined}
           tone={tone}
+          changed={changed?.has(key)}
           onChange={(v) => {
             if (v === WRITTEN) return;
             if (key !== 'probe') { set({ [key]: v }, true); return; }
@@ -488,26 +564,19 @@ export const TsCatalogTemplate: React.FC<TsProps> = ({ spec, families, form, onC
       <div className="flex flex-wrap items-start gap-1 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 pt-3 pb-2">
         {items}
       </div>
-      {/* ชีตมีราคาแต่แคตตาล็อกและรหัสไม่มีท่อนนี้ (หัก L · หักฉาก — ข้อ 8) ⇒ ติ๊กแยกใต้รหัส แบบเดียวกับ "บวกเพิ่ม" ของ BH */}
+      {/* ชีตมีราคาแต่แคตตาล็อกและรหัสไม่มีท่อนนี้ (หัก L · หักฉาก — ข้อ 8) ⇒ ติ๊กแยกใต้รหัส แถว "นอกรหัส" แบบเดียวกับของ BH */}
       {spec.addons?.length ? (
-        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12.5px] text-slate-700">
-          <span className="text-slate-500">บวกเพิ่ม (ไม่อยู่ในรหัส)</span>
+        <OffCodeRow hint="ไม่พิมพ์ลงรหัส · ชีตมีราคาแต่แคตตาล็อกไม่มีท่อนนี้">
           {spec.addons.map((a) => {
             const on = form.addons?.includes(a.code) ?? false;
             return (
-              <label key={a.code} className="inline-flex items-center gap-1.5 cursor-pointer select-none">
-                <input
-                  type="checkbox" className="h-4 w-4 accent-[var(--brand)]" checked={on} aria-label={a.label}
-                  onChange={() => {
-                    const cur = form.addons ?? [];
-                    onChange({ ...form, addons: on ? cur.filter((x) => x !== a.code) : [...cur, a.code] }, true);
-                  }}
-                />
-                {a.label}
-              </label>
+              <AddonBox key={a.code} label={a.label} on={on} onToggle={() => {
+                const cur = form.addons ?? [];
+                onChange({ ...form, addons: on ? cur.filter((x) => x !== a.code) : [...cur, a.code] }, true);
+              }} />
             );
           })}
-        </div>
+        </OffCodeRow>
       ) : null}
     </div>
   );

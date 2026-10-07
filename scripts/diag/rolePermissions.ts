@@ -435,8 +435,9 @@ async function main() {
   const pricingSrc = readFileSync(new URL('../../routes/pricingLab.ts', import.meta.url), 'utf-8');
   const quoteSide = [...pricingSrc.matchAll(/^pricingLabRouter\.(get|post|put|patch|delete)\('([^']+)'/gm)]
     .map((m) => `${m[1].toUpperCase()} ${m[2]}`);
-  ok('  ฝั่งคิดราคา (page.pricing) มีแค่ GET /overview + POST /quote — ไม่มีเส้นแก้ราคา',
-    sameSet(quoteSide, ['GET /overview', 'POST /quote']), quoteSide.join(' · '));
+  // GET /examples = ช่องค้นรหัสในฐานของหน้าคำนวณราคา (2026-10-07) — อ่านอย่างเดียว ไม่มีราคาของสมุด
+  ok('  ฝั่งคิดราคา (page.pricing) มีแค่ GET /overview + GET /examples + POST /quote — ไม่มีเส้นแก้ราคา',
+    sameSet(quoteSide, ['GET /overview', 'GET /examples', 'POST /quote']), quoteSide.join(' · '));
 
   // ── เมนูฝั่งหน้าจออ่านจากช่องเดียวกับด่าน ─────────────────────────────────
   //  AdminApp.tsx ถือ `roles: [...]` ไว้เป็น **ค่าสำรอง** ตอนเรียก /me/capabilities ไม่สำเร็จ
