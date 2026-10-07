@@ -11,16 +11,15 @@
 //  ครอบคลุม: จองใบ (claim) ได้เฉพาะใบที่ยังไม่ถูกมาร์ก · จองซ้ำครั้งที่สองได้ 0 ใบ (= กันส่งออกซ้ำ)
 //            ใบไม่มีรายการสินค้าไม่ถูกมาร์กและไม่ลงไฟล์ · exported=yes/all ยังส่งซ้ำได้
 //            ใบของอีกบริษัท/เลขไม่ขึ้นต้น QP-QT ไม่ถูกมาร์กและไม่ลงไฟล์
-//            จำนวนใน log/batch ตรงกับใบที่ลงไฟล์จริง · un-mark รายใบและทั้งชุดคืนสถานะครบ
-//  ให้รันซ้ำทุกครั้งที่แตะ endpoint export, ตัวกรอง exported หรือฟังก์ชัน claim/unmark ใน repositories
+//            จำนวนใน log/batch ตรงกับใบที่ลงไฟล์จริง
+//            ส่งออกใหม่จากตัวกรอง "รอนำเข้า" ได้ (ทางเดียวที่เหลือหลังถอดปุ่มถอยเครื่องหมาย 2026-10-07)
+//  ให้รันซ้ำทุกครั้งที่แตะ endpoint export, ตัวกรอง exported หรือฟังก์ชัน claim ใน repositories
 // ─────────────────────────────────────────────────────────────────────────────
 import { pool } from '../../config/db.js';
 import {
   claimQuotationsForExport,
   insertExportBatch,
   insertExportLogRows,
-  unmarkQuotationExport,
-  unmarkExportBatch,
   exportedFilterCondition,
   parseExportedFilter,
 } from '../../db/repositories.js';
@@ -191,43 +190,24 @@ try {
   ok('จองแบบไม่ใส่ guard (exported=yes/all) ได้ใบเดิมครบ ส่งซ้ำได้',
     claimed3.length === exportable.length, `(ได้ ${claimed3.length} / คาด ${exportable.length})`);
 
-  // ── 7. un-mark รายใบ ──────────────────────────────────────────────────
-  const oneId = String(emitted[0].id);
-  const unmarked = await unmarkQuotationExport(client, oneId);
-  ok('un-mark รายใบคืนค่า true', unmarked);
-
-  const { rows: afterOne } = await client.query(
-    `SELECT odoo_exported_at FROM quotations WHERE id = $1::uuid`, [oneId]);
-  ok('ใบที่ถูก un-mark กลับเป็นยังไม่ส่งออก', afterOne[0].odoo_exported_at === null);
-
-  const { rows: revertedLog } = await client.query(
-    `SELECT COUNT(*)::int AS n FROM quotation_export_log
-      WHERE quotation_id = $1::uuid AND reverted_at IS NOT NULL`, [oneId]);
-  ok('log ของใบนั้นถูกประทับ reverted_at (ไม่ถูกลบทิ้ง)', revertedLog[0].n > 0);
-
-  ok('un-mark ซ้ำใบเดิมคืนค่า false (ไม่ถูกมาร์กอยู่แล้ว)',
-    (await unmarkQuotationExport(client, oneId)) === false);
-
-  // ใบที่ถูก un-mark ต้องกลับเข้าคิว exported=no
-  const { rows: backInQueue } = await client.query(
-    `SELECT COUNT(*)::int AS n FROM quotations q WHERE q.id = $1::uuid AND ${exportedFilterCondition('no')}`,
-    [oneId]);
-  ok('ใบที่ถูก un-mark กลับมาอยู่ในตัวกรอง "ยังไม่ส่งออก"', backInQueue[0].n === 1);
-
-  // ── 8. un-mark ทั้งชุด ────────────────────────────────────────────────
-  const revertedCount = await unmarkExportBatch(client, batchId);
-  // ใบแรกถูกถอยไปแล้วในข้อ 7 จึงเหลือให้ถอยอีก emitted.length - 1
-  ok('un-mark ทั้งชุดถอยใบที่เหลือครบ', revertedCount === emitted.length - 1,
-    `(ถอย ${revertedCount} / คาด ${emitted.length - 1})`);
-
-  const { rows: allNull } = await client.query(
-    `SELECT COUNT(*)::int AS n FROM quotations
-      WHERE id = ANY($1::uuid[]) AND odoo_exported_at IS NOT NULL`,
-    [emitted.map((q: any) => String(q.id))]);
-  ok('ไม่เหลือใบไหนในชุดที่ยังถูกมาร์กว่าส่งออกแล้ว', allNull[0].n === 0, `(เหลือ ${allNull[0].n} ใบ)`);
-
-  ok('un-mark ทั้งชุดซ้ำได้ 0 ใบ (idempotent)',
-    (await unmarkExportBatch(client, batchId)) === 0);
+  // ── 7. ส่งออกใหม่จากตัวกรอง "รอนำเข้า" ──────────────────────────────────
+  //  ปุ่มถอยเครื่องหมาย (รายใบ/ทั้งชุด) ถูกถอดเมื่อ 2026-10-07 (เจ้าของสั่ง) ⇒ ไฟล์ที่นำเข้าไม่ผ่าน
+  //  ส่งใหม่ด้วยการเลือกตัวกรอง "รอนำเข้า" แล้วกดส่งออก · endpoint จองแบบไม่ใส่ guard เมื่อ
+  //  exported !== 'no' (ข้อ 6 พิสูจน์ส่วนนั้นแล้ว) ข้อนี้พิสูจน์ส่วนที่เหลือ: ใบที่เพิ่งส่งออกและ
+  //  ยังไม่เห็นใน Odoo **ต้องอยู่ในตัวกรองนั้นครบทุกใบ** ไม่งั้นทางนี้ใช้ไม่ได้จริง
+  const emittedIds = emitted.map((q: any) => String(q.id));
+  const { rows: pendingCount } = await client.query(
+    `SELECT COUNT(*) FILTER (WHERE ${exportedFilterCondition('pending')})::int AS pending,
+            COUNT(*) FILTER (WHERE q.odoo_imported_at IS NULL)::int AS not_imported
+       FROM quotations q WHERE q.id = ANY($1::uuid[])`, [emittedIds]);
+  ok('ใบที่ส่งออกแล้วแต่ยังไม่เห็นใน Odoo อยู่ในตัวกรอง "รอนำเข้า" ครบ',
+    pendingCount[0].pending === pendingCount[0].not_imported,
+    `(อยู่ในตัวกรอง ${pendingCount[0].pending} / ยังไม่นำเข้า ${pendingCount[0].not_imported})`);
+  const { rows: pendingNotInQueue } = await client.query(
+    `SELECT COUNT(*)::int AS n FROM quotations q WHERE q.id = ANY($1::uuid[]) AND ${exportedFilterCondition('no')}`,
+    [emittedIds]);
+  ok('ใบที่ส่งออกแล้วไม่หลุดกลับเข้าตัวกรอง "ยังไม่ส่งออก" เอง', pendingNotInQueue[0].n === 0,
+    `(หลุด ${pendingNotInQueue[0].n} ใบ)`);
 } finally {
   // ROLLBACK เสมอ — สคริปต์นี้ต้องไม่ทิ้งอะไรไว้ใน DB
   await client.query('ROLLBACK');

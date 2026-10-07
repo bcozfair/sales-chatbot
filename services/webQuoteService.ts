@@ -809,10 +809,10 @@ export async function createDraft(params: {
   spSource?: unknown;
   /**
    * เลขที่ใบต้นทางเมื่อร่างนี้เกิดจากการ "แก้ใบเดิม" — ติดไว้ใน `customer_name` ด้วยตัวต่อสตริง
-   * ตัวเดียวกับ reviseQuotation() (`appendReviseFrom`) ⇒ รูปแบบ `revise_from=` ของสองเส้นไม่เพี้ยนกัน
+   * ตัวเดียวกับแก้ใบผ่าน LINE (`appendReviseFrom`) ⇒ รูปแบบ `revise_from=` ของสองเส้นไม่เพี้ยนกัน
    *
    * มีพารามิเตอร์นี้เพราะหน้าเว็บ **ไม่เขียนใบร่างลง DB จนกว่าจะกดยืนยัน** (2026-09-14) —
-   * ขั้น revise จึงส่งรายการกลับเข้าฟอร์มแล้วมาออกใบจริงที่นี่ ไม่ได้ยืนยันร่างที่ revise สร้างไว้
+   * ขั้น revise จึงส่งรายการกลับเข้าฟอร์มแล้วมาออกใบจริงที่นี่ (ตั้งแต่ 2026-10-07 revise ไม่สร้างร่างเลย)
    */
   reviseFrom?: string | null;
   /** เครดิตที่แอดมินเขียนทับเฉพาะชุดใบนี้ — ว่าง/ไม่ส่ง = ใช้ของลูกค้า */
@@ -1929,20 +1929,18 @@ export interface ReviseResult {
    * จะไปคนละคู่ (แอดมิน × เซลส์) กับร่างที่เพิ่งสร้าง
    */
   sp_user_id: string;
-  /** id ของ "ร่าง" ที่เพิ่งสร้าง — ฟอร์มเปิดใบนี้ต่อในหน้าเดิม */
-  draft_quote_id: string;
   /** เลขที่ใบต้นทางที่กำลังแก้ */
   revise_from: string;
+  /**
+   * "หน้าตาของร่าง" 1 ก้อน **ที่ไม่มีแถวในฐาน** (ไม่มี `id`) — รายการ + ค่าที่ใบต้นทางตั้งทับไว้
+   * ให้ฟอร์มเติมกลับเข้าใบ · ใบจริงออกที่ createDraft({ reviseFrom }) ทางเดียวกับทางปกติ
+   */
   quotes: any[];
 }
 
 /**
- * ทำ revision ของใบที่ยืนยันแล้ว — เดินลำดับเดียวกับ handleQuotationEditRequest() เป๊ะ
- * (loadActiveQuotation → validateQuotationItems → ยกเลิกร่างค้าง → insertDraftQuotations)
- * ต่างกันแค่ **คืน id ของร่าง แทนที่จะคืน Flex**
- *
- * ⚠️ ลำดับ "ตรวจกฎก่อนยกเลิกร่างค้าง" ห้ามสลับ — ถ้าตรวจทีหลังแล้วติดกฎ ร่างที่แอดมิน
- *    ทำค้างไว้จะถูกทิ้งไปฟรี ๆ ทั้งที่ทำอะไรต่อไม่ได้เลย
+ * เปิดใบที่ยืนยันแล้วกลับเข้าฟอร์มเพื่อแก้ (revision) — ตรวจกฎแบบเดียวกับ handleQuotationEditRequest()
+ * (loadActiveQuotation → validateQuotationItems) แต่ **ไม่บันทึกร่าง** (ตั้งแต่ 2026-10-07 · เหตุผลอยู่ในตัวฟังก์ชัน)
  */
 export async function reviseQuotation(params: {
   adminId: number;
@@ -1973,7 +1971,7 @@ export async function reviseQuotation(params: {
     spUserId = await salespersonOfQuotation(quoteNo);
   }
 
-  // ออกใบ (revision) ในนามคนอื่นไม่ได้ ถ้าไม่มีสิทธิ์ — เส้นนี้เขียนร่างจริงลง DB (§13.6 ข้อ 9)
+  // ออกใบ (revision) ในนามคนอื่นไม่ได้ ถ้าไม่มีสิทธิ์ — กันตั้งแต่ตอนเปิดใบ ไม่ใช่รอไปเจอที่ปุ่มยืนยัน (§13.6 ข้อ 9)
   await assertMayActAs(params.adminId, params.role, spUserId);
   const webUserId = await resolveWebUserId(params.adminId, spUserId, params.role);
 
@@ -2007,62 +2005,57 @@ export async function reviseQuotation(params: {
       throw new WebQuoteError('RULE_VIOLATION', buildViolationText(revBlockers), 422, { violations: revBlockers });
     }
 
-    // ร่างที่ค้างของ "คู่ (แอดมิน × เซลส์) นี้" ถูกเก็บกวาดโดย insertDraftQuotations ข้างล่าง
-    // ซึ่ง **DELETE** ด้วยขอบเขตเดียวกันเป๊ะ (`user_id` + สามสถานะ + `price_approval IS NULL`)
-    // อยู่ในทรานแซกชันเดียวกับ INSERT ⇒ ที่นี่ไม่ต้องทำอะไรอีก
+    // ── ไม่บันทึกร่างลงฐาน (2026-10-07 · เจ้าของสั่ง) ─────────────────────────────
+    //  เดิมขั้นนี้ INSERT "ร่าง revision" ทันทีที่เลือกใบ ทั้งที่หน้าเว็บไม่เคยยืนยันร่างตัวนั้น — มันแค่
+    //  หยิบรายการกลับเข้าฟอร์ม แล้วไปออกใบจริงที่ createDraft ⇒ คนที่กดแก้ใบแล้วเปลี่ยนใจทิ้งร่างค้าง
+    //  ไว้ทุกครั้ง และตัวกวาดใน insertDraftQuotations ลบให้เฉพาะเมื่อคู่ (แอดมิน × เซลส์) เดิมออกใบอีก
+    //  ซึ่งไม่ค่อยเกิดเพราะช่อง "ออกในนาม" เปลี่ยนตามลูกค้า (วัด 2026-10-07: กดแก้ใบ 4 ครั้งตั้งแต่
+    //  2026-09-15 ออกใบต่อ 1 ครั้ง · ร่างที่ค้างในฐานตอนนั้นมาจากทางนี้ทั้งหมด)
+    //  ⇒ คืน "หน้าตาของร่าง" แบบอ่านอย่างเดียว · หน้านี้กลับมามีจุดเขียนฐานจุดเดียวคือปุ่มยืนยัน
     //
-    // เคยมี `UPDATE … SET status = 'cancelled'` ยืนอยู่ตรงนี้ **ถอดออก 2026-09-21** เพราะมันไม่ได้
-    // ซ้ำซ้อนเฉย ๆ แต่ทำให้ตัวเก็บกวาดข้างล่างหาไม่เจอ (แถวไม่ใช่ `draft` แล้ว) ⇒ ทุกครั้งที่มีคน
-    // กดแก้ใบ จะมีแถว "ยกเลิก" ที่ไม่มีเลขที่ตกค้างในประวัติใบเสนอราคาหนึ่งแถวเสมอ
-    // และยังเสียทางถอยด้วย: ถ้า INSERT ล้ม ร่างเดิมถูกยกเลิกไปแล้วฟรี ๆ ส่วน DELETE ใน
-    // ทรานแซกชันจะ rollback คืนให้เอง
+    //  รายการผ่าน buildItemSnapshots ตัวเดียวกับตอน INSERT (อ่านอย่างเดียว) ⇒ ชื่อ/รหัสสินค้าสดจาก
+    //  ฐานเหมือนเดิม — สำคัญกับสินค้าเพิ่มเองที่เข้า Odoo แล้ว (แถว local ถูกกวาด รหัสสินค้าเปลี่ยน)
+    //  ไม่ผ่าน applyShippingFeeToQuoteGroup ⇒ บรรทัดค่าบริการของกฎเป็นของใบต้นทางตรง ๆ ซึ่งหน้าจอ
+    //  ใช้แค่ชื่อ/ราคา (autoFeeOv) แล้วให้ /preview ตัดสินเองว่ากฎยังเข้าไหม — ผลบนจอเท่าเดิม
+    //  ไม่แตกใบ PM/THT ⇒ รายการครบทุกบรรทัดในใบเดียว (เดิมหน้าจออ่านแค่ quotes[0] ถ้าแตก บรรทัด
+    //  ของอีกใบหาย) · /preview แบ่งบริษัทให้เองอยู่แล้ว
+    //
+    //  ค่าที่คนออกใบต้นทางตั้งทับต้องตามมาทั้งสามตัว — ฟอร์มอ่านไปตั้งช่องให้ (QuoteRequest.tsx doRevise)
+    //  ไม่งั้น "แก้ใบเดิม" จะเงียบ ๆ คืนค่าเป็นอัตโนมัติ ทั้งที่ใบที่ลูกค้าถืออยู่ไม่ได้เขียนแบบนั้น:
+    //  Source คืนเป็น Sales · เครดิตที่ตั้ง Cash กลับเป็นเครดิตของลูกค้า ค่าบริการหาย ยอดใบเปลี่ยน
+    //  (แก้ 2026-09-25) · กำหนดส่งตั้งทับรายใบ ⇒ ผูกกับบริษัทของใบต้นทาง
+    //  ⚠️ แก้ใบผ่าน LINE (quotationAgent) **ยังสร้างร่างเหมือนเดิม** และไม่พาค่าเหล่านี้ไปโดยตั้งใจ
+    //     (เจ้าของเคาะ 2026-09-25) — ฝั่งนั้นเซลส์กดยืนยันจากร่างใน Flex จริง ร่างจึงจำเป็น
+    const { isShippingFeeItem, loadShippingFeeConfig } = await import('./shippingFee.js');
+    const shippingCfg = await loadShippingFeeConfig();
+    const items = (await buildItemSnapshots(revExpanded)).map((it: any) => ({
+      ...it,
+      // ธงที่ enrichQuotationData คำนวณสดตอนอ่านกลับ — หน้าจอใช้แยกบรรทัดค่าบริการของกฎออกจากแถว
+      is_shipping_fee: isShippingFeeItem(it, shippingCfg),
+    }));
+    const quotes = [{
+      customer_id: active.customer_id ?? null,
+      contact_id: active.contact_id ?? null,
+      company_name: active.company_name ?? '',
+      contact_name: active.contact_name ?? '',
+      quote_company: active.quote_company ?? null,
+      payment_terms_override: active.payment_terms_override ?? null,
+      source_id: active.source_id ?? null,
+      delivery_type_override: active.delivery_type_override ?? null,
+      delivery_days_override: active.delivery_days_override ?? null,
+      items,
+    }];
 
-    const quotes = await insertDraftQuotations(
-      webUserId,
-      appendReviseFrom(active.customer_name, active.quotation_no),
-      revExpanded,
-      'draft',
-      active.customer_id,
-      active.contact_id,
-      false,
-      // ค่าที่คนออกใบต้นทางตั้งทับไว้ต้องตามมาทั้งสามตัว — ฟอร์มอ่านจากร่างนี้ไปตั้งช่องให้
-      // (QuoteRequest.tsx ตอนโหลดร่าง revise) ไม่งั้น "แก้ใบเดิม" จะเงียบ ๆ คืนค่าเป็นอัตโนมัติ
-      // ทั้งที่ใบที่ลูกค้าถืออยู่ไม่ได้เขียนแบบนั้น: Source คืนเป็น Sales · เครดิตที่ตั้ง Cash
-      // (เช่น ลูกค้าเครดิตเงียบเกินเกณฑ์) กลับเป็นเครดิตของลูกค้า ค่าบริการหาย ยอดใบเปลี่ยน
-      // (แก้ 2026-09-25 · เดิมส่งแค่ sourceId) · กำหนดส่งตั้งทับรายใบ ⇒ ผูกกับบริษัทของใบต้นทาง
-      // ⚠️ แก้ใบผ่าน LINE (quotationAgent) ไม่ส่งค่าเหล่านี้ **โดยตั้งใจ** — เจ้าของเคาะ 2026-09-25
-      //    ว่าแก้ใบผ่าน LINE ได้ Source = Sales ทั้งหมด
-      {
-        sourceId: active.source_id ?? null,
-        paymentTerms: active.customer_details?.payment_terms_override ?? null,
-        ...(active.quote_company === 'PM' || active.quote_company === 'THT'
-          ? {
-              delivery: {
-                [active.quote_company]: {
-                  type: active.delivery_type_override ?? null,
-                  days: active.delivery_days_override ?? null,
-                },
-              },
-            }
-          : {}),
-      }
-    );
-    if (!quotes || quotes.length === 0) {
-      throw new WebQuoteError('INSERT_FAILED', 'ไม่สามารถเตรียมใบเสนอราคาเพื่อแก้ไขได้', 500);
-    }
-
-    // นอกทรานแซกชันของ insertDraftQuotations แล้ว — เหตุผลเดียวกับใน createDraft()
     await logWebEvent({
       webUserId,
       apiRequestId: params.apiRequestId,
       type: 'web_revise',
       content: `แก้ไข ${active.quotation_no}`,
       replyContent:
-        `📝 ร่างใบเสนอราคา\n🏢 ${active.customer_name}\n` +
-        `📄 รหัสร่าง: ${quotes[0].id} (แก้จาก ${active.quotation_no})`,
+        `📝 เปิดใบเดิมในฟอร์ม\n🏢 ${active.customer_name}\n` +
+        `📄 แก้จาก ${active.quotation_no}`,
       meta: {
         revise_from: active.quotation_no,
-        draft_quote_id: String(quotes[0].id),
         chosen_customer_id: active.customer_id ?? null,
         chosen_contact_id: active.contact_id ?? null,
         outcome: 'ok',
@@ -2073,7 +2066,6 @@ export async function reviseQuotation(params: {
     return {
       web_user_id: webUserId,
       sp_user_id: spUserId,
-      draft_quote_id: String(quotes[0].id),
       revise_from: active.quotation_no,
       quotes,
     };

@@ -14,7 +14,6 @@ import {
   Calendar,
   ChevronDown,
   History,
-  RotateCcw,
   AlertTriangle,
   Ban,
   Trash2,
@@ -343,9 +342,8 @@ export const Quotations: React.FC = () => {
   /** กางกลุ่ม "ต้องแก้มือก่อน" ค้างไว้ไหม — จำไว้ระหว่างเปิด/ปิดเมนูในเซสชันเดียวกัน */
   const [manualOpen, setManualOpen] = useState(true);
 
-  // ประวัติการส่งออก (กล่องแยกไฟล์ ExportHistoryModal) + การถอยเครื่องหมายของใบเดียว
+  // ประวัติการส่งออก (กล่องแยกไฟล์ ExportHistoryModal · ดูอย่างเดียว)
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [unmarkingId, setUnmarkingId] = useState<string | null>(null);
 
   /** ใบที่กำลังถูกถามยืนยันลบ — null = กล่องปิดอยู่ */
   const [deleteTarget, setDeleteTarget] = useState<Quotation | null>(null);
@@ -556,26 +554,6 @@ export const Quotations: React.FC = () => {
     }
   };
 
-  // ถอยเครื่องหมาย "ส่งออกแล้ว" ของใบเดียว — ใช้ตอนนำเข้า Odoo ไม่ผ่าน ใบจะกลับเข้าคิวรอบถัดไป
-  const handleUnmarkExport = async (quote: Quotation) => {
-    if (!window.confirm(`ยกเลิกเครื่องหมาย "ส่งออกแล้ว" ของใบ ${quote.quotation_no || quote.id}?\nใบนี้จะกลับมาอยู่ในชุดที่ส่งออกครั้งถัดไป`)) return;
-    setUnmarkingId(quote.id);
-    setError(null);
-    try {
-      const response = await fetch(`/api/admin/quotations/${quote.id}/unmark-export`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (!response.ok) throw new Error('ไม่สามารถยกเลิกเครื่องหมายส่งออกได้');
-      showToast('ยกเลิกเครื่องหมายส่งออกแล้ว');
-      fetchQuotations();
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการยกเลิกเครื่องหมายส่งออก');
-    } finally {
-      setUnmarkingId(null);
-    }
-  };
-
   const openHistory = () => {
     setExportMenuOpen(false);
     setHistoryOpen(true);
@@ -600,7 +578,7 @@ export const Quotations: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      {/* Success Toast — z-[60] ให้อยู่เหนือกล่องโต้ตอบ (Modal = z-50) เพราะถอยทั้งชุดแจ้งผลขณะกล่องประวัติยังเปิดอยู่ */}
+      {/* Success Toast — z-[60] ให้อยู่เหนือกล่องโต้ตอบ (Modal = z-50) */}
       {successMsg && (
         <div className="fixed bottom-5 right-5 z-[60] flex items-center gap-3 bg-card border border-slate-200 border-l-4 border-l-[var(--brand-fg)] p-4 rounded-2xl shadow-xl shadow-slate-200/50 text-slate-800 text-sm animate-fade-in">
           <CheckCircle2 className="w-5 h-5 text-[var(--brand-fg)]" />
@@ -1114,16 +1092,6 @@ export const Quotations: React.FC = () => {
                                 onClick={(e) => e.stopPropagation()}
                               />
                             )}
-                            {quote.odoo_exported_at && (
-                              <RowAction
-                                icon={unmarkingId === quote.id ? Loader2 : RotateCcw}
-                                label="ยกเลิกเครื่องหมายส่งออก (ให้ส่งออกใหม่ได้)"
-                                tone="danger"
-                                disabled={unmarkingId === quote.id}
-                                className={unmarkingId === quote.id ? '[&>svg]:animate-spin' : ''}
-                                onClick={(e) => { e.stopPropagation(); handleUnmarkExport(quote); }}
-                              />
-                            )}
                             {/* ลบได้เฉพาะ admin แต่ขึ้นครบทุกแถวรวมใบที่ยังไม่ออกเลขที่ (เจ้าของสั่ง
                                 2026-09-21) — ความแรงของด่านไปอยู่ในกล่องยืนยันแทน: ใบมีเลขที่ต้อง
                                 พิมพ์เลขที่ · ใบยังไม่ออกเลขกดยืนยันได้เลย และ server ตรวจซ้ำทั้งสองแบบ */}
@@ -1244,10 +1212,6 @@ export const Quotations: React.FC = () => {
           token={token}
           formatTime={formatDate}
           onClose={() => setHistoryOpen(false)}
-          onUnmarked={(reverted) => {
-            showToast(`ยกเลิกเครื่องหมายส่งออกแล้ว ${reverted} ใบ`);
-            fetchQuotations();
-          }}
         />
       )}
 

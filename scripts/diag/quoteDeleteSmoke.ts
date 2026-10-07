@@ -10,7 +10,7 @@
 //            เลขที่ของ "ใบอื่น" ปนมาไม่ได้ · ใบที่ยังไม่มีเลขที่ลบได้ด้วยค่าว่าง แต่ค่าว่าง
 //            **ไม่ใช่กุญแจผีของใบที่มีเลขที่** ·
 //            audit_logs ได้ snapshot ทั้งใบในทรานแซกชันเดียวกัน · ประวัติการส่งออกไม่หายตามใบ ·
-//            การถอยส่งออกทั้งชุดยังทำงานได้หลังใบในชุดถูกลบ
+//            ใบอื่นในชุดส่งออกเดียวกันไม่ถูกแตะ
 //  ให้รันซ้ำทุกครั้งที่แตะ deleteQuotationConfirmed, insertQuotationDeleteAudit
 //  หรือ endpoint DELETE /api/admin/quotations/:id
 // ─────────────────────────────────────────────────────────────────────────────
@@ -19,7 +19,6 @@ import {
   deleteQuotationConfirmed,
   insertExportBatch,
   insertExportLogRows,
-  unmarkExportBatch,
 } from '../../db/repositories.js';
 import { insertQuotationDeleteAudit } from '../../db/logRepositories.js';
 
@@ -165,13 +164,11 @@ try {
   ok('quotation_id กลายเป็น NULL (FK ON DELETE SET NULL) แต่เลขที่ใบยังอ่านได้',
     log.length === 1 && log[0].quotation_id === null && log[0].quotation_no === NO_A);
 
-  // ── 7. ถอยส่งออกทั้งชุดยังทำงานได้ ไม่สะดุดกับใบที่หายไป ──────────────
-  const reverted = await unmarkExportBatch(client, batchId);
-  ok('ถอยทั้งชุดได้ และนับเฉพาะใบที่ยังอยู่ (ข้ามใบที่ถูกลบไปเงียบ ๆ)', reverted === 1,
-    `(ถอย ${reverted} / คาด 1 — ชุดนี้มี 2 ใบ ลบไปแล้ว 1)`);
+  // ── 7. ใบอื่นในชุดส่งออกเดียวกันไม่ถูกแตะ ─────────────────────────────
+  //  (เดิมข้อนี้ตรวจปุ่มถอยส่งออกทั้งชุดหลังใบในชุดถูกลบ — ปุ่มถูกถอดเมื่อ 2026-10-07)
   const { rows: bStill } = await client.query(
     `SELECT odoo_exported_at FROM quotations WHERE id = $1::uuid`, [idB]);
-  ok('ใบ B กลับมาอยู่ในคิวรอส่งออกตามปกติ', bStill[0]?.odoo_exported_at === null);
+  ok('ใบ B ในชุดเดียวกันยังเป็น "ส่งออกแล้ว" ตามเดิม', bStill.length === 1 && bStill[0].odoo_exported_at !== null);
 } finally {
   // ROLLBACK เสมอ — สคริปต์นี้ต้องไม่ทิ้งอะไรไว้ใน DB
   await client.query('ROLLBACK');

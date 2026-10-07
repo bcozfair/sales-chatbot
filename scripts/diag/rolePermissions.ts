@@ -70,7 +70,6 @@ const TODAY: Record<Capability, [admin: PermissionMode, approver: PermissionMode
   'quote.revise':                 ['allow', 'allow', 'allow'],
   'quote.view_all':               ['allow', 'allow', 'allow'],
   'quote.export_odoo':            ['allow', 'allow', 'allow'],
-  'quote.unmark_export':          ['allow', 'allow', 'allow'],
   'quote.payment_terms_override': ['allow', 'allow', 'allow'],
   // ความสามารถใหม่ของโมดูล "เพิ่มผู้ติดต่อเอง" — ไม่มีใครเสียสิทธิ์ที่เคยมี เพราะก่อนหน้านี้
   // ไม่มีใครเพิ่มผู้ติดต่อได้เลยสักคน (เจ้าของเคาะ 2026-09-17: หน้าเว็บเท่านั้น ไม่เปิดให้ LINE)

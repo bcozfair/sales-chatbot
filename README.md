@@ -31,10 +31,8 @@
 | POST | `/api/admin/login` | Login ได้รับ JWT token |
 | GET | `/api/admin/quotations` | ดึงใบเสนอราคาทั้งหมด (pagination, filter, sort) |
 | GET | `/api/admin/quotations/export` | Export ไฟล์นำเข้า Sale Order ของ Odoo (xlsx/csv) — ตั้งต้นเฉพาะใบที่ยังไม่เคยส่ง แล้วมาร์กใบที่ลงไฟล์ว่าส่งออกแล้ว |
-| POST | `/api/admin/quotations/:id/unmark-export` | ยกเลิกเครื่องหมาย "ส่งออกแล้ว" ของใบเดียว |
 | DELETE | `/api/admin/quotations/:id` | ลบใบเสนอราคาถาวร — **role `admin` เท่านั้น** · body ส่ง `quotationNo` ให้ตรงกับในฐาน · ใบที่ยังไม่ออกเลขที่ส่งค่าว่าง `""` มา (และค่าว่างลบใบที่มีเลขที่ไม่ได้) · เขียน `audit_logs` พร้อม snapshot ทั้งใบในทรานแซกชันเดียวกัน |
 | GET | `/api/admin/quotations/export-batches` | ประวัติชุดการส่งออก Odoo — แบ่งหน้า `limit`/`offset` · กรอง `q` (เลขที่ใบ) `company` `exportedBy` `dateFrom`/`dateTo` (วันไทย) · ตอบ `{ data, total, exporters }` |
-| POST | `/api/admin/quotations/export-batches/:batchId/unmark` | ยกเลิกเครื่องหมายส่งออกทั้งชุด |
 | GET | `/api/admin/promotions` | ดึงโปรโมชันทั้งหมด |
 | POST | `/api/admin/promotions` | สร้างโปรโมชันใหม่ |
 | PUT | `/api/admin/promotions/:id` | แก้ไขโปรโมชัน |
@@ -242,7 +240,7 @@ user_id, message_id, type, content, reply_token, reply_content, meta (jsonb), cr
 |---|---|---|
 | Login | `Login.tsx` | Form username/password → POST `/api/admin/login` → JWT → localStorage |
 | Dashboard | `AdminApp.tsx` | Welcome card, quick nav ไป tab ต่างๆ |
-| ประวัติใบเสนอราคา | `Quotations.tsx` | ตาราง pagination, filter status/วันที่/search/สถานะการส่งออก, expand แสดงสินค้า, download PDF, export Odoo (กันส่งออกซ้ำ + ประวัติชุด + ถอยเครื่องหมาย) |
+| ประวัติใบเสนอราคา | `Quotations.tsx` | ตาราง pagination, filter status/วันที่/search/สถานะการส่งออก, expand แสดงสินค้า, download PDF, export Odoo (กันส่งออกซ้ำ + ประวัติชุดแบบดูอย่างเดียว · ส่งไฟล์ใหม่ = กรอง "รอนำเข้า" แล้วส่งออก) |
 | โปรโมชัน | `Promotions.tsx` | CRUD promotion, multi-select product/customer/ref tags, sort, toggle active, import/export CSV |
 | ลายเซ็นพนักงาน | `Salespersons.tsx` | ดู list พนักงาน, upload sale_sig/admin_sig (PNG/JPG ≤5MB), preview, delete, sort |
 | เงื่อนไขใบเสนอราคา | `QuotationRules.tsx` | CRUD rules, ComboBox dropdown ที่ filter brand/series ตาม production ที่เลือก, warranty_unit (month/year) |
