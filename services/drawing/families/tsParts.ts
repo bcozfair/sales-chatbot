@@ -28,6 +28,8 @@ export const SPRING_TS03 = (d: string | number): number => (Number(d) < 5 ? 50 :
 
 /** ระยะที่ "วาดย่อ" — สายจริงยาวเป็นเมตร */
 const CABLE_SHOWN = 120, BRAID_SHOWN = 40, LEAD_SHOWN = 14.5;
+/** ความยาวสายที่วาด (ปลอกสาย + ปลายถัก) นับจากจุดเริ่มสาย — ป้าย CL ของ annotate.ts ใช้ ⇒ ต้องตามรูปทรงจริง ห้ามใส่ตัวเลขเอง */
+export const CABLE_TAIL_SHOWN = CABLE_SHOWN + BRAID_SHOWN;
 const LEAD_ANGLE = 20*Math.PI/180, BARREL_LEN = 7, BARREL_R = 1.5, LUG_LEN = 10.5;
 
 /** แกนวัด: ปลายมนตามรูปในแคตตาล็อก ยาว L1 จบที่ x = 0 */
