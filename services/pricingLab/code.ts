@@ -1827,8 +1827,12 @@ export function parseProductCode(input: string, book: PriceBook, picks: CodePick
   else if (model.code === 'TS-14') { readModelSuffix(c, suffix); readTs14(c, rest, prefix, letter); }
   else if (model.code === 'TS-18') { readModelSuffix(c, suffix); readTs18(c, rest, prefix, letter); }
   else {
-    readModelSuffix(c, suffix);
-    readTsGeneric(c, rest, prefix, letter);
+    // ตัวอักษรนอกแคตตาล็อกที่เขียนแยกด้วยขีด (`TSK-07-S 12.7x200`) — ตามด้วยขนาดแกนทันที ⇒ ไม่ใช่หัวกระโหลกท้ายรหัส
+    // เฉพาะตัวใน `OFF_CATALOG_SUFFIX` ของรุ่น · ไม่งั้น `S` ไปตกแถว "หัวกระโหลกเล็ก" แล้วราคาที่กรอกให้หัวจะติดมาด้วย
+    const dashed = suffix === '' ? rest.match(/^-([A-Z]+)(?=\d)/i) : null;
+    const off = dashed && OFF_CATALOG_SUFFIX[model.code]?.letters.includes(dashed[1]!.toUpperCase()) ? dashed : null;
+    readModelSuffix(c, off ? off[1]!.toUpperCase() : suffix);
+    readTsGeneric(c, off ? rest.slice(off[0].length) : rest, prefix, letter);
     // หัววัดอ่านหลังส่วนขนาด เพราะบางชีตคิดมันเป็น "คอลัมน์ของตารางราคาตั้ง" (ต้องรู้แกนอื่นก่อน)
     // และบางชีตคิดเป็น "กฎบวกเพิ่ม" — `readSensor` ดูจากสมุดราคาเองว่าเป็นแบบไหน
     if (NTC_HEADS[prefix]) readNtcHead(c, prefix);

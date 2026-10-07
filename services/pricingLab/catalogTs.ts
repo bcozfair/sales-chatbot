@@ -199,6 +199,8 @@ export const MODEL_SUFFIX: Record<string, Record<string, string>> = {
 export const OFF_CATALOG_SUFFIX: Record<string, { num: string; head: string; letters: string[] }> = {
   'TSK-02': { num: '02', head: 'TS_-02', letters: ['S', 'L'] },
   'TSK-03': { num: '03', head: 'TS_-03', letters: ['P'] },
+  // `TSK-07-S 12.7x200` (1 รหัส · เขียนมีขีด) — เจ้าของ 2026-10-07 "ใส่ราคาทีหลัง" · ตั้งราคาที่ `07S` ไม่ใช่ `S` (= หัวกระโหลกเล็กของรุ่น)
+  'TSK-07': { num: '07', head: 'TS_-07', letters: ['S'] },
 };
 
 /**
