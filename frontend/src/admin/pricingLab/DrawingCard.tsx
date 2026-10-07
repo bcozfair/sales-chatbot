@@ -1,9 +1,13 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Box, Boxes, Download, Hash, RotateCcw, Tag } from 'lucide-react';
 import { Button } from '../Button';
 import { errMsg } from '../logs/format';
 // three.js (~650 KB) โหลดเฉพาะตอนการ์ดมีภาพ — import แบบ type อย่างเดียวที่นี่ ตัวจริงโหลดใน effect (หน้าอื่นของแอดมินไม่ต้องจ่าย)
-import type { Annotations, ViewerApi } from '../../drawing-viewer/viewer';
+import type { ViewerApi } from '../../drawing-viewer/viewer';
+// ตัววาดชุดเดียวกับเซิร์ฟเวอร์ (TS ล้วน · ไม่มีตัวอ่านรหัส) — สร้างชิ้นส่วนในเบราว์เซอร์ให้ภาพยืดหดตามช่องทันที
+import type { DrawingSpec } from '../../../../services/drawing/types';
+import { fromReading } from '../../../../services/drawing/spec/fromReading';
+import type { BhForm, TsForm } from './types';
 
 /**
  * การ์ด "แบบ 3 มิติ" ใต้ราคาในหน้าคำนวณราคา — เฟส 1 ใช้ภายใน (docs/plan-product-drawing-3d.md §8 · mockup รอบ 4 เจ้าของเคาะ 2026-10-06)
@@ -13,12 +17,17 @@ import type { Annotations, ViewerApi } from '../../drawing-viewer/viewer';
  *     วาดไม่ได้ (ระบบต้องเดาช่องรูปทรง) = ไม่มีภาพ บอกเหตุผล · ส่งไม่ได้ = มีภาพ ปุ่มไฟล์ปิด + เหตุผลใน tooltip
  *     ส่งได้หลังยืนยัน = แถบเหลืองบอกท่อนที่แบบไม่ได้วาด + ติ๊ก "ยืนยันส่งได้" ก่อนปุ่มไฟล์เปิด
  * · ปุ่มเป็นไอคอน + คำสั้น · คำอธิบายอยู่ใน tooltip = aria-label (design.md ข้อ 8)
+ * · **ภาพยืดหดตามทันที** (หัวหน้าสั่ง 2026-10-07 · แบบ Appsale): เซิร์ฟเวอร์ส่ง `spec` มา ไม่ใช่ GLB — การ์ดสร้างชิ้นส่วนเองด้วยตัววาดชุดเดียวกัน
+ *   และระหว่างแก้ช่องในหน้าคำนวณราคา การ์ดแปลง "ช่องที่กำลังแก้" เป็น spec ด้วย `fromReading` ตัวเดียวกับเซิร์ฟเวอร์ (ไม่ใช่ตัวอ่านรหัสตัวที่สอง —
+ *   ช่องคือผลอ่านเดียวกับที่ส่งไปคิดราคา) แล้วเปลี่ยนภาพโดยมุมกล้องคงเดิม · คำตัดสิน/ปุ่มไฟล์/STEP ยังมาจากเซิร์ฟเวอร์เท่านั้น
+ *   ภาพที่สร้างจากช่องเป็นภาพชั่วคราว คำตอบของเซิร์ฟเวอร์ (รหัสที่ประกอบจากช่องเดียวกัน) มาทับเสมอ
  * · วันนี้มีแค่ STEP — PDF / PNG / ลิงก์ลูกค้ามากับก้อนถัดไป (ไม่โชว์ปุ่มที่ยังทำงานไม่ได้)
+ * · แยกชิ้นค้างไว้ได้ระหว่างแก้ช่อง (ตัวดูไม่ถูกสร้างใหม่) — เดิมกลับเป็นประกอบทุกครั้ง
  */
 
 interface Doubt { key: string; reason: string }
 interface Verdict { family: string | null; canDraw: boolean; canSend: boolean; noDraw: Doubt[]; noSend: Doubt[]; confirm: Doubt[] }
-interface Preview { code: string; verdict: Verdict; annotations?: Annotations; glb?: string }
+interface Preview { code: string; verdict: Verdict; spec?: DrawingSpec; cfg?: { options?: string[] } }
 
 type Picks = { amp?: string; addons?: string[]; holes?: unknown[] };
 
@@ -30,11 +39,11 @@ const TOOL_ON = 'border-[#00764A] text-[#00764A] bg-[#e9f4ee]';
 /** ท่อนในเครื่องหมาย «…» ของเหตุผล — ใช้ทำชิปสั้น ๆ บนแถบยืนยัน */
 const tokensOf = (ds: Doubt[]) => ds.flatMap((d) => [...d.reason.matchAll(/«([^»]+)»/g)].map((m) => m[1]));
 
-const b64ToBuf = (b64: string): ArrayBuffer => {
-  const bin = atob(b64); const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out.buffer;
-};
+/** spec → ชิ้นส่วน + ป้าย (ตัววาด ~0.2 MB โหลดคู่กับ three.js เฉพาะตอนมีภาพ) */
+async function modelOf(spec: DrawingSpec) {
+  const [{ buildModel }, { annotate }] = await Promise.all([import('../../../../services/drawing/families/registry'), import('../../../../services/drawing/annotate')]);
+  return { src: { parts: buildModel(spec).parts }, ann: annotate(spec) };
+}
 
 /** ปุ่มบนภาพ — ไอคอน (+ คำเดียวถ้ามี) · คำอธิบายใน tooltip = aria-label */
 const Tool: React.FC<{ on: boolean; tip: string; word?: string; onClick: () => void; children: React.ReactNode }> = ({ on, tip, word, onClick, children }) => (
@@ -43,7 +52,7 @@ const Tool: React.FC<{ on: boolean; tip: string; word?: string; onClick: () => v
   </button>
 );
 
-export const DrawingCard: React.FC<{ code: string; picks: Picks; headers: Record<string, string> }> = ({ code, picks, headers }) => {
+export const DrawingCard: React.FC<{ code: string; picks: Picks; headers: Record<string, string>; form?: BhForm | null; tsForm?: TsForm | null }> = ({ code, picks, headers, form, tsForm }) => {
   const [data, setData] = useState<Preview | null>(null);
   const [error, setError] = useState('');
   const [confirmed, setConfirmed] = useState(false);
@@ -56,8 +65,23 @@ export const DrawingCard: React.FC<{ code: string; picks: Picks; headers: Record
   const viewer = useRef<ViewerApi | null>(null);
   const seq = useRef(0);
   const picksKey = JSON.stringify(picks);
+  // ภาพชั่วคราวจากช่องที่กำลังแก้ — ล้างทุกครั้งที่เซิร์ฟเวอร์ตอบ (คำตอบนั้นคือรหัสที่ประกอบจากช่องชุดล่าสุดแล้ว)
+  const [live, setLive] = useState<DrawingSpec | null>(null);
+  const formKey = JSON.stringify(form ?? tsForm ?? null);
+  const cfgKey = JSON.stringify(data?.cfg ?? null);
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const f: unknown = JSON.parse(formKey);
+      if (!f) return;
+      const r = fromReading({ ...(form ? { form: f as BhForm } : { tsForm: f as TsForm }), cfg: JSON.parse(cfgKey) ?? undefined });
+      setLive(r.ok ? r.spec : null);
+    }, 0);
+    return () => clearTimeout(t);
+    // form/tsForm อ่านผ่าน formKey — ค่าใหม่ทุก render แต่เนื้อเดิม ไม่ต้องสร้างภาพใหม่
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formKey, cfgKey]);
 
-  // รหัส/ตัวเลือกเปลี่ยน → ถามใหม่ (หน่วงให้พิมพ์จบ) · คำตอบเก่าที่มาถึงทีหลังทิ้ง
+  // รหัส/ตัวเลือกเปลี่ยน → ถามคำตัดสินใหม่ · คำตอบเก่าที่มาถึงทีหลังทิ้ง
   useEffect(() => {
     const mine = ++seq.current;
     const t = setTimeout(async () => {
@@ -67,29 +91,53 @@ export const DrawingCard: React.FC<{ code: string; picks: Picks; headers: Record
         const out = await res.json();
         if (mine !== seq.current) return;
         if (!res.ok) throw new Error(out?.error ?? 'โหลดแบบไม่สำเร็จ');
-        setError(''); setData(out); setConfirmed(false); setExploded(false);
+        setError(''); setData(out); setLive(null); setConfirmed(false);
       } catch (e: unknown) {
         if (mine !== seq.current) return;
         setError(errMsg(e)); setData(null);
       }
-    }, 400);
+    }, 150); // ภาพชั่วคราวจากช่องขึ้นก่อนแล้ว — ที่นี่รอแค่ให้รหัสนิ่ง (หน้าคำนวณราคาหน่วงช่องพิมพ์ไว้ 350 ms อยู่แล้ว)
     return () => clearTimeout(t);
   }, [code, picksKey, headers]);
 
-  // สร้างตัวดูใหม่เมื่อได้โมเดลใหม่ · ทิ้งตัวเก่าทุกครั้ง (WebGL context มีจำกัดต่อหน้า)
-  const glb = data?.glb, ann = data?.annotations;
+  // ภาพที่แสดง = ภาพชั่วคราวจากช่อง (ถ้ามี) ไม่งั้นของเซิร์ฟเวอร์ · เทียบด้วยเนื้อ JSON — เนื้อเดิมไม่สร้างใหม่
+  const canDraw = !!data?.verdict.canDraw;
+  const shownKey = useMemo(() => (canDraw ? JSON.stringify(live ?? data?.spec ?? null) : 'null'), [canDraw, live, data?.spec]);
+  // ตัวดูสร้างครั้งเดียวต่อผืนภาพ · โมเดลเปลี่ยน = `update()` มุมกล้องคงเดิม · ผืนภาพใหม่ (วาดไม่ได้แล้วกลับมาวาดได้ · error) = สร้างใหม่
+  // ทิ้งตัวเก่าทุกครั้ง (WebGL context มีจำกัดต่อหน้า)
+  const ready = useRef<{ host: HTMLElement; p: Promise<ViewerApi> } | null>(null);
+  const toggles = useRef({ labels, edges });
+  useEffect(() => { toggles.current = { labels, edges }; }, [labels, edges]);
+  const drop = () => { const r = ready.current; ready.current = null; viewer.current = null; void r?.p.then((v) => v.dispose(), () => {}); };
   useEffect(() => {
-    if (!glb || !ann || !stage.current) return;
-    let live = true, v: ViewerApi | null = null;
+    const spec: DrawingSpec | null = JSON.parse(shownKey);
     const host = stage.current;
-    import('../../drawing-viewer/viewer')
-      .then(({ createViewer }) => createViewer(host, b64ToBuf(glb), ann, { listEl: list.current, title: `ภาพ 3 มิติ ${code}` }))
-      .then((x) => { if (live) { v = x; viewer.current = x; } else x.dispose(); })
-      .catch((e: unknown) => { if (live) setError(`แสดงภาพ 3 มิติไม่ได้ — ${errMsg(e)}`); });
-    return () => { live = false; v?.dispose(); viewer.current = null; };
-    // code อยู่ใน aria-label เท่านั้น — โมเดลเปลี่ยนเมื่อ glb เปลี่ยน
+    if (!spec || !host) return;
+    let alive = true;
+    void (async () => {
+      try {
+        const m = await modelOf(spec);
+        if (!alive) return;
+        if (ready.current?.host !== host) {
+          drop();
+          const { labels: lb, edges: ed } = toggles.current;
+          const p = import('../../drawing-viewer/viewer').then(({ createViewer }) => createViewer(host, m.src, m.ann, { listEl: list.current, title: `ภาพ 3 มิติ ${code}`, labels: lb, edges: ed }));
+          ready.current = { host, p };
+          const v = await p;
+          if (ready.current?.p === p) { viewer.current = v; setExploded(false); }
+          return;
+        }
+        const v = await ready.current.p;
+        if (alive) await v.update(m.src, m.ann);
+      } catch (e: unknown) {
+        if (alive) setError(`แสดงภาพ 3 มิติไม่ได้ — ${errMsg(e)}`);
+      }
+    })();
+    return () => { alive = false; };
+    // code อยู่ใน aria-label เท่านั้น — โมเดลเปลี่ยนเมื่อ spec เปลี่ยน
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [glb, ann]);
+  }, [shownKey, canDraw, error]);
+  useEffect(() => drop, []);
 
   if (error) return <div className="bg-card border border-slate-200 rounded-2xl px-5 py-4 text-sm text-red-700">{error}</div>;
   if (!data) return null;

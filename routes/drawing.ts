@@ -2,9 +2,7 @@ import { Router, json, type Response } from 'express';
 import type { AdminRequest } from '../config/auth.js';
 import type { PricingOutcome, PricingReading } from '../services/drawing/types.js';
 import { judge, type DrawingVerdict } from '../services/drawing/checks.js';
-import { annotate } from '../services/drawing/annotate.js';
 import { buildModel } from '../services/drawing/families/registry.js';
-import { writeGlb } from '../services/drawing/writers/glb.js';
 import { writeStep } from '../services/drawing/writers/step.js';
 
 /**
@@ -14,7 +12,10 @@ import { writeStep } from '../services/drawing/writers/step.js';
  * ⇒ แบบกับราคามาจากการอ่านรหัสครั้งเดียวกัน และถอดโมดูลคิดราคา = ถอดบรรทัด mount ของไฟล์นี้ด้วย
  *
  * เส้นทาง (mount ใต้ `/api/admin/drawing` · สิทธิ์ `page.pricing` ที่ index.ts):
- *   POST /preview  { code, picks? } → คำตัดสิน (วาดได้/ส่งได้/ต้องยืนยัน + เหตุผลภาษาคน) + ป้าย + GLB (base64) เมื่อวาดได้
+ *   POST /preview  { code, picks? } → คำตัดสิน (วาดได้/ส่งได้/ต้องยืนยัน + เหตุผลภาษาคน) + `spec` + `cfg` เมื่อวาดได้
+ *                  **การ์ดสร้างชิ้นส่วน/ป้ายเองในเบราว์เซอร์จาก `spec`** (ภาพยืดหดตามทันที · หัวหน้าสั่ง 2026-10-07) — ตัววาดเป็น TS ล้วน
+ *                  ชุดเดียวกับที่ STEP ใช้ จึงได้รูปทรงเดียวกัน · `cfg` = สัญญาณแกนหักของผลอ่าน ให้การ์ดใช้คู่กับช่องที่กำลังแก้
+ *                  (เดิมส่ง GLB base64 — TS_-11 ~0.1 MB ต่อการแก้หนึ่งครั้ง · สเปกไม่กี่ร้อยไบต์)
  *   POST /step     { code, picks?, confirmed? } → ไฟล์ .step — **เฉพาะที่ส่งได้** (เจ้าของ: ระบบเดาบางช่อง = ปิดปุ่มไฟล์)
  *                  และถ้ามีท่อนที่แบบไม่ได้วาด (`confirm`) ต้องส่ง `confirmed: true` มา (ผู้เสนอราคาติ๊กแล้ว)
  * สร้างไฟล์สดทุกครั้ง ไม่เก็บ — โมเดลสามตระกูลแรกสร้างไม่ถึงร้อยมิลลิวินาที · การเก็บไฟล์ 7 วันเป็นของเฟส 2 (ลิงก์ลูกค้า)
@@ -28,7 +29,7 @@ export interface CodeQuote {
 }
 export type QuoteFn = (code: string, picks?: unknown) => Promise<CodeQuote | null>;
 
-/** คำตัดสินฉบับที่ส่งให้หน้าจอ — ไม่ส่ง spec ทั้งก้อน (หน้าจอไม่ต้องรู้พารามิเตอร์ของรูปทรง) */
+/** คำตัดสินฉบับที่ส่งให้หน้าจอ — `spec` ส่งแยกเฉพาะเมื่อวาดได้ (ดู /preview) */
 function verdictView(v: DrawingVerdict) {
   return { family: v.family, canDraw: v.canDraw, canSend: v.canSend, noDraw: v.noDraw, noSend: v.noSend, confirm: v.confirm };
 }
@@ -47,16 +48,15 @@ export function createDrawingRouter({ quote }: { quote: QuoteFn }): Router {
     if (code.length > 200) { res.status(400).json({ error: 'รหัสยาวเกินไป' }); return null; }
     const q = await quote(code, req.body?.picks);
     if (!q) { res.status(503).json({ error: 'ยังไม่มีสมุดราคา' }); return null; }
-    return { code: q.code, verdict: judge(q.parsed, q.outcome) };
+    return { code: q.code, verdict: judge(q.parsed, q.outcome), cfg: { options: q.parsed.cfg?.options ?? [] } };
   }
 
   router.post('/preview', async (req: AdminRequest, res: Response) => {
     const j = await judgeCode(req, res);
     if (!j) return;
-    const { code, verdict } = j;
+    const { code, verdict, cfg } = j;
     if (!verdict.spec) return res.json({ code, verdict: verdictView(verdict) });
-    const glb = writeGlb(buildModel(verdict.spec), code);
-    res.json({ code, verdict: verdictView(verdict), annotations: annotate(verdict.spec), glb: glb.toString('base64') });
+    res.json({ code, verdict: verdictView(verdict), spec: verdict.spec, cfg });
   });
 
   router.post('/step', async (req: AdminRequest, res: Response) => {

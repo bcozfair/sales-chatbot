@@ -14,10 +14,11 @@
 | ลบ | อะไร |
 | --- | --- |
 | `services/drawing/` | โฟลเดอร์นี้ |
-| `scripts/diag/drawingPort.ts` · `drawingGlb.ts` · `drawingGlbLib.ts` · `drawingCoverage.ts` · `gltf-validator.d.ts` | ด่านของโมดูล |
+| `scripts/diag/drawingPort.ts` · `drawingGlb.ts` · `drawingGlbLib.ts` · `drawingCoverage.ts` · `drawingLiveUi.ts` · `gltf-validator.d.ts` | ด่านของโมดูล |
 | `routes/drawing.ts` + 2 บรรทัดใน `index.ts` (import + mount `/api/admin/drawing`) | API ของการ์ด |
 | `frontend/src/drawing-viewer/` · `frontend/src/admin/pricingLab/DrawingCard.tsx` + 2 บรรทัดใน `PricingLab.tsx` · dependency `three` ของ frontend | ตัวดู + การ์ด |
-| ใน `package.json` | `diag:drawing-port` · `diag:drawing-glb` · `diag:drawing-coverage` · devDependency `gltf-validator` |
+| ใน `package.json` | `diag:drawing-port` · `diag:drawing-glb` · `diag:drawing-coverage` · `diag:drawing-live-ui` · devDependency `gltf-validator` |
+| `Dockerfile` | บรรทัด `COPY services/drawing/` ใน stage frontend |
 
 **สิ่งที่ทำให้ตารางนี้จริง: การพึ่งพาเป็นทางเดียว** — โค้ดเดิมเข้าโฟลเดอร์นี้ได้ทาง `routes/drawing.ts` ทางเดียว (ไฟล์นั้นก็ไม่ import ตัวคิดราคา) และโฟลเดอร์นี้
 **ไม่ import** `services/pricingLab/` · `routes/` · `pdfGenerator.ts` · `puppeteer` (ผลอ่านรหัสของหน้าคำนวณราคา
@@ -37,7 +38,11 @@ writers/glb.ts   (รับ DrawingModel — ใช้ parts ที่มี nor
 
 `registry.ts` คือทางเดียวที่ส่วนอื่นได้โมเดล (`buildModel(spec)`) · type ของ `FAMILIES` ผูกกับ union `DrawingSpec`
 ⇒ เพิ่มตระกูลใน union แล้วลืมลงทะเบียน = typecheck ล้ม · เส้นทางของหนึ่งรหัส (เฟส 1):
-`quote(code)` (ฉีดเข้ามา) → `judge(parsed, outcome)` → `buildModel(spec)` → `writeGlb` + `annotate(spec)` / `writeStep`
+`quote(code)` (ฉีดเข้ามา) → `judge(parsed, outcome)` → `spec` ส่งให้การ์ด → **การ์ดเรียก `buildModel(spec)` + `annotate(spec)` เองในเบราว์เซอร์** / `writeStep` ฝั่งเซิร์ฟเวอร์
+· **โฟลเดอร์นี้ถูกคอมไพล์ฝั่งหน้าเว็บด้วย** (ภาพยืดหดตามทันที 2026-10-07): `registry` · `annotate` · `spec/fromReading` และทุกอย่างที่มัน import ต้องเป็น TS ล้วน
+  ไม่มี Node API · ผ่าน `erasableSyntaxOnly`/`noUnusedParameters` ของ frontend (ไม่มี parameter property · พารามิเตอร์ที่ไม่ใช้ขึ้นต้น `_`) ·
+  Dockerfile stage frontend คัดลอก `services/drawing/` ไว้ให้ — **import ออกนอกโฟลเดอร์นี้เมื่อไหร่ build หน้าแอดมินบนเซิร์ฟเวอร์ล้ม** · `writers/` ไม่ถูกดึงไปหน้าเว็บ
+· GLB (`writers/glb.ts`) ยังอยู่สำหรับไฟล์ที่ตรึงให้ลูกค้า (เฟส 2) · การ์ดไม่ใช้แล้ว (เดิม TS_-11 ~0.1 MB ต่อการแก้หนึ่งครั้ง · `spec` ~300 ไบต์)
 · หน้าจอโหลด three.js แยกก้อน (`viewer-*.js` ~656 KB) เฉพาะตอนการ์ดมีภาพ — ก้อนหลักของแอดมินโต +9 KB (วัด 2026-10-06)
 · ป้ายขนาดของ BH-01C ยังไม่มี (โมเดลของ Appsale วางเอียง ต้องหาแกนก่อน)
 
@@ -123,6 +128,7 @@ sqrt · ห้ามสลับลำดับบวก/คูณ · ห้า�
 | ด่าน | พิสูจน์อะไร | ฐาน |
 | --- | --- | --- |
 | `npm run diag:drawing-port` | ค่าชุดเดียวกันเข้าโมดูลเรากับต้นฉบับ Appsale ที่คอมมิตต้นแบบ → ทุกชิ้น (ชื่อ/สี/positions/normals/triangles/edges) `Object.is` ทีละตัว + STEP ทั้งไฟล์ (ยกเว้น FILE_NAME) · **ส่วน ค** ตัวแปลงช่องอ่านเท่าต้นแบบ · ไม่มีรีโป/คอมมิต = **ตอบไม่ได้ exit 1** · `-- --quick` ไม่แตะฐาน | SELECT อย่างเดียว (READ ONLY + statement_timeout) · เขียนแค่ tmpdir แล้วลบ |
+| `npm run diag:drawing-live-ui` | **หน้าจอ** — หน้าคำนวณราคาจริง (build แล้ว) + API จำลองที่อ่านด้วยโค้ดจริง (`readTsForm` · `buildTsCode` · `judge`) หน่วง 900 ms · แก้ความยาวแกนแล้วภาพยาวขึ้นก่อนเซิร์ฟเวอร์ตอบ · ทิศกล้องคงเดิม · ตัวดูไม่ถูกสร้างใหม่ · แยกชิ้นค้างได้ · คำตอบมาแล้วไม่กระตุก · ถอดสปริงภาพก็ตาม · `/preview` เป็น spec < 2 KB · `DL_DEBUG=1` พิมพ์ทุกคำขอ + console | ไม่แตะ · ต้อง build frontend ก่อน |
 | `npm run diag:drawing-glb` | `writeGlb` → ตัวถอดของด่านเอง (ไม่ใช้โค้ดตัวเขียน) ตรวจโครง (magic · ความยาว · ตัวเติม chunk · bufferView ในขอบ/หาร 4 · min/max · index < จุด · normal ยาว 1 ±5e-4) แล้วถอดกลับ = `Math.fround(ต้นฉบับ)` · **gltf-validator ของ Khronos 0 error 0 warning** · เขียนซ้ำได้ไบต์เดิม · ชิ้นสังเคราะห์ 90,000 จุดบังคับทาง index uint32 | ไม่แตะ |
 | `npm run diag:drawing-coverage` | **ถาวร** — รหัสจริงทุกตัว → อ่าน+คิดราคาแบบหน้าคำนวณราคา → `judge` → โมเดล/GLB/STEP ครั้งเดียวต่อรูปทรง · รายงานวาดได้ / ส่งได้ทันที / ส่งได้หลังยืนยัน / เหตุผลต่อตระกูล (ไม่มีเกณฑ์ขั้นต่ำ) · **ต้องจริงเสมอ 8 ข้อ** (หัวไฟล์) รวม "สามทางตรงกัน": ค่าที่วัดจาก mesh = ช่องหน้าคำนวณราคา = ค่าที่คิดเงิน · แกนหักจาก `cfg.options` ต้องวาดไม่ได้ · ความหลวมที่ปิดการส่งต้องส่งไม่ได้ (6ก) · ส่วนท้ายที่ยืนยันได้ต้องอยู่ใน `confirm` ครบ (6ข) · ทิศการพึ่งพา · keyof สองทางกับ `TsForm`/`BhForm` + `cfg.options` ของ `ProductConfig` (ล้มที่ tsc) | SELECT อย่างเดียว (READ ONLY + statement_timeout) · ไม่เขียนไฟล์ |
 

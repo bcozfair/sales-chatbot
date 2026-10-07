@@ -64,7 +64,10 @@ class SolidBuilder {
   readonly triangles: number[] = [];
   readonly edges: number[] = [];
 
-  constructor(readonly name: string, readonly colour: Colour) {}
+  readonly name: string;
+  readonly colour: Colour;
+  // ไม่ใช้ parameter property — การ์ดแอดมินคอมไพล์ไฟล์นี้ด้วย (`erasableSyntaxOnly` ของ frontend)
+  constructor(name: string, colour: Colour) { this.name = name; this.colour = colour; }
 
   add(p: number[], n: number[]): number {
     this.positions.push(...p);
@@ -111,7 +114,7 @@ export function revolve(parts: Part[], name: string, profile: number[][], colour
   const ringIds = rings.map(([u, r, slope = 0], i) => {
     const [pu, pr] = rings[Math.max(0, i-1)], [qu, qr] = rings[Math.min(rings.length-1, i+1)];
     const edge = unit([-(qr-pr), qu-pu]);                    // normal ในระนาบ (u, รัศมี)
-    return Array.from({ length: seg }, (unused, j) => {
+    return Array.from({ length: seg }, (_, j) => {
       const a = TAU*j/seg, c = Math.cos(a), sn = Math.sin(a);
       return s.add(at(frame, u + slope*r*c, r*c, r*sn), dir(frame, edge[0], edge[1]*c, edge[1]*sn));
     });
@@ -180,7 +183,7 @@ export function tube(parts: Part[], name: string, path: PathNode[], radius: numb
     const tangent = unit(t);
     const ref = Math.abs(tangent[0]) > .9 ? [0, 1, 0] : [1, 0, 0];
     const n1 = unit(cross(tangent, ref)), n2 = unit(cross(tangent, n1));
-    rings.push(Array.from({ length: seg }, (unused, j) => {
+    rings.push(Array.from({ length: seg }, (_, j) => {
       const a = TAU*j/seg, n = [0, 1, 2].map(k => n1[k]*Math.cos(a) + n2[k]*Math.sin(a));
       return s.add(p.map((x, k) => x + radius*n[k]), n);
     }));

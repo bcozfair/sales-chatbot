@@ -41,7 +41,11 @@ class BandPart {
   readonly triangles: number[] = [];
   readonly edges: number[] = [];
 
-  constructor(readonly name: string, readonly colour: Colour, private readonly world: (p: number[]) => number[]) {}
+  readonly name: string;
+  readonly colour: Colour;
+  private readonly world: (p: number[]) => number[];
+  // ไม่ใช้ parameter property — การ์ดแอดมินคอมไพล์ไฟล์นี้ด้วย (`erasableSyntaxOnly` ของ frontend)
+  constructor(name: string, colour: Colour, world: (p: number[]) => number[]) { this.name = name; this.colour = colour; this.world = world; }
 
   vertex(p: number[], n: number[]): number {
     this.positions.push(...this.world(p));
