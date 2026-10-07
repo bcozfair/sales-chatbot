@@ -12,6 +12,7 @@
 
 import type { BandSpec, DrawingSpec, Ts11Spec } from './types.js';
 import { springLength } from './families/ts-11.js';
+import { CABLE_TAIL_SHOWN } from './families/tsParts.js';
 
 type Vec3 = [number, number, number];
 interface Text2 { th: string; en: string }
@@ -76,8 +77,9 @@ function ts11(spec: Ts11Spec): Annotations {
     { k: 'len', a: [-L, 0, 0], b: [0, 0, 0], side: 'down', text: `L1 ${num(L)} mm.` },
     { k: 'dia', c: [-L, 0, 0], axis: [1, 0, 0], r: Number(d) / 2, text: `∅D1 ${d}` },
   ];
-  // สายวาดย่อ (0 → ปลายสาย 290 mm) แต่ป้ายบอกความยาวจริงจากรหัส · ไม่บอกความยาว = ไม่มีป้าย (ไม่เดา)
-  if (len) dims.splice(1, 0, { k: 'len', a: [0, 0, 0], b: [290, 0, 0], side: 'down', text: `CL1 ${len.th}` });
+  // สายวาดย่อ (0 → ปลายถัก = สปริง + สายที่วาด) แต่ป้ายบอกความยาวจริงจากรหัส · ไม่บอกความยาว = ไม่มีป้าย (ไม่เดา)
+  // ปลายเส้นต้องคิดจากรูปทรงเดียวกับ cableTail() — เดิมตรึง 290 (= สปริง 130 ของ Ø บางขนาด) ⇒ ถอดสปริง/เปลี่ยน Ø แล้วเส้นเลยปลายสาย
+  if (len) dims.splice(1, 0, { k: 'len', a: [0, 0, 0], b: [spring + CABLE_TAIL_SHOWN, 0, 0], side: 'down', text: `CL1 ${len.th}` });
   return { view: [0.4, 0.55, 1], groups, dims };
 }
 
