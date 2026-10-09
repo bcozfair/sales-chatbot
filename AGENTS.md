@@ -589,6 +589,7 @@ TS ไต่ `node_modules` ขึ้นไปตามลำดับ ⇒ `<ท
 | cache ค้นหาลูกค้าในหน่วยความจำ (`startCustomerCacheLoad` · memo ของ `norm_name`/`trigrams`) | `npm run diag:customer-cache-memo` — โหลดซ้ำของโค้ดปัจจุบันต้อง deep-equal กับโหลดสดของ **โค้ดก่อนแก้** บนแถวชุดเดียวกัน ทุกฉาก + พฤติกรรม gen/TTL/โหลดซ้อน/ล้ม ต้องเหมือนกัน (อ่านฐานอย่างเดียว ~3 นาที · base เลือกเองแบบ `diag:line-parity`) |
 | อะไรที่เกี่ยวกับวันที่ | `npm run diag:date-filter` |
 | ตัวเรียก LLM (`createChatCompletion` · ตัวตัดเร็ว `config/llmCircuit.ts`) · ปุ่ม "ลองอีกครั้ง" ตอน AI ขัดข้อง | `npm run diag:llm-timeout` + `diag:llm-circuit` (ไม่แตะฐาน · ไม่ยิงเน็ต) |
+| คำตอบเมื่อกดปุ่มเลือกรุ่นซ้ำหลังได้การ์ดสรุป (`pickedModelReplyApplies` · ต้องตรงกับปุ่ม "แก้ไขรายละเอียด" ของการ์ด) | `npm run diag:picked-model-reply` (อ่านฐานอย่างเดียว) |
 | flow ยืนยัน / การออกเลขใบ | `npm run diag:confirm-race` (ต้องเปิด server ก่อน) · **บวก `diag:odoo-export` ทั้ง qp/qt** ตั้งแต่เฟส H เพราะการยืนยันเขียนช่อง Sales Team ของไฟล์ export ลงใบด้วย |
 | กฎสต็อก / validation ของใบ | `npm run diag:stock-rule` · `diag:stock-rule-put` · `diag:quote-validation` |
 | รายการ "รุ่นใกล้เคียง" ที่ให้เซลส์กดเลือก | `npm run diag:product-candidates` — เฉลยมาจากประวัติแชทจริง ไม่มี fixture ในกิต ⇒ **จำนวนเคสขยับได้ ตัวที่เป็น gate คือ "หลุดจากรายการ 0 เคส"** ไม่ใช่เปอร์เซ็นต์ |
