@@ -1,0 +1,202 @@
+{
+  "file": "ราคาTC อัพเดต (13-05-69).xlsx",
+  "sheet": "TS-09",
+  "code": "TSP-09",
+  "label": "RTD TS-09 (หน้าแปลนปีกนก + หัวกระโหลก)",
+  "aliases": [
+    "TSPA-09",
+    "TSZ-09"
+  ],
+  "standard": {
+    "L1": 100
+  },
+  "base": {
+    "kind": "matrix",
+    "axes": [
+      "D",
+      "sensor"
+    ],
+    "rowHeaderCol": "A",
+    "rows": [
+      13,
+      38
+    ],
+    "colHeaderRow": 12,
+    "cols": [
+      "C",
+      "D",
+      "E"
+    ]
+  },
+  "adders": [
+    {
+      "id": "len_l1",
+      "label": "ความยาวแกน L1",
+      "order": 20,
+      "kind": "perUnit",
+      "dim": "L1",
+      "step": 100,
+      "round": "ceil",
+      "unit": "mm",
+      "byAxis": "D",
+      "ratesFrom": {
+        "col": "B",
+        "keyCol": "A",
+        "rows": [
+          13,
+          38
+        ]
+      },
+      "source": "TS-09!B12 'บวกเพิ่ม 100 mm ละ' — ราคาตั้งที่ 100 mm (A10 'ราคาตั้ง Standard TS_- 09 6x100' = แคตตาล็อก Standard 100 mm)"
+    },
+    {
+      "id": "element_2",
+      "label": "2 element",
+      "order": 35,
+      "kind": "flat",
+      "when": {
+        "option": "element:2"
+      },
+      "byAxis": "D",
+      "ratesFrom": {
+        "col": "F",
+        "keyCol": "A",
+        "rows": [
+          13,
+          38
+        ]
+      },
+      "source": "TS-09!F12 '2 element บวกเพิ่ม' — ชีตมีราคาตั้งแต่แกน 6 mm ตรงกับแคตตาล็อก · แกนเล็กกว่าถูกห้ามที่ข้อจำกัด ELEM2_MIN_DIA"
+    },
+    {
+      "id": "coat_teflon",
+      "label": "หุ้มเทปล่อน",
+      "order": 40,
+      "kind": "perUnit",
+      "when": {
+        "option": "coat:teflon"
+      },
+      "dim": "teflon_mm",
+      "over": 0,
+      "step": 100,
+      "round": "ceil",
+      "unit": "mm",
+      "byAxis": "D",
+      "ratesFrom": {
+        "col": "J",
+        "keyCol": "A",
+        "rows": [
+          13,
+          38
+        ]
+      },
+      "source": "TS-09!J12 'หุ้มเทปล่อน เพิ่ม 100มม. ละ' — มีอัตราเฉพาะแกน 4 · 4A · 6 · 6A ตรงกับแคตตาล็อก 'แกนเคลือบเทปล่อน (เฉพาะแกน 4 mm และ 6 mm)'"
+    },
+    {
+      "id": "head_blacklite_s",
+      "label": "หัวกระโหลก Blacklite เล็ก",
+      "order": 50,
+      "kind": "flat",
+      "when": {
+        "option": "head:blacklite_s"
+      },
+      "byAxis": "D",
+      "ratesFrom": {
+        "col": "G",
+        "keyCol": "A",
+        "rows": [
+          13,
+          38
+        ]
+      },
+      "source": "TS-09!G12 'Blacklite เล็ก' — ชีตเว้นว่างแกน 17.5A ขึ้นไป = ยังไม่มีราคา"
+    },
+    {
+      "id": "head_alu_l",
+      "label": "หัวกระโหลก อลูมิเนียม ใหญ่",
+      "order": 50,
+      "kind": "flat",
+      "when": {
+        "option": "head:alu_l"
+      },
+      "byAxis": "D",
+      "ratesFrom": {
+        "col": "H",
+        "keyCol": "A",
+        "rows": [
+          13,
+          38
+        ]
+      },
+      "source": "TS-09!H12 'อลูมิเนียม ใหญ่'"
+    },
+    {
+      "id": "head_blacklite_l",
+      "label": "หัวกระโหลก Blacklite ใหญ่",
+      "order": 50,
+      "kind": "flat",
+      "when": {
+        "option": "head:blacklite_l"
+      },
+      "byAxis": "D",
+      "ratesFrom": {
+        "col": "I",
+        "keyCol": "A",
+        "rows": [
+          13,
+          38
+        ]
+      },
+      "source": "TS-09!I12 'Blackliteใหญ่'"
+    },
+    {
+      "id": "bend_l",
+      "label": "หัก L ดัดงอ",
+      "order": 55,
+      "kind": "flat",
+      "when": {
+        "option": "bend:L"
+      },
+      "amount": 100,
+      "source": "TS-09!B8 'สำหรับรุ่นหัก L ดัดงอ บวกเพิ่ม 100 บาท'"
+    },
+    {
+      "id": "bend_square",
+      "label": "หักฉาก (เชื่อมฉาก)",
+      "order": 55,
+      "kind": "flat",
+      "when": {
+        "option": "bend:square"
+      },
+      "amount": 200,
+      "source": "TS-09!B8 'แบบฉาก (เชื่อมฉาก) บวกเพิ่ม 200 บาท'"
+    }
+  ],
+  "constraints": [
+    {
+      "id": "ELEM2_MIN_DIA",
+      "when": {
+        "all": [
+          {
+            "option": "element:2"
+          },
+          {
+            "axis": "D",
+            "in": [
+              "3.2",
+              "3.2A",
+              "4",
+              "4A",
+              "4.8",
+              "4.8A",
+              "5"
+            ]
+          }
+        ]
+      },
+      "level": "block",
+      "message": "2 element ทำได้ตั้งแต่แกน 6 mm ขึ้นไป",
+      "source": "แคตตาล็อก TS_-09 '*สำหรับรุ่น 2 Element สามารถผลิตรุ่นขนาดแกน 6 mm ขึ้นไป' · ชีต TS-09 คอลัมน์ F ว่างทุกแถวที่เล็กกว่า 6"
+    }
+  ]
+}

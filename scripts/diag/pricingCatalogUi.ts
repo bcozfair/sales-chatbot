@@ -241,13 +241,13 @@ for (const width of [1280, 390]) {
 
   // ช่อง "รุ่น" ช่องเดียวรวม BH กับ TS แบ่งกลุ่ม (เจ้าของเคาะข้อ 9 · 2026-09-29) — TS 11 ตาราง (TS_-12 สองหน้า) + BH 4 รุ่น
   // + TS_-02 กับ TS_-02-SI (แคตตาล็อกคนละหน้า · รุ่นเดียวกัน) เมื่อเล่มในฐานมี TSK-02 แล้ว (ฐาน PMSV เขียน 2026-10-05) — เงื่อนไขเดียวกับขั้น TS_-02 ข้างล่าง
-  // + TS_-03 เมื่อเล่มมี TSK-03 แล้ว (ฐาน PMSV เขียน 2026-10-06) · + TS_-05 เมื่อเล่มมี TSK-05 แล้ว · + TS_-07 เมื่อเล่มมี TSK-07 แล้ว
+  // + TS_-03 เมื่อเล่มมี TSK-03 แล้ว (ฐาน PMSV เขียน 2026-10-06) · + TS_-05 เมื่อเล่มมี TSK-05 แล้ว · + TS_-07 เมื่อเล่มมี TSK-07 แล้ว · + TS_-09 เมื่อเล่มมี TSP-09 แล้ว
   // ตั้งแต่ 2026-10-07 BH ขึ้นก่อน TS (mockup `pricing-calc-redesign` รอบ 4)
   const fam = await familyRows();
   const groupsOf = [...new Set(fam.map((r) => r.group))].map((g) => `${g}:${fam.filter((r) => r.group === g).length}`);
   const hasTable = async (v: string) => fam.some((r) => r.value === v);
   const tsTables = 11 + ((await hasTable('TS_-02')) ? 2 : 0) + ((await hasTable('TS_-03')) ? 1 : 0) + ((await hasTable('TS_-05')) ? 1 : 0)
-    + ((await hasTable('TS_-07')) ? 1 : 0);
+    + ((await hasTable('TS_-07')) ? 1 : 0) + ((await hasTable('TS_-09')) ? 1 : 0);
   ok(`เลือกรุ่นจาก dropdown ในช่อง "รุ่น" (ไม่มีการ์ดแยกแล้ว) · กลุ่ม BH 4 + TS ${tsTables}`,
     JSON.stringify(groupsOf) === JSON.stringify(['HEATER · BH:4', `TEMPERATURE SENSOR · TS:${tsTables}`])
       && (await page.$$('xpath/.//button[.//b[text()="BH-03"]]')).length === 0, groupsOf.join(' · '));
