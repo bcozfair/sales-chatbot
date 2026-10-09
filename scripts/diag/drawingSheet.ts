@@ -19,7 +19,7 @@ import type { AddressInfo } from 'node:net';
 import { closePrintBrowser, printHtml } from '../../pdfGenerator.js';
 import { checkStill, renderSheet, type SheetStill } from '../../services/drawing/sheet.js';
 import { A4_LANDSCAPE, sheetHtml } from '../../services/drawing/render/sheetHtml.js';
-import type { BandSpec, Ts11Spec } from '../../services/drawing/types.js';
+import type { BandSpec, Ts11Spec, TsCableSpec } from '../../services/drawing/types.js';
 import express from 'express';
 import { createDrawingRouter } from '../../routes/drawing.js';
 import { readTsForm } from '../../services/pricingLab/catalogTs.js';
@@ -36,6 +36,14 @@ const PNG_1x1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfF
 const LOGO = PNG_1x1;
 const TS: Ts11Spec = { family: 'TS_-11', sensor: 'TSK', spring: 'NONE', dia: '6', mat: 'NONE', tubeLen: 100, elem: 'NONE', cableLen: 2, cable: 'NONE', ground: 'NONE' };
 const BH: BandSpec = { family: 'BH-01', id: 120, h: 60, t: 4, v: '220', w: 800, term: '2', mat: 'NONE', conn: null, termPos: null, holes: [] };
+/** รุ่นออกสายที่เพิ่ม 2026-10-09 — ค่าที่ทำข้อความยาวสุดของแต่ละรุ่น (เกลียวยาวสุด · RTD · ตารางแถวมากสุด) */
+const CABLE_SPECS: [TsCableSpec, string][] = [
+  [{ family: 'TS_-01', sensor: 'PA', thread: 'M10x1.5', dia: '6', tubeLen: 100, mat: 'NONE', cableLen: 10, cable: 'TS', ground: 'U' }, 'TSPA-01(M10x1.5)6x100+10MTSU'],
+  [{ family: 'TS_-01-0', sensor: 'Z', hold: 'M10', cableLen: 2.5, cable: 'F', ground: 'U' }, 'TSZ-01-0(M10)+2.5MFU'],
+  [{ family: 'TS_-02', sensor: 'K', lock: '15.5', dia: '8', mat: 'A', tubeLen: 30, cableLen: 3, cable: 'C', ground: 'U' }, 'TSK-02(15.5)8Ax30+3MCU'],
+  [{ family: 'TS_-03', sensor: 'N10', dia: '6.35', mat: 'S', tubeLen: 250, elem: '2', cableLen: 5, cable: 'T', ground: 'U' }, 'N10-03 6.35Sx250-2+5MTU'],
+  [{ family: 'TS_-05', sensor: 'TSPA', lock: '14.5', dia: '6', mat: 'A', tubeLen: 20, elem: '2', cableLen: 2, cable: 'F', ground: 'U' }, 'TSPA-05(14.5)6Ax20-2+2MFU'],
+];
 const STILL: SheetStill = {
   png: PNG_1x1, w: 872, h: 640,
   marks: {
@@ -63,6 +71,13 @@ try {
   const t1 = Date.now();
   const pdf2 = Buffer.from(await printHtml(sheetHtml(renderSheet({ spec: BH, code: 'BH-01-120X60-220-800W-2', still: null, logo: LOGO, meta })), { kind: 'pdf', widthMm: A4_LANDSCAPE.w, heightMm: A4_LANDSCAPE.h }));
   ok('   BH-01 ไม่มีภาพนิ่ง (ภาพฉายเต็มกรอบ) ก็หน้าเดียว', pdfPages(pdf2) === 1, `${Date.now() - t1} ms (Chrome เปิดค้างไว้แล้ว)`);
+  const cablePages: string[] = [];
+  for (const [spec, code] of CABLE_SPECS)
+    for (const still of [STILL, null]) {
+      const b = Buffer.from(await printHtml(sheetHtml(renderSheet({ spec, code, still, logo: LOGO, meta })), { kind: 'pdf', widthMm: A4_LANDSCAPE.w, heightMm: A4_LANDSCAPE.h }));
+      if (pdfPages(b) !== 1) cablePages.push(`${spec.family}${still ? '' : ' (ไม่มีภาพนิ่ง)'} ${pdfPages(b)} หน้า`);
+    }
+  ok('   TS_-01 · 01-0 · 02 · 03 · 05 ข้อความยาวสุด ก็หน้าเดียว (มี/ไม่มีภาพนิ่ง)', cablePages.length === 0, cablePages.join(', ') || `${CABLE_SPECS.length * 2} แผ่น`);
   const png = Buffer.from(await printHtml(sheetHtml(sheetTs), { kind: 'png', widthMm: A4_LANDSCAPE.w, heightMm: A4_LANDSCAPE.h, pngWidthPx: 1754 }));
   const pw = png.readUInt32BE(16), ph = png.readUInt32BE(20);
   ok('2 · PNG 1754 × 1240', png.subarray(1, 4).toString() === 'PNG' && pw === 1754 && Math.abs(ph - 1240) <= 1, `${pw} × ${ph} · ${(png.length / 1024).toFixed(0)} KB`);

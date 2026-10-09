@@ -1,10 +1,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  ตารางรายละเอียดสินค้า + หมายเหตุของแบบ ต่อตระกูล (แผน §2.6 A5 · A6) — ข้อความล้วนจาก spec
 //
-//  **ตารางพอร์ตจาก `specRows(v)` ของ Appsale ที่ `4dd2475`** (`products/ts-11.js` · `products/bh-01.js` · คำจาก `ts-common.js`)
+//  **ตารางพอร์ตจาก `specRows(v)` ของ Appsale ที่ `4dd2475`** (`products/ts-11.js` · `ts-01.js` · `ts-03.js` · `bh-01.js` · คำจาก `ts-common.js`)
 //  ⇒ ภาษาไทยต้องเท่าต้นฉบับทุกตัวอักษรหลังถอด entity — ด่าน `diag:drawing-port` ส่วน ง เทียบให้ทุกรหัส
 //  ต่างจากต้นฉบับโดยตั้งใจ 2 ข้อ: (1) ค่าที่ผลอ่านรหัสไม่ได้บอก (`null`) ขึ้น `-` — Appsale ไม่มีค่าว่างเพราะเติมค่าเริ่มต้นเอง
 //  (2) BH-01C ที่รหัสไม่บอกการต่อ (`conn: ''`) ขึ้น "ไม่ระบุ" — Appsale เติม `PL` เอง (ข้อเดียวกับส่วน ค ของด่าน)
+//  (3) แถว "รุ่น" ของ TS_-01-0/02/03/05 = ชื่อรุ่นล้วน (`TSK-03`) — ต้นฉบับตัดจากรหัสเต็มที่ `(`/`X` แรก จึงติดขนาดแกนมาด้วย
+//      (`TSK-03-6`) หรือติดสายทั้งท่อนเมื่อไม่มีวงเล็บ (`TSK-01-0+2MP`) · ด่านส่วน ง ตัดของต้นฉบับให้เหลือชื่อรุ่นก่อนเทียบ
+//  (4) TS_-05 ที่เป็น RTD (TSP/TSPA/TSZ — หน้าคำนวณราคามี แต่หน้า 8 ของ Appsale ไม่มี) ใช้ชื่อ/ย่านของ RTD · ต้นฉบับถอยไปเป็น Type K
 //  · ใช้ตัวอักษรจริง (∅ × ° ² ±) ไม่ใช่ HTML entity — คนเรียกเป็นคน escape ตามพื้นผิวของตัวเอง (React · SVG · PDF)
 //
 //  **หมายเหตุของแบบ = ภาษาช่าง/ภายใน เห็นเฉพาะการ์ดแอดมิน** (เจ้าของเคาะ mockup รอบ 5 ข้อ 2 · 2026-10-09) —
@@ -15,8 +18,10 @@
 //  โมดูลนี้ห้าม import pricingLab)
 // ─────────────────────────────────────────────────────────────────────────────
 
-import type { BandSpec, DrawingSpec, Ts11Spec } from './types.js';
+import type { BandSpec, DrawingSpec, Ts11Spec, TsCable, TsCableSpec } from './types.js';
 import { springLength } from './families/ts-11.js';
+import { CABLE_LEADS, THREADS_01, tsCableBuild } from './families/tsCable.js';
+import { HOLDS } from './families/tsParts.js';
 
 export type SheetLang = 'th' | 'en';
 /** หนึ่งแถวของตาราง: [หัวข้อ, ค่า] */
@@ -89,6 +94,80 @@ function ts11Rows(s: Ts11Spec, lang: SheetLang): SpecRow[] {
   ];
 }
 
+// ── TS_-01 · TS_-01-0 · TS_-02 · TS_-03 · TS_-05 ────────────────────────────
+
+/** `SENSORS_TC/RTD/TCNP` (`ts-common.js`) — ชื่อ + ย่านการวัด · NTC/PTC ของหน้าเหล่านี้ "แคตตาล็อกไม่ระบุ" (ต่างจาก TS_-11) */
+const UNSTATED: Text2 = { th: 'แคตตาล็อกไม่ระบุ', en: 'Not stated in catalog' };
+const CABLE_SENSOR: Record<TsCableSpec['sensor'], { label: string; range: Text2 }> = {
+  K: { label: 'Thermocouple Type K', range: TC_RANGE }, J: { label: 'Thermocouple Type J', range: TC_RANGE },
+  T: { label: 'Thermocouple Type T', range: TC_RANGE }, P: { label: 'PT100 Class B', range: RTD_RANGE },
+  PA: { label: 'PT100 Class A', range: RTD_RANGE }, Z: { label: 'PT1000 Class B', range: RTD_RANGE },
+  TSK: { label: 'Thermocouple Type K', range: TC_RANGE }, TSJ: { label: 'Thermocouple Type J', range: TC_RANGE },
+  TST: { label: 'Thermocouple Type T', range: TC_RANGE },
+  P2: { label: 'PTC 2K', range: UNSTATED }, P10: { label: 'PTC 10K', range: UNSTATED },
+  N2: { label: 'NTC 2K', range: UNSTATED }, N10: { label: 'NTC 10K', range: UNSTATED },
+  TSP: { label: 'PT100 Class B', range: RTD_RANGE }, TSPA: { label: 'PT100 Class A', range: RTD_RANGE },
+  TSZ: { label: 'PT1000 Class B', range: RTD_RANGE },
+};
+/** `MATERIALS_TS` ที่ห้ารุ่นนี้ใช้ */
+const CABLE_MAT: Record<'NONE' | 'A' | 'S' | 'T' | 'AT', Text2> = {
+  NONE: TS_MAT.NONE, A: TS_MAT.A, T: TS_MAT.T, AT: TS_MAT.AT,
+  S: { th: 'Shealth 316 (เฉพาะ Thermocouple)', en: 'Sheath 316 (Thermocouple only)' },
+};
+/** `CABLES` (`ts-common.js`) ทั้งชุด */
+const CABLE_TYPE: Record<TsCable, Text2> = {
+  ...TS_CABLE,
+  C: { th: 'ซิลิโคน (0-105 °C)', en: 'Silicone (0-105 °C)' },
+  F: { th: 'ไฟเบอร์กลาส (0-350 °C)', en: 'Fiberglass (0-350 °C)' },
+};
+const CABLE_HEAD: Record<string, Text2> = {
+  ...TS11_HEAD,
+  thread: { th: 'เกลียว', en: 'Thread' },
+  hold: { th: 'Hold size (ID1)', en: 'Hold size (ID1)' },
+  lock: { th: 'เขี้ยวล็อค (ID)', en: 'Bayonet lock (ID)' },
+};
+/** ชื่อรุ่นตามรหัส — หน้า 2–4 ขึ้นต้น "TS" + ชนิด · หน้า 6/8 ชนิดหัววัดอยู่ในชื่อเซนเซอร์แล้ว */
+const CODE_OF: Record<TsCableSpec['family'], string> = { 'TS_-01': '01', 'TS_-01-0': '01-0', 'TS_-02': '02', 'TS_-03': '03', 'TS_-05': '05' };
+const modelName = (s: TsCableSpec): string =>
+  `${s.family === 'TS_-03' || s.family === 'TS_-05' ? s.sensor : `TS${s.sensor}`}-${CODE_OF[s.family]}`;
+
+function tsCableRows(s: TsCableSpec, lang: SheetLang): SpecRow[] {
+  const H = (k: string) => CABLE_HEAD[k][lang];
+  const th = lang === 'th', sen = CABLE_SENSOR[s.sensor];
+  const cable: SpecRow = [H('cable'), `${fmtOr(s.cableLen)} M. — ${CABLE_TYPE[s.cable][lang]}`];
+  const probe = (dia: string, len: number) => (th ? `∅${dia} mm. × ยาว ${fmt(len)} mm.` : `∅${dia} mm. × L ${fmt(len)} mm.`);
+  if (s.family === 'TS_-01') {
+    const t = THREADS_01[s.thread];
+    return [
+      [H('model'), `${modelName(s)} — ${sen.label}`],
+      [H('thread'), `${s.thread === 'NONE' ? '(None)' : s.thread} — ${t.label} (${th ? 'ยาว' : 'L'} ${t.len} mm.)`],
+      [H('probe'), `${probe(s.dia, s.tubeLen)} · SUS 304`],
+      cable,
+      [H('ground'), s.ground === null ? '-' : s.ground === 'U'
+        ? (th ? 'Unground (มาตรฐานของ RTD)' : 'Unground (RTD standard)')
+        : (th ? 'Ground (มาตรฐานของ Thermocouple)' : 'Ground (Thermocouple standard)')],
+      [H('range'), sen.range[lang]],
+      [H('spring'), th ? '100 mm. (มาตรฐาน)' : '100 mm. (standard)'],
+    ];
+  }
+  const rows: SpecRow[] = [[H('model'), `${modelName(s)} — ${sen.label}`]];
+  if (s.family === 'TS_-01-0') {
+    const h = HOLDS[s.hold];
+    rows.push([H('hold'), `${h.label} × ${th ? 'ยาว' : 'L'} ${fmt(h.len)} mm.`]);
+  }
+  if (s.family === 'TS_-02' || s.family === 'TS_-05') rows.push([H('lock'), `${fmt(Number(s.lock))} mm.`]);
+  if (s.family !== 'TS_-01-0') {
+    rows.push([H('probe'), probe(s.dia, s.tubeLen)]);
+    rows.push([H('mat'), s.mat === null ? '-' : CABLE_MAT[s.mat][lang]]);
+  }
+  if (s.family === 'TS_-03' || s.family === 'TS_-05') rows.push([H('elem'), s.elem === null ? '-' : TS_ELEM[s.elem]]);
+  rows.push([H('spring'), `${fmt(tsCableBuild(s).springLen)} mm.`]);
+  rows.push(cable);
+  rows.push([H('ground'), s.ground === null ? '-' : s.ground === 'U' ? 'U — Unground' : 'Ground']);
+  rows.push([H('range'), sen.range[lang]]);
+  return rows;
+}
+
 // ── BH-01 / BH-01C ──────────────────────────────────────────────────────────
 
 /** `SPECS` ของ `bh-01.js` — ค่าตามแคตตาล็อก BH-01 */
@@ -154,12 +233,18 @@ export function specRows(spec: DrawingSpec, lang: SheetLang = 'th'): SpecRow[] {
     case 'TS_-11': return ts11Rows(spec, lang);
     case 'BH-01':
     case 'BH-01C': return bandRows(spec, lang);
+    case 'TS_-01':
+    case 'TS_-01-0':
+    case 'TS_-02':
+    case 'TS_-03':
+    case 'TS_-05': return tsCableRows(spec, lang);
   }
 }
 
 // ── หมายเหตุของแบบ (ภายใน) ──────────────────────────────────────────────────
 
 const TS_TAIL = 'หางปลาแฉกมาตรฐาน (1.5) และท้ายสายตามไฟล์ CAD ของผู้ผลิต · สปริงลวด ∅0.7 พันชิดบนสายเป็นรูปอ้างอิง · สายวาดย่อ ไม่ใช่มาตราส่วนจริง';
+const TS_TAIL_SHORT = 'สายวาดย่อ ไม่ใช่มาตราส่วนจริง';
 const BH_NOTE = 'รูปทรงอ้างอิงจากแคตตาล็อก · ID/H/T ตามค่าที่ระบุ · ชุดรัดและขั้วไฟเป็นรูปทรงประมาณ สายแสดงย่อ · ความหนามาตรฐาน 4 mm. อุณหภูมิใช้งานสูงสุด 450°C กำลังไฟไม่เกิน 5 W/cm² ตามแคตตาล็อก Primus · ถ้ามีเจาะรูต้องระบุขนาดและตำแหน่งให้ฝ่ายผลิต';
 
 /** หมายเหตุของแบบ — เห็นเฉพาะการ์ดแอดมิน (ไม่ลงกระดาษแบบ/หน้าลูกค้า) */
@@ -171,5 +256,16 @@ export function sheetNote(spec: DrawingSpec): string {
       return spec.termPos === null ? `${BH_NOTE} · ตำแหน่งขั้วไฟ (152° จากรอยผ่า) เป็นรูปอ้างอิง รหัสสินค้าไม่ได้บอก` : BH_NOTE;
     case 'BH-01C':
       return spec.termPos === null ? `${BH_NOTE} · ตำแหน่งขั้วไฟ (กลางแนวแกน) เป็นรูปอ้างอิง รหัสสินค้าไม่ได้บอก` : BH_NOTE;
+    // `sheetNote` ของ Appsale ต่อรุ่น (`ts-01.js` · `ts-03.js`)
+    case 'TS_-01':
+      return 'หัวเซ็นเซอร์และเกลียวเป็น SUS 304 · เกลียวหมุนปรับได้ · Tube Length = ปลายแกนที่ยื่นพ้นเกลียว (None = 5 mm.) · รูปทรงหกเหลี่ยม สปริง และหางปลาตามไฟล์ CAD ของผู้ผลิต (ขนาดหกเหลี่ยมของเกลียวอื่นขยายตามสัดส่วน) · ' + TS_TAIL_SHORT;
+    case 'TS_-01-0':
+      return 'หูแหวนยึดด้วยรู ID1 ตามตาราง Hold size · ช่อง Length ในแคตตาล็อกตีความเป็นความยาวหูทั้งชิ้น · รูปทรงหูแหวน สปริง 100 mm. และหางปลาแฉกตามไฟล์ CAD ของผู้ผลิต · ' + TS_TAIL_SHORT;
+    case 'TS_-02':
+      return 'สปริงคลุมแกน 300 mm. ตามแคตตาล็อก · รูปทรงเขี้ยวล็อค (ร่องตัว J + วงจับลายเฟือง) สปริง และหางปลาแฉกตามไฟล์ CAD ของผู้ผลิต · ID อื่นขยายตามสัดส่วน · ' + TS_TAIL_SHORT;
+    case 'TS_-03':
+      return 'สปริงกันสายหัก 50 mm. เมื่อแกนเล็กกว่า 5 mm. และ 130 mm. ตั้งแต่ 5 mm. ขึ้นไป · แกน 4-10 mm. แถมหน้าแปลนปีกนก (ไม่ได้วาดในแบบ) · รูปทรง Sleeve สปริง และหางปลาแฉกตามไฟล์ CAD ของผู้ผลิต (แกน ∅5) · ' + TS_TAIL_SHORT;
+    case 'TS_-05':
+      return `สปริงกันสายหัก 100 mm. ทุกขนาดแกน · ระยะจากเขี้ยวล็อคถึง Sleeve 50 mm. ตามแบบในแคตตาล็อก · รูปทรงเขี้ยวล็อค Sleeve สปริง และหางปลาแฉกตามไฟล์ CAD ของผู้ผลิต · ${CABLE_LEADS[spec.sensor] === 3 ? 'RTD (3 สาย) ไม่อยู่ในแคตตาล็อกหน้านี้ — ใช้ตามมาตรฐาน Type for RTD · ' : ''}${TS_TAIL_SHORT}`;
   }
 }

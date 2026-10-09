@@ -15,14 +15,14 @@
    5. คำตอบเซิร์ฟเวอร์มาถึงแล้วภาพไม่กระตุก (ขนาดเท่าเดิม) · เปลี่ยนชนิดหัว (ส่วนประกอบ) ภาพก็ตาม
    6. ไม่มี error ในหน้า
 
-   รัน: `npm run build --prefix frontend` ก่อน แล้ว `npm run diag:drawing-live-ui` (`DL_SHOT=<ไฟล์.png>` = ถ่ายภาพการ์ดตอนจบ)
+   รัน: `npm run build --prefix frontend` ก่อน แล้ว `npm run diag:drawing-live-ui` (`DL_SHOT=<ไฟล์.png>` = ถ่ายภาพการ์ดตอนจบ + การ์ดแบบคู่ของแต่ละรุ่นในข้อ 14)
    ───────────────────────────────────────────────────────────────────────────── */
 import puppeteer, { type HTTPRequest, type Page } from 'puppeteer';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { extname, join, normalize } from 'node:path';
-import { TS_CATALOG, buildTsCode, readTsForm, type TsForm } from '../../services/pricingLab/catalogTs.js';
+import { TS_CATALOG, buildTsCode, readTsForm, type TsFamily, type TsForm } from '../../services/pricingLab/catalogTs.js';
 import { judge } from '../../services/drawing/checks.js';
 import type { PricingReading } from '../../services/drawing/types.js';
 import { checkStill, renderSheet } from '../../services/drawing/sheet.js';
@@ -42,8 +42,15 @@ const ok = (msg: string, cond: boolean, extra = '') => {
 };
 
 // ── API จำลอง: อ่านด้วยโค้ดจริง ─────────────────────────────────────────────
+/** ตระกูลจากรหัส — แทนตัวหาตระกูลของ parseProductCode (ด่านนี้ไม่โหลดสมุดราคา) · เฉพาะรหัสที่ด่านพิมพ์เอง */
+const familyOf = (code: string): TsFamily => {
+  const m = code.match(/-(11|01-0|01|02|03|05)\b/);
+  return (m ? `TS_-${m[1]}` : 'TS_-11') as TsFamily;
+};
+/** รหัสจริงหนึ่งตัวต่อตระกูลที่เพิ่ม (2026-10-09) — ข้อ 14 */
+const CABLE_CODES = ['TSK-01(M8)6x50+2MC', 'TSK-01-0(M6)+2MP', 'TSJ-02(12)4.8Ax10+3MFU', 'TSK-03 6x100+1MP', 'TSJ-05(12)4.8x20+2M'];
 function readingOf(body: { code?: string; tsForm?: TsForm }): { code: string; parsed: PricingReading & { tsForm?: TsForm } } {
-  const tsForm = body.tsForm ?? readTsForm(String(body.code ?? ''), 'TS_-11');
+  const tsForm = body.tsForm ?? readTsForm(String(body.code ?? ''), familyOf(String(body.code ?? '')));
   const code = body.tsForm ? buildTsCode(body.tsForm) : String(body.code ?? '').trim();
   return { code, parsed: { tsForm, cfg: { options: [] } } };
 }
@@ -62,7 +69,7 @@ async function route(req: HTTPRequest) {
   }
   if (process.env.DL_DEBUG) console.log('    api', req.method(), path, (req.postData() ?? '').slice(0, 160));
   if (path === '/api/admin/me/capabilities') return json(req, { capabilities: {} });
-  if (path === '/api/admin/pricing/overview') return json(req, { book: { ok: true, models: 1 }, version: 'r1', models: [], edited: null, catalog: [], catalogTs: TS_CATALOG.filter((s) => s.family === 'TS_-11') });
+  if (path === '/api/admin/pricing/overview') return json(req, { book: { ok: true, models: 1 }, version: 'r1', models: [], edited: null, catalog: [], catalogTs: TS_CATALOG.filter((s) => s.family === 'TS_-11' || CABLE_CODES.some((c) => familyOf(c) === s.family)) });
   if (path === '/api/admin/pricing/quote') {
     const r = readingOf(JSON.parse(req.postData() ?? '{}'));
     await later(DELAY);
@@ -272,12 +279,32 @@ try {
 
   if (process.env.DL_SHOT) { const card = await page.$('[data-testid="drawing-card"]'); await card?.screenshot({ path: process.env.DL_SHOT }); await tab('คู่'); await later(1500); await card?.screenshot({ path: process.env.DL_SHOT.replace(/\.png$/, '-pair.png') }); await tab('3 มิติ'); await later(300); }
 
+  // ข้อ 14 — รุ่นที่เพิ่ม 2026-10-09 (TS_-01 · 01-0 · 02 · 03 · 05): รหัสจริงบนหน้าจริงได้ภาพ 3 มิติ + ภาพฉาย 2 มิติของรุ่นนั้น
+  for (const code of CABLE_CODES) {
+    const before = (await stageState(page))?.builds ?? 0;
+    // ล้างช่องด้วย Ctrl+A (คลิกสามครั้งพลาดได้หลังถ่ายภาพการ์ดที่เลื่อนหน้าจอ — รหัสถูกพิมพ์ต่อท้ายของเดิม)
+    await page.focus('#pl-code');
+    await page.keyboard.down('Control'); await page.keyboard.press('KeyA'); await page.keyboard.up('Control');
+    await page.type('#pl-code', code);
+    await page.keyboard.press('Enter');
+    await page.waitForFunction((n: number) => Number(document.querySelector<HTMLElement>('[data-testid="drawing-card"] .dv-stage')?.dataset.dvBuilds ?? 0) > n, { timeout: 15000, polling: 100 }, before);
+    const st = await settle(page);
+    await tab('2 มิติ'); await later(400);
+    const svg = await page.evaluate(() => document.querySelector('[data-testid="drawing-card"] svg[aria-label="ภาพฉาย 2 มิติ"]')?.textContent ?? '');
+    if (process.env.DL_SHOT) {   // ภาพการ์ดแบบคู่ของแต่ละรุ่น → <DL_SHOT>-TS_-02.png
+      await tab('คู่'); await later(1500);
+      await (await page.$('[data-testid="drawing-card"]'))?.screenshot({ path: process.env.DL_SHOT.replace(/\.png$/, `-${familyOf(code)}.png`) });
+    }
+    await tab('3 มิติ'); await later(300);
+    ok(`14 · ${familyOf(code)} «${code}»: ภาพ 3 มิติ + ภาพฉาย 2 มิติ`, st.canvases === 1 && svg.includes(code) && /CL1/.test(svg), `กล่อง ${st.box.map((x) => Math.round(x)).join(' × ')} mm`);
+  }
+
   ok('11 · ไม่มี error ในหน้า', pageErrors.length === 0, pageErrors.join(' | '));
 } catch (e) {
   fail++;
   console.log('  ✗ ด่านล้มกลางทาง:', e instanceof Error ? e.message : e);
   const pg = (await browser.pages()).at(-1);
-  if (pg) console.log('    การ์ด:', await pg.evaluate(() => document.querySelector('[data-testid="drawing-card"]')?.textContent ?? document.body.innerText.slice(0, 600)));
+  if (pg) console.log('    การ์ด:', (await pg.evaluate(() => document.querySelector('[data-testid="drawing-card"]')?.textContent ?? document.body.innerText.slice(0, 600))).replace(/\s+/g, ' '));
   if (pageErrors.length) console.log('    error ในหน้า:', pageErrors.join(' | '));
 } finally {
   await browser.close();
