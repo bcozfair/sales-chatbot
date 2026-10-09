@@ -530,6 +530,8 @@ export async function createViewer(host: HTMLElement, src: ModelSource, annIn: A
   const camera = new THREE.PerspectiveCamera(28, 1, 1, 1000);
   const controls = new OrbitControls(camera, canvas);
   controls.enableDamping = true; controls.dampingFactor = 0.09; controls.screenSpacePanning = true;
+  // ซูมเข้าหาจุดใต้เมาส์ (ไม่ใช่กลางจอ) — ซูมแล้วเลื่อนดูส่วนอื่นได้ด้วยคลิกขวา/Shift+ลาก/สองนิ้ว (เจ้าของ 2026-10-09)
+  controls.zoomToCursor = true;
   const ov = document.createElement('div'); ov.className = 'dv-lbls'; host.appendChild(ov);
   const listEl = opts.listEl ?? null;
   let lang: Lang = opts.lang ?? 'th';
@@ -556,7 +558,10 @@ export async function createViewer(host: HTMLElement, src: ModelSource, annIn: A
   // สถานะให้ด่าน UI อ่านจาก DOM (diag:drawing-live-ui) — ขนาดโมเดล (mm) · จำนวนครั้งที่สร้าง · ทิศกล้อง
   let builds = 0;
   const mark = () => { host.dataset.dvBox = model.box.getSize(new THREE.Vector3()).toArray().map((x) => x.toFixed(1)).join(','); host.dataset.dvBuilds = String(++builds); };
-  const markCam = () => { host.dataset.dvCam = camera.position.clone().sub(controls.target).normalize().toArray().map((x) => x.toFixed(3)).join(','); };
+  const markCam = () => {
+    host.dataset.dvCam = camera.position.clone().sub(controls.target).normalize().toArray().map((x) => x.toFixed(3)).join(',');
+    host.dataset.dvPan = controls.target.distanceTo(tgt(t)).toFixed(1);
+  };
   function dirty() { ov.style.opacity = '0'; clearTimeout(settleTimer); settleTimer = setTimeout(() => { if (!anim) layout(); }, 160); }
   function resize() {
     const w = host.clientWidth, h = host.clientHeight; if (!w || !h) return;
@@ -623,9 +628,11 @@ export async function createViewer(host: HTMLElement, src: ModelSource, annIn: A
     if (anim) {
       const p = Math.min(1, (now - anim.t0) / 650); const e = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
       const nt = anim.from + (anim.to - anim.from) * e;
+      // แพนที่ผู้ใช้เลื่อนไว้ติดไปด้วย (ย่อ/ขยายตามระยะกล้อง) — ไม่ดีดกลับกลางจอตอนแยกชิ้น/ประกอบ
+      const pan = controls.target.clone().sub(tgt(t)).multiplyScalar(k(nt) / k(t));
       const off = camera.position.clone().sub(controls.target).multiplyScalar(k(nt) / k(t));
-      controls.target.copy(tgt(nt)); camera.position.copy(controls.target).add(off);
-      t = nt; setExplode(model, t); shadowAt(t); need = true; if (p >= 1) { anim = null; dirty(); }
+      controls.target.copy(tgt(nt)).add(pan); camera.position.copy(controls.target).add(off);
+      t = nt; setExplode(model, t); shadowAt(t); need = true; if (p >= 1) { anim = null; dirty(); markCam(); }
     }
     if (pend) { setHL(pick(pend)); pend = null; }
     if (controls.update() || need) { renderer.render(scene, camera); need = false; }
@@ -662,7 +669,12 @@ export async function createViewer(host: HTMLElement, src: ModelSource, annIn: A
     setLabels(on) { labelsOn = on; layout(); },
     setEdges(on) { model.edgeRoot.visible = on; need = true; },
     setLang(l) { lang = l; layout(); },
-    reset() { if (home) { controls.target.copy(tgt(t)); camera.position.copy(home).multiplyScalar(k(t)).add(controls.target); controls.update(); need = true; dirty(); } },
+    reset() {
+      if (!home) return;
+      // ทิ้งแรงเฉื่อยที่ค้างจากการลาก (ไม่งั้นภาพไหลต่อหลังกลับมุมเริ่มต้น) — update() แบบไม่หน่วงล้างค่าค้างทั้งหมด
+      controls.enableDamping = false; controls.update(); controls.enableDamping = true;
+      controls.target.copy(tgt(t)); camera.position.copy(home).multiplyScalar(k(t)).add(controls.target); controls.update(); need = true; dirty(); markCam();
+    },
     checks: () => lastCheck,
     dispose() {
       alive = false; clearTimeout(settleTimer); ro.disconnect(); controls.dispose(); pmrem.dispose();
