@@ -1,0 +1,121 @@
+{
+  "file": "ราคาTC อัพเดต (13-05-69).xlsx",
+  "sheet": "TS-09S",
+  "code": "TSP-09S",
+  "label": "RTD TSP-09 S (แกน Sheath · หน้าแปลนปีกนก + หัวกระโหลก)",
+  "aliases": [
+    "TSPA-09S",
+    "TSZ-09S"
+  ],
+  "standard": {
+    "L1": 100
+  },
+  "base": {
+    "kind": "matrix",
+    "axes": [
+      "D",
+      "sensor"
+    ],
+    "rowHeaderCol": "A",
+    "rows": [
+      13,
+      14
+    ],
+    "colHeaderRow": 12,
+    "cols": [
+      "C",
+      "D",
+      "E"
+    ]
+  },
+  "adders": [
+    {
+      "id": "len_l1",
+      "label": "ความยาวแกน L1",
+      "order": 20,
+      "kind": "perUnit",
+      "dim": "L1",
+      "step": 100,
+      "round": "ceil",
+      "unit": "mm",
+      "byAxis": "D",
+      "ratesFrom": {
+        "col": "B",
+        "keyCol": "A",
+        "rows": [
+          13,
+          14
+        ]
+      },
+      "source": "TS-09S!B12 'บวกเพิ่ม 100 mm ละ' — ราคาตั้งที่ 100 mm (A10 'ราคาตั้ง Standard TS_- 09 6x100')"
+    },
+    {
+      "id": "head_blacklite_s",
+      "label": "หัวกระโหลก Blacklite เล็ก",
+      "order": 50,
+      "kind": "flat",
+      "when": {
+        "option": "head:blacklite_s"
+      },
+      "byAxis": "D",
+      "ratesFrom": {
+        "col": "G",
+        "keyCol": "A",
+        "rows": [
+          13,
+          14
+        ]
+      },
+      "source": "TS-09S!G12 — หัวกระโหลกรายขนาดแกนแบบชีต TS-09"
+    },
+    {
+      "id": "head_alu_l",
+      "label": "หัวกระโหลก อลูมิเนียม ใหญ่",
+      "order": 50,
+      "kind": "flat",
+      "when": {
+        "option": "head:alu_l"
+      },
+      "byAxis": "D",
+      "ratesFrom": {
+        "col": "H",
+        "keyCol": "A",
+        "rows": [
+          13,
+          14
+        ]
+      },
+      "source": "TS-09S!H12 — หัวกระโหลกรายขนาดแกนแบบชีต TS-09"
+    },
+    {
+      "id": "head_blacklite_l",
+      "label": "หัวกระโหลก Blacklite ใหญ่",
+      "order": 50,
+      "kind": "flat",
+      "when": {
+        "option": "head:blacklite_l"
+      },
+      "byAxis": "D",
+      "ratesFrom": {
+        "col": "I",
+        "keyCol": "A",
+        "rows": [
+          13,
+          14
+        ]
+      },
+      "source": "TS-09S!I12 — หัวกระโหลกรายขนาดแกนแบบชีต TS-09"
+    }
+  ],
+  "constraints": [
+    {
+      "id": "ELEM2_SHEATH",
+      "when": {
+        "option": "element:2"
+      },
+      "level": "quoteOnRequest",
+      "message": "2 Element ของแกน Sheath ต้องนำรุ่น 1 Element ไปสวมในแกน 15.8 mm ขึ้นไป — ปรึกษาฝ่ายผลิต 2 ก่อน (ต้องขอราคา)",
+      "source": "TS-09S!A16 'หมายเหตุ : เนื่องจากรุ่น 2 Element จะต้องนำรุ่น 1 Element ใส่ในแกนใหญ่ … ให้ปรึกษากับทางผลิต 2 ก่อน'"
+    }
+  ]
+}
