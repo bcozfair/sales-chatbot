@@ -24,7 +24,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { Doubt, DrawingSpec, PricingOutcome, PricingReading } from './types.js';
-import { ISSUE_TEXT, SLOT_LABEL, TS11_SHAPE_SLOTS, fromReading } from './spec/fromReading.js';
+import { ISSUE_TEXT, SLOT_LABEL, TS_SHAPE_SLOTS, fromReading } from './spec/fromReading.js';
 
 /** ชนิดของความหลวมในผลอ่านรหัส */
 export type LooseKind =
@@ -86,12 +86,12 @@ const CABLE_END_CONFIRMABLE: readonly string[] = ['MP', 'SP'];
 /** ความยาวสายที่ขั้วไฟแบบออกสายของ BH หมายถึง (เมตร) — `''` = สาย 30 cm */
 const BH_WIRE_METRES: Record<string, number> = { '': 0.3, '1': 1, '2': 2, '3': 3 };
 
-/** ทุกความหลวมของผลอ่าน (รวมที่ได้รับยกเว้น) — ช่องรูปทรงของ TS_-11 ไม่อยู่ในนี้ (fromReading ตัดสินเป็น "วาดไม่ได้" แล้ว) */
+/** ทุกความหลวมของผลอ่าน (รวมที่ได้รับยกเว้น) — ช่องรูปทรงของซีรีส์ TS ไม่อยู่ในนี้ (fromReading ตัดสินเป็น "วาดไม่ได้" แล้ว) */
 export function loosenessOf(reading: PricingReading): Looseness[] {
   const out: Looseness[] = [];
   const ts = reading.tsForm;
   if (ts) {
-    const shape = ts.family === 'TS_-11' ? (TS11_SHAPE_SLOTS as readonly string[]) : [];
+    const shape = TS_SHAPE_SLOTS[ts.family] ?? [];
     for (const [slot, issue] of Object.entries(ts.issues ?? {}))
       if (!shape.includes(slot)) out.push({ kind: 'issue', key: `issue:${slot}`, reason: `${SLOT_LABEL[slot] ?? slot} ${ISSUE_TEXT[issue] ?? issue}` });
     for (const slot of ts.omit ?? [])
@@ -106,7 +106,7 @@ export function loosenessOf(reading: PricingReading): Looseness[] {
       const token = raw.replace(/^[-+]+/, '');
       const hit = TS_EMPTY_FIELD.find((f) => f.slot in ts.values && ts.values[f.slot] === '' && !ts.issues?.[f.slot] && !shape.includes(f.slot) && f.looksLike(token));
       if (hit) out.push({ kind: 'guessedField', key: `guessed:${hit.slot}`, reason: `ท้ายรหัส «${raw}» น่าจะเป็น${SLOT_LABEL[hit.slot] ?? hit.slot} แต่ช่องนั้นว่าง — ตารางสเปกจะพิมพ์ผิด` });
-      else if (ts.family === 'TS_-11' && ts.values.cable && /^[A-Z]/i.test(token) && !/^S\d+$/i.test(token) && !CABLE_END_CONFIRMABLE.includes(token.toUpperCase()))
+      else if (ts.family in TS_SHAPE_SLOTS && ts.values.cable && /^[A-Z]/i.test(token) && !/^S\d+$/i.test(token) && !CABLE_END_CONFIRMABLE.includes(token.toUpperCase()))
         out.push({ kind: 'cableEnd', key: 'tail:cableEnd', reason: `ท่อน «${raw}» ต่อท้ายสาย — ยังไม่รู้ว่าเปลี่ยนปลายสายหรือไม่` });
     }
   }

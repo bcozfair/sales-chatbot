@@ -11,6 +11,8 @@ import {
   getRecentConfirmedQuotations,
   getStaticBranches,
   getBranchesByCodes,
+  getRetryableFailedText,
+  getFreshDraftForUser,
 } from '../db/repositories.js';
 import { buildPdfLink, parseQuotationNosFromText } from '../utils/quotationLink.js';
 import { getAppUrl } from '../config/appUrl.js';
@@ -24,7 +26,8 @@ import {
   createCartConfirmationFlex,
   appendReviseFrom,
   createRevisionFlex,
-  isCustomerInfoIncomplete
+  isCustomerInfoIncomplete,
+  createLlmOutageRetryFlex
 } from '../utils/flexTemplates.js';
 import { findProduct } from '../services/productService.js';
 import { applyThaiSuffixVariants } from '../services/thaiSuffixVariant.js';
@@ -77,6 +80,30 @@ const PRODUCT_INFO_HINT_REPLY = `ต้องการเช็คสต๊อ�
 
 // คำที่บ่งว่าเซลส์อยากเช็คข้อมูลสินค้า — เช็คหลัง "เสนอราคา" เสมอ เพราะ "เสนอราคา" มีคำว่า "ราคา" อยู่ด้วย
 const PRODUCT_INFO_KEYWORDS = ['ราคา', 'เช็คของ', 'เช็คสินค้า', 'มีของ', 'ของมี', 'สต็อก', 'สต๊อก', 'stock'];
+
+// AI ขัดข้องจนสกัดข้อความไม่สำเร็จ (extraction_failed) — ส่งคู่ปุ่ม "ลองอีกครั้ง" (createLlmOutageRetryFlex)
+// เจ้าของเคาะถ้อยคำ 2026-10-08 · เปลี่ยนเป็นข้อความกลาง (ไม่มีคำว่า AI) 2026-10-09 · ห้ามแก้แบบไม่ตั้งใจ: getRetryableFailedText ใช้ค่านี้ยืนยันว่าแถวไหนคือข้อความที่ล้ม
+// (แถวที่บันทึกก่อนเปลี่ยนถ้อยคำจะกดปุ่มไม่ได้ — ยอมรับได้ ปุ่มเก่าหมดความหมายไปพร้อมกัน)
+const LLM_OUTAGE_REPLY = 'ขออภัย ระบบขัดข้องชั่วคราว กรุณารอสักครู่ แล้วลองใหม่อีกครั้งนะครับ 🙏';
+
+// กดปุ่ม "ลองอีกครั้ง" ของข้อความที่ไม่ใช่ข้อความพิมพ์ล่าสุดแล้ว (ทำรายการไปแล้ว / พิมพ์อย่างอื่นต่อ)
+const RETRY_STALE_REPLY = 'ปุ่มนี้ใช้กับข้อความล่าสุดเท่านั้นครับ ข้อความนั้นทำรายการไปแล้ว หรือมีข้อความใหม่กว่าแล้ว 🙏';
+
+// กดปุ่มเลือกรุ่นซ้ำหลังเลือกครบและได้การ์ดสรุปร่างแล้ว (วัด 2026-10-06..08: 4 ใน 6 ครั้งของ "เซสชันหมดอายุ"
+// คือกดซ้ำภายใน 1.4–3.4 วิ · อีก 2 ครั้งอยากเปลี่ยนรุ่น) — ข้อความเดิมสั่งให้พิมพ์ใหม่ทั้งที่ร่างสร้างเสร็จแล้ว
+// เจ้าของเคาะถ้อยคำ 2026-10-09 · ใช้เฉพาะเมื่อการ์ดมีปุ่ม "🔧 แก้ไขรายละเอียด" จริง (pickedModelReplyApplies)
+const PICKED_MODEL_REPLY = 'คุณเลือกรุ่นไปแล้วครับ ถ้าต้องการเปลี่ยนรุ่น กรุณากดปุ่ม "แก้ไข" ได้เลย';
+const PICKED_MODEL_WINDOW_SEC = 120;
+
+/**
+ * ข้อความ PICKED_MODEL_REPLY ใช้ได้ไหม — ต้องมีร่างที่เพิ่งได้การ์ดสรุป และการ์ดนั้นต้องมีปุ่มชื่อ "แก้ไข…"
+ * ปุ่มบนการ์ดเป็น "🏢 กรอกข้อมูลลูกค้า" เมื่อ isCustomerInfoIncomplete (getQuotationSummaryMessage)
+ * ⇒ กรณีนั้นถอยไปข้อความเดิม ไม่บอกให้กดปุ่มที่ไม่มีอยู่จริง
+ * `draft` ต้องผ่าน enrichQuotationData แล้ว (ตัวเดียวกับที่การ์ดใช้) — แถวดิบไม่มี customer_name
+ */
+export function pickedModelReplyApplies(draft: { status: string; customer_name?: string | null } | null): boolean {
+  return !!draft && draft.status === 'draft' && !isCustomerInfoIncomplete(draft);
+}
 
 // ตัวสำรองสำหรับ UNCLEAR ที่ไม่ได้พูดถึงการเสนอราคา (ทักทาย/ถามทั่วไป) เผื่อ LLM ไม่ส่ง reply_message มา
 const GREETING_REPLY = `สวัสดีครับ ผมเป็นบอทผู้ช่วยออกใบเสนอราคา 🙏
@@ -333,6 +360,26 @@ export async function handleEvent(
       const action = params.get('action');
       const quoteIdParam = params.get('id') || params.get('quoteId') || '';
 
+      // ปุ่ม "ลองอีกครั้ง" ตอน AI ขัดข้อง — รันข้อความเดิมใหม่ทั้งเส้นเหมือนเซลส์พิมพ์เอง
+      // ใช้ replyToken ของ postback นี้ (ใหม่ ยังไม่ถูกใช้) และงบเวลาของ event นี้
+      // message id ใหม่ต่อการกดหนึ่งครั้ง ⇒ ถ้ายังล่มอยู่ ปุ่มของรอบใหม่ชี้แถวของรอบนี้ ไม่ใช่แถวเดิม
+      if (action === 'retry_text') {
+        const mid = params.get('mid') || '';
+        const text = mid ? await getRetryableFailedText(userId, mid, LLM_OUTAGE_REPLY) : null;
+        if (!text) {
+          return await lineClient.replyMessage({
+            replyToken: event.replyToken,
+            messages: [{ type: 'text', text: RETRY_STALE_REPLY }],
+          });
+        }
+        const retryEvent = {
+          ...event,
+          type: 'message',
+          message: { type: 'text', id: `retry_${event.webhookEventId || Date.now()}`, text },
+        };
+        return await handleEvent(retryEvent, opts);
+      }
+
 
 
       if (action === 'edit_menu') {
@@ -583,7 +630,7 @@ export async function handleEvent(
             console.error("confirmQuotationAtomic error:", err);
             replyMessages.push({
               type: 'text',
-              text: `❌ เกิดข้อผิดพลาดในการยืนยันใบเสนอราคา ID: ${qId}`
+              text: '❌ เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้งครับ'
             });
             continue;
           }
@@ -903,14 +950,26 @@ export async function handleEvent(
           console.error('[select_product] transaction error:', err);
           return await lineClient.replyMessage({
             replyToken: event.replyToken,
-            messages: [{ type: 'text', text: '❌ เกิดข้อผิดพลาด รบกวนลองใหม่อีกครั้งครับ' }]
+            messages: [{ type: 'text', text: '❌ เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้งครับ' }]
           });
         }
 
         if (outcome === 'no_pending') {
+          // อ่านไม่สำเร็จ = ถอยไปข้อความเดิม (ห้ามทำให้ปุ่มนี้ตอบไม่ได้)
+          const freshDraft = await getFreshDraftForUser(pool, userId, PICKED_MODEL_WINDOW_SEC)
+            .then((row) => (row ? enrichQuotationData(row) : null))
+            .catch((err) => {
+              console.error('[select_product] fresh draft lookup failed (ใช้ข้อความเดิม):', err);
+              return null;
+            });
           return await lineClient.replyMessage({
             replyToken: event.replyToken,
-            messages: [{ type: 'text', text: '❌ เซสชันหมดอายุหรือไม่มีรายการที่รอเลือกรุ่น รบกวนพิมพ์คำสั่งเสนอราคาใหม่อีกครั้งครับ' }]
+            messages: [{
+              type: 'text',
+              text: pickedModelReplyApplies(freshDraft)
+                ? PICKED_MODEL_REPLY
+                : '❌ เซสชันหมดอายุหรือไม่มีรายการที่รอเลือกรุ่น รบกวนพิมพ์คำสั่งเสนอราคาใหม่อีกครั้งครับ'
+            }]
           });
         }
         if (outcome === 'invalid') {
@@ -1901,10 +1960,12 @@ export async function handleEvent(
           // เลือกคำแนะนำตามสิ่งที่เซลส์พิมพ์มา (เรียงลำดับสำคัญ: "เสนอราคา" ต้องมาก่อน "ราคา")
           // - เอ่ยถึง "เสนอราคา" แต่ข้อมูลไม่พอ → ส่งแบบฟอร์มให้ก๊อปไปกรอก
           // - ถามเช็คราคา/เช็คของ แต่ไม่ได้ระบุรุ่น → บอกให้พิมพ์รหัสรุ่นมาด้วย
-          // - นอกนั้น (ทักทาย/ถามทั่วไป/ระบบสกัดล่ม) → ตอบตามบริบทที่ LLM สร้างมา
+          // - ระบบสกัดล่ม (AI ขัดข้อง) → ขออภัย + ปุ่มรันข้อความเดิมใหม่ (action=retry_text)
+          // - นอกนั้น (ทักทาย/ถามทั่วไป) → ตอบตามบริบทที่ LLM สร้างมา
           const lowerContent = content.toLowerCase();
           if (aiResult.extraction_failed) {
-            botReplyText = aiResult.reply_message || GREETING_REPLY;
+            botReplyText = LLM_OUTAGE_REPLY;
+            customMessages = [createLlmOutageRetryFlex(LLM_OUTAGE_REPLY, messageId)];
           } else if (content.includes('เสนอราคา')) {
             botReplyText = QUOTATION_FORM_REPLY;
           } else if (PRODUCT_INFO_KEYWORDS.some(kw => lowerContent.includes(kw))) {

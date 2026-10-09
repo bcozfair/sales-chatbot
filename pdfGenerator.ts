@@ -1081,3 +1081,88 @@ export async function generateQuotationPDF(quoteData: any, quoteNoInput?: string
     await page.close().catch((err) => console.error("[pdfGenerator] ปิด page ไม่สำเร็จ:", err));
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  พิมพ์เอกสารอื่นที่ไม่ใช่ใบเสนอราคา (กระดาษแบบ 3 มิติ · docs/plan-product-drawing-3d.md §5.4 "กฎ PDF เฟส 1" เจ้าของเคาะ 2026-10-06)
+//
+//  ไฟล์นี้เป็นที่เดียวที่สั่ง Chrome พิมพ์ · เนื้อหา (HTML) สร้างที่โมดูลของเอกสารนั้นเอง · **ใช้ Chrome ตัวแยก** ไม่แตะตัวที่ใบเสนอราคาถือ
+//  (getBrowser ด้านบน) และ **ไม่แตะโค้ดใบเสนอราคาสักบรรทัด** — พิสูจน์ด้วย `npm run diag:pdf-render -- <quoteId>` ก่อน/หลัง (ลายนิ้วมือเท่าเดิม)
+//  · เปิดเมื่อมีงาน ปิดเองเมื่อว่าง 60 วิ (ไม่กิน RAM ตอนไม่มีใครโหลดแบบ)
+//  · หน้าที่พิมพ์ **ถูกบล็อกเน็ตทุกคำขอที่ไม่ใช่ data:** — เนื้อหามาจากผู้ใช้บางส่วน (ภาพนิ่ง 3 มิติ) ห้ามพาไปเปิดที่อื่น/ไฟล์ในเครื่อง
+// ─────────────────────────────────────────────────────────────────────────────
+
+let printBrowserPromise: Promise<import("puppeteer").Browser> | null = null;
+let printIdleTimer: NodeJS.Timeout | undefined;
+let printJobs = 0;
+const PRINT_IDLE_MS = 60_000;
+const PRINT_LOAD_TIMEOUT_MS = 15_000;
+
+async function getPrintBrowser(): Promise<import("puppeteer").Browser> {
+  if (printBrowserPromise) {
+    try {
+      const existing = await printBrowserPromise;
+      if (existing.connected) return existing;
+    } catch {
+      // launch รอบก่อนล้ม — launch ใหม่ด้านล่าง
+    }
+    printBrowserPromise = null;
+  }
+  printBrowserPromise = puppeteer
+    .launch({ headless: "new" as any, args: ["--no-sandbox", "--disable-setuid-sandbox"] })
+    .catch((err) => { printBrowserPromise = null; throw err; });
+  const browser = await printBrowserPromise;
+  browser.once("disconnected", () => { printBrowserPromise = null; });
+  return browser;
+}
+
+function schedulePrintBrowserClose(): void {
+  if (printIdleTimer) clearTimeout(printIdleTimer);
+  printIdleTimer = setTimeout(() => { if (printJobs === 0) void closePrintBrowser(); }, PRINT_IDLE_MS);
+  printIdleTimer.unref?.();   // ไม่ถ่วงให้โปรเซส (สคริปต์/ด่าน) ค้างรอปิด
+}
+
+/** ปิด Chrome ตัวแยกของ printHtml (ด่าน/graceful shutdown · ปกติปิดเองเมื่อว่าง) */
+export async function closePrintBrowser(): Promise<void> {
+  if (printIdleTimer) clearTimeout(printIdleTimer);
+  const current = printBrowserPromise;
+  printBrowserPromise = null;
+  if (!current) return;
+  try { await (await current).close(); } catch (err) { console.error("[pdfGenerator] ปิด browser ของ printHtml ไม่สำเร็จ:", err); }
+}
+
+export interface PrintOptions {
+  kind: "pdf" | "png";
+  /** ขนาดกระดาษ (mm) */
+  widthMm: number;
+  heightMm: number;
+  /** PNG: ความกว้างเป็นพิกเซล (ความสูงตามสัดส่วนกระดาษ) */
+  pngWidthPx?: number;
+  /** PDF: จำนวนหน้า (ไม่ส่ง = 1) — หน้าเนื้อหาแบ่งเองด้วย CSS `break-after:page` · PNG ถ่ายหน้าแรกเสมอ */
+  pages?: number;
+}
+
+/** พิมพ์หน้า HTML ที่ประกอบเสร็จแล้วเป็น PDF หน้าเดียว หรือ PNG ขนาดกระดาษ */
+export async function printHtml(html: string, opts: PrintOptions): Promise<Uint8Array> {
+  printJobs++;
+  if (printIdleTimer) clearTimeout(printIdleTimer);
+  const browser = await getPrintBrowser().catch((e) => { printJobs--; schedulePrintBrowserClose(); throw e; });
+  const page = await browser.newPage();
+  try {
+    await page.setRequestInterception(true);
+    page.on("request", (r) => { const u = r.url(); if (u.startsWith("data:") || u === "about:blank") void r.continue(); else void r.abort("blockedbyclient"); });
+    // viewport เป็นพิกเซล CSS จำนวนเต็ม — ตัวคูณคิดจากค่าที่ปัดแล้ว ไม่งั้น PNG เกินไป 1 px (1755 × 1241)
+    const cssW = Math.round(opts.widthMm / 25.4 * 96), cssH = Math.round(opts.heightMm / 25.4 * 96);
+    const scale = opts.kind === "png" ? (opts.pngWidthPx ?? 1754) / cssW : 1;
+    await page.setViewport({ width: cssW, height: cssH, deviceScaleFactor: scale });
+    await page.setContent(html, { waitUntil: "load", timeout: PRINT_LOAD_TIMEOUT_MS });
+    await waitForFontsReady(page);
+    if (opts.kind === "pdf") {
+      return await page.pdf({ width: `${opts.widthMm}mm`, height: `${opts.heightMm}mm`, printBackground: true, pageRanges: `1-${Math.max(1, opts.pages ?? 1)}`, margin: { top: 0, right: 0, bottom: 0, left: 0 } });
+    }
+    return await page.screenshot({ type: "png", clip: { x: 0, y: 0, width: cssW, height: cssH } });
+  } finally {
+    await page.close().catch(() => {});
+    printJobs--;
+    schedulePrintBrowserClose();
+  }
+}

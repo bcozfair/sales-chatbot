@@ -13,6 +13,8 @@
 //      4. **สามทางตรงกัน**: ค่าที่วัดจาก mesh = ช่องของหน้าคำนวณราคา = ค่าที่คิดเงิน (`cfg`)
 //         TS_-11: รัศมีแกน = D/2 = axes.D/2 · ปลายแกน −x = L1 = dims.L1 · ความยาวสาย = dims.cable_m · จำนวนสายตามชนิด
 //                 · มี/ไม่มีสปริงตามช่อง · สีปลอกตามชนิดสาย
+//         TS_-01/01-0/02/03/05 (2026-10-09): เหมือน TS_-11 ยกเว้นสปริง (มีเสมอ) · TS_-01 ช่อง L1 ว่าง = 5 (แคตตาล็อก "None = 5 mm" ·
+//                 ไม่มี dims.L1) · TS_-01-0 ไม่มีแกนวัด ⇒ ตรวจแค่สาย/สีปลอก · จำนวนสาย: RTD (P/PA/Z) = 3
 //         BH-01/01C: รัศมีใน = ID/2 = dims.dia_mm/2 · หนา 4 · สูงตามแกน = H = dims.width_mm · ชิ้นขั้วไฟตามช่อง · ผ่าครึ่งตามตระกูล
 //      5. ช่องรูปทรงมี issue/ไม่ได้เขียน · ท่อนหลังเลขรุ่น · แกนหัก ⇒ ต้อง "วาดไม่ได้" (ตรวจซ้ำจากผลอ่านเอง ไม่ใช้ checks.ts)
 //         · แกนหักอ่านจาก **`parsed.cfg.options` ตรง ๆ** (`bend:*` ที่ตัวอ่านรหัสตั้งจากตัว L ท้ายเลขรุ่น — pricingLab `c80d688`)
@@ -50,6 +52,7 @@ import { judge } from '../../services/drawing/checks.js';
 import { buildModel } from '../../services/drawing/families/registry.js';
 import { JACKETS } from '../../services/drawing/families/tsParts.js';
 import { SENSOR_LEADS } from '../../services/drawing/families/ts-11.js';
+import { CABLE_LEADS } from '../../services/drawing/families/tsCable.js';
 import type { ProductConfig } from '../../services/pricingLab/types.js';
 import type { BhFormReading, DrawingModel, DrawingSpec, PricingReading, TsFormReading } from '../../services/drawing/types.js';
 import { writeGlb } from '../../services/drawing/writers/glb.js';
@@ -72,6 +75,16 @@ const GREEN = '\x1b[32m', RED = '\x1b[31m', DIM = '\x1b[2m', BOLD = '\x1b[1m', R
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const MAX_REPORT = 8;
 const EPS = 1e-9;
+/** ช่องรูปทรงของซีรีส์ TS ต่อตระกูล — สำเนาของด่านเอง (สัญญาณอิสระจาก fromReading.ts) */
+const TS_SHAPE: Record<string, string[]> = {
+  'TS_-11': ['probe', 'sensor', 'spring', 'd', 'l1', 'cable'],
+  'TS_-01': ['sensor', 'thread', 'd', 'l1', 'cable'],
+  'TS_-01-0': ['sensor', 'hold', 'cable'],
+  'TS_-02': ['sensor', 'id', 'd', 'l1', 'cable'],
+  'TS_-03': ['probe', 'sensor', 'd', 'l1', 'cable'],
+  'TS_-05': ['sensor', 'id', 'd', 'l1', 'cable'],
+};
+const DRAWN = new Set([...Object.keys(TS_SHAPE), 'BH-01', 'BH-01C']);
 
 // ── ข้อ 8: ทิศการพึ่งพา (อ่านซอร์ส) ────────────────────────────────────────────
 function walk(dir: string, out: string[] = []): string[] {
@@ -173,7 +186,7 @@ function measure(spec: DrawingSpec, name: string): Measured {
     problems.push(`ข้อ 3: เขียน GLB ไม่ได้ — ${e instanceof Error ? e.message : String(e)}`);
   }
   const out: Measured = { problems, model };
-  if (spec.family === 'TS_-11') {
+  if (spec.family !== 'BH-01' && spec.family !== 'BH-01C') {
     const tube = model.parts.find((p) => p.name === 'probe_tube');
     let radius = 0, tip = 0;
     for (let k = 0; tube && k < tube.positions.length; k += 3) {
@@ -183,7 +196,7 @@ function measure(spec: DrawingSpec, name: string): Measured {
     out.ts = {
       radius, tip,
       leads: model.parts.filter((p) => /^lead_\d+$/.test(p.name)).length,
-      spring: model.parts.some((p) => p.name === 'strain_spring'),
+      spring: model.parts.some((p) => p.name === 'strain_spring' || p.name === 'cover_spring'),
       jacket: model.parts.find((p) => p.name === 'cable')?.colour ?? null,
     };
   } else {
@@ -220,6 +233,21 @@ function threeWay(spec: DrawingSpec, m: Measured, cfg: { axes?: Record<string, s
     const want = JACKETS[spec.cable];
     if (!m.ts.jacket || m.ts.jacket.some((c, k) => c !== want[k])) out.push(`ข้อ 4: สีปลอกสายไม่ตรงชนิดสาย «${ts.values.cable}»`);
   }
+  if (spec.family !== 'TS_-11' && spec.family !== 'BH-01' && spec.family !== 'BH-01C' && m.ts && ts) {
+    if (spec.family !== 'TS_-01-0') {
+      const d = Number(ts.values.d), l1 = ts.values.l1 === '' && spec.family === 'TS_-01' ? 5 : Number(ts.values.l1);
+      const cfgD = cfg?.axes?.D !== undefined ? parseFloat(cfg.axes.D) : NaN;
+      if (!near(m.ts.radius, d / 2, 1e-9) || !near(cfgD / 2, d / 2, 1e-12)) out.push(`ข้อ 4: รัศมีแกน mesh ${m.ts.radius} · ช่อง ${d / 2} · cfg.axes.D ${cfg?.axes?.D}`);
+      const cfgL1 = cfg?.dims?.L1 ?? (ts.values.l1 === '' ? 5 : NaN);
+      if (!near(m.ts.tip, l1, 1e-9) || cfgL1 !== l1) out.push(`ข้อ 4: ความยาวแกน mesh ${m.ts.tip} · ช่อง ${l1} · cfg.dims.L1 ${cfg?.dims?.L1}`);
+    }
+    if (spec.cableLen !== null && !near(spec.cableLen, cfg?.dims?.cable_m ?? NaN, 1e-9)) out.push(`ข้อ 4: ความยาวสาย spec ${spec.cableLen} · cfg.dims.cable_m ${cfg?.dims?.cable_m}`);
+    const rtd = ['P', 'PA', 'Z'].includes(ts.values.sensor) && (ts.values.probe ?? 'TS') === 'TS';
+    if (m.ts.leads !== CABLE_LEADS[spec.sensor] || m.ts.leads !== (rtd ? 3 : 2)) out.push(`ข้อ 4: จำนวนสาย mesh ${m.ts.leads} · ชนิด ${ts.values.probe ?? ''}${ts.values.sensor}`);
+    if (!m.ts.spring) out.push('ข้อ 4: ไม่มีสปริงใน mesh (ทุกรุ่นออกสายมีสปริง)');
+    const want = JACKETS[spec.cable];
+    if (!m.ts.jacket || m.ts.jacket.some((c, k) => c !== want[k])) out.push(`ข้อ 4: สีปลอกสายไม่ตรงชนิดสาย «${ts.values.cable}»`);
+  }
   if ((spec.family === 'BH-01' || spec.family === 'BH-01C') && m.bh && bh) {
     const id = bh.id ?? NaN, h = bh.h ?? NaN;
     if (!near(m.bh.ri, id / 2, 1e-6) || cfg?.dims?.dia_mm !== id) out.push(`ข้อ 4: รัศมีใน mesh ${m.bh.ri} · ช่อง ID/2 ${id / 2} · cfg.dims.dia_mm ${cfg?.dims?.dia_mm}`);
@@ -239,8 +267,8 @@ function threeWay(spec: DrawingSpec, m: Measured, cfg: { axes?: Record<string, s
 function mustNotDraw(ts?: TsForm, bh?: BhForm, cfg?: ProductConfig): string | null {
   // แกนหักทุกตระกูล — สัญญาณอิสระจากสเปกที่ส่งเข้าตัวคิดราคา + ช่องที่ติ๊ก
   if ([...(cfg?.options ?? []), ...(ts?.addons ?? []), ...(bh?.addons ?? [])].some((a) => a.startsWith('bend:'))) return 'แกนหัก (bend:* ใน cfg.options/addons)';
-  if (ts?.family === 'TS_-11') {
-    const shape = ['probe', 'sensor', 'spring', 'd', 'l1', 'cable'];
+  if (ts && TS_SHAPE[ts.family]) {
+    const shape = TS_SHAPE[ts.family];
     if (ts.headJunk) return `ท่อนหลังเลขรุ่น ${ts.headJunk}`;
     const bad = shape.find((s) => ts.issues?.[s] || ts.omit?.includes(s));
     if (bad) return `ช่องรูปทรง ${bad} มี issue/ไม่ได้เขียน`;
@@ -272,7 +300,7 @@ function blockingLooseness(ts?: TsForm, bh?: BhForm): string | null {
   return guessedEmptyField(ts, bh);
 }
 /** ท่อนท้ายที่เป็นค่าของช่องที่ตัวอ่านปล่อยว่าง — ตัดสินเองจากผลอ่าน (สำเนาโดยตั้งใจ · เป็นสัญญาณอิสระจาก checks.ts) */
-/** ท่อนต่อท้ายสาย TS_-11 ที่เจ้าของให้ยืนยันได้ (2026-10-06 · "วาดเท่าที่มีตามรูปและแบบไปก่อน") — รายการของด่านเอง คู่กับ checks.ts */
+/** ท่อนต่อท้ายสายของซีรีส์ TS ที่เจ้าของให้ยืนยันได้ (2026-10-06 · "วาดเท่าที่มีตามรูปและแบบไปก่อน") — รายการของด่านเอง คู่กับ checks.ts */
 const CABLE_END_OK: readonly string[] = ['MP', 'SP'];
 
 function guessedEmptyField(ts?: TsForm, bh?: BhForm): string | null {
@@ -284,7 +312,7 @@ function guessedEmptyField(ts?: TsForm, bh?: BhForm): string | null {
       if (v.elem === '' && /^2(?![\d.])/.test(t)) return `ท้ายรหัส ${t} = Element แต่ช่องว่าง`;
       if (v.cl === '' && /^\d+(\.\d+)?(M|CM|MM)$/i.test(t)) return `ท้ายรหัส ${t} = ความยาวสาย แต่ช่องว่าง`;
       // ท่อนตัวอักษรต่อท้ายสายที่ระบุแล้ว นอกรายการที่เจ้าของให้ยืนยันได้ — ยังไม่รู้ว่าเปลี่ยนปลายสายไหม
-      if (ts.family === 'TS_-11' && v.cable !== '' && /^[A-Z]/i.test(t) && !/^S\d+$/i.test(t) && !CABLE_END_OK.includes(t.toUpperCase())) return `ท่อน ${t} ต่อท้ายสายที่ระบุแล้ว — ยังไม่รู้ความหมาย`;
+      if (TS_SHAPE[ts.family] && v.cable !== '' && /^[A-Z]/i.test(t) && !/^S\d+$/i.test(t) && !CABLE_END_OK.includes(t.toUpperCase())) return `ท่อน ${t} ต่อท้ายสายที่ระบุแล้ว — ยังไม่รู้ความหมาย`;
     }
   }
   if (bh) {
@@ -350,7 +378,7 @@ async function main(): Promise<void> {
     const v = judge(parsed, outcome);
     const ts = parsed.tsForm, bh = parsed.form;
     const fam = ts?.family ?? bh?.family ?? null;
-    const hasDrawing = fam === 'TS_-11' || fam === 'BH-01' || fam === 'BH-01C';
+    const hasDrawing = fam !== null && DRAWN.has(fam);
     if (!hasDrawing) {
       const label = fam ?? (parsed.model ? `${parsed.model} (ไม่มีช่องตามแคตตาล็อก)` : '(ไม่มีรุ่นในสมุดราคา)');
       noDrawingFamilies.set(label, (noDrawingFamilies.get(label) ?? 0) + 1);
@@ -381,9 +409,10 @@ async function main(): Promise<void> {
 
     // ข้อ 1–4
     const spec = v.spec as DrawingSpec;
-    const key = spec.family === 'TS_-11'
-      ? JSON.stringify([spec.family, spec.sensor, spec.spring, spec.dia, spec.tubeLen, spec.cable])
-      : JSON.stringify([spec.family, spec.id, spec.h, spec.term, spec.mat]);
+    // คีย์รูปทรง = ช่องที่ตัวสร้างอ่าน (ช่องอื่นไม่เปลี่ยนรูปทรง)
+    const key = spec.family === 'BH-01' || spec.family === 'BH-01C'
+      ? JSON.stringify([spec.family, spec.id, spec.h, spec.term, spec.mat])
+      : JSON.stringify({ ...spec, mat: null, elem: null, ground: null, cableLen: null });
     let m = cache.get(key);
     if (!m) {
       m = measure(spec, code);

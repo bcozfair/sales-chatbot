@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-//  "การสั่งซื้อ" ของแคตตาล็อก TS — ลำดับท่อนของรหัส + ตัวเลือกของแต่ละท่อน (16 ตาราง · TS_-02 กับ TS_-02-SI ใช้รุ่นเดียวกัน)
+//  "การสั่งซื้อ" ของแคตตาล็อก TS — ลำดับท่อนของรหัส + ตัวเลือกของแต่ละท่อน (17 ตาราง · TS_-02 กับ TS_-02-SI ใช้รุ่นเดียวกัน)
 //
 //  โมดูล "คิดราคาสินค้า" — ถอดออกได้ทั้งก้อน ดู services/pricingLab/README.md · docs/pricing-code-ts-catalog.md
 //
@@ -27,7 +27,7 @@
 
 import type { CatalogOption } from './catalogBh.js';
 
-export type TsFamily = 'TS_-01' | 'TS_-01-0' | 'TS_-02' | 'TS_-02-SI' | 'TS_-03' | 'TS_-04' | 'TS_-05' | 'TS_-06' | 'TS_-07' | 'TS_-08' | 'TS_-10' | 'TS_-11' | 'TS_-12' | 'TS_-12R' | 'TS_-14' | 'TS_-18';
+export type TsFamily = 'TS_-01' | 'TS_-01-0' | 'TS_-02' | 'TS_-02-SI' | 'TS_-03' | 'TS_-04' | 'TS_-05' | 'TS_-06' | 'TS_-07' | 'TS_-08' | 'TS_-09' | 'TS_-10' | 'TS_-11' | 'TS_-12' | 'TS_-12R' | 'TS_-14' | 'TS_-18';
 
 export interface TsSlot {
   label: string;
@@ -210,23 +210,137 @@ export const OFF_CATALOG_SUFFIX: Record<string, { num: string; head: string; let
  *   TSP-10L 10 · TSP-12L 9 · TSP-08L 2 · วัด 2026-10-06) ⇒ เจ้าของสั่ง 2026-10-06 *"ทุกรหัสที่มีกฎหัก L เหมือนกัน ให้บวกตามที่ excel ระบุ"*
  *   · เงินอยู่ที่กฎ `bend_l` ของรุ่น (แก้ที่หน้าสมุดราคา) · รุ่นที่ไม่มีกฎนี้ = ตัว L ยังเป็นท่อนนอกแคตตาล็อกตามเดิม (`TSJ-02L`)
  *   · ตัวเลขหลัง L1 (`6x50+700` = ความยาวขาที่สอง) ชีตไม่ได้เขียนราคา ⇒ ยังไม่คิด (ท่อนไม่รู้จัก)
+ *   · เขียนแยกด้วยขีด (`TSP-08-L(` · `TSK-11-L 5x…`) = ตัวเดียวกัน + เตือนให้แก้รหัสใน Odoo (เจ้าของ 2026-10-09 "นับด้วย")
  * อยู่ในโค้ด ไม่ใช่ตารางรหัสย่อย ด้วยเหตุผลเดียวกับ `MODEL_SUFFIX` (ตัวอักษรเดียวกันตำแหน่งอื่นเป็นคนละเรื่อง) และไม่ต้องเขียนฐานเพิ่ม
  * — ช่องติ๊ก "หัก L" บนหน้าคำนวณราคาไม่ติ๊กตาม (ค่าที่ติ๊กติดไปกับรหัสถัดไปที่พิมพ์ ⇒ ติ๊กให้เอง = รหัสที่ไม่มี L ได้ +100 ตาม)
  */
 export const SUFFIX_ADDON: Record<string, string> = { L: 'bend:L' };
 
 /**
- * ตัวอักษรวัสดุที่ชีตสั่งให้ **คิดราคาทั้งชิ้นจากตารางของรุ่นอื่น** — วันนี้ตัวเดียว: S (Sheath 316 · แกนสำเร็จ) ของ TS_-03
+ * ตัวอักษรวัสดุที่ชีตสั่งให้ **คิดราคาทั้งชิ้นจากตารางของรุ่นอื่น** — S (Sheath 316 · แกนสำเร็จ) ของ TS_-03 และ S ของ TS_-08
  * ชีต TS-03!H12 "สำหรับรุ่นแกนสำเร็จให้ไปใช้ราคา Model TSK-12" · เจ้าของสั่ง 2026-10-06 "ให้เอาตาม excel" (14 รหัสจริง)
  * ⇒ ราคาตั้ง · ความยาวแกน · ค่าสาย มาจากรุ่น TSK-12 (ชีต TS-12,13) **ที่เดียว** ไม่ก๊อปตัวเลขมาไว้ในรุ่น TSK-03 —
  * แก้ราคา TSK-12 ที่หน้าสมุดราคาแล้วรหัสเหล่านี้ตามเอง · ตารางรหัสย่อย (ชนิดสาย · Ground) ยังเป็นของรุ่นในรหัส
  * ส่วนที่ TSK-12 ไม่มีกฎ (Type T · NTC · หัก L) = ยังไม่มีราคา ไม่ใช่ +0 — ดู `ProductConfig.priceAs`
+ * · S ของ TS_-08 (`TSP-08(S4)8Sx100`) — ชีต `TS-08S` "TS_-08 S" (แกน 6.35S · 8S · Max 600 °C) เป็นตารางของตัวเอง (รุ่น `TSP-08S` แมป 25)
+ *   เจ้าของยืนยันด้วยภาพชีต 2026-10-09 "รุ่น TS_-08 S หมายถึงตามภาพ" · แถวของตารางเขียนตัว S ติดขนาด (`8S`) ⇒ `readPriceAsD` ลองชื่อนั้นด้วย
+ *   (รหัสจริง `TSP-08(S4)8Sx100-BU` ราคาในฐาน 3,290 = 2,790 + หัว B 500 ตรงชีต) · `TSP-08S(…)` เข้ารุ่นนี้ตรง ๆ ทางหัวรหัส
  * ⚠️ ไม่ใช่ทางถอยข้ามตาราง (`findModel`) — ใช้เฉพาะตัวอักษรที่ชีตเขียนสั่งไว้เองเท่านั้น
  * รุ่น → { ตัวอักษรวัสดุ → { รุ่นที่ใช้ราคา · ที่มา } }
  */
-export const MAT_PRICE_AS: Record<string, Record<string, { model: string; source: string }>> = {
+export const MAT_PRICE_AS: Record<string, Record<string, { model: string; source: string; head?: boolean }>> = {
   'TSK-03': { S: { model: 'TSK-12', source: "ชีต TS-03 H12 'สำหรับรุ่นแกนสำเร็จให้ไปใช้ราคา Model TSK-12'" } },
+  // `head` = ตัวอักษรนี้เขียนต่อท้ายเลขรุ่นได้ด้วย (`TSP-08S(…)` · `TSP-08-S(…)` = แกนวัสดุนี้ทุกขนาด) — เฉพาะรุ่นที่เจ้าของบอกไว้
+  // (TS_-08 S ตามภาพชีต 2026-10-09) · `TSK-03S` ไม่ได้ตั้ง ⇒ ยังเป็น "ตัวอักษรท้ายเลขรุ่นที่ยังไม่ได้ตั้งค่า" ตามเดิม
+  'TSP-08': { S: { model: 'TSP-08S', source: "ชีต TS-08S 'TS_-08 S' (แกน Sheath 6.35S · 8S)", head: true } },
+  // TS_-09 S — ชีต `TS-09S` "TSP-09 S" โครงเดียวกับ TS-08S (เจ้าของส่งภาพชีต 2026-10-09 "TSP-09 S อยู่ในชีท excel อีกหน้า") · รหัสจริง `TSP-09-S 8x136-BU` 4 ตัว
+  'TSP-09': { S: { model: 'TSP-09S', source: "ชีต TS-09S 'TSP-09 S' (แกน Sheath 6.35S · 8S)", head: true } },
 };
+
+/**
+ * ข้อจำกัดที่แคตตาล็อกเขียนไว้เป็นประโยค (ไม่ใช่ช่องว่างในตารางราคา) — เจ้าของสั่ง 2026-10-09 *"ควรให้เตือนด้วย ตามข้อจำกัดต่าง ๆ
+ * ที่มีระบุในแคตตาล็อกและ Excel แต่ยังคงขอราคาและกรอกราคาเพิ่มได้"* ⇒ รหัสที่ขัดข้อใดข้อหนึ่ง = **ต้องขอราคา + บอกข้อที่ขัด**
+ * ราคาเท่าที่คิดได้ยังขึ้นตามปกติ (ไม่ใช่ "ไม่รับผลิต" — ไม่รับผลิตเหลือเฉพาะข้อห้ามในชีต) และช่องราคาในตารางยังกรอกได้ตามเดิม
+ * · อ่านจากช่องกรอกของรหัส (`TsForm`) — ช่องที่อ่านไม่ออกหรือว่าง ข้อนั้นไม่ตัดสิน (ไม่เดาว่าขัด)
+ * · `when` ทุกช่องต้องตรง แล้ว `need` ช่องใดไม่ผ่าน = ขัด · `need` เป็นรายการค่า หรือ `{ min }` = ตัวเลขอย่างน้อยเท่านี้
+ * · 2 Element แกนเล็กกว่า 6 mm ไม่อยู่ที่นี่ — ชีตเว้นช่องไว้เป็นข้อห้ามของรุ่นแล้ว (`ELEM2_MIN_DIA` · ไม่รับผลิต)
+ * · `level: 'warn'` = **เตือนอย่างเดียว ราคาคิดตามปกติ** (เจ้าของ 2026-10-09 "คิดราคาได้ แต่เพิ่มแจ้งเตือน") — ใช้กับข้อที่ Excel/ของที่ขายจริงไม่ขัด:
+ *   "PT100 แกน 4.8 · 5 · 6" ของ TS_-02 (ชีต TS-02 มีราคา PT100 แกน 8 เอง) ·
+ *   "พีวีซี แกน 5 mm ขึ้นไป" ของ TS_-11 (= สายมาตรฐานของ RTD ไม่ใช่ข้อห้าม · รหัสจริงแกน 3.2–4.8 ขายด้วยราคาตามชีต)
+ */
+export interface CatalogLimit {
+  id: string;
+  families: TsFamily[];
+  when: Record<string, string[]>;
+  need: Record<string, string[] | { min: number }>;
+  message: string;
+  source: string;
+  /** ไม่ใส่ = ต้องขอราคา · `'warn'` = เตือนอย่างเดียว ราคาคิดตามปกติ */
+  level?: 'warn';
+  /** ใช้เฉพาะรหัสที่มีท่อนต่อท้ายนอกแคตตาล็อกตรงแบบนี้ (`-TM000` → `/^TM\d+$/`) — ท่อนพวกนี้ไม่ใช่ช่องกรอก จึงเทียบใน `when` ไม่ได้ */
+  extra?: RegExp;
+}
+
+/**
+ * ตาราง Diameter Tube ของแคตตาล็อก TS_-09 — ขนาดแกน → วัสดุที่ทำได้ (`''` = SUS 304 · A = 316L · B = 310S · I = Inconel · TN = Titanium)
+ * เคลือบเทปล่อนนับตามวัสดุแกน (T = 304 · AT = 316) · S (Sheath) ของ 6.35/8 = ตาราง TSP-09 S ใน Excel · ชีต TS-09 มีราคาแถวที่ขัดตารางนี้หลายแถว (`3.2A` · `4.8` · `6.35` · `8` · `15.8`)
+ * และขายจริง ⇒ เตือนอย่างเดียว (แนว PT100_D · เจ้าของ 2026-10-09 "คิดราคาได้ แต่เพิ่มแจ้งเตือน")
+ */
+const TS09_MAT_BY_D: Record<string, string[]> = {
+  '3.2': [''], '4': ['', 'A'], '4.8': ['A'], '5': [''], '6': ['', 'A'], '6.35': ['A'], '7': ['TN'], '8': ['A'], '9.5': ['', 'A'],
+  '10': ['A'], '12.7': ['', 'A'], '15.8': ['B', 'A'], '17.5': ['A'], '19': [''], '21.3': ['B', 'A', 'I'],
+};
+const matLabelTs = (m: string) => ({ '': 'SUS 304', A: 'SUS 316L', B: 'SUS 310S', I: 'Inconel', TN: 'Titanium' } as Record<string, string>)[m] ?? m;
+const TS09_MAT_LIMITS: CatalogLimit[] = Object.entries(TS09_MAT_BY_D).map(([d, mats]) => ({
+  id: 'MAT_BY_D', families: ['TS_-09'] as TsFamily[], when: { d: [d] },
+  need: { mat: [...mats, ...(mats.includes('') ? ['T'] : []), ...(mats.includes('A') ? ['AT'] : []), ...(d === '6.35' || d === '8' ? ['S'] : [])] }, level: 'warn' as const,
+  message: `แกน ${d} mm แคตตาล็อกทำวัสดุ ${mats.map(matLabelTs).join(', ')}`,
+  source: 'แคตตาล็อก TS_-09 ตาราง Diameter Tube (ขนาด → วัสดุ) — ชีต TS-09 มีราคาแถวอื่น ⇒ เตือนอย่างเดียว',
+}));
+export const CATALOG_LIMITS: CatalogLimit[] = [
+  { id: 'TITANIUM_S4', families: ['TS_-04', 'TS_-06', 'TS_-08', 'TS_-10'], when: { mat: ['TN'] }, need: { thread: ['S4'] },
+    message: 'วัสดุ Titanium (TN) แคตตาล็อกทำเฉพาะเกลียว 1/2” NPT (S4)', source: 'แคตตาล็อก ตาราง Diameter Tube — 7 mm (Titanium) เฉพาะเกลียว S4' },
+  { id: 'NTC_MIN_D', families: ['TS_-03', 'TS_-04', 'TS_-06', 'TS_-07', 'TS_-11'], when: { probe: ['N', 'P'] }, need: { d: { min: 5 } },
+    message: 'NTC/PTC แคตตาล็อกทำแกนตั้งแต่ 5 mm ขึ้นไป', source: 'แคตตาล็อก ตาราง Diameter Tube — NTC/PTC แกน 5 mm ขึ้นไป' },
+  { id: 'NTC_UNGROUND', families: ['TS_-03', 'TS_-04', 'TS_-06', 'TS_-07'], when: { probe: ['N', 'P'] }, need: { ground: ['U'] },
+    message: 'NTC/PTC แคตตาล็อกทำเฉพาะ Unground (U)', source: 'แคตตาล็อก ตาราง Ground — NTC/PTC Unground เท่านั้น' },
+  { id: 'SHEATH_TC_ONLY', families: ['TS_-03', 'TS_-04', 'TS_-06', 'TS_-07'], when: { mat: ['S'] }, need: { probe: ['TS'] },
+    message: 'วัสดุ Sheath 316 (S) แคตตาล็อกทำเฉพาะ Thermocouple', source: 'แคตตาล็อก ตาราง Type of Material — Sheath 316 (Thermocouple เท่านั้น)' },
+  { id: 'TEFLON_D', families: ['TS_-03', 'TS_-09'], when: { mat: ['T', 'AT'] }, need: { d: ['4', '6'] },
+    message: 'เคลือบเทปล่อน (T · AT) แคตตาล็อกทำเฉพาะแกน 4 · 6 mm', source: 'แคตตาล็อก TS_-03 ตาราง Type of Material' },
+  { id: 'TYPE_T_CABLE', families: ['TS_-02', 'TS_-02-SI'], when: { sensor: ['T'] }, need: { cable: ['', 'T'] },
+    message: 'Type T แคตตาล็อกทำเฉพาะสายสแตนเลสถักและเทปล่อน', source: 'แคตตาล็อก TS_-02 ตาราง Cable' },
+  { id: 'TYPE_T_CABLE', families: ['TS_-03', 'TS_-05'], when: { sensor: ['T'] }, need: { cable: [''] },
+    message: 'Type T แคตตาล็อกทำเฉพาะสายสแตนเลสถัก', source: 'แคตตาล็อก ตาราง Cable' },
+  { id: 'K_ONLY_D', families: ['TS_-12'], when: { d: ['1.5'] }, need: { sensor: ['K'] },
+    message: 'แกน 1.5 mm แคตตาล็อกทำเฉพาะ Type K', source: 'แคตตาล็อก TS_-12 ตาราง Diameter Tube (1.5 mm Type K Only)' },
+  { id: 'J_ONLY_D', families: ['TS_-12'], when: { d: ['1.6'] }, need: { sensor: ['J'] },
+    message: 'แกน 1.6 mm แคตตาล็อกทำเฉพาะ Type J', source: 'แคตตาล็อก TS_-12 ตาราง Diameter Tube (1.6 mm Type J Only)' },
+  { id: 'PT100_D', families: ['TS_-02', 'TS_-02-SI'], when: { sensor: ['P', 'PA'] }, need: { d: ['4.8', '5', '6'] }, level: 'warn',
+    message: 'PT100 แคตตาล็อกทำแกน 4.8 · 5 · 6 mm', source: 'แคตตาล็อก TS_-02 ตาราง Diameter Tube (PT100) — ชีต TS-02 มีราคาแกนอื่น ⇒ เตือนอย่างเดียว' },
+  { id: 'PVC_MIN_D', families: ['TS_-11'], when: { cable: ['P'] }, need: { d: { min: 5 } }, level: 'warn',
+    message: 'สายพีวีซี แคตตาล็อกเขียนสำหรับแกน 5 mm ขึ้นไป', source: 'แคตตาล็อก TS_-11 ตาราง Cable (PVC Standard for RTD · แกน 5 mm ขึ้นไป) ⇒ เตือนอย่างเดียว' },
+  // TS_-09 ไม่มีเกลียว แต่แคตตาล็อกยังเขียน "7 mm Titanium *ทำได้เฉพาะเกลียว S4" (ก๊อปจากหน้า TS_-08) — เจ้าของ 2026-10-09
+  // "ถ้ามีข้อจำกัดระบุไว้ในไฟล์แค็ตตาล็อค pdf ต้องใส่เสมอ" ⇒ Titanium ของ TS_-09 = ขัดเสมอ (ไม่มีเกลียว S4 ให้เลือก) → ต้องขอราคา
+  { id: 'TITANIUM_S4', families: ['TS_-09'], when: { mat: ['TN'] }, need: { mat: [] },
+    message: 'วัสดุ Titanium (TN) แคตตาล็อกเขียนว่าทำได้เฉพาะเกลียว S4 — รุ่นนี้ไม่มีเกลียว', source: 'แคตตาล็อก TS_-09 ตาราง Diameter Tube — 7 mm (Titanium) *ทำได้เฉพาะเกลียว S4' },
+  ...TS09_MAT_LIMITS,
+  { id: 'FLANGE_D', families: ['TS_-09'], when: {}, need: { d: ['4', '4.8', '6', '8', '9.5', '12.7', '15.8', '15.97'] }, level: 'warn',
+    message: 'แคตตาล็อกมีหน้าแปลนปีกนกให้เฉพาะแกน 4 · 4.8 · 6 · 8 · 9.5 · 12.7 mm และหน้าแปลนกลม (แถม) แกน 15.8 · 15.97 mm',
+    source: 'แคตตาล็อก TS_-09 หมายเหตุใต้ภาพหน้าแปลน — ชีต TS-09 มีราคาแกนอื่นและขายจริง ⇒ เตือนอย่างเดียว' },
+  { id: 'TM_BIG_HEAD', families: ['TS_-08', 'TS_-09'], when: {}, need: { hd: ['B', 'E', 'KB', 'SB'] }, extra: /^TM\d+$/,
+    message: 'ฝังทรานสมิตเตอร์ TM-012 ในหัว แคตตาล็อกให้ใช้หัวกระโหลกแบบ Big Head (B · E · KB · SB)',
+    source: "แคตตาล็อก หมายเหตุ 'กรณีต้องการฝัง Temperature Sensor Transmitter (TM-012-Series) ในหัวกระโหลก ชนิดหัวกระโหลกต้องเป็น Big Head'" },
+];
+
+/** ข้อจำกัดของแคตตาล็อกที่รหัสนี้ขัด (`CATALOG_LIMITS`) — ช่องที่อ่านไม่ออก/ว่างไม่ตัดสิน */
+export function catalogLimitsHit(form: TsForm): CatalogLimit[] {
+  // อ่านแบบหลวม (`readTsFormLoose`) ช่องว่างอาจแปลว่า "ท่อนนั้นหลุดไปอยู่ท้ายรหัส" ไม่ใช่ None ⇒ ไม่ตัดสินจากค่าว่าง
+  // (`N2-03 6x120+1MTSU` อ่านหลวมแล้ว Ground ว่างทั้งที่รหัสเขียน U)
+  const loose = !!(form.written || form.issues || form.tail || form.headJunk);
+  const val = (k: string): string | undefined => {
+    if (form.issues?.[k]) return undefined;
+    const v = form.written?.[k] ?? form.values[k];
+    if (v === undefined || (v === '' && loose)) return undefined;
+    return v.toUpperCase();
+  };
+  return CATALOG_LIMITS.filter((l) => {
+    if (!l.families.includes(form.family)) return false;
+    if (l.extra && ![...(form.extras ?? []), ...(form.tail ?? [])].some((x) => l.extra!.test(x.replace(/^[-+.]+/, '').toUpperCase()))) return false;
+    for (const [k, list] of Object.entries(l.when)) {
+      const v = val(k);
+      if (v === undefined || !list.includes(v)) return false;
+    }
+    return Object.entries(l.need).some(([k, need]) => {
+      const v = val(k);
+      if (v === undefined) return false;
+      if (Array.isArray(need)) return !need.includes(v);
+      if (v === '') return false;
+      const n = Number(v.match(/^\d+(?:\.\d+)?/)?.[0]);
+      return Number.isFinite(n) && n < need.min;
+    });
+  });
+}
 
 /**
  * ช่องที่แคตตาล็อก TS_-02 กับ TS_-02-SI เขียนเหมือนกัน (สองหน้า ตารางชุดเดียวกัน) — ขนาดแกนของ TS_-02 อยู่ที่นี่ด้วย
@@ -449,7 +563,9 @@ export const TS_CATALOG: TsFamilySpec[] = [
       // B / I = ตาราง Diameter Tube ของแคตตาล็อก TS_-08 (15.8 = SUS 310S · 21.3 = SUS 310S, Inconel) — ไม่ได้อยู่ในช่อง Type of Material
       // แต่ไม่มีสองตัวนี้ แถว `21.3B`/`21.3I` ของชีตจะกลายเป็นแถวสีส้ม "ราคาที่แอดมินใส่" และเพิ่มแถว `15.8B` จากหน้าชีตไม่ได้ (ตรวจ 2026-10-07)
       d: ch('ขนาดแกน', mm(D_RTD, TITANIUM)),
-      mat: ch('วัสดุ', [...MAT_RTD.slice(0, 2), o('B', 'SUS 310S (แกน 15.8 · 21.3)'), o('I', 'Inconel (แกน 21.3)'), ...MAT_RTD.slice(2)]),
+      mat: ch('วัสดุ', [...MAT_RTD.slice(0, 2), o('B', 'SUS 310S (แกน 15.8 · 21.3)'), o('I', 'Inconel (แกน 21.3)'), ...MAT_RTD.slice(2),
+        // S = แกน Sheath ของตาราง "TS_-08 S" (ชีต TS-08S · แกน 6.35 · 8) — คิดราคาจากรุ่น TSP-08S ทั้งชิ้น (`MAT_PRICE_AS` · เจ้าของ 2026-10-09)
+        o('S', 'Sheath (ตาราง TS_-08 S · แกน 6.35 · 8)')]),
       l1: L1, elem: ch('จำนวน Element', ELEMENT, 'ทำ 2 Element ได้ตั้งแต่แกน 6 mm'),
       hd: ch('ชนิดหัวกระโหลก', HEADS), ground: ch('Ground', GROUND_RTD),
     },
@@ -457,6 +573,29 @@ export const TS_CATALOG: TsFamilySpec[] = [
     addons: TS_ADDONS,
     // ขนาดแกนที่ทั้งแคตตาล็อกและชีตไม่มี (`10.2` · `10.2A` · `12` · `9` …) = ต้องขอราคา + แถวสีส้ม แบบ TS_-02–07
     // (ตรวจ TS_-08 2026-10-07 · เดิมขึ้น "รหัสไม่ได้บอกขนาดแกน" ทั้งที่รหัสบอกแล้ว) · เกลียวไม่อยู่ในนี้ — แนวเดียวกับ TS_-04/06
+    askPrice: { d: 'D' },
+  },
+  {
+    // แคตตาล็อก `Catalogue_RTD_PT100_TS_-09.pdf` + ชีต `TS-09` (2026-10-09 · docs/pricing-code-ts-catalog.md หัวข้อ TS_-09) —
+    // RTD หน้าแปลนปีกนก + หัวกระโหลก · ท่อนเหมือน TS_-08 แต่ไม่มีเกลียว · รหัสจริงเว้นวรรคหลังเลขรุ่น (`TSP-09 6x100-U` · ทุกตัวในฐาน)
+    // ราคาหัวกระโหลกรายขนาดแกน (คอลัมน์ G–I) แบบ TS-07
+    family: 'TS_-09', head: 'TS_-09', name: 'RTD · Flange + RTD Head', model: 'TSP-09',
+    layout: [{ fixed: 'TS' }, { slot: 'sensor' }, { sep: '-09 ' }, { slot: 'd' }, { slot: 'mat' }, { sep: 'x' }, { slot: 'l1' },
+      { sep: '-' }, { slot: 'elem' }, { sep: '-' }, { slot: 'hd' }, { slot: 'ground' }],
+    slots: {
+      sensor: ch('ชนิดของ RTD', RTD),
+      // แคตตาล็อกเขียน "7 mm Titanium *ทำได้เฉพาะเกลียว S4" ทั้งที่ TS_-09 ไม่มีเกลียว (ก๊อปจากหน้า TS_-08) ⇒ ไม่ใส่ข้อจำกัด TITANIUM_S4
+      d: ch('ขนาดแกน', mm(D_RTD, { '7': '(Titanium)' })),
+      // B / I = แถว `21.3B`/`21.3I` ของชีต (ตาราง Diameter Tube: 15.8 = SUS 310S · 21.3 = SUS 310S, Inconel) แบบ TS_-08
+      mat: ch('วัสดุ', [...MAT_RTD.slice(0, 2), o('B', 'SUS 310S (แกน 15.8 · 21.3)'), o('I', 'Inconel (แกน 21.3)'), ...MAT_RTD.slice(2),
+        // S = แกน Sheath ของตาราง "TSP-09 S" (ชีต TS-09S · แกน 6.35 · 8) — คิดราคาจากรุ่น TSP-09S ทั้งชิ้น (`MAT_PRICE_AS` · เจ้าของ 2026-10-09)
+        o('S', 'Sheath (ตาราง TSP-09 S · แกน 6.35 · 8)')]),
+      l1: L1, elem: ch('จำนวน Element', ELEMENT, 'ทำ 2 Element ได้ตั้งแต่แกน 6 mm'),
+      hd: ch('ชนิดหัวกระโหลก', HEADS), ground: ch('Ground', GROUND_RTD),
+    },
+    defaults: { sensor: 'P', d: '6', mat: '', l1: '100', elem: '', hd: '', ground: 'U' },
+    addons: TS_ADDONS,
+    // ขนาดแกนที่ทั้งแคตตาล็อกและชีตไม่มี (`10.2` · `10.2A` · `12A` …) = ต้องขอราคา + แถวสีส้ม แบบ TS_-02–08
     askPrice: { d: 'D' },
   },
   {
@@ -637,6 +776,10 @@ export function buildTsCode(form: TsForm): string {
     case 'TS_-08':
       code = `TS${s('sensor')}-08${hj}${par('thread')}${s('d')}${s('mat')}${xl1}${elem}${headGround}`;
       break;
+    case 'TS_-09':
+      // เว้นวรรคหลังเลขรุ่นแบบรหัสจริง (`TSP-09 6x100-U` · ทุกตัวในฐาน 2026-10-09)
+      code = `TS${s('sensor')}-09${hj} ${s('d')}${s('mat')}${xl1}${elem}${headGround}`;
+      break;
     case 'TS_-10':
       code = `TS${s('sensor')}-10${hj}${par('thread')}${s('d')}${s('mat')}${xl1}${elem}${cable}`;
       break;
@@ -728,6 +871,7 @@ function grammar(spec: TsFamilySpec, loose = false): RegExp {
     case 'TS_-06': body = `${head}${num('06')}${paren('thread')}${dm()}${L1}${elem}${hd()}`; break;
     case 'TS_-07': body = `${head}${num('07')}${dm()}${L1}${elem}${hd()}`; break;
     case 'TS_-08': body = `${head}${num('08')}${paren('thread')}${dm()}${L1}${elem}${hd()}`; break;
+    case 'TS_-09': body = `${head}${num('09')}${dm()}${L1}${elem}${hd()}`; break;
     case 'TS_-10': body = `${head}${num('10')}${paren('thread')}${dm()}${L1}${elem}${cable()}`; break;
     case 'TS_-11': body = `${head}-11(?<spring>P)?${hj}${dm()}${L1}${elem}\\+(?<cl>${NUM})${unit}(?:(?<dash>-)?(?=[A-Z])${g('cable', 'cable')}${g('ground', 'ground')})?`;
       if (loose) body = body.replace(`\\+(?<cl>${NUM})${unit}`, `(?:\\+(?<cl>${NUM})${unit}`) + ')?';

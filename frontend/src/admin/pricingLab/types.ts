@@ -132,7 +132,7 @@ export interface BhForm {
 }
 
 // ── แคตตาล็อก TS (สำเนาชนิดข้อมูลของ services/pricingLab/catalogTs.ts) ──────────────────────────
-export type TsFamily = 'TS_-01' | 'TS_-01-0' | 'TS_-02' | 'TS_-02-SI' | 'TS_-03' | 'TS_-04' | 'TS_-05' | 'TS_-06' | 'TS_-07' | 'TS_-08' | 'TS_-10' | 'TS_-11' | 'TS_-12' | 'TS_-12R' | 'TS_-14' | 'TS_-18';
+export type TsFamily = 'TS_-01' | 'TS_-01-0' | 'TS_-02' | 'TS_-02-SI' | 'TS_-03' | 'TS_-04' | 'TS_-05' | 'TS_-06' | 'TS_-07' | 'TS_-08' | 'TS_-09' | 'TS_-10' | 'TS_-11' | 'TS_-12' | 'TS_-12R' | 'TS_-14' | 'TS_-18';
 export interface TsSlot {
   label: string;
   kind: 'choice' | 'number';

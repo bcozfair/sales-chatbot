@@ -39,11 +39,13 @@ import { pool } from '../../config/db.js';
 import { listSubCodes } from '../../db/pricingLabRepo.js';
 import { loosenessOf } from '../../services/drawing/checks.js';
 import { buildModel } from '../../services/drawing/families/registry.js';
+import { specRows } from '../../services/drawing/sheetText.js';
+import { SHEET_BOX, orthoView } from '../../services/drawing/views/index.js';
 import { fromReading } from '../../services/drawing/spec/fromReading.js';
 import { withSubCodes } from '../../services/pricingLab/bookStore.js';
 import { parseProductCode } from '../../services/pricingLab/code.js';
 import { NoBook, loadBookFrom } from '../pricebook/bookSource.js';
-import type { BandSpec, DrawingSpec, Ts11Spec } from '../../services/drawing/types.js';
+import type { BandSpec, DrawingSpec, Ts11Spec, TsCableSpec } from '../../services/drawing/types.js';
 import { writeStep } from '../../services/drawing/writers/step.js';
 
 const GREEN = '\x1b[32m', RED = '\x1b[31m', DIM = '\x1b[2m', BOLD = '\x1b[1m', RESET = '\x1b[0m';
@@ -68,6 +70,8 @@ interface AppProduct {
   build(v: AppValues): string;
   modelParts(v: AppValues): AppPart[];
   exportStep(v: AppValues): string;
+  specRows(v: AppValues): [string, string][];
+  views: { ortho(v: AppValues, box: { cx: number; cy: number; w: number; h: number }): { svg: string; scale: string } };
 }
 interface AppSolid { name: string; colour: number[]; positions: number[]; triangles: number[] }
 interface AppRegistry { PRODUCTS: AppProduct[]; canonical(code: string): string; findProduct(code: string): AppProduct | null }
@@ -146,7 +150,43 @@ function bandCover(family: BandSpec['family']): Coverage {
   };
 }
 
-const COVERED: Record<string, Coverage> = { 'TS-11': TS11_COVER, 'BH-01': bandCover('BH-01'), 'BH-01C': bandCover('BH-01C') };
+/** ซีรีส์ TS ออกสาย (`ts-series-assembly.js`) — ค่าของ Appsale = ช่องของเรา ทุกตัว · คีย์รูปทรง = cache key ของ `buildTSModel` */
+const TR = ['K', 'J', 'T', 'P', 'PA', 'Z'] as const;
+const TCNP = ['TSK', 'TSJ', 'TST', 'N2', 'N10', 'P2', 'P10'] as const;
+const CABLE_ALL = ['NONE', 'C', 'F', 'P', 'T', 'TS'] as const;
+const LOCK = ['12', '12.7', '14.5', '15.5'] as const;
+const TR_LEADS: Record<string, number> = { K: 2, J: 2, T: 2, P: 3, PA: 3, Z: 3, TSK: 2, TSJ: 2, TST: 2, N2: 2, N10: 2, P2: 2, P10: 2 };
+const str = (v: unknown, field: string): string => (typeof v === 'string' ? v : String(num(v, field)));
+function cableCover(id: 'TS-01' | 'TS-01-0' | 'TS-02' | 'TS-03' | 'TS-05'): Coverage {
+  return {
+    toSpec(v): TsCableSpec {
+      const tail = {
+        cableLen: v.cableLen === undefined ? null : num(v.cableLen, 'cableLen'),
+        cable: pick(v.cable, CABLE_ALL, 'cable'),
+        ground: pick(v.ground, ['NONE', 'U'] as const, 'ground'),
+      };
+      switch (id) {
+        case 'TS-01': return { family: 'TS_-01', sensor: pick(v.sensor, TR, 'sensor'), thread: pick(v.thread, ['NONE', '5/16', 'M6', 'M8', 'M10'] as const, 'thread'),
+          dia: str(v.dia, 'dia'), tubeLen: num(v.tubeLen, 'tubeLen'), mat: pick(v.mat, ['NONE'] as const, 'mat'), ...tail };
+        case 'TS-01-0': return { family: 'TS_-01-0', sensor: pick(v.sensor, TR, 'sensor'), hold: pick(v.hold, ['NONE', 'M4', 'M6', 'M8', 'M10'] as const, 'hold'), ...tail };
+        case 'TS-02': return { family: 'TS_-02', sensor: pick(v.sensor, TR, 'sensor'), lock: pick(v.lock, LOCK, 'lock'), dia: str(v.dia, 'dia'),
+          mat: pick(v.mat, ['NONE', 'A'] as const, 'mat'), tubeLen: num(v.tubeLen, 'tubeLen'), ...tail };
+        case 'TS-03': return { family: 'TS_-03', sensor: pick(v.sensor, TCNP, 'sensor'), dia: str(v.dia, 'dia'),
+          mat: pick(v.mat, ['NONE', 'A', 'S', 'T', 'AT'] as const, 'mat'), tubeLen: num(v.tubeLen, 'tubeLen'), elem: pick(v.elem, ['NONE', '2'] as const, 'elem'), ...tail };
+        case 'TS-05': return { family: 'TS_-05', sensor: pick(v.sensor, TCNP, 'sensor'), lock: pick(v.lock, LOCK, 'lock'), dia: str(v.dia, 'dia'),
+          mat: pick(v.mat, ['NONE', 'A'] as const, 'mat'), tubeLen: num(v.tubeLen, 'tubeLen'), elem: pick(v.elem, ['NONE', '2'] as const, 'elem'), ...tail };
+      }
+    },
+    shapeKey: (v) => JSON.stringify([id, v.dia, v.tubeLen, v.cable, v.lock, v.hold, v.thread, TR_LEADS[String(v.sensor)]]),
+    rawParts: (_app, p, v) => p.modelParts(v),
+    stepSolids: null,
+  };
+}
+
+const COVERED: Record<string, Coverage> = {
+  'TS-11': TS11_COVER, 'BH-01': bandCover('BH-01'), 'BH-01C': bandCover('BH-01C'),
+  'TS-01': cableCover('TS-01'), 'TS-01-0': cableCover('TS-01-0'), 'TS-02': cableCover('TS-02'), 'TS-03': cableCover('TS-03'), 'TS-05': cableCover('TS-05'),
+};
 
 /** เคสสังเคราะห์ — ขอบของรูปทรงที่รหัสจริงอาจไม่มี */
 const SYNTHETIC: { family: string; label: string; values: AppValues }[] = [
@@ -172,6 +212,24 @@ const SYNTHETIC: { family: string; label: string; values: AppValues }[] = [
   { family: 'BH-01C', label: 'รูบนแถบผ่าครึ่ง', values: { holes: [{ x: 30, y: 40, d: 12 }, { x: 300, y: 80, d: 6 }] } },
   { family: 'BH-01C', label: 'ขั้วน็อต SE สังกะสี', values: { term: 'N', conn: 'SE', mat: 'Z', h: 60 } },
   { family: 'BH-01C', label: 'ขั้วเต๋า termPos เกิน H (ถูกบีบ)', values: { term: 'T', termPos: 500 } },
+  // ซีรีส์ TS ออกสาย — ทุกเกลียว / Hold / เขี้ยวล็อค · แกนเล็ก/ใหญ่ · L1 สั้น · RTD 3 สาย · ทุกชนิดสาย
+  { family: 'TS-01', label: 'เกลียว 1/4 (None) แกน 4.8 PT100', values: { thread: 'NONE', dia: '4.8', sensor: 'P', cable: 'T', ground: 'U' } },
+  { family: 'TS-01', label: 'เกลียว 5/16 สาย F', values: { thread: '5/16', dia: '4.8', cable: 'F' } },
+  { family: 'TS-01', label: 'เกลียว M6 L1 ทศนิยม', values: { thread: 'M6', dia: '4.8', tubeLen: 7.5 } },
+  { family: 'TS-01', label: 'เกลียว M10 L1 100 สาย TS', values: { thread: 'M10', dia: '6', tubeLen: 100, cable: 'TS' } },
+  { family: 'TS-01-0', label: 'Hold None (M5) PT1000', values: { hold: 'NONE', sensor: 'Z' } },
+  { family: 'TS-01-0', label: 'Hold M4 สาย ถัก', values: { hold: 'M4', cable: 'NONE' } },
+  { family: 'TS-01-0', label: 'Hold M8', values: { hold: 'M8' } },
+  { family: 'TS-01-0', label: 'Hold M10 สาย C', values: { hold: 'M10', cable: 'C' } },
+  { family: 'TS-02', label: 'เขี้ยวล็อค 12.7 แกน 4', values: { lock: '12.7', dia: '4', tubeLen: 5 } },
+  { family: 'TS-02', label: 'เขี้ยวล็อค 14.5 แกน 6 RTD', values: { lock: '14.5', dia: '6', sensor: 'PA' } },
+  { family: 'TS-02', label: 'เขี้ยวล็อค 15.5 แกน 8 สาย TS', values: { lock: '15.5', dia: '8', cable: 'TS' } },
+  { family: 'TS-03', label: 'แกน 2 (สปริง 50) NTC', values: { dia: '2', sensor: 'N2', ground: 'U' } },
+  { family: 'TS-03', label: 'แกน 10 วัสดุ A 2 Element', values: { dia: '10', mat: 'A', elem: '2', tubeLen: 250 } },
+  { family: 'TS-03', label: 'แกน 4.8 สาย ถัก L1 10', values: { dia: '4.8', cable: 'NONE', tubeLen: 10 } },
+  { family: 'TS-05', label: 'L1 10 (ปลายเปล่าครึ่งแกน) แกน 4', values: { tubeLen: 10, dia: '4', lock: '12' } },
+  { family: 'TS-05', label: 'เขี้ยวล็อค 15.5 แกน 8 L1 100', values: { lock: '15.5', dia: '8', tubeLen: 100 } },
+  { family: 'TS-05', label: 'PTC P10 สาย F', values: { sensor: 'P10', cable: 'F', ground: 'U' } },
 ];
 
 // ── โหลดต้นฉบับ ─────────────────────────────────────────────────────────────
@@ -280,11 +338,16 @@ async function realCodes(): Promise<string[]> {
 interface Case { family: string; label: string; values: AppValues }
 
 /** ตระกูลของ Appsale → ตระกูลตามผลอ่านของหน้าคำนวณราคา */
-const FAMILY_OF: Record<string, string> = { 'TS-11': 'TS_-11', 'BH-01': 'BH-01', 'BH-01C': 'BH-01C' };
+const FAMILY_OF: Record<string, string> = { 'TS-11': 'TS_-11', 'BH-01': 'BH-01', 'BH-01C': 'BH-01C', 'TS-01': 'TS_-01', 'TS-01-0': 'TS_-01-0', 'TS-02': 'TS_-02', 'TS-03': 'TS_-03', 'TS-05': 'TS_-05' };
 const SPEC_FIELDS: Record<string, string[]> = {
   'TS_-11': ['sensor', 'spring', 'dia', 'mat', 'tubeLen', 'elem', 'cableLen', 'cable', 'ground'],
   'BH-01': ['id', 'h', 't', 'v', 'w', 'term', 'mat', 'conn', 'termPos', 'holes'],
   'BH-01C': ['id', 'h', 't', 'v', 'w', 'term', 'mat', 'conn', 'termPos', 'holes'],
+  'TS_-01': ['sensor', 'thread', 'dia', 'tubeLen', 'mat', 'cableLen', 'cable', 'ground'],
+  'TS_-01-0': ['sensor', 'hold', 'cableLen', 'cable', 'ground'],
+  'TS_-02': ['sensor', 'lock', 'dia', 'mat', 'tubeLen', 'cableLen', 'cable', 'ground'],
+  'TS_-03': ['sensor', 'dia', 'mat', 'tubeLen', 'elem', 'cableLen', 'cable', 'ground'],
+  'TS_-05': ['sensor', 'lock', 'dia', 'mat', 'tubeLen', 'elem', 'cableLen', 'cable', 'ground'],
 };
 
 /** ส่วน ค — คืนบรรทัดรายงาน + จำนวนที่ต่างโดยไม่ตั้งใจ */
@@ -322,6 +385,81 @@ async function partC(clean: { raw: string; family: string; values: AppValues }[]
     }
   }
   lines.push(`${fail ? RED + '✗' : GREEN + '✓'}${RESET} ส่วน ค: ผลอ่านสะอาดทั้งสองตัวอ่าน ${compared.toLocaleString()} รหัส — ต่างโดยไม่ตั้งใจ ${fail} · ต่างโดยตั้งใจ (BH-01C ไม่บอกการต่อ: Appsale เติม PL) ${intended} ${DIM}· ผลอ่านของหน้าคำนวณราคาไม่สะอาด/วาดไม่ได้ ${notClean.toLocaleString()} (ไม่อยู่ในส่วนนี้)${RESET}`);
+  for (const d of diffs) lines.push(`    ${RED}${d}${RESET}`);
+  return { lines, fail, compared };
+}
+
+/** HTML entity ของ Appsale → ตัวอักษรจริง (ตารางของเราเก็บตัวอักษรจริง) */
+const ENTITY: Record<string, string> = { deg: '°', sup2: '²', micro: 'µ', lt: '<', gt: '>', amp: '&', quot: '"' };
+const decode = (s: string): string => s.replace(/&#(\d+);/g, (_, n: string) => String.fromCodePoint(Number(n))).replace(/&([a-z0-9]+);/g, (m, k: string) => ENTITY[k] ?? m);
+
+/** รุ่นที่แถว "รุ่น" ของต้นฉบับตัดจากรหัสเต็ม (`cableProduct` ของ `ts-03.js`) */
+const MODEL_ROW_TRIM = new Set(['TS-01-0', 'TS-02', 'TS-03', 'TS-05']);
+
+/** ส่วน ง — ตารางรายละเอียดสินค้า (`specRows`) ภาษาไทยเท่าต้นฉบับทุกตัวอักษร · ทุกเคส (ไม่ตัดซ้ำด้วยรูปทรง — ตารางมีช่องที่ไม่ใช่รูปทรง) */
+function partD(app: { byId(id: string): AppProduct }, cases: Case[]): { lines: string[]; fail: number; compared: number } {
+  const seen = new Set<string>();
+  let compared = 0, fail = 0, skipped = 0;
+  const diffs: string[] = [];
+  for (const c of cases) {
+    const key = JSON.stringify([c.family, c.values]);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (c.family === 'TS-11' && c.values.mat === 'S') { skipped++; continue; }   // วัสดุ S ไม่มีในตาราง TS_-11 ของเรา (ส่วนบน)
+    compared++;
+    let problem: string | null = null;
+    try {
+      const theirs = app.byId(c.family).specRows(c.values).map(([k, v]) => [decode(k), decode(v)]);
+      // ต่างโดยตั้งใจ (sheetText.ts ข้อ 3): แถว "รุ่น" ของต้นฉบับตัดจากรหัสเต็ม ติดขนาดแกน/สายมาด้วย — ตัดให้เหลือชื่อรุ่นก่อนเทียบ
+      if (MODEL_ROW_TRIM.has(c.family) && theirs[0]) theirs[0][1] = theirs[0][1].replace(/^(.+?-(?:01-0|02|03|05))\S*( — )/, '$1$2');
+      const ours = specRows(COVERED[c.family].toSpec(c.values), 'th');
+      const n = Math.max(theirs.length, ours.length);
+      for (let i = 0; i < n && !problem; i++) {
+        if (JSON.stringify(theirs[i]) !== JSON.stringify(ours[i])) problem = `แถว ${i + 1}: Appsale ${JSON.stringify(theirs[i])} · เรา ${JSON.stringify(ours[i])}`;
+      }
+    } catch (e) {
+      problem = `โยน error: ${e instanceof Error ? e.message : String(e)}`;
+    }
+    if (problem) { fail++; if (diffs.length < MAX_REPORT) diffs.push(`${c.family} · ${c.label}: ${problem}`); }
+  }
+  const lines = [`${fail ? RED + '✗' : GREEN + '✓'}${RESET} ส่วน ง: ตารางรายละเอียดสินค้า ${compared.toLocaleString()} ชุดค่า — ไม่ตรงต้นฉบับ ${fail}${skipped ? ` ${DIM}· ข้ามวัสดุ S ${skipped}${RESET}` : ''}`];
+  for (const d of diffs) lines.push(`    ${RED}${d}${RESET}`);
+  return { lines, fail, compared };
+}
+
+/** กรอบที่ส่วน จ ใช้ — สามกรอบของกระดาษ + กรอบแคบ (TS ใช้คำย่อเมื่อกว้าง < 520) */
+const ORTHO_BOXES = { ...SHEET_BOX, narrow: { cx: 200, cy: 180, w: 360, h: 260 } };
+
+/** ส่วน จ — ภาพฉาย 2 มิติ (`views/`) เท่า `views.ortho()` ของต้นฉบับทั้งสตริง (SVG + ป้ายมาตราส่วน) ทุกกรอบ · ทุกชุดค่าที่ไม่ซ้ำ */
+function partE(app: { byId(id: string): AppProduct }, cases: Case[]): { lines: string[]; fail: number; compared: number } {
+  const seen = new Set<string>();
+  let compared = 0, fail = 0, skipped = 0;
+  const diffs: string[] = [];
+  for (const c of cases) {
+    const key = JSON.stringify([c.family, c.values]);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (c.family === 'TS-11' && c.values.mat === 'S') { skipped++; continue; }
+    const p = app.byId(c.family);
+    for (const [name, box] of Object.entries(ORTHO_BOXES)) {
+      compared++;
+      let problem: string | null = null;
+      try {
+        const theirs = p.views.ortho(c.values, box);
+        const ours = orthoView(COVERED[c.family].toSpec(c.values), box, p.build(c.values));
+        if (theirs.scale !== ours.scale) problem = `มาตราส่วน Appsale ${JSON.stringify(theirs.scale)} · เรา ${JSON.stringify(ours.scale)}`;
+        else if (theirs.svg !== ours.svg) {
+          let i = 0;
+          while (i < theirs.svg.length && theirs.svg[i] === ours.svg[i]) i++;
+          problem = `SVG ต่างที่ตัวที่ ${i}: Appsale …${JSON.stringify(theirs.svg.slice(Math.max(0, i - 40), i + 40))}… · เรา …${JSON.stringify(ours.svg.slice(Math.max(0, i - 40), i + 40))}…`;
+        }
+      } catch (e) {
+        problem = `โยน error: ${e instanceof Error ? e.message : String(e)}`;
+      }
+      if (problem) { fail++; if (diffs.length < MAX_REPORT) diffs.push(`${c.family} · ${c.label} · กรอบ ${name}: ${problem}`); }
+    }
+  }
+  const lines = [`${fail ? RED + '✗' : GREEN + '✓'}${RESET} ส่วน จ: ภาพฉาย 2 มิติ ${compared.toLocaleString()} ภาพ (${Object.keys(ORTHO_BOXES).length} กรอบ) — ไม่ตรงต้นฉบับ ${fail}${skipped ? ` ${DIM}· ข้ามวัสดุ S ${skipped}${RESET}` : ''}`];
   for (const d of diffs) lines.push(`    ${RED}${d}${RESET}`);
   return { lines, fail, compared };
 }
@@ -445,6 +583,14 @@ async function main(): Promise<void> {
     for (const f of failures) console.log(`\n  ${RED}✗${RESET} ${f}`);
     if (totalFail > MAX_REPORT) console.log(`\n  ${DIM}… และอีก ${totalFail - MAX_REPORT} ชุด${RESET}`);
 
+    const d = partD({ byId }, cases);
+    console.log('');
+    for (const l of d.lines) console.log(`  ${l}`);
+    const dFail = d.fail + (d.compared === 0 ? 1 : 0);
+    const e = partE({ byId }, cases);
+    for (const l of e.lines) console.log(`  ${l}`);
+    const eFail = e.fail + (e.compared === 0 ? 1 : 0);
+
     let cFail = 0;
     if (!QUICK) {
       const c = await partC(cleanAppsale);
@@ -454,8 +600,8 @@ async function main(): Promise<void> {
       if (c.compared === 0) console.log(`  ${RED}ส่วน ค ตอบไม่ได้${RESET} — ไม่มีรหัสที่สะอาดทั้งสองฝั่ง`);
     }
 
-    const pass = total > 0 && totalFail === 0 && cFail === 0;
-    console.log(`\n${'─'.repeat(70)}\nสรุป: ${pass ? `${GREEN}ผ่าน${RESET} — ทุกชุดตรงกับต้นฉบับทุกไบต์${QUICK ? '' : ' และตัวแปลงช่องอ่านเหมือนต้นแบบ'}` : total === 0 ? `${RED}ตอบไม่ได้${RESET} — ไม่มีเคสให้ตรวจ` : `${RED}ตก${RESET} — ${totalFail} ชุดไม่ตรงกับต้นฉบับ · ส่วน ค ${cFail}`}\n${'─'.repeat(70)}\n`);
+    const pass = total > 0 && totalFail === 0 && cFail === 0 && dFail === 0 && eFail === 0;
+    console.log(`\n${'─'.repeat(70)}\nสรุป: ${pass ? `${GREEN}ผ่าน${RESET} — ทุกชุดตรงกับต้นฉบับทุกไบต์${QUICK ? '' : ' และตัวแปลงช่องอ่านเหมือนต้นแบบ'}` : total === 0 ? `${RED}ตอบไม่ได้${RESET} — ไม่มีเคสให้ตรวจ` : `${RED}ตก${RESET} — ${totalFail} ชุดไม่ตรงกับต้นฉบับ · ส่วน ค ${cFail} · ส่วน ง ${dFail} · ส่วน จ ${eFail}`}\n${'─'.repeat(70)}\n`);
     process.exitCode = pass ? 0 : 1;
   } finally {
     rmSync(tmp, { recursive: true, force: true });

@@ -1007,6 +1007,32 @@ npx tsx scripts/pricebook/seedCatalogSubcodes.ts --apply --by admin
 ตรวจหลังขึ้น: `TSP-08(S3)10.2Ax100-U` = ต้องขอราคา (ไม่ใช่ "รหัสไม่ได้บอกขนาดแกน") · หน้าสมุดราคา ชีต TS-08 แถว `21.3B`/`21.3I` ไม่เป็นสีส้ม · `diag:pricing-catalog-ts` หัวข้อ 16
 · แถวรหัสย่อย `TM###` (ทรานสมิตเตอร์ · ค่าว่าง) **ฐาน PMSV เขียนแล้ว 2026-10-07** · ฐานอื่น: `npx tsx scripts/pricebook/seedCatalogSubcodes.ts --apply --by admin` (เขียนเฉพาะแถวที่ยังไม่มี) ⇒ `TSP-08(S4)6x100-KBU-TM000` = ยังไม่มีราคา (ราคาเท่าที่คิดได้ 2,380)
 
+**TS_-09 / TS_-09 S** (ตรวจ 2026-10-09 · `docs/pricing-code-ts-catalog.md` หัวข้อ TS_-09) — **รุ่นใหม่** `TSP-09` (ชีต `TS-09` · แมป 26) + `TSP-09S` (ชีต `TS-09S` · แมป 27)
++ แถวรหัสย่อย 11 แถวของ TSP-09 (2 Element · หัว B/K/KB/S/E/SS/SB · U · TN · TM###) · เพิ่มรุ่นด้วย `--new-models` (**ห้าม `--replace-all`**) · **ฐานยังไม่เขียน** ·
+เขียนก่อนหรือหลัง deploy ก็ได้ **รอบเดียว** — ก่อน deploy prod (`46d22d9`) ต่างจากหลัง deploy 37 รหัส TS_-09 (แกนสองขนาด 3 ตัวได้ราคาแกนแรก · ที่เหลือขอราคา/ไม่รับผลิต) · สำรอง `pricing_*` ก่อน:
+```bash
+npx tsx scripts/pricebook/importer.ts --data <โฟลเดอร์ Excel> --new-models --out /tmp/ts09-book.json   # รายงาน — ต้องเห็น + TSP-09 (75 ช่อง) + TSP-09S (6 ช่อง)
+npm run diag:pricing-diff -- --head-book /tmp/ts09-book.json --head-seed-subcodes --base HEAD          # เปลี่ยนแค่ TS-09: ไม่มีรุ่น → ได้ราคา 390 / ขอราคา 47 (บนโค้ดที่ขึ้นแล้ว)
+npm run diag:pricing-catalog-ts -- --source json --book /tmp/ts09-book.json                            # หัวข้อ 19–20 ไม่ข้าม
+npx tsx scripts/pricebook/importer.ts --data <โฟลเดอร์ Excel> --new-models --apply --by admin
+npx tsx scripts/pricebook/seedCatalogSubcodes.ts                                                        # รายงาน — ต้องเห็น + 11 แถว TSP-09
+npx tsx scripts/pricebook/seedCatalogSubcodes.ts --apply --by admin
+```
+ตรวจ: หน้าคำนวณราคา `TSP-09 6x100-U` = 1,430 · `TSP-09 6x100-KU` = 1,850 · `TSP-09 6x300-2-KBU` = 3,120 · `TSZ-09 6x100-U` = 2,180 · `TSP-09-S 8x136-BU` = 3,750 (Excel 13-05-69) ·
+`TSP-09 10.2Ax100-U` = ต้องขอราคา · `TSP-09 6x200-BU-TM001` = ยังไม่มีราคา (ราคาเท่าที่คิดได้ 2,050) · `TSP-09 4.8x100-U` = 1,385 + เตือนวัสดุ · `diag:pricing-catalog-ui` ช่อง "รุ่น" กลุ่ม TS +1 · รันซ้ำต้องได้ "ไม่มีอะไรต้องเขียน"
+
+**TS_-08 S** (2026-10-09 · `docs/pricing-code-ts-catalog.md` หัวข้อ TS_-08 S) — **รุ่นใหม่** `TSP-08S` จากชีต `TS-08S` (แมป 25) ·
+**ฐาน PMSV เขียนแล้ว 2026-10-09** ตามที่เจ้าของสั่ง (การบันทึกครั้งที่ 26 · สำรอง `backup/pricing-before-ts08s-2026-10-09.dump`) ⇒ deploy ไม่ต้องทำซ้ำ ·
+ระหว่างรอ deploy รหัส `TSP-08S(…)` 11 ตัวเป็นไม่รับผลิตบน prod (โค้ดเก่าอ่านแกนไม่ออก) · ฐานใหม่จากศูนย์: ขึ้นโค้ดก่อน แล้วรันข้างล่าง ·
+เพิ่มรุ่นด้วย `--new-models` (**ห้าม `--replace-all`**) · ไม่มีแถวรหัสย่อย
+
+```bash
+npx tsx scripts/pricebook/importer.ts --data <โฟลเดอร์ Excel> --new-models --out /tmp/ts08s-book.json   # รายงาน — ต้องเห็น + TSP-08S รุ่นเดียว · ราคาตั้ง 30 ช่อง
+npx tsx scripts/diag/pricingCatalogTs.ts --source json --book /tmp/ts08s-book.json                     # หัวข้อ 17 ผ่าน
+npx tsx scripts/pricebook/importer.ts --data <โฟลเดอร์ Excel> --new-models --apply --by admin
+```
+ตรวจหลังขึ้น: `TSP-08(S4)8Sx100-BU` = 3,290 · `TSP-08S(S4)6x160-U` = ต้องขอราคา · หน้าสมุดราคามีชีต TS-08S
+
 **TS_-07** (ตรวจ 2026-10-07 · `docs/pricing-code-ts-catalog.md` หัวข้อ TS_-07) — **รุ่นใหม่** `TSK-07` จากชีต `TS-07` (แมป 24) + แถวรหัสย่อย 10 แถว
 (2 Element · หัว B/K/KB/S/E/SS/SB · U · TN) · เพิ่มรุ่นด้วย `--new-models` (**ห้าม `--replace-all`**) ·
 **ฐาน PMSV เขียนแล้ว 2026-10-07** ตามที่เจ้าของสั่ง (การบันทึกครั้งที่ 25 · 10 แถวรหัสย่อย · สำรอง `backup/pricing-before-ts07-2026-10-07.dump`) ⇒ deploy ไม่ต้องทำซ้ำ ·

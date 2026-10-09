@@ -36,7 +36,7 @@ import type { PriceBook, PriceModel, Predicate, ProductConfig } from './types.js
 import { resolveModel } from './engine.js';
 import { findSubCode, subCodeOption } from './subcodes.js';
 import { ADDONS, AMP, BH_CATALOG, SHAPE_AXIS, bhSpec, buildBhCode, sameBhCode, type BhFamily, type BhForm, type HoleSpec, type SizeKey } from './catalogBh.js';
-import { MAT_PRICE_AS, MODEL_SUFFIX, NTC_HEADS, OFF_CATALOG_SUFFIX, SUFFIX_ADDON, askSlotKey, NTC_NUMBERS, TS_ADDONS, TS_CATALOG, readTsForm, readTsFormLoose, tsFamilyOfModel, tsSpec, type TsFamily, type TsFamilySpec, type TsForm } from './catalogTs.js';
+import { catalogLimitsHit, MAT_PRICE_AS, MODEL_SUFFIX, NTC_HEADS, OFF_CATALOG_SUFFIX, SUFFIX_ADDON, askSlotKey, NTC_NUMBERS, TS_ADDONS, TS_CATALOG, readTsForm, readTsFormLoose, tsFamilyOfModel, tsSpec, type TsFamily, type TsFamilySpec, type TsForm } from './catalogTs.js';
 
 /** หนึ่งรหัสย่อยในรหัสสินค้า พร้อมคำอธิบายว่าระบบอ่านมันว่าอะไร — ใช้โชว์ให้คนตรวจก่อนเชื่อราคา */
 export interface CodePart {
@@ -549,6 +549,11 @@ interface Ctx {
   cfg: ProductConfig;
   parts: CodePart[];
   warnings: string[];
+  /**
+   * ตัวอักษรวัสดุที่หัวรหัสบอกแทนขนาดแกน (`TSP-08S(S4)6.35x100` · `TSP-08-S(…)` = แกน `6.35S`) — ตัวอักษรใน `MAT_PRICE_AS`
+   * ของรุ่นที่เขียนต่อท้ายเลขรุ่น ⇒ ทุกขนาดแกนของรหัสคิดตามตารางปลายทาง (เจ้าของ 2026-10-09 "รุ่น TS_-08 S หมายถึงตามภาพ")
+   */
+  sheath?: string;
 }
 
 const add = (c: Ctx, part: CodePart) => c.parts.push(part);
@@ -760,20 +765,24 @@ function readPriceAsD(c: Ctx, target: PriceModel, source: string, size: string, 
   const listed = (spec?.slots.d?.options ?? []).some((o) => o.code !== '' && Number(o.code) === Number(size));
   const where = `ตารางราคา ${target.code}${target.sheet ? ` (ชีต ${target.sheet})` : ''}`;
   c.cfg.priceAs = { model: target.code, why: `วัสดุ ${letter} (${matLabel}) — ${source} ⇒ ราคาตั้ง กฎบวกเพิ่ม และค่าสายของใบนี้มาจาก${where}` };
-  const hit = matchD(axisValues(target, 'D'), size);
+  // ตารางที่เขียนตัวอักษรวัสดุติดขนาดทุกแถว (ชีต TS-08S: `6.35S` · `8S`) — ชื่อแถวคือ "ขนาด + ตัวอักษร" ไม่ใช่ขนาดเปล่า
+  const targetD = axisValues(target, 'D');
+  const named = targetD.length > 0 && targetD.every((x) => x.toUpperCase().endsWith(letter));
+  const hit = named ? matchValue(targetD, `${size}${letter}`) : matchD(targetD, size);
   if (hit) {
     c.cfg.axes = { ...c.cfg.axes, D: hit };
     add(c, { text: dText, reads: `แกน D = ${size} mm วัสดุ ${letter} (${matLabel}) — ${source} ⇒ คิดตาม${where} แถว ${hit}`, kind: 'axis' });
     if (!listed) c.warnings.push(`แกน ${size} mm ไม่อยู่ในแคตตาล็อก ${spec?.head ?? c.model.code} — ราคาคิดตามแถว ${hit} ของ${where}`);
     return;
   }
-  const v = canonicalAskValue('d', size) ?? size;
+  // ตารางแบบ `named` ไม่ใช่แคตตาล็อกของรหัส ⇒ ขนาดที่ตารางไม่มี = ขอราคาเสมอ (แคตตาล็อก TS_-08 มีขนาด 6 ก็ไม่ได้แปลว่ามี `6S`)
+  const v = named ? `${canonicalAskValue('d', size) ?? size}${letter}` : canonicalAskValue('d', size) ?? size;
   c.cfg.axes = { ...c.cfg.axes, D: v };
-  if (listed) c.cfg.catalogOnly = { ...c.cfg.catalogOnly, D: v };
+  if (listed && !named) c.cfg.catalogOnly = { ...c.cfg.catalogOnly, D: v };
   else c.cfg.askPrice = { ...c.cfg.askPrice, D: v };
   add(c, {
     text: dText,
-    reads: `แกน D = ${v} mm วัสดุ ${letter} (${matLabel}) — ${source} แต่${where} ไม่มีแถวแกน ${v} ⇒ ${listed ? 'ยังไม่มีราคา' : 'ต้องขอราคาจากฝ่ายผลิต'}`,
+    reads: `แกน D = ${v} mm วัสดุ ${letter} (${matLabel}) — ${source} แต่${where} ไม่มีแถวแกน ${v} ⇒ ${listed && !named ? 'ยังไม่มีราคา' : 'ต้องขอราคาจากฝ่ายผลิต'}`,
     kind: 'axis',
   });
 }
@@ -947,7 +956,15 @@ function readTsGeneric(c: Ctx, rest: string, prefix: string, letter = ''): void 
   let teflon = false;
   if (core) {
     const dText = core[1] ?? '';
-    if (hasD) {
+    // หัวรหัสบอกวัสดุแล้ว (`c.sheath`) — ขนาดแกนทุกตัวไปตารางปลายทาง ไม่ใช่ตารางของรุ่น (แกน `6.35` ของ TSP-08 มีแถวของตัวเองที่คนละราคา)
+    // ตัวอักษรอื่นติดขนาดมาด้วย (`6.35A`) = ชื่อแถวที่ตารางปลายทางไม่มี ⇒ ขอราคา ไม่ทิ้งตัวอักษรนั้น
+    const sheathAs = c.sheath ? MAT_PRICE_AS[c.model.code]?.[c.sheath] : undefined;
+    const sheathModel = sheathAs ? resolveModel(c.book, sheathAs.model) : undefined;
+    const sheathD = sheathModel ? dText.match(/^([0-9.]+)([A-Z]*)$/i) : null;
+    if (sheathD) {
+      const extra = sheathD[2]!.toUpperCase();
+      readPriceAsD(c, sheathModel!, sheathAs!.source, extra && extra !== c.sheath ? `${sheathD[1]}${extra}` : sheathD[1]!, c.sheath!, dText);
+    } else if (hasD) {
       const dValues = axisValues(c.model, 'D');
       const dHit = matchD(dValues, dText);
       // วัสดุ T / AT = แกนเคลือบเทปล่อน (แคตตาล็อก "SUS 304 / 316 With Teflon Coated") — เจ้าของเคาะข้อ 2 (2026-09-29):
@@ -1714,6 +1731,12 @@ function findModel(book: PriceBook, prefix: string, num: string, suffix: string)
     if (!NTC_HEADS[prefix] || !NTC_NUMBERS.includes(num)) return undefined;
     prefix = 'TSN';
   }
+  // ตัวอักษรวัสดุที่เขียนต่อท้ายเลขรุ่น (`TSP-08S` — `MAT_PRICE_AS`) = รุ่นฐาน + วัสดุนั้นทุกขนาดแกน ⇒ ตอบรุ่นฐาน
+  // แบบเดียวกับ `TSP-08(S4)8Sx100` (ตัวอ่านคิดตามตารางปลายทางผ่าน `cfg.priceAs`) — หน้าสมุดราคานับรหัสสองรูปนี้เป็นรุ่นเดียวกัน
+  // เล่มที่ยังไม่มีรุ่นปลายทาง = กติกาเดิม (ตัวอักษรท้ายเลขรุ่นที่ยังไม่ได้ตั้งค่า) ไม่ใช่คิดเป็นแกนธรรมดาเงียบ ๆ
+  const base = suffix ? resolveModel(book, `${prefix}-${num}`) : undefined;
+  const asTarget = base ? MAT_PRICE_AS[base.code]?.[suffix] : undefined;
+  if (base && asTarget?.head && resolveModel(book, asTarget.model)) return base;
   const own = resolveModel(book, `${prefix}-${num}${suffix}`) ?? resolveModel(book, `${prefix}-${num}`);
   if (own) return own;
   // หัวรหัสนอกแคตตาล็อกของตารางที่ตั้งให้ "ขอราคา" (`TSE-01` · เจ้าของเคาะ B#6 2026-09-29) — ได้รุ่นเพื่อขึ้น "ต้องขอราคาจากฝ่ายผลิต"
@@ -1831,8 +1854,29 @@ export function parseProductCode(input: string, book: PriceBook, picks: CodePick
     // เฉพาะตัวใน `OFF_CATALOG_SUFFIX` ของรุ่น · ไม่งั้น `S` ไปตกแถว "หัวกระโหลกเล็ก" แล้วราคาที่กรอกให้หัวจะติดมาด้วย
     const dashed = suffix === '' ? rest.match(/^-([A-Z]+)(?=\d)/i) : null;
     const off = dashed && OFF_CATALOG_SUFFIX[model.code]?.letters.includes(dashed[1]!.toUpperCase()) ? dashed : null;
-    readModelSuffix(c, off ? off[1]!.toUpperCase() : suffix);
-    readTsGeneric(c, off ? rest.slice(off[0].length) : rest, prefix, letter);
+    // ตัวอักษรวัสดุต่อท้ายเลขรุ่น (`TSP-08S(…)` · มีขีด `TSP-08-S(…)` · ไม่มีเกลียว `TSP-09-S 8x136`) = แกนวัสดุนั้นทุกขนาด (`MAT_PRICE_AS` · ดู `findModel`)
+    // — แบบมีขีดเดิมตกเป็น "หัวกระโหลกเล็ก" ท้ายรหัส ⇒ ราคาที่กรอกให้หัว S จะติดรหัสเหล่านี้ไปด้วย
+    const dashedMat = suffix === '' ? rest.match(/^-([A-Z])(?=[(\d\s])/i) : null;
+    const asOf = (l: string) => { const t = MAT_PRICE_AS[model.code]?.[l]; return !!t?.head && !!resolveModel(book, t.model); };
+    const sheath = suffix && asOf(suffix) ? suffix : dashedMat && asOf(dashedMat[1]!.toUpperCase()) ? dashedMat[1]!.toUpperCase() : undefined;
+    // ตัว L หัก L เขียนแยกด้วยขีด (`TSP-08-L(S4)…` · `TSK-11-L 5x254`) — เจ้าของ 2026-10-09 "นับด้วย" ⇒ อ่านเท่า `TSP-08L(`
+    // เฉพาะรุ่นที่มีกฎหัก L (`SUFFIX_ADDON`) · รูปที่เขียนผิดจากแคตตาล็อก = รับเมื่ออ่านได้ทางเดียว + เตือนให้แก้ใน Odoo (เจ้าของ 2026-10-06)
+    const dashedAddon = suffix === '' && !off && !sheath ? rest.match(/^-([A-Z])(?=[\d( ])/i) : null;
+    const addonLetter = dashedAddon ? dashedAddon[1]!.toUpperCase() : '';
+    const addon = addonLetter && SUFFIX_ADDON[addonLetter] && hasOptionAdder(model, SUFFIX_ADDON[addonLetter]!) ? addonLetter : undefined;
+    if (sheath) {
+      c.sheath = sheath;
+      if (dashedMat) add(c, { text: dashedMat[0], reads: `วัสดุ ${sheath} ทุกขนาดแกน — ${MAT_PRICE_AS[model.code]![sheath]!.source}`, kind: 'model' });
+      readTsGeneric(c, dashedMat ? rest.slice(dashedMat[0].length) : rest, prefix, letter);
+    } else if (addon) {
+      readSuffixLetter(c, addon);
+      c.parts[c.parts.length - 1]!.text = dashedAddon![0];
+      c.warnings.push(`อ่าน ${dashedAddon![0]} เป็นตัว ${addon} ต่อท้ายเลขรุ่น (${model.code}${addon}) — รหัสในแคตตาล็อกไม่มีขีดคั่น ควรแก้รหัสใน Odoo`);
+      readTsGeneric(c, rest.slice(dashedAddon![0].length), prefix, letter);
+    } else {
+      readModelSuffix(c, off ? off[1]!.toUpperCase() : suffix);
+      readTsGeneric(c, off ? rest.slice(off[0].length) : rest, prefix, letter);
+    }
     // หัววัดอ่านหลังส่วนขนาด เพราะบางชีตคิดมันเป็น "คอลัมน์ของตารางราคาตั้ง" (ต้องรู้แกนอื่นก่อน)
     // และบางชีตคิดเป็น "กฎบวกเพิ่ม" — `readSensor` ดูจากสมุดราคาเองว่าเป็นแบบไหน
     if (NTC_HEADS[prefix]) readNtcHead(c, prefix);
@@ -1845,6 +1889,8 @@ export function parseProductCode(input: string, book: PriceBook, picks: CodePick
     const family = tsFamilyOfModel(model.code, c.cfg.axes?.submodel);
     const tsForm = family ? tsFormOf(c, typed, family) : undefined;
     if (tsForm) {
+      const limits = catalogLimitsHit(tsForm);
+      if (limits.length) c.cfg.catalogLimits = limits.map(({ id, message, source, level }) => ({ id, message, source, ...(level ? { level } : {}) }));
       const on = (picks.addons ?? []).filter((a) => TS_ADDONS.some((x) => x.code === a) && hasOptionAdder(model, a));
       out.tsForm = on.length ? { ...tsForm, addons: on } : tsForm;
     }

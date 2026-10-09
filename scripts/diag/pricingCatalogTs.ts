@@ -100,7 +100,7 @@ async function main(): Promise<void> {
   // ── 1. รหัสจริงทุกตัว: อ่าน → ช่อง → ประกอบกลับ → ราคาเท่าเดิม ─────────────────────
   section('1. รหัสจริงในฐาน (products) — อ่านเป็นช่องแล้วประกอบกลับต้องได้รหัสเดิมและราคาเท่าเดิม');
   const { rows } = await pool.query<{ model: string }>(
-    `SELECT DISTINCT model FROM products WHERE model ~* '^(TS[A-Z]*|[NP][0-9]{1,2})-(01|02|03|04|05|06|07|08|10|11|12|14|18)'`
+    `SELECT DISTINCT model FROM products WHERE model ~* '^(TS[A-Z]*|[NP][0-9]{1,2})-(01|02|03|04|05|06|07|08|09|10|11|12|14|18)'`
   );
   // ตั้งแต่ 2026-10-01 ทุกรหัสได้ช่อง (เจ้าของ: "ใช้หน้าตา ui เป็นมาตรฐานเดียวกัน อะไรไม่ตรงก็แค่แจ้งเตือน") —
   // ตรงแคตตาล็อกทุกตัวอักษร (`readTsForm`) = เกณฑ์เดิมทุกข้อ · นอกรูปแบบ (`readTsFormLoose`) = ประกอบกลับเป็นรหัสเดิมเกือบทุกตัว
@@ -193,7 +193,7 @@ async function main(): Promise<void> {
 
   // ข้อ 1: หัว NTC/PTC = ตาราง K/J เดียวกัน + กฎ NTC/PTC ของชีต
   const k04 = price('TSK-04(S3)6x100+1M');
-  const n04 = price('N10-04(S3)6x100+1M');
+  const n04 = price('N10-04(S3)6x100+1MU'); // NTC = Unground เท่านั้น (แคตตาล็อก) — ไม่มี U = ขัดข้อจำกัด (หัวข้อ 18)
   const ntcRule = line(n04.o, /NTC/);
   check('ข้อ 1: N10-04 = ราคาตั้งของ TSK-04 ตัวเดียวกัน + กฎ "NTC / PTC บวกเพิ่มจาก Type K/J"',
     n04.o?.status === 'priced' && base(n04.o) === base(k04.o) && ntcRule !== undefined && n04.o.unitPrice === (k04.o?.unitPrice ?? NaN) + ntcRule,
@@ -866,6 +866,178 @@ async function main(): Promise<void> {
         tm.o?.unitPrice === cell08('6', '1/2”', 'TSP') + amt08('head_blacklite_l') && tm.p.parts.some((x) => x.text === 'TM000' && x.kind !== 'unknown'),
         `${tm.o?.status} ${tm.o?.unitPrice} ${tm.p.parts.map((x) => `${x.text}:${x.kind}`).join(" ")}`);
     }
+  }
+
+  // ── 17. TS_-08 S — ชีต TS-08S (แกน Sheath 6.35S · 8S) · เจ้าของ 2026-10-09 "รุ่น TS_-08 S หมายถึงตามภาพ" ───────────────
+  // แกนวัสดุ S ของ TSP-08 คิดทั้งชิ้นจากรุ่น TSP-08S (`MAT_PRICE_AS`) · หัวรหัส `TSP-08S(…)` / `TSP-08-S(…)` = วัสดุ S ทุกขนาดแกน
+  section('17. TS_-08 S — แกน Sheath จากชีต TS-08S (6.35S · 8S) · หัวรหัส TSP-08S / TSP-08-S (เจ้าของ 2026-10-09)');
+  const p08s = book.models['TSP-08S'];
+  if (!p08s || !p08) {
+    console.log(`  ${YEL}…${RESET} เล่มนี้ยังไม่มี TSP-08S — ข้าม (ตรวจก่อนเขียนฐานด้วย -- --book <ไฟล์จาก importer.ts --new-models --out>)`);
+  } else {
+    const cellS = (d: string, thread: string, sensor: string) => p08s.base.kind === 'matrix'
+      ? p08s.base.cells[`${d} | ${thread} | ${sensor}`] ?? NaN : NaN;
+    const rateS = (id: string, key: string) => p08s.adders.find((a) => a.id === id)?.rates?.[key] ?? NaN;
+    const amtS = (id: string) => p08s.adders.find((a) => a.id === id)?.amount ?? NaN;
+    const cell08 = (d: string, thread: string, sensor: string) => p08.base.kind === 'matrix'
+      ? p08.base.cells[`${d} | ${thread} | ${sensor}`] ?? NaN : NaN;
+    const amt08 = (id: string) => p08.adders.find((a) => a.id === id)?.amount ?? NaN;
+    const real = price('TSP-08(S4)8Sx100-BU');
+    check('รหัสจริง TSP-08(S4)8Sx100-BU = ชีต TS-08S แถว 8S × 1/2” × TSP + หัว B (= ราคาในฐาน 3,290)', real.o?.status === 'priced' &&
+      real.o.unitPrice === cellS('8S', '1/2”', 'TSP') + amtS('head_alu_l') && real.o.unitPrice === 3290 && real.p.model === 'TSP-08', `${real.o?.status} ${real.o?.unitPrice}`);
+    const len = price('TSPA-08(S2)8Sx250-B');
+    check('TSPA + ความยาว (อัตราของแถว 8S · ปัดขึ้นทุก 100) + หัว B', len.o?.status === 'priced' &&
+      len.o.unitPrice === cellS('8S', '1/4”', 'TSPA') + 2 * rateS('len_l1', '8S') + amtS('head_alu_l'), `${len.o?.unitPrice}`);
+    const d635 = price('TSZ-08(S8)6.35Sx100-KB');
+    check('แกน 6.35S ไม่ไปแถว 6.35 ของ TSP-08 (คนละราคา)', d635.o?.status === 'priced' &&
+      d635.o.unitPrice === cellS('6.35S', '1”', 'TSZ') + amtS('head_blacklite_l') && d635.o.unitPrice !== cell08('6.35', '1”', 'TSZ') + amt08('head_blacklite_l'), `${d635.o?.unitPrice}`);
+    const head = price('TSP-08S(S4)6.35x100');
+    check('หัวรหัส TSP-08S + แกน 6.35 = แถว 6.35S (รุ่นในรหัสยังเป็น TSP-08)', head.o?.status === 'priced' && head.p.model === 'TSP-08' &&
+      head.o.unitPrice === cellS('6.35S', '1/2”', 'TSP') && modelOfCode('TSP-08S(S4)6.35x100', book)?.code === 'TSP-08', `${head.p.model} ${head.o?.unitPrice}`);
+    for (const code of ['TSP-08S(S4)6x160-U', 'TSP-08-S(S4)6x285-U', 'TSP-08(S4)6Sx100']) {
+      const r = price(code);
+      check(`${code}: แกนที่ชีต TS-08S ไม่มี = ต้องขอราคา (ไม่ใช้แถว 6 ของ TSP-08 · ไม่เดาเป็น 6.35S)`, r.o?.status === 'quoteOnRequest' &&
+        r.o.violations.some((v) => v.askPrice) && !r.o.breakdown.some((b) => /ราคาตั้ง/.test(b.label)), `${r.o?.status} ${r.o?.unitPrice}`);
+    }
+    const dash = price('TSP-08-S(S2)4x150-U');
+    check('TSP-08-S (มีขีด) ไม่ตกเป็นหัวกระโหลกเล็ก (S)', !dash.o?.violations.some((v) => /Small Head/.test(v.message)) && !dash.p.cfg?.options?.some((o) => /head/.test(o)),
+      `${dash.o?.violations.map((v) => v.message).join(' / ')}`);
+    const t18 = price('TSP-08(S1)8Sx100');
+    check('เกลียว 1/8” (ชีตเว้นว่าง) = ยังไม่มีราคา ไม่ใช่ไม่รับผลิต', noRate(t18.o), `${t18.o?.status}`);
+    const e2 = price('TSP-08(S4)6.35Sx100-2');
+    check('2 Element = ต้องขอราคา (หมายเหตุชีต: ปรึกษาฝ่ายผลิต 2) ไม่ใช่ราคาเต็ม', e2.o?.status === 'quoteOnRequest', `${e2.o?.status}`);
+    const plain = price('TSP-08(S4)6.35x100');
+    check('แกน 6.35 ธรรมดา (ไม่มี S) ยังคิดตาม TSP-08 เดิม', plain.o?.unitPrice === cell08('6.35', '1/2”', 'TSP'), `${plain.o?.unitPrice}`);
+    const form = price('TSP-08(S4)8Sx100-BU').p.tsForm;
+    check('ช่องกรอก TS_-08: วัสดุ = S · ประกอบกลับเป็นรหัสเดิม', form?.values.mat === 'S' && !form.issues && buildTsCode(form) === 'TSP-08(S4)8Sx100-BU',
+      `${JSON.stringify(form?.values)} ${JSON.stringify(form?.issues)}`);
+  }
+
+  // ── 18. ตัว L มีขีด + ข้อจำกัดของแคตตาล็อก — เจ้าของ 2026-10-09 ("นับด้วย" · "เตือนตามข้อจำกัด แต่ยังขอราคาและกรอกราคาได้") ─────
+  section('18. ตัว L มีขีด (-L) = หัก L · ข้อจำกัดของแคตตาล็อก = ต้องขอราคา + บอกข้อที่ขัด · ข้อ PT100/พีวีซี = เตือนอย่างเดียว (เจ้าของ 2026-10-09)');
+  {
+    const dashL = price('TSP-08-L(S4)6x100-U');
+    const plainL = price('TSP-08L(S4)6x100-U');
+    check('TSP-08-L( = TSP-08L( (หัก L +100) + เตือนให้แก้รหัสใน Odoo', dashL.o?.status === 'priced' && dashL.o.unitPrice === plainL.o?.unitPrice &&
+      !!dashL.p.cfg?.options?.includes('bend:L') && dashL.p.warnings.some((w) => /Odoo/.test(w)), `${dashL.o?.unitPrice} / ${plainL.o?.unitPrice}`);
+    const k11 = price('TSK-11-L 5x254+1000+1M');
+    check('TSK-11-L (เว้นวรรคหลัง L) = หัก L ด้วย', !!k11.p.cfg?.options?.includes('bend:L'), `${k11.p.cfg?.options}`);
+    const k01 = price('TSK-01-L(M6)4.8+1M');
+    check('รุ่นที่ไม่มีกฎหัก L (TSK-01) — -L ไม่ถูกอ่านเป็นหัก L', !k01.p.cfg?.options?.includes('bend:L'), `${k01.p.cfg?.options}`);
+    const limit = (o: ReturnType<typeof price>['o'], id: string) => !!o?.violations.some((v) => v.id === `CATALOG_LIMIT:${id}` && v.level === 'quoteOnRequest');
+    const tn8 = price('TSPA-08(S8)7TNx700-KU');
+    check('Titanium + เกลียว S8 = ขัดแคตตาล็อก (เฉพาะ S4) → ต้องขอราคา ไม่ใช่ไม่รับผลิต', limit(tn8.o, 'TITANIUM_S4') && tn8.o?.status === 'quoteOnRequest',
+      `${tn8.o?.violations.map((v) => v.id).join(' ')}`);
+    const tn4 = price('TSPA-08(S4)7TNx700-KU');
+    check('Titanium + เกลียว S4 = ไม่ขัด', !tn4.o?.violations.some((v) => v.id.startsWith('CATALOG_LIMIT')), `${tn4.o?.violations.map((v) => v.id).join(' ')}`);
+    const k16 = price('TSK-12 1.6x100+1MS');
+    const j16 = price('TSJ-12 1.6x100+1MS');
+    check('TS_-12 แกน 1.6 (Type J Only) กับ Type K = ต้องขอราคา แต่ยังโชว์ราคาเท่าที่คิดได้เท่ารุ่นที่ถูก', limit(k16.o, 'J_ONLY_D') &&
+      k16.o?.status === 'quoteOnRequest' && k16.o.unitPrice === j16.o?.unitPrice && j16.o?.status === 'priced', `${k16.o?.status} ${k16.o?.unitPrice} / ${j16.o?.unitPrice}`);
+    check('ข้อที่ขัดขึ้นใน "วิธีคำนวณทีละขั้น" พร้อมที่มา', !!k16.o?.trace?.checks.some((c) => c.hit && /Type J/.test(c.message) && !!c.source),
+      `${k16.o?.trace?.checks.map((c) => c.message).join(' / ')}`);
+    const ntc = price('N2-03 6x120+1MTSU-S000');
+    check('อ่านแบบหลวม: ช่องว่างไม่ตัดสิน (N2-03 …TSU ไม่โดน "Unground เท่านั้น")', !ntc.o?.violations.some((v) => v.id === 'CATALOG_LIMIT:NTC_UNGROUND'),
+      `${ntc.o?.violations.map((v) => v.id).join(' ')}`);
+    // เตือนอย่างเดียว (เจ้าของ 2026-10-09 "คิดราคาได้ แต่เพิ่มแจ้งเตือน") — ราคา/สถานะเท่ารหัสที่ไม่ขัด
+    const warnOnly = (o: ReturnType<typeof price>['o'], id: string) => !!o?.violations.some((v) => v.id === `CATALOG_LIMIT:${id}` && v.level === 'warn');
+    const pt8 = price('TSP-02(14.5)8x25+1M');
+    const pt6 = price('TSP-02(14.5)6x25+1M');
+    check('TS_-02 PT100 แกน 8 (แคตตาล็อก 4.8 · 5 · 6) = เตือน แต่ยังได้ราคาตาม Excel', warnOnly(pt8.o, 'PT100_D') && pt8.o?.status === 'priced',
+      `${pt8.o?.status} ${pt8.o?.violations.map((v) => `${v.id}:${v.level}`).join(' ')}`);
+    check('TS_-02 PT100 แกน 6 = ไม่เตือน', !pt6.o?.violations.some((v) => v.id.startsWith('CATALOG_LIMIT')), `${pt6.o?.violations.map((v) => v.id).join(' ')}`);
+    const pvc = price('TSK-11 3.2x50+2M-P');
+    const pvc5 = price('TSK-11 5x50+2M-P');
+    check('TS_-11 สายพีวีซี แกน 3.2 (แคตตาล็อก 5 mm ขึ้นไป) = เตือน แต่ยังได้ราคา', warnOnly(pvc.o, 'PVC_MIN_D') && pvc.o?.status === 'priced',
+      `${pvc.o?.status} ${pvc.o?.violations.map((v) => `${v.id}:${v.level}`).join(' ')}`);
+    check('TS_-11 สายพีวีซี แกน 5 = ไม่เตือน', !pvc5.o?.violations.some((v) => v.id.startsWith('CATALOG_LIMIT')), `${pvc5.o?.violations.map((v) => v.id).join(' ')}`);
+    check('ข้อเตือนขึ้นใน "วิธีคำนวณทีละขั้น" พร้อมที่มา', !!pvc.o?.trace?.checks.some((c) => c.hit && c.level === 'warn' && /พีวีซี/.test(c.message) && !!c.source),
+      `${pvc.o?.trace?.checks.filter((c) => c.hit).map((c) => c.message).join(' / ')}`);
+  }
+
+  // ── 19. TS_-09 (2026-10-09) — รุ่นใหม่ TSP-09 · RTD หน้าแปลนปีกนก + หัวกระโหลก · เทียบกับช่องของชีต ไม่ใช่ตัวเลขที่จดไว้ ──
+  section('19. TS_-09 — ชีต TS-09 + แคตตาล็อก TS_-09 (RTD · หัวกระโหลกรายขนาดแกน · แกนนอกตาราง = ขอราคา)');
+  const p09 = book.models['TSP-09'];
+  if (!p09) {
+    console.log(`  ${YEL}…${RESET} เล่มนี้ยังไม่มี TSP-09 — ข้าม (ตรวจก่อนเขียนฐานด้วย -- --book <ไฟล์จาก importer.ts --new-models --out>)`);
+  } else {
+    const cell09 = (d: string, sensor = 'PT100 (Class B) (TSP)') => p09.base.kind === 'matrix' ? p09.base.cells[`${d} | ${sensor}`] ?? NaN : NaN;
+    const rate09 = (id: string, key: string) => p09.adders.find((a) => a.id === id)?.rates?.[key] ?? NaN;
+    const std = price('TSP-09 6x100-U');
+    check('ราคาตั้ง = แถวแกน 6 คอลัมน์ TSP (A10 "TS_- 09 6x100") · U ไม่มีราคาเพิ่ม', std.o?.status === 'priced' && std.o.unitPrice === cell09('6') &&
+      std.o.breakdown.length === 1, `${std.o?.unitPrice}`);
+    check('ได้ช่องตามแคตตาล็อก TS_-09 · ประกอบกลับเป็นรหัสเดิม (เว้นวรรคหลังเลขรุ่น)',
+      std.p.tsForm?.family === 'TS_-09' && !!readTsForm('TSP-09 6x100-U', 'TS_-09') && buildTsCode(std.p.tsForm!) === 'TSP-09 6x100-U',
+      std.p.tsForm ? buildTsCode(std.p.tsForm) : '—');
+    const pa = price('TSPA-09 6x100-U');
+    const z = price('TSZ-09 6x100-U');
+    check('TSPA / TSZ = คอลัมน์ D / E ของแถวเดียวกัน', pa.o?.unitPrice === cell09('6', 'PT100 (Class A) (TSPA)') && z.o?.unitPrice === cell09('6', 'PT1000  (TSZ)'),
+      `${pa.o?.unitPrice} / ${z.o?.unitPrice}`);
+    const len = price('TSP-09 21.3Bx250-U');
+    check('ความยาวแกน = ทุก 100 mm ที่เกิน ปัดขึ้น (21.3B: 2 ช่วง)', len.o?.unitPrice === cell09('21.3B') + 2 * rate09('len_l1', '21.3B'), `${len.o?.unitPrice}`);
+    for (const [hd, id] of [['B', 'head_alu_l'], ['K', 'head_blacklite_s'], ['KB', 'head_blacklite_l']] as const) {
+      const r = price(`TSP-09 8x100-${hd}U`);
+      check(`หัว ${hd} = คอลัมน์ ${id} ของแถวแกน 8`, r.o?.status === 'priced' && r.o.unitPrice === cell09('8') + rate09(id, '8'), `${r.o?.unitPrice}`);
+    }
+    const k175 = price('TSP-09 17.5Ax100-KU');
+    check('หัว K ของแกน 17.5A (ชีตเว้นว่าง) = ยังไม่มีราคา ไม่ใช่ไม่รับผลิต', noRate(k175.o), `${k175.o?.status}`);
+    const ss = price('TSP-09 6x100-SSU');
+    check('หัว SS (Excel ไม่มีราคา · แถวรหัสย่อยค่าว่าง) = ยังไม่มีราคา', noRate(ss.o), `${ss.o?.status}`);
+    const e2 = price('TSP-09 6x150-2-BU');
+    check('2 Element + หัว B = ราคาตั้ง + ความยาว + คอลัมน์ F + หัว B', e2.o?.status === 'priced' &&
+      e2.o.unitPrice === cell09('6') + rate09('len_l1', '6') + rate09('element_2', '6') + rate09('head_alu_l', '6'), `${e2.o?.unitPrice}`);
+    const e2s = price('TSP-09 4x100-2-U');
+    check('2 Element แกน 4 = ไม่รับผลิต (แคตตาล็อก: 6 mm ขึ้นไป)', e2s.o?.status === 'notManufacturable', `${e2s.o?.status}`);
+    const tf = price('TSP-09 6Tx300-U');
+    check('วัสดุ T = แกนเปล่า + หุ้มเทปล่อนเต็มความยาว (คอลัมน์ J)', tf.o?.status === 'priced' &&
+      tf.o.unitPrice === cell09('6') + 2 * rate09('len_l1', '6') + 3 * rate09('coat_teflon', '6'), `${tf.o?.unitPrice}`);
+    const tn = price('TSP-09 7TNx100-U');
+    check('แกน 7TN (ชีตมีแถวแต่ราคาตั้งว่าง) = ไม่ได้ราคาเต็ม และไม่ใช่ไม่รับผลิต', tn.o?.status === 'quoteOnRequest', `${tn.o?.status}`);
+    const lj = price('TSP-09L 6x100-U');
+    check('ตัว L = หัก L +100 ตามชีต B8 (กฎกลาง SUFFIX_ADDON)', lj.o?.unitPrice === cell09('6') + 100, `${lj.o?.unitPrice}`);
+    const d102 = price('TSP-09 10.2Ax100-U');
+    check('แกน 10.2A (ไม่มีทั้งแคตตาล็อกและชีต) = ต้องขอราคา · ช่องกรอกขึ้น ask', d102.o?.status === 'quoteOnRequest' && d102.p.tsForm?.issues?.d === 'ask',
+      `${d102.o?.status} ${JSON.stringify(d102.p.tsForm?.issues)}`);
+    const tm = price('TSP-09 6x200-BU-TM001');
+    check('-TM### (ทรานสมิตเตอร์ในหัว · แนว TSP-08) = ยังไม่มีราคา + ราคาเท่าที่คิดได้', noRate(tm.o) &&
+      tm.o?.unitPrice === cell09('6') + rate09('len_l1', '6') + rate09('head_alu_l', '6') && tm.p.parts.some((x) => x.text === 'TM001' && x.kind !== 'unknown'),
+      `${tm.o?.status} ${tm.p.parts.map((x) => `${x.text}:${x.subCode ?? ''}`).join(' ')}`);
+    // ข้อจำกัดของแคตตาล็อก TS_-09 — เจ้าของ 2026-10-09 "ถ้ามีข้อจำกัดระบุไว้ในไฟล์แค็ตตาล็อค pdf ต้องใส่เสมอ"
+    const hit = (o: ReturnType<typeof price>['o'], id: string, level: 'quoteOnRequest' | 'warn') =>
+      !!o?.violations.some((v) => v.id === `CATALOG_LIMIT:${id}` && v.level === level);
+    const tn9 = price('TSP-09 7TNx100-U');
+    check('Titanium (แคตตาล็อก: เฉพาะเกลียว S4 · รุ่นนี้ไม่มีเกลียว) = ต้องขอราคา + บอกข้อที่ขัด', hit(tn9.o, 'TITANIUM_S4', 'quoteOnRequest'),
+      `${tn9.o?.violations.map((v) => `${v.id}:${v.level}`).join(' ')}`);
+    const tf8 = price('TSP-09 8Tx100-U');
+    check('เคลือบเทปล่อนแกน 8 (แคตตาล็อก: เฉพาะ 4 · 6) = ต้องขอราคา', hit(tf8.o, 'TEFLON_D', 'quoteOnRequest'), `${tf8.o?.violations.map((v) => v.id).join(' ')}`);
+    const m48 = price('TSP-09 4.8x100-U');
+    check('แกน 4.8 วัสดุ 304 (แคตตาล็อก: 316L เท่านั้น · ชีตมีราคา) = เตือนอย่างเดียว ราคาตามชีต', hit(m48.o, 'MAT_BY_D', 'warn') &&
+      m48.o?.status === 'priced' && m48.o.unitPrice === cell09('4.8'), `${m48.o?.status} ${m48.o?.unitPrice}`);
+    const fl = price('TSP-09 5x100-U');
+    check('แกน 5 (แคตตาล็อกไม่มีหน้าแปลนให้) = เตือนอย่างเดียว', hit(fl.o, 'FLANGE_D', 'warn') && fl.o?.status === 'priced', `${fl.o?.status}`);
+    check('แกน 6 วัสดุ 304 = ไม่เตือน', !std.o?.violations.some((v) => v.id.startsWith('CATALOG_LIMIT')), `${std.o?.violations.map((v) => v.id).join(' ')}`);
+    const tmS = price('TSP-09 6x200-U-TM001');
+    check('-TM### กับหัวมาตรฐาน (ไม่ใช่ Big Head) = ต้องขอราคา + บอกข้อที่ขัด · หัว B ไม่ขัด', hit(tmS.o, 'TM_BIG_HEAD', 'quoteOnRequest') &&
+      !hit(tm.o, 'TM_BIG_HEAD', 'quoteOnRequest'), `${tmS.o?.violations.map((v) => v.id).join(' ')}`);
+  }
+
+  // ── 20. TS_-09 S (2026-10-09) — ชีต TS-09S "TSP-09 S" (เจ้าของส่งภาพชีต) · แนวเดียวกับ TS_-08 S ──
+  section('20. TS_-09 S — แกน Sheath จากชีต TS-09S (6.35S · 8S) · หัวรหัส TSP-09-S (เจ้าของ 2026-10-09)');
+  const p09s = book.models['TSP-09S'];
+  if (!p09s || !book.models['TSP-09']) {
+    console.log(`  ${YEL}…${RESET} เล่มนี้ยังไม่มี TSP-09S — ข้าม (ตรวจก่อนเขียนฐานด้วย -- --book <ไฟล์จาก importer.ts --new-models --out>)`);
+  } else {
+    const cellS = (d: string) => p09s.base.kind === 'matrix' ? p09s.base.cells[`${d} | PT100 (Class B) (TSP)`] ?? NaN : NaN;
+    const rateS = (id: string, key: string) => p09s.adders.find((a) => a.id === id)?.rates?.[key] ?? NaN;
+    const dash = price('TSP-09-S 8x136-BU');
+    check('TSP-09-S 8x136-BU = ตาราง TSP-09S แถว 8S + ความยาว 1 ช่วง + หัว B (ไม่ใช่หัวกระโหลกเล็ก)', dash.o?.status === 'priced' &&
+      dash.o.unitPrice === cellS('8S') + rateS('len_l1', '8S') + rateS('head_alu_l', '8S'), `${dash.o?.status} ${dash.o?.unitPrice}`);
+    const inl = price('TSP-09 6.35Sx100-U');
+    check('แกน 6.35S ในรหัส TSP-09 = ตาราง TSP-09S', inl.o?.status === 'priced' && inl.o.unitPrice === cellS('6.35S'), `${inl.o?.status} ${inl.o?.unitPrice}`);
+    const no95 = price('TSP-09-S 9.5x170-KBU');
+    check('ขนาดที่ชีต TS-09S ไม่มี (9.5) = ต้องขอราคา', no95.o?.status === 'quoteOnRequest', `${no95.o?.status}`);
+    const e2 = price('TSP-09-S 8x100-2-BU');
+    check('2 Element ของแกน Sheath = ต้องขอราคา (หมายเหตุชีต: ปรึกษาฝ่ายผลิต 2)', e2.o?.status === 'quoteOnRequest', `${e2.o?.status}`);
   }
 }
 
