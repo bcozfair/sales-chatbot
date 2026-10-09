@@ -18,7 +18,8 @@
    รัน: `npm run build --prefix frontend` ก่อน แล้ว `npm run diag:drawing-live-ui` (`DL_SHOT=<ไฟล์.png>` = ถ่ายภาพการ์ดตอนจบ)
    ───────────────────────────────────────────────────────────────────────────── */
 import puppeteer, { type HTTPRequest, type Page } from 'puppeteer';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { extname, join, normalize } from 'node:path';
 import { TS_CATALOG, buildTsCode, readTsForm, type TsForm } from '../../services/pricingLab/catalogTs.js';
@@ -210,6 +211,38 @@ try {
   await tab('3 มิติ'); await later(300);
   const v3 = await viewState();
   ok('   กลับ 3 มิติ: ตัวดูตัวเดียว', v3.canvases === 1 && !v3.svgText, `canvas ${v3.canvases}`);
+  // กระดาษแบบ SVG — กดปุ่มจริง แล้วอ่านไฟล์ที่ดาวน์โหลด
+  const dlDir = mkdtempSync(join(tmpdir(), 'dl-sheet-'));
+  try {
+    const cdp = await page.createCDPSession();
+    await cdp.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: dlDir });
+    await tab('คู่');
+    await page.waitForFunction(() => Number(document.querySelector<HTMLElement>('[data-testid="drawing-card"] .dv-stage')?.dataset.dvBuilds ?? 0) >= 1, { timeout: 10000 });
+    await later(600);
+    await page.evaluate(() => [...document.querySelectorAll<HTMLButtonElement>('[data-testid="drawing-card"] button')].find((b) => b.textContent?.trim() === 'SVG')?.click());
+    let file = '';
+    for (let i = 0; i < 50 && !file; i++) { await later(100); file = readdirSync(dlDir).find((f) => f.endsWith('.svg')) ?? ''; }
+    const svg = file ? readFileSync(join(dlDir, file), 'utf8') : '';
+    const has = (re: RegExp) => re.test(svg);
+    ok('13 · ปุ่ม SVG ได้กระดาษแบบ A4 (980 × 693)', has(/viewBox="0 0 980 693"/), file || 'ไม่มีไฟล์');
+    ok('   ภาพ 3 มิติ (ภาพนิ่ง PNG + ป้าย) + ภาพฉาย 2 มิติตามช่องที่แก้', has(/<image href="data:image\/png;base64,[A-Za-z0-9+/]{2000}/) && has(/class="stlb"/) && has(/L1 300 mm\./) && has(/data-view="ortho"/));
+    ok('   title block + ตาราง + บรรทัด "ไม่ใช่แบบผลิต" · โลโก้ฝังในไฟล์', has(/เลขที่แบบ/) && has(/ผู้เขียนแบบ/) && has(/รายละเอียดสินค้า/) && has(/ไม่ใช่แบบผลิต/) && (svg.match(/data:image\/png;base64,/g) ?? []).length === 2);
+    ok('   ไม่มีหมายเหตุของแบบ (เห็นเฉพาะในระบบ) · ไม่มีราคา', !has(/หมายเหตุของแบบ|สปริงลวด/) && !has(/บาท|฿/));
+    ok('   สัญลักษณ์เส้นผ่านศูนย์กลางเป็น Ø (ฟอนต์ที่ฝัง/ในกล่อง prod ไม่มี ∅)', !has(/&#8709;|\u2205/) && has(/&#216;D1 6/));
+    ok('   SVG เป็น XML ที่อ่านได้ (ไม่มี named entity)', !has(/&(?!#\d+;|amp;|lt;|gt;|quot;)[a-z]+;/));
+    if (process.env.DL_SHOT && svg) {
+      const pg = await browser.newPage();
+      await pg.setViewport({ width: 1470, height: 1040 });
+      await pg.setContent(`<body style="margin:0;background:#888">${svg.replace('<svg ', '<svg width="1470" height="1040" ')}</body>`);
+      await later(500);
+      await pg.screenshot({ path: process.env.DL_SHOT.replace(/\.png$/, '-sheet.png') });
+      await pg.close();
+    }
+  } finally {
+    rmSync(dlDir, { recursive: true, force: true });
+  }
+  await tab('3 มิติ'); await later(300);
+
   if (process.env.DL_SHOT) { const card = await page.$('[data-testid="drawing-card"]'); await card?.screenshot({ path: process.env.DL_SHOT }); await tab('คู่'); await later(1500); await card?.screenshot({ path: process.env.DL_SHOT.replace(/\.png$/, '-pair.png') }); await tab('3 มิติ'); await later(300); }
 
   ok('11 · ไม่มี error ในหน้า', pageErrors.length === 0, pageErrors.join(' | '));
