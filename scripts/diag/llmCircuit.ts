@@ -104,7 +104,7 @@ console.log('\n2. เล่นซ้ำเหตุการณ์ 2026-10-08 09
 // ── 3. ปุ่มลองอีกครั้ง: ส่วนตัดสิน ─────────────────────────────────────────────
 console.log('\n3. pickRetryableText');
 {
-  const FAIL = 'ขออภัยระบบ AI ขัดข้องชั่วคราว กรุณารอสักครู่ แล้วลองใหม่อีกครั้งนะครับ 🙏';
+  const FAIL = 'ขออภัย ระบบขัดข้องชั่วคราว กรุณารอสักครู่ แล้วลองใหม่อีกครั้งนะครับ 🙏';
   const row = { message_id: '600123', content: 'เสนอราคา\nบริษัท ก', reply_content: FAIL };
   check('3a. ข้อความล่าสุด + ตอบด้วยข้อความล้ม = รันได้', pickRetryableText(row, '600123', FAIL) === row.content);
   check('3b. ข้อความล่าสุดเป็นข้อความอื่น (ทำรายการแล้ว/พิมพ์ต่อแล้ว) = ไม่รัน', pickRetryableText({ ...row, message_id: 'retry_X' }, '600123', FAIL) === null);
@@ -118,7 +118,7 @@ console.log('\n3. pickRetryableText');
 // ── 4. Flex ─────────────────────────────────────────────────────────────────
 console.log('\n4. createLlmOutageRetryFlex');
 {
-  const text = 'ขออภัยระบบ AI ขัดข้องชั่วคราว กรุณารอสักครู่ แล้วลองใหม่อีกครั้งนะครับ 🙏';
+  const text = 'ขออภัย ระบบขัดข้องชั่วคราว กรุณารอสักครู่ แล้วลองใหม่อีกครั้งนะครับ 🙏';
   const mid = 'retry_01JABCDEFGHJKMNPQRSTVWXYZ';
   const f: any = createLlmOutageRetryFlex(text, mid);
   const btn = f.contents.body.contents.find((x: any) => x.type === 'button');
