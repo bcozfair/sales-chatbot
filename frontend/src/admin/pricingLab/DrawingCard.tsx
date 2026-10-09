@@ -1,5 +1,5 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Box, Boxes, Check, ChevronDown, Copy, Download, Hash, Printer, RotateCcw, Tag } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, Box, Boxes, Check, Copy, Download, Hash, Printer, RotateCcw, Tag } from 'lucide-react';
 import { Button } from '../Button';
 import { errMsg } from '../logs/format';
 // three.js (~650 KB) โหลดเฉพาะตอนการ์ดมีภาพ — import แบบ type อย่างเดียวที่นี่ ตัวจริงโหลดใน effect (หน้าอื่นของแอดมินไม่ต้องจ่าย)
@@ -21,11 +21,13 @@ import type { BhForm, TsForm } from './types';
  *   และระหว่างแก้ช่องในหน้าคำนวณราคา การ์ดแปลง "ช่องที่กำลังแก้" เป็น spec ด้วย `fromReading` ตัวเดียวกับเซิร์ฟเวอร์ (ไม่ใช่ตัวอ่านรหัสตัวที่สอง —
  *   ช่องคือผลอ่านเดียวกับที่ส่งไปคิดราคา) แล้วเปลี่ยนภาพโดยมุมกล้องคงเดิม · คำตัดสิน/ปุ่มไฟล์/STEP ยังมาจากเซิร์ฟเวอร์เท่านั้น
  *   ภาพที่สร้างจากช่องเป็นภาพชั่วคราว คำตอบของเซิร์ฟเวอร์ (รหัสที่ประกอบจากช่องเดียวกัน) มาทับเสมอ
- * · ไฟล์: PDF · PNG (เซิร์ฟเวอร์พิมพ์ · ฟอนต์ฝัง) · SVG (สร้างในเบราว์เซอร์) — กระดาษแบบ A4 ภาพ 3 มิติตามมุม/ซูมที่เห็น · STEP
- *   ลิงก์ลูกค้ามากับเฟส 2 (ไม่โชว์ปุ่มที่ยังทำงานไม่ได้)
- * · ภาพ 3 มิติ / 2 มิติ / คู่ (ตั้งต้น 3 มิติ · mockup รอบ 5 ข้อ 1) — 2 มิติ = ภาพฉายของโมดูล (`views/`) ตาม spec ที่แสดง
- * · ตารางรายละเอียดสินค้า (`specRows` · ตามภาพที่แสดง จึงยืดหดตามช่องเหมือนภาพ) + หมายเหตุของแบบ — **หมายเหตุเห็นเฉพาะที่นี่**
- *   ไม่ลงกระดาษแบบ/หน้าลูกค้า (เจ้าของเคาะ mockup รอบ 5 ข้อ 2 · 2026-10-09) · ปุ่มคัดลอกรหัสข้างรหัส (mockup รอบ 5)
+ * · **จอ = กระดาษ** (เจ้าของ 2026-10-09 · mockup drawing-sheet-split ข้อ A): แท็บ 3 มิติ / 2 มิติ / คู่ แสดงกระดาษแบบ A4 จาก `renderSheet`
+ *   ตัวเดียวกับไฟล์ (ตาม spec ที่แสดง จึงยืดหดตามช่อง) · ใบ 3 มิติบนจอ = กรอบว่าง แล้ววางตัวดูทับ `PIC_3D` พอดี (หมุน/ซูม/แยกชิ้นได้ในกรอบ)
+ *   · คู่ = ใบ 3 มิติตามด้วยใบ 2 มิติ · ตั้งต้น 3 มิติ (mockup รอบ 5 ข้อ 1)
+ * · ไฟล์ตามแท็บที่เปิด: PDF (เซิร์ฟเวอร์พิมพ์ · เปิดแท็บใหม่ · คู่ = 2 หน้า) · PNG (คู่ = 2 ไฟล์) · SVG (สร้างในเบราว์เซอร์ · คู่ = 2 ไฟล์) · STEP
+ *   ภาพ 3 มิติในไฟล์ = ภาพนิ่งจากตัวดูตามมุม/ซูมที่เห็น (`STILL_3D` สัดส่วนเดียวกับกรอบ) · ลิงก์ลูกค้ามากับเฟส 2
+ * · หมายเหตุของแบบ — **เห็นเฉพาะที่นี่** (บรรทัดใต้กระดาษ) ไม่ลงกระดาษแบบ/หน้าลูกค้า (เจ้าของเคาะ mockup รอบ 5 ข้อ 2)
+ *   ตารางรายละเอียดอยู่ในกระดาษแล้ว จึงไม่มีกล่องแยก · ปุ่มคัดลอกรหัสข้างรหัส (mockup รอบ 5)
  * · แยกชิ้นค้างไว้ได้ระหว่างแก้ช่อง (ตัวดูไม่ถูกสร้างใหม่) — เดิมกลับเป็นประกอบทุกครั้ง
  */
 
@@ -62,8 +64,6 @@ let logoP: Promise<string> | null = null;
 const loadLogo = () => (logoP ??= fetch('/logo.png').then((r) => r.blob()).then((b) => new Promise<string>((ok, bad) => {
   const fr = new FileReader(); fr.onload = () => ok(String(fr.result)); fr.onerror = () => bad(fr.error); fr.readAsDataURL(b);
 })));
-/** ภาพนิ่ง 3 มิติของกระดาษ: 872 × 640 (= กรอบ 436 × 320 ของกระดาษ × 2) */
-const STILL = { w: 872, h: 640 };
 /** ผู้เขียนแบบ = ผู้ใช้ที่ล็อกอิน (ชื่อที่ AuthContext เก็บไว้) */
 const drawerName = (): string => { try { const u = JSON.parse(sessionStorage.getItem('admin_user') ?? 'null'); return u?.name || u?.username || ''; } catch { return ''; } };
 const thaiDate = () => new Date().toLocaleDateString('th-TH', { timeZone: 'Asia/Bangkok', day: '2-digit', month: '2-digit', year: 'numeric' });
@@ -76,26 +76,23 @@ const saveBlob = (blob: Blob, name: string) => {
 const fileBase = (code: string) => code.trim().replace(/[\\/:*?"<>|\s]+/g, '_') || 'drawing';
 
 type ViewMode = '3d' | '2d' | 'pair';
+type SheetKind = '3d' | '2d';
 const VIEW_MODES: [ViewMode, string][] = [['3d', '3 มิติ'], ['2d', '2 มิติ'], ['pair', 'คู่']];
+const SHEETS_OF: Record<ViewMode, SheetKind[]> = { '3d': ['3d'], '2d': ['2d'], pair: ['3d', '2d'] };
+const SHEET_LABEL: Record<ViewMode, string> = { '3d': 'ใบ 3 มิติ (มุมที่เห็น)', '2d': 'ใบ 2 มิติ', pair: '2 ใบ: 3 มิติ + 2 มิติ' };
+const SUFFIX: Record<SheetKind, string> = { '3d': '3D', '2d': '2D' };
 
 /**
- * ภาพฉาย 2 มิติ (SVG จากโมดูล · พื้นขาวคงที่ทุกธีม) — ตัดกรอบตามเนื้อภาพจริงด้วย getBBox
- * (viewBox ของกระดาษทั้งแผ่นเหลือขอบว่างครึ่งกรอบ ⇒ ตัวหนังสือเล็กจนอ่านไม่ออก · mockup รอบ 5)
+ * กระดาษแบบบนจอ — SVG ทั้งแผ่นจาก `renderSheet` (ตัวเดียวกับไฟล์ · พื้นขาวคงที่ทุกธีม) ย่อตามความกว้างการ์ด
+ * · `children` = ผืนตัวดู 3 มิติ วางเป็นสัดส่วนของ `pic` (หน่วยกระดาษ) ⇒ ตำแหน่งตรงกรอบภาพในไฟล์ทุกขนาดจอ
  */
-const Ortho2D: React.FC<{ svg: string; pair: boolean }> = ({ svg, pair }) => {
-  const box = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const el = box.current?.querySelector('svg');
-    if (!el) return;
-    let b: DOMRect;
-    try { b = el.getBBox(); } catch { return; }
-    if (!b.width || !b.height) return;
-    const pad = Math.max(b.width, b.height) * 0.04;
-    el.setAttribute('viewBox', `${b.x - pad} ${b.y - pad} ${b.width + pad * 2} ${b.height + pad * 2}`);
-  }, [svg]);
-  return <div ref={box} data-testid="drawing-2d" className={`rounded-xl border border-slate-200 bg-white overflow-hidden [&>svg]:block [&>svg]:w-full ${pair ? '[&>svg]:h-auto [&>svg]:max-h-[380px]' : 'h-[420px] max-sm:h-[320px] [&>svg]:h-full'}`}
-              dangerouslySetInnerHTML={{ __html: svg }} />;
-};
+const Paper: React.FC<{ svg: string; kind: SheetKind; size: { w: number; h: number }; children?: React.ReactNode }> = ({ svg, kind, size, children }) => (
+  <div data-testid={`drawing-sheet-${kind}`} className="relative w-full rounded-xl ring-1 ring-slate-200 bg-white overflow-hidden" style={{ aspectRatio: `${size.w} / ${size.h}` }}>
+    <div className="absolute inset-0 [&>svg]:block [&>svg]:w-full [&>svg]:h-full" dangerouslySetInnerHTML={{ __html: svg }} />
+    {children}
+  </div>
+);
+const pct = (n: number, of: number) => `${(n / of) * 100}%`;
 
 /** ปุ่มบนภาพ — ไอคอน (+ คำเดียวถ้ามี) · คำอธิบายใน tooltip = aria-label */
 const Tool: React.FC<{ on: boolean; tip: string; word?: string; onClick: () => void; children: React.ReactNode }> = ({ on, tip, word, onClick, children }) => (
@@ -115,6 +112,7 @@ export const DrawingCard: React.FC<{ code: string; picks: Picks; headers: Record
   const [printing, setPrinting] = useState<'pdf' | 'png' | null>(null);
   const [copied, setCopied] = useState(false);
   const [text, setText] = useState<SheetText | null>(null);
+  const [logo, setLogo] = useState('');
   // ภาพตั้งต้น = 3 มิติ (เจ้าของเคาะ mockup รอบ 5 ข้อ 1) · 2 มิติ/คู่ สลับเอง
   const [view, setView] = useState<ViewMode>('3d');
   const stage = useRef<HTMLDivElement>(null);
@@ -193,9 +191,18 @@ export const DrawingCard: React.FC<{ code: string; picks: Picks; headers: Record
     return () => { alive = false; };
     // code อยู่ใน aria-label เท่านั้น — โมเดลเปลี่ยนเมื่อ spec เปลี่ยน
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shownKey, canDraw, error, view]);
+  }, [shownKey, canDraw, error, view, text]);   // text: ผืนภาพอยู่ในกระดาษ ⇒ มาหลังโมดูลกระดาษโหลด
   useEffect(() => drop, []);
   useEffect(() => { if (canDraw && !text) void loadSheetText().then(setText, () => {}); }, [canDraw, text]);
+  useEffect(() => { if (canDraw && !logo) void loadLogo().then(setLogo, () => {}); }, [canDraw, logo]);
+  // กระดาษบนจอ = ใบที่แท็บนี้จะพิมพ์ (ใบ 3 มิติ = กรอบว่าง ตัวดูวางทับ) — สร้างใหม่เมื่อภาพ/รหัส/แท็บเปลี่ยนเท่านั้น
+  const dataCode = data?.code ?? '';
+  const paper = useMemo(() => {
+    const spec: DrawingSpec | null = JSON.parse(shownKey);
+    if (!text || !spec) return null;
+    const base = { spec, code: dataCode, still: null, logo, meta: { drawer: drawerName(), date: thaiDate() } };
+    return Object.fromEntries(SHEETS_OF[view].map((k) => [k, text.renderSheet({ ...base, view: k })])) as Partial<Record<SheetKind, string>>;
+  }, [text, shownKey, dataCode, logo, view]);
 
   if (error) return <div className="bg-card border border-slate-200 rounded-2xl px-5 py-4 text-sm text-red-700">{error}</div>;
   if (!data) return null;
@@ -221,37 +228,53 @@ export const DrawingCard: React.FC<{ code: string; picks: Picks; headers: Record
     }
     if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1500); }
   };
-  const shownSpec: DrawingSpec | null = v.canDraw ? JSON.parse(shownKey) : null;
   const sheetOk = fileOk && !live && !!text && !!data.spec;
-  const sheetView = view === '2d' ? 'ภาพฉาย 2 มิติ' : 'ภาพ 3 มิติใช้มุมที่เห็น + ภาพฉาย';
+  const sheetView = SHEET_LABEL[view];
   const sheetWhy = !fileOk ? fileWhy : live || !text ? 'รอแบบ' : `กระดาษแบบ A4 (เวกเตอร์) · ${sheetView}`;
+  const kinds = SHEETS_OF[view];
+  /** ภาพนิ่ง 3 มิติตามมุม/ซูมที่เห็น — แท็บ 2 มิติไม่ต้องใช้ · แท็บที่มีใบ 3 มิติแต่ตัวดูยังไม่พร้อม = throw (ไม่พิมพ์กรอบว่างออกไป) */
+  const snap = () => {
+    if (!kinds.includes('3d')) return null;
+    const s = text && viewer.current?.snapshot(text.STILL_3D.w, text.STILL_3D.h);
+    if (!s) throw new Error('ภาพ 3 มิติยังไม่พร้อม ลองอีกครั้ง');
+    return s;
+  };
+  const nameOf = (k: SheetKind, ext: string) => `${fileBase(data.code)}-${SUFFIX[k]}.${ext}`;
 
-  // กระดาษแบบ SVG — สร้างในเบราว์เซอร์ทั้งแผ่น (โมดูลเป็น TS ล้วน) · ภาพ 3 มิติ = ภาพนิ่งจากตัวดูตามมุม/ซูมที่เห็น
-  // ใช้ spec/รหัสของคำตอบเซิร์ฟเวอร์เท่านั้น (ปุ่มปิดระหว่างแก้ช่อง — ภาพชั่วคราวยังไม่ผ่านการตัดสิน) · โหมด 2 มิติ = กระดาษภาพฉายเต็มกรอบ
+  // กระดาษแบบ SVG — สร้างในเบราว์เซอร์ทั้งแผ่น (โมดูลเป็น TS ล้วน) · ใบตามแท็บที่เปิด (คู่ = 2 ไฟล์)
+  // ใช้ spec/รหัสของคำตอบเซิร์ฟเวอร์เท่านั้น (ปุ่มปิดระหว่างแก้ช่อง — ภาพชั่วคราวยังไม่ผ่านการตัดสิน)
   const downloadSvg = async () => {
     if (!text || !data.spec) return;
     try {
-      const still = view !== '2d' ? viewer.current?.snapshot(STILL.w, STILL.h) ?? null : null;
-      const svg = text.renderSheet({ spec: data.spec, code: data.code, still, logo: await loadLogo(), meta: { drawer: drawerName(), date: thaiDate() } });
-      saveBlob(new Blob([svg], { type: 'image/svg+xml' }), `${fileBase(data.code)}.svg`);
+      const still = snap(), lg = await loadLogo();
+      for (const k of kinds) {
+        const svg = text.renderSheet({ spec: data.spec, code: data.code, view: k, still: k === '3d' ? still : null, logo: lg, meta: { drawer: drawerName(), date: thaiDate() } });
+        saveBlob(new Blob([svg], { type: 'image/svg+xml' }), nameOf(k, 'svg'));
+      }
     } catch (e: unknown) {
       setError(`สร้างกระดาษแบบไม่สำเร็จ — ${errMsg(e)}`);
     }
   };
 
-  // PDF/PNG — เซิร์ฟเวอร์อ่านรหัสซ้ำแล้วประกอบกระดาษเอง (กติกาเดียวกับ STEP) · ส่งไปแค่ภาพนิ่ง 3 มิติตามมุม/ซูมที่เห็น
-  //  PDF เปิดในแท็บใหม่ให้พิมพ์/บันทึกจากตัวดู PDF ของเบราว์เซอร์ แบบเดียวกับพรีวิวใบเสนอราคา (เจ้าของ 2026-10-09) · PNG ยังดาวน์โหลด
+  // PDF/PNG — เซิร์ฟเวอร์อ่านรหัสซ้ำแล้วประกอบกระดาษเอง (กติกาเดียวกับ STEP) · ส่งไปแค่ชนิดใบ + ภาพนิ่ง 3 มิติตามมุม/ซูมที่เห็น
+  //  PDF เปิดในแท็บใหม่ให้พิมพ์/บันทึกจากตัวดู PDF ของเบราว์เซอร์ แบบเดียวกับพรีวิวใบเสนอราคา (เจ้าของ 2026-10-09) · คู่ = PDF 2 หน้า
+  //  PNG ยังดาวน์โหลด · คู่ = ขอทีละใบ 2 ไฟล์
   const downloadPrint = async (format: 'pdf' | 'png') => {
     setPrinting(format);
     // เปิดแท็บ "ตอนกด" ไม่ใช่หลัง await — เบราว์เซอร์บล็อก window.open ที่ไม่ได้เกิดจากการกดโดยตรง
     const tab = format === 'pdf' ? window.open('', '_blank') : null;
     try {
-      const still = view !== '2d' ? viewer.current?.snapshot(STILL.w, STILL.h) ?? null : null;
-      const res = await fetch('/api/admin/drawing/sheet', { method: 'POST', headers, body: JSON.stringify({ code: data.code, picks, confirmed, format, still }) });
-      if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? 'สร้างไฟล์ไม่สำเร็จ');
-      const blob = await res.blob();
-      if (format === 'png') return saveBlob(blob, `${fileBase(data.code)}.png`);
-      const url = URL.createObjectURL(blob);
+      const still = snap();
+      const ask = async (sheet: ViewMode) => {
+        const res = await fetch('/api/admin/drawing/sheet', { method: 'POST', headers, body: JSON.stringify({ code: data.code, picks, confirmed, format, view: sheet, still: sheet === '2d' ? null : still }) });
+        if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? 'สร้างไฟล์ไม่สำเร็จ');
+        return res.blob();
+      };
+      if (format === 'png') {
+        for (const k of kinds) saveBlob(await ask(k), nameOf(k, 'png'));
+        return;
+      }
+      const url = URL.createObjectURL(await ask(view));
       if (tab) tab.location.href = url;
       else window.open(url, '_blank');
       // คืน objectURL ทีหลัง ไม่ใช่ทันที — คืนเร็วไปแท็บที่เพิ่งเปิดจะได้ไฟล์ว่าง
@@ -329,38 +352,32 @@ export const DrawingCard: React.FC<{ code: string; picks: Picks; headers: Record
 
       {v.canDraw && (
         <>
-          {view !== '2d' && <div ref={stage} className={`dv-stage rounded-xl border border-slate-200 ${view === 'pair' ? 'h-[400px] max-sm:h-[300px]' : 'h-[420px] max-sm:h-[320px]'}`}>
-            <div className="absolute top-2.5 right-2.5 z-[3] flex gap-1.5">
-              <Tool on={exploded} tip={exploded ? 'ประกอบกลับ' : 'แยกชิ้น'} word={exploded ? 'ประกอบ' : 'แยกชิ้น'}
-                    onClick={() => setExploded(viewer.current?.toggleExplode() ?? false)}>
-                {exploded ? <Box className="w-4 h-4" /> : <Boxes className="w-4 h-4" />}
-              </Tool>
-              <Tool on={labels} tip="ป้ายชื่อและขนาด" onClick={() => { viewer.current?.setLabels(!labels); setLabels(!labels); }}><Tag className="w-4 h-4" /></Tool>
-              <Tool on={edges} tip="เส้นขอบ" onClick={() => { viewer.current?.setEdges(!edges); setEdges(!edges); }}><Hash className="w-4 h-4" /></Tool>
-              <Tool on={false} tip="กลับมุมเริ่มต้น" onClick={() => viewer.current?.reset()}><RotateCcw className="w-4 h-4" /></Tool>
+          {paper && text && kinds.map((k, n) => (
+            <div key={k} className={n ? 'mt-2.5' : ''}>
+              <Paper svg={paper[k] ?? ''} kind={k} size={{ w: text.SHEET_W, h: text.SHEET_H }}>
+                {k === '3d' && (
+                  <div ref={stage} className="dv-stage" data-testid="drawing-stage"
+                       style={{ position: 'absolute', left: pct(text.PIC_3D.x, text.SHEET_W), top: pct(text.PIC_3D.y, text.SHEET_H), width: pct(text.PIC_3D.w, text.SHEET_W), height: pct(text.PIC_3D.h, text.SHEET_H) }}>
+                    <div className="absolute top-1.5 right-1.5 z-[3] flex gap-1.5">
+                      <Tool on={exploded} tip={exploded ? 'ประกอบกลับ' : 'แยกชิ้น'} word={exploded ? 'ประกอบ' : 'แยกชิ้น'}
+                            onClick={() => setExploded(viewer.current?.toggleExplode() ?? false)}>
+                        {exploded ? <Box className="w-4 h-4" /> : <Boxes className="w-4 h-4" />}
+                      </Tool>
+                      <Tool on={labels} tip="ป้ายชื่อและขนาด" onClick={() => { viewer.current?.setLabels(!labels); setLabels(!labels); }}><Tag className="w-4 h-4" /></Tool>
+                      <Tool on={edges} tip="เส้นขอบ" onClick={() => { viewer.current?.setEdges(!edges); setEdges(!edges); }}><Hash className="w-4 h-4" /></Tool>
+                      <Tool on={false} tip="กลับมุมเริ่มต้น" onClick={() => viewer.current?.reset()}><RotateCcw className="w-4 h-4" /></Tool>
+                    </div>
+                    <span className="absolute left-1.5 bottom-1.5 z-[3] text-[11px] text-[#3D5261] bg-white/85 rounded-lg px-2 py-0.5 max-sm:hidden">{TOUCH ? 'ลาก = หมุน · สองนิ้ว = ซูม/เลื่อน' : 'ลาก = หมุน · คลิกขวาลาก = เลื่อน'}</span>
+                  </div>
+                )}
+              </Paper>
             </div>
-            <span className="absolute left-2.5 bottom-2.5 z-[3] text-[11px] text-[#3D5261] bg-white/85 rounded-lg px-2 py-0.5">{TOUCH ? 'ลาก = หมุน · สองนิ้ว = ซูม/เลื่อน' : 'ลาก = หมุน · คลิกขวาลาก = เลื่อน'}</span>
-          </div>}
-          {view !== '3d' && shownSpec && text && <div className={view === 'pair' ? 'mt-2.5' : ''}><Ortho2D svg={text.orthoSvg(shownSpec, data.code)} pair={view === 'pair'} /></div>}
+          ))}
           {view !== '2d' && <div ref={list} className="mt-2.5 empty:hidden" />}
-          {shownSpec && text && (
-            <details open className="group mt-2.5 border border-slate-200 rounded-xl bg-slate-50" data-testid="drawing-spec">
-              <summary className="cursor-pointer list-none flex items-center gap-2 px-3 py-2 text-[12.5px] font-bold text-slate-900 [&::-webkit-details-marker]:hidden">
-                รายละเอียดสินค้า
-                <ChevronDown className="w-3.5 h-3.5 ml-auto text-slate-500 transition-transform group-open:rotate-180" />
-              </summary>
-              <dl className="m-0 px-3 pb-2 grid grid-cols-[max-content_minmax(0,1fr)] max-sm:grid-cols-1 gap-x-4 gap-y-0.5 text-[12.5px]">
-                {text.specRows(shownSpec).map(([k, val]) => (
-                  <React.Fragment key={k}>
-                    <dt className="text-slate-500">{k}</dt>
-                    <dd className="m-0 text-slate-900 [overflow-wrap:anywhere] max-sm:mb-1">{val}</dd>
-                  </React.Fragment>
-                ))}
-              </dl>
-              <p className="m-0 px-3 pb-2.5 text-[11.5px] leading-relaxed text-slate-500" data-testid="drawing-note">
-                <b className="text-slate-700">หมายเหตุของแบบ</b> (เห็นเฉพาะในระบบ) · {text.sheetNote(shownSpec)}
-              </p>
-            </details>
+          {paper && text && (
+            <p className="m-0 mt-2 text-[11.5px] leading-relaxed text-slate-500" data-testid="drawing-note">
+              <b className="text-slate-700">หมายเหตุของแบบ</b> (เห็นเฉพาะในระบบ ไม่อยู่ในกระดาษ) · {text.sheetNote(JSON.parse(shownKey))}
+            </p>
           )}
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <span title={sheetOk ? `แบบ A4 · ${sheetView}` : sheetWhy}>

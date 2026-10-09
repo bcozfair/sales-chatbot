@@ -11,13 +11,15 @@
 //    6. เส้น POST /sheet ตัวจริง (router + ตัวคิดราคาจำลองที่อ่านด้วย readTsForm จริง): PDF/PNG ได้ · ภาพนิ่งผิด = 400 ·
 //       มีท่อนที่แบบไม่ได้วาดแต่ไม่ติ๊ก = 409 · ชนิดไฟล์แปลก = 400
 //    5. ไม่มี ∅ ในแผ่น (ฟอนต์ไม่มี glyph) · ไม่มีหมายเหตุของแบบ/ราคา
+//    7. ใบละอย่าง (เจ้าของ 2026-10-09): ใบ 3 มิติ = ภาพนิ่งเต็มกรอบ PIC_3D ไม่มีภาพฉาย · ใบ 2 มิติ = ภาพฉาย ไม่มีภาพนิ่ง ·
+//       ใบคู่ = PDF 2 หน้า A4 ทั้งสองหน้า · เส้นจริง: view คู่ = 2 หน้า · คู่ขอ PNG = 400 · ใบ 3 มิติไม่มีภาพนิ่ง = 400 · view แปลก = 400
 //  รัน: `npm run diag:drawing-sheet` (~5 วิ)
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { closePrintBrowser, printHtml } from '../../pdfGenerator.js';
-import { checkStill, renderSheet, type SheetStill } from '../../services/drawing/sheet.js';
+import { PIC_3D, checkStill, renderSheet, type SheetStill } from '../../services/drawing/sheet.js';
 import { A4_LANDSCAPE, sheetHtml } from '../../services/drawing/render/sheetHtml.js';
 import type { BandSpec, Ts11Spec, TsCableSpec } from '../../services/drawing/types.js';
 import express from 'express';
@@ -78,6 +80,12 @@ try {
       if (pdfPages(b) !== 1) cablePages.push(`${spec.family}${still ? '' : ' (ไม่มีภาพนิ่ง)'} ${pdfPages(b)} หน้า`);
     }
   ok('   TS_-01 · 01-0 · 02 · 03 · 05 ข้อความยาวสุด ก็หน้าเดียว (มี/ไม่มีภาพนิ่ง)', cablePages.length === 0, cablePages.join(', ') || `${CABLE_SPECS.length * 2} แผ่น`);
+  const sheet2d = renderSheet({ spec: TS, code: 'TSK-11-6X100+2M', view: '2d', still: STILL, logo: LOGO, meta });
+  ok('7 · ใบ 3 มิติ: ภาพนิ่งเต็มกรอบ PIC_3D · ไม่มีภาพฉาย', sheetTs.includes(`<svg x="${PIC_3D.x}" y="${PIC_3D.y}" width="${PIC_3D.w}" height="${PIC_3D.h}"`) && !sheetTs.includes('data-view="ortho"') && sheetTs.includes('>ภาพ 3 มิติ</text>'));
+  ok('   ใบ 2 มิติ: ภาพฉาย · ไม่มีภาพนิ่ง (ส่งมาก็ไม่ใช้)', sheet2d.includes('data-view="ortho"') && !sheet2d.includes('class="stlb"') && sheetTs.includes('class="stlb"') && sheet2d.includes('>ภาพฉาย 2 มิติ</text>'));
+  const pairPdf = Buffer.from(await printHtml(sheetHtml([sheetTs, sheet2d]), { kind: 'pdf', widthMm: A4_LANDSCAPE.w, heightMm: A4_LANDSCAPE.h, pages: 2 }));
+  const boxes = [...pairPdf.toString('latin1').matchAll(/\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/g)];
+  ok('   ใบคู่ = PDF 2 หน้า A4 แนวนอนทั้งสองหน้า', pdfPages(pairPdf) === 2 && boxes.length >= 2 && boxes.every((m) => Math.abs(Number(m[1]) - 841.89) < 1 && Math.abs(Number(m[2]) - 595.28) < 1), `${pdfPages(pairPdf)} หน้า`);
   const png = Buffer.from(await printHtml(sheetHtml(sheetTs), { kind: 'png', widthMm: A4_LANDSCAPE.w, heightMm: A4_LANDSCAPE.h, pngWidthPx: 1754 }));
   const pw = png.readUInt32BE(16), ph = png.readUInt32BE(20);
   ok('2 · PNG 1754 × 1240', png.subarray(1, 4).toString() === 'PNG' && pw === 1754 && Math.abs(ph - 1240) <= 1, `${pw} × ${ph} · ${(png.length / 1024).toFixed(0)} KB`);
@@ -113,7 +121,7 @@ try {
   ok('   ข้อความในป้ายถูก escape', out.includes('สาย &lt;script&gt;alert(1)&lt;/script&gt;') && !out.includes('<script'));
 
   console.log('\n── เนื้อหาของแผ่น ─────────────────────────────────');
-  ok('5 · ไม่มี ∅ (ฟอนต์ไม่มี glyph) — ใช้ Ø', !/&#8709;|∅/.test(sheetTs) && /&#216;D1 6/.test(sheetTs));
+  ok('5 · ไม่มี ∅ (ฟอนต์ไม่มี glyph) — ใช้ Ø', !/&#8709;|∅/.test(sheetTs + sheet2d) && /&#216;D1 6/.test(sheet2d));
   ok('   ไม่มีหมายเหตุของแบบ · ไม่มีราคา · มี "ไม่ใช่แบบผลิต"', !/หมายเหตุของแบบ|สปริงลวด|บาท|฿/.test(sheetTs) && /ไม่ใช่แบบผลิต/.test(sheetTs));
 
   console.log('\n── เส้น POST /sheet ───────────────────────────────────');
@@ -139,6 +147,18 @@ try {
   ok('   มีท่อนที่แบบไม่ได้วาด: ไม่ติ๊ก = 409 · ติ๊กแล้ว = 200', r4.status === 409 && r4b.status === 200, `${r4.status} / ${r4b.status}`);
   const r5 = await post({ code: 'TSK-11 6x100+2M', format: 'exe' });
   ok('   ชนิดไฟล์แปลก = 400', r5.status === 400, String(r5.status));
+  const r6 = await post({ code: 'TSK-11 6x100+2M', format: 'pdf', view: 'pair', still: STILL });
+  const b6 = Buffer.from(await r6.arrayBuffer());
+  ok('7 · เส้นจริง view คู่ = PDF 2 หน้า', r6.status === 200 && pdfPages(b6) === 2, `${r6.status} · ${pdfPages(b6)} หน้า`);
+  const r7 = await post({ code: 'TSK-11 6x100+2M', format: 'pdf', view: '2d', still: STILL });
+  ok('   view 2 มิติ (มีภาพนิ่งติดมาก็ไม่ใช้) = 1 หน้า', r7.status === 200 && pdfPages(Buffer.from(await r7.arrayBuffer())) === 1, String(r7.status));
+  const badView = await Promise.all([
+    post({ code: 'TSK-11 6x100+2M', format: 'png', view: 'pair', still: STILL }),
+    post({ code: 'TSK-11 6x100+2M', format: 'pdf', view: '3d' }),
+    post({ code: 'TSK-11 6x100+2M', format: 'pdf', view: 'pair' }),
+    post({ code: 'TSK-11 6x100+2M', format: 'pdf', view: 'iso', still: STILL }),
+  ]);
+  ok('   คู่ขอ PNG · ใบ 3 มิติ/คู่ไม่มีภาพนิ่ง · view แปลก = 400 ทุกตัว', badView.every((r) => r.status === 400), badView.map((r) => r.status).join(' / '));
   http.close();
 } catch (e) {
   fail++;

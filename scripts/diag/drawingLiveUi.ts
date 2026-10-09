@@ -14,6 +14,8 @@
    4. แยกชิ้นค้างไว้ได้ระหว่างแก้ (ปุ่มยังเป็น "ประกอบ")
    5. คำตอบเซิร์ฟเวอร์มาถึงแล้วภาพไม่กระตุก (ขนาดเท่าเดิม) · เปลี่ยนชนิดหัว (ส่วนประกอบ) ภาพก็ตาม
    6. ไม่มี error ในหน้า
+   12–13. จอ = กระดาษ (เจ้าของ 2026-10-09): แท็บ 3 มิติ/2 มิติ/คู่ แสดงกระดาษ A4 ใบที่จะพิมพ์ · ตัวดูวางทับกรอบภาพ 3 มิติพอดี
+       · PDF/PNG/SVG ตามแท็บที่เปิด (คู่ = PDF 2 หน้า · PNG/SVG 2 ไฟล์ · 2 มิติ = ไม่ส่งภาพนิ่ง)
 
    รัน: `npm run build --prefix frontend` ก่อน แล้ว `npm run diag:drawing-live-ui` (`DL_SHOT=<ไฟล์.png>` = ถ่ายภาพการ์ดตอนจบ + การ์ดแบบคู่ของแต่ละรุ่นในข้อ 14)
    ───────────────────────────────────────────────────────────────────────────── */
@@ -25,7 +27,7 @@ import { extname, join, normalize } from 'node:path';
 import { TS_CATALOG, buildTsCode, readTsForm, type TsFamily, type TsForm } from '../../services/pricingLab/catalogTs.js';
 import { judge } from '../../services/drawing/checks.js';
 import type { PricingReading } from '../../services/drawing/types.js';
-import { checkStill, renderSheet } from '../../services/drawing/sheet.js';
+import { PIC_3D, SHEET_H, SHEET_W, checkStill, renderSheet } from '../../services/drawing/sheet.js';
 import { A4_LANDSCAPE, sheetHtml } from '../../services/drawing/render/sheetHtml.js';
 import { closePrintBrowser, printHtml } from '../../pdfGenerator.js';
 
@@ -89,16 +91,20 @@ async function route(req: HTTPRequest) {
     const r = readingOf(body);
     const v = judge(r.parsed, { status: 'priced' });
     const still = body.still == null ? null : checkStill(body.still);
-    sheets.push({ format: body.format, still: typeof still === 'string' ? still : still ? 'ok' : 'none' });
-    if (typeof still === 'string' || !v.spec) return req.respond({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: typeof still === 'string' ? still : 'no spec' }) });
-    const svg = renderSheet({ spec: v.spec, code: r.code, still, logo: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==', meta: { drawer: 'Probe', date: '09/10/2569' } });
+    const view: string = body.view;
+    sheets.push({ format: body.format, view, still: typeof still === 'string' ? still : still ? 'ok' : 'none' });
+    // กติกาเดียวกับ routes/drawing.ts: ชนิดใบต้องรู้จัก · ใบ 3 มิติ/คู่ต้องมีภาพนิ่ง · คู่ = PDF เท่านั้น
+    const bad = typeof still === 'string' ? still : !v.spec ? 'no spec' : !['3d', '2d', 'pair'].includes(view) ? 'view' : view !== '2d' && !still ? 'no still' : view === 'pair' && body.format !== 'pdf' ? 'pair png' : '';
+    if (bad) return req.respond({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: bad }) });
+    const base = { spec: v.spec!, code: r.code, still: still as Exclude<typeof still, string>, logo: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==', meta: { drawer: 'Probe', date: '09/10/2569' } };
+    const svgs = (view === 'pair' ? ['3d', '2d'] as const : [view as '3d' | '2d']).map((k) => renderSheet({ ...base, view: k }));
     const kind = body.format === 'png' ? 'png' : 'pdf';
-    const file = await printHtml(sheetHtml(svg), { kind, widthMm: A4_LANDSCAPE.w, heightMm: A4_LANDSCAPE.h, pngWidthPx: 1754 });
+    const file = await printHtml(sheetHtml(svgs), { kind, widthMm: A4_LANDSCAPE.w, heightMm: A4_LANDSCAPE.h, pngWidthPx: 1754, pages: svgs.length });
     return req.respond({ status: 200, contentType: kind === 'pdf' ? 'application/pdf' : 'image/png', headers: { 'Content-Disposition': `attachment; filename="x.${kind}"` }, body: Buffer.from(file) });
   }
   return json(req, {});
 }
-const sheets: { format: string; still: string }[] = [];
+const sheets: { format: string; view: string; still: string }[] = [];
 
 const TOKEN_PAYLOAD = Buffer.from(JSON.stringify({ id: 1, role: 'admin', exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url');
 const FAKE_TOKEN = `eyJhbGciOiJIUzI1NiJ9.${TOKEN_PAYLOAD}.probe`;
@@ -166,13 +172,13 @@ try {
   const dCam = Math.max(...s1.cam.map((x, i) => Math.abs(x - camBefore[i])));
   ok('3 · ทิศกล้องเท่าเดิม', dCam <= 0.01, `คลาด ${dCam.toFixed(4)}`);
   ok('   ไม่สร้างตัวดูใหม่ (canvas ตัวเดิม)', s1.canvases === 1);
+  // ตารางรายละเอียดอยู่ในกระดาษบนจอแล้ว (ไม่มีกล่องแยก) — ข้อความ "แกนวัด" ตามด้วยค่าของแถวนั้น
   const probeRow = await page.evaluate(() => {
-    const dl = document.querySelector('[data-testid="drawing-spec"] dl');
-    const dts = [...(dl?.querySelectorAll('dt') ?? [])];
-    const i = dts.findIndex((d) => d.textContent === 'แกนวัด');
-    return { rows: dts.length, probe: i < 0 ? '' : dl!.querySelectorAll('dd')[i].textContent ?? '', note: document.querySelector('[data-testid="drawing-note"]')?.textContent ?? '' };
+    const ts = [...document.querySelectorAll('[data-testid="drawing-sheet-3d"] svg text')].map((t) => t.textContent ?? '');
+    const i = ts.indexOf('แกนวัด');
+    return { probe: i < 0 ? '' : ts[i + 1] ?? '', box: !!document.querySelector('[data-testid="drawing-spec"]'), note: document.querySelector('[data-testid="drawing-note"]')?.textContent ?? '' };
   });
-  ok('   ตารางรายละเอียดตามช่องทันที (แกนวัด ยาว 300)', probeRow.rows >= 8 && /ยาว 300 mm/.test(probeRow.probe), `${probeRow.rows} แถว · แกนวัด "${probeRow.probe}"`);
+  ok('   ตารางรายละเอียดในกระดาษตามช่องทันที (แกนวัด ยาว 300) · ไม่มีกล่องรายละเอียดแยก', /ยาว 300 mm/.test(probeRow.probe) && !probeRow.box, `แกนวัด "${probeRow.probe}"`);
   ok('   หมายเหตุของแบบ (เห็นเฉพาะในระบบ)', /หมายเหตุของแบบ.*เห็นเฉพาะในระบบ.*สปริงกันสายหัก/.test(probeRow.note));
   const stillExploded = await page.evaluate(() => [...document.querySelectorAll('[data-testid="drawing-card"] button')].some((b) => b.getAttribute('aria-label') === 'ประกอบกลับ'));
   ok('4 · แยกชิ้นค้างอยู่ระหว่างแก้', stillExploded);
@@ -220,21 +226,34 @@ try {
   const viewState = () => page.evaluate(() => {
     const card = document.querySelector('[data-testid="drawing-card"]')!;
     const sel = card.querySelector('[role="tab"][aria-selected="true"]')?.textContent ?? '';
-    const svg = card.querySelector('[data-testid="drawing-2d"] svg');
-    return { sel, canvases: card.querySelectorAll('canvas').length, svgText: svg?.textContent ?? '', vb: svg?.getAttribute('viewBox') ?? '' };
+    const papers = [...card.querySelectorAll<HTMLElement>('[data-testid^="drawing-sheet-"]')];
+    const p3 = card.querySelector<HTMLElement>('[data-testid="drawing-sheet-3d"]'), stg = p3?.querySelector<HTMLElement>('.dv-stage');
+    const r = (e?: Element | null) => { const b = e?.getBoundingClientRect(); return b ? [b.x, b.y, b.width, b.height] : null; };
+    return { sel, canvases: card.querySelectorAll('canvas').length, order: papers.map((p) => p.dataset.testid!.slice(-2)),
+      vb: papers.map((p) => p.querySelector('svg')?.getAttribute('viewBox') ?? ''),
+      text2d: card.querySelector('[data-testid="drawing-sheet-2d"] svg')?.textContent ?? '', paper: r(p3), stage: r(stg) };
   });
   const v0 = await viewState();
-  ok('12 · ภาพตั้งต้น = 3 มิติ', v0.sel === '3 มิติ' && v0.canvases === 1 && !v0.svgText);
+  ok('12 · ภาพตั้งต้น = กระดาษ 3 มิติ ใบเดียว (A4 980 × 693) · ตัวดูอยู่ในกระดาษ', v0.sel === '3 มิติ' && v0.canvases === 1 && v0.order.join() === '3d' && v0.vb.join() === `0 0 ${SHEET_W} ${SHEET_H}`, `ใบ ${v0.order.join('+')}`);
+  // ตัวดูต้องทับกรอบภาพ PIC_3D ของกระดาษพอดี (คลาดไม่เกิน 1.5 px) ⇒ ภาพบนจอ = ภาพในไฟล์
+  const fit = (st: typeof v0) => {
+    if (!st.paper || !st.stage) return Infinity;
+    const [px, py, pw, ph] = st.paper, k = pw / SHEET_W;
+    const want = [px + PIC_3D.x * k, py + PIC_3D.y * k, PIC_3D.w * k, PIC_3D.h * k];
+    return Math.max(...want.map((x, i) => Math.abs(x - st.stage![i])), Math.abs(ph - SHEET_H * k));
+  };
+  ok('   ตัวดูทับกรอบภาพ 3 มิติของกระดาษพอดี', fit(v0) <= 1.5, `คลาด ${fit(v0).toFixed(2)} px`);
   await tab('2 มิติ'); await later(400);
   const v1 = await viewState();
-  ok('   2 มิติ: ภาพฉายตามช่องที่แก้ (L1 300) · ไม่มีภาพ 3 มิติค้าง · ตัดกรอบตามเนื้อภาพ', v1.canvases === 0 && /L1 300 mm\./.test(v1.svgText) && v1.vb !== '' && v1.vb !== '0 0 980 640', `canvas ${v1.canvases} · viewBox ${v1.vb}`);
+  ok('   2 มิติ: กระดาษภาพฉายใบเดียวตามช่องที่แก้ (L1 300) · ไม่มีตัวดูค้าง', v1.canvases === 0 && v1.order.join() === '2d' && /L1 300 mm\./.test(v1.text2d), `canvas ${v1.canvases} · ใบ ${v1.order.join('+')}`);
   await tab('คู่');
   await page.waitForFunction(() => Number(document.querySelector<HTMLElement>('[data-testid="drawing-card"] .dv-stage')?.dataset.dvBuilds ?? 0) >= 1, { timeout: 10000 });
+  await later(300);
   const v2 = await viewState();
-  ok('   คู่: 3 มิติบน + 2 มิติล่าง', v2.canvases === 1 && /L1 300 mm\./.test(v2.svgText));
+  ok('   คู่: กระดาษ 3 มิติตามด้วย 2 มิติ · ตัวดูยังทับกรอบพอดี', v2.canvases === 1 && v2.order.join() === '3d,2d' && /L1 300 mm\./.test(v2.text2d) && fit(v2) <= 1.5, `ใบ ${v2.order.join('+')}`);
   await tab('3 มิติ'); await later(300);
   const v3 = await viewState();
-  ok('   กลับ 3 มิติ: ตัวดูตัวเดียว', v3.canvases === 1 && !v3.svgText, `canvas ${v3.canvases}`);
+  ok('   กลับ 3 มิติ: ตัวดูตัวเดียว ใบเดียว', v3.canvases === 1 && v3.order.join() === '3d', `canvas ${v3.canvases}`);
   // กระดาษแบบ SVG — กดปุ่มจริง แล้วอ่านไฟล์ที่ดาวน์โหลด
   const dlDir = mkdtempSync(join(tmpdir(), 'dl-sheet-'));
   try {
@@ -243,20 +262,32 @@ try {
     await tab('คู่');
     await page.waitForFunction(() => Number(document.querySelector<HTMLElement>('[data-testid="drawing-card"] .dv-stage')?.dataset.dvBuilds ?? 0) >= 1, { timeout: 10000 });
     await later(600);
-    await page.evaluate(() => [...document.querySelectorAll<HTMLButtonElement>('[data-testid="drawing-card"] button')].find((b) => b.textContent?.trim() === 'SVG')?.click());
-    let file = '';
-    for (let i = 0; i < 50 && !file; i++) { await later(100); file = readdirSync(dlDir).find((f) => f.endsWith('.svg')) ?? ''; }
-    const svg = file ? readFileSync(join(dlDir, file), 'utf8') : '';
-    const has = (re: RegExp) => re.test(svg);
-    ok('13 · ปุ่ม SVG ได้กระดาษแบบ A4 (980 × 693)', has(/viewBox="0 0 980 693"/), file || 'ไม่มีไฟล์');
-    ok('   ภาพ 3 มิติ (ภาพนิ่ง PNG + ป้าย) + ภาพฉาย 2 มิติตามช่องที่แก้', has(/<image href="data:image\/png;base64,[A-Za-z0-9+/]{2000}/) && has(/class="stlb"/) && has(/L1 300 mm\./) && has(/data-view="ortho"/));
-    ok('   title block + ตาราง + บรรทัด "ไม่ใช่แบบผลิต" · โลโก้ฝังในไฟล์', has(/เลขที่แบบ/) && has(/ผู้เขียนแบบ/) && has(/รายละเอียดสินค้า/) && has(/ไม่ใช่แบบผลิต/) && (svg.match(/data:image\/png;base64,/g) ?? []).length === 2);
-    ok('   ไม่มีหมายเหตุของแบบ (เห็นเฉพาะในระบบ) · ไม่มีราคา', !has(/หมายเหตุของแบบ|สปริงลวด/) && !has(/บาท|฿/));
-    ok('   สัญลักษณ์เส้นผ่านศูนย์กลางเป็น Ø (ฟอนต์ที่ฝัง/ในกล่อง prod ไม่มี ∅)', !has(/&#8709;|\u2205/) && has(/&#216;D1 6/));
-    ok('   SVG เป็น XML ที่อ่านได้ (ไม่มี named entity)', !has(/&(?!#\d+;|amp;|lt;|gt;|quot;)[a-z]+;/));
-    for (const fmt of ['PDF', 'PNG'] as const) {
-      // PDF เปิดในแท็บใหม่แบบพรีวิวใบเสนอราคา (ไม่ดาวน์โหลด) ⇒ แทน window.open ด้วยแท็บจำลองที่จำ URL ไว้ แล้วอ่าน blob จากหน้าเดิม
-      if (fmt === 'PDF') await page.evaluate(() => {
+    const click = (l: string) => page.evaluate((x: string) => [...document.querySelectorAll<HTMLButtonElement>('[data-testid="drawing-card"] button')].find((b) => b.textContent?.trim() === x)?.click(), l);
+    const waitFiles = async (ext: string, n: number) => {
+      let fs: string[] = [];
+      for (let i = 0; i < 100 && fs.length < n; i++) { await later(100); fs = readdirSync(dlDir).filter((f) => f.endsWith(ext) && !f.endsWith('.crdownload')).sort(); }
+      return fs;
+    };
+    // แท็บคู่ → SVG 2 ไฟล์ (ใบ 3 มิติ + ใบ 2 มิติ)
+    await click('SVG');
+    const svgFiles = await waitFiles('.svg', 2);
+    const read = (suffix: string) => { const f = svgFiles.find((x) => x.endsWith(`-${suffix}.svg`)); return f ? readFileSync(join(dlDir, f), 'utf8') : ''; };
+    const svg3 = read('3D'), svg2 = read('2D'), svg = svg3;
+    const has = (t: string, re: RegExp) => re.test(t);
+    const pngs = (t: string) => (t.match(/data:image\/png;base64,/g) ?? []).length;
+    ok('13 · แท็บคู่ → ปุ่ม SVG ได้ 2 ไฟล์ (…-3D.svg · …-2D.svg) กระดาษ A4 980 × 693', svgFiles.length === 2 && !!svg3 && !!svg2 && [svg3, svg2].every((t) => has(t, /viewBox="0 0 980 693"/)), svgFiles.join(' · ') || 'ไม่มีไฟล์');
+    ok('   ใบ 3 มิติ: ภาพนิ่ง PNG + ป้าย เต็มกรอบ · ไม่มีภาพฉาย', has(svg3, /<image href="data:image\/png;base64,[A-Za-z0-9+/]{2000}/) && has(svg3, /class="stlb"/) && !has(svg3, /data-view="ortho"/) && has(svg3, new RegExp(`<svg x="${PIC_3D.x}" y="${PIC_3D.y}" width="${PIC_3D.w}" height="${PIC_3D.h}"`)) && has(svg3, /ภาพ 3 มิติ<\/text>/));
+    ok('   ใบ 2 มิติ: ภาพฉายตามช่องที่แก้ · ไม่มีภาพนิ่ง (มีแค่โลโก้)', has(svg2, /data-view="ortho"/) && has(svg2, /L1 300 mm\./) && pngs(svg2) === 1 && has(svg2, /ภาพฉาย 2 มิติ<\/text>/));
+    for (const t of [svg3, svg2]) {
+      ok('   title block + ตาราง + บรรทัด "ไม่ใช่แบบผลิต" · โลโก้ฝังในไฟล์', has(t, /เลขที่แบบ/) && has(t, /ผู้เขียนแบบ/) && has(t, /รายละเอียดสินค้า/) && has(t, /ไม่ใช่แบบผลิต/) && pngs(t) === (t === svg3 ? 2 : 1));
+      ok('   ไม่มีหมายเหตุของแบบ (เห็นเฉพาะในระบบ) · ไม่มีราคา', !has(t, /หมายเหตุของแบบ|สปริงลวด/) && !has(t, /บาท|฿/));
+      ok('   SVG เป็น XML ที่อ่านได้ (ไม่มี named entity)', !has(t, /&(?!#\d+;|amp;|lt;|gt;|quot;)[a-z]+;/));
+    }
+    ok('   สัญลักษณ์เส้นผ่านศูนย์กลางเป็น Ø (ฟอนต์ที่ฝัง/ในกล่อง prod ไม่มี ∅)', !has(svg2 + svg3, /&#8709;|\u2205/) && has(svg2 + svg3, /&#216;D1 6/));
+
+    // PDF เปิดในแท็บใหม่แบบพรีวิวใบเสนอราคา (ไม่ดาวน์โหลด) ⇒ แทน window.open ด้วยแท็บจำลองที่จำ URL ไว้ แล้วอ่าน blob จากหน้าเดิม
+    const pdfOf = async () => {
+      await page.evaluate(() => {
         const w = window as unknown as { __pdfTab: { href: string; opened: number; closed: boolean } };
         w.__pdfTab = { href: '', opened: 0, closed: false };
         window.open = ((u?: string | URL) => {
@@ -265,27 +296,35 @@ try {
           return { location: { set href(v: string) { w.__pdfTab.href = v; } }, close() { w.__pdfTab.closed = true; } } as unknown as Window;
         }) as typeof window.open;
       });
-      await page.evaluate((l: string) => [...document.querySelectorAll<HTMLButtonElement>('[data-testid="drawing-card"] button')].find((b) => b.textContent?.trim() === l)?.click(), fmt);
+      const n0 = sheets.length;
+      await click('PDF');
       let f = '';
-      let bytes = Buffer.alloc(0);
-      if (fmt === 'PDF') {
-        for (let i = 0; i < 100 && !f; i++) { await later(100); f = await page.evaluate(() => (window as unknown as { __pdfTab: { href: string } }).__pdfTab.href); }
-        const tabInfo = await page.evaluate(() => (window as unknown as { __pdfTab: { opened: number; closed: boolean } }).__pdfTab);
-        const b64 = f.startsWith('blob:') ? await page.evaluate(async (u: string) => {
-          const b = new Uint8Array(await (await fetch(u)).arrayBuffer()); let s = ''; for (const x of b) s += String.fromCharCode(x); return btoa(s);
-        }, f) : '';
-        bytes = Buffer.from(b64, 'base64');
-        const downloaded = readdirSync(dlDir).some((x) => x.endsWith('.pdf'));
-        ok('   ปุ่ม PDF: เปิดแท็บใหม่ตอนกด 1 แท็บ แล้วพาไปที่ไฟล์ PDF (ไม่ดาวน์โหลด)', tabInfo.opened === 1 && !tabInfo.closed && f.startsWith('blob:') && !downloaded, `เปิด ${tabInfo.opened} · ${f || 'ไม่มี URL'}`);
-      } else {
-        for (let i = 0; i < 100 && !f; i++) { await later(100); f = readdirSync(dlDir).find((x) => x.endsWith(`.${fmt.toLowerCase()}`)) ?? ''; }
-        bytes = f ? readFileSync(join(dlDir, f)) : Buffer.alloc(0);
-      }
-      const sig = fmt === 'PDF' ? bytes.subarray(0, 5).toString() === '%PDF-' : bytes.subarray(1, 4).toString() === 'PNG';
-      const sent = sheets.find((x) => x.format === fmt.toLowerCase());
-      ok(`   ปุ่ม ${fmt}: ภาพนิ่งที่การ์ดส่งผ่านตัวตรวจของเซิร์ฟเวอร์ · ได้ไฟล์`, sig && sent?.still === 'ok', `${f || 'ไม่มีไฟล์'} · ${(bytes.length / 1024).toFixed(0)} KB · ภาพนิ่ง ${sent?.still ?? '-'}`);
-      if (process.env.DL_SHOT && fmt === 'PNG' && bytes.length) (await import('node:fs')).writeFileSync(process.env.DL_SHOT.replace(/\.png$/, '-print.png'), bytes);
-    }
+      for (let i = 0; i < 100 && !f; i++) { await later(100); f = await page.evaluate(() => (window as unknown as { __pdfTab: { href: string } }).__pdfTab.href); }
+      const tabInfo = await page.evaluate(() => (window as unknown as { __pdfTab: { opened: number; closed: boolean } }).__pdfTab);
+      const b64 = f.startsWith('blob:') ? await page.evaluate(async (u: string) => {
+        const b = new Uint8Array(await (await fetch(u)).arrayBuffer()); let s = ''; for (const x of b) s += String.fromCharCode(x); return btoa(s);
+      }, f) : '';
+      const bytes = Buffer.from(b64, 'base64');
+      return { f, tabInfo, bytes, pages: (bytes.toString('latin1').match(/\/Type\s*\/Page(?!s)/g) ?? []).length, sent: sheets.slice(n0) };
+    };
+    const pair = await pdfOf();
+    ok('   ปุ่ม PDF: เปิดแท็บใหม่ตอนกด 1 แท็บ แล้วพาไปที่ไฟล์ PDF (ไม่ดาวน์โหลด)', pair.tabInfo.opened === 1 && !pair.tabInfo.closed && pair.f.startsWith('blob:') && !readdirSync(dlDir).some((x) => x.endsWith('.pdf')), `เปิด ${pair.tabInfo.opened} · ${pair.f || 'ไม่มี URL'}`);
+    ok('   แท็บคู่ → PDF ไฟล์เดียว 2 หน้า · ส่งภาพนิ่งผ่านตัวตรวจของเซิร์ฟเวอร์', pair.bytes.subarray(0, 5).toString() === '%PDF-' && pair.pages === 2 && pair.sent.length === 1 && pair.sent[0].view === 'pair' && pair.sent[0].still === 'ok', `${pair.pages} หน้า · ${(pair.bytes.length / 1024).toFixed(0)} KB · ${JSON.stringify(pair.sent)}`);
+    const n0 = sheets.length;
+    await click('PNG');
+    const pngFiles = await waitFiles('.png', 2);
+    const sentPng = sheets.slice(n0);
+    const pngOk = pngFiles.length === 2 && pngFiles.every((f) => readFileSync(join(dlDir, f)).subarray(1, 4).toString() === 'PNG') && pngFiles.some((f) => f.endsWith('-3D.png')) && pngFiles.some((f) => f.endsWith('-2D.png'));
+    ok('   แท็บคู่ → PNG 2 ไฟล์ (3D ส่งภาพนิ่ง · 2D ไม่ส่ง)', pngOk && sentPng.map((x) => `${x.view}:${x.still}`).join() === '3d:ok,2d:none', `${pngFiles.join(' · ')} · ${JSON.stringify(sentPng)}`);
+    if (process.env.DL_SHOT && pngFiles[0]) (await import('node:fs')).writeFileSync(process.env.DL_SHOT.replace(/\.png$/, '-print.png'), readFileSync(join(dlDir, pngFiles.find((f) => f.endsWith('-3D.png')) ?? pngFiles[0])));
+    await tab('2 มิติ'); await later(400);
+    const one2 = await pdfOf();
+    ok('   แท็บ 2 มิติ → PDF 1 หน้า ใบ 2 มิติ ไม่ส่งภาพนิ่ง', one2.pages === 1 && one2.sent.length === 1 && one2.sent[0].view === '2d' && one2.sent[0].still === 'none', `${one2.pages} หน้า · ${JSON.stringify(one2.sent)}`);
+    await tab('3 มิติ');
+    await page.waitForFunction(() => Number(document.querySelector<HTMLElement>('[data-testid="drawing-card"] .dv-stage')?.dataset.dvBuilds ?? 0) >= 1, { timeout: 10000 });
+    await later(600);
+    const one3 = await pdfOf();
+    ok('   แท็บ 3 มิติ → PDF 1 หน้า ใบ 3 มิติ ส่งภาพนิ่ง', one3.pages === 1 && one3.sent.length === 1 && one3.sent[0].view === '3d' && one3.sent[0].still === 'ok', `${one3.pages} หน้า · ${JSON.stringify(one3.sent)}`);
     if (process.env.DL_SHOT && svg) {
       const pg = await browser.newPage();
       await pg.setViewport({ width: 1470, height: 1040 });
@@ -312,7 +351,7 @@ try {
     await page.waitForFunction((n: number) => Number(document.querySelector<HTMLElement>('[data-testid="drawing-card"] .dv-stage')?.dataset.dvBuilds ?? 0) > n, { timeout: 15000, polling: 100 }, before);
     const st = await settle(page);
     await tab('2 มิติ'); await later(400);
-    const svg = await page.evaluate(() => document.querySelector('[data-testid="drawing-card"] svg[aria-label="ภาพฉาย 2 มิติ"]')?.textContent ?? '');
+    const svg = await page.evaluate(() => document.querySelector('[data-testid="drawing-sheet-2d"] [data-view="ortho"]')?.textContent ?? '');
     if (process.env.DL_SHOT) {   // ภาพการ์ดแบบคู่ของแต่ละรุ่น → <DL_SHOT>-TS_-02.png
       await tab('คู่'); await later(1500);
       await (await page.$('[data-testid="drawing-card"]'))?.screenshot({ path: process.env.DL_SHOT.replace(/\.png$/, `-${familyOf(code)}.png`) });

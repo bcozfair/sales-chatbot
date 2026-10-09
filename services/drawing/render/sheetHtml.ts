@@ -32,11 +32,13 @@ function fonts(): string {
 /** ขนาดกระดาษ A4 แนวนอน (mm) — กระดาษแบบ 980 × 693 มีสัดส่วนเดียวกัน */
 export const A4_LANDSCAPE = { w: 297, h: 210 } as const;
 
-/** SVG ของกระดาษแบบทั้งแผ่น → หน้า HTML ที่พิมพ์ได้หน้าเดียวพอดี A4 แนวนอน */
-export function sheetHtml(svg: string): string {
+/** SVG ของกระดาษแบบ (แผ่นละหน้า) → หน้า HTML ที่พิมพ์ได้พอดี A4 แนวนอนหน้าละแผ่น — ใบคู่ = 3 มิติ + 2 มิติ */
+export function sheetHtml(svg: string | string[]): string {
+  const pages = Array.isArray(svg) ? svg : [svg];
   return `<!doctype html><html><head><meta charset="utf-8"><style>
 ${fonts()}@page{size:${A4_LANDSCAPE.w}mm ${A4_LANDSCAPE.h}mm;margin:0}
 html,body{margin:0;padding:0;background:#fff}
-body>svg{display:block;width:${A4_LANDSCAPE.w}mm;height:${A4_LANDSCAPE.h}mm}
-</style></head><body>${svg}</body></html>`;
+body>svg{display:block;width:${A4_LANDSCAPE.w}mm;height:${A4_LANDSCAPE.h}mm;break-after:page}
+body>svg:last-child{break-after:auto}
+</style></head><body>${pages.join('')}</body></html>`;
 }

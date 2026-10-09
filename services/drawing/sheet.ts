@@ -1,14 +1,16 @@
 // ─────────────────────────────────────────────────────────────────────────────
-//  กระดาษแบบ A4 แนวนอนหน้าเดียว (แผน §5.4 · แบบ C2 · mockup รอบ 5 แท็บ C ที่เจ้าของเคาะ) — คืน SVG ทั้งแผ่น
+//  กระดาษแบบ A4 แนวนอน แผ่นละหน้า (แผน §5.4 · แบบ C2 · mockup รอบ 5 แท็บ C ที่เจ้าของเคาะ) — คืน SVG ทั้งแผ่น
 //
 //  โครงยกจาก Appsale `engine/sheet.js` ที่ `4dd2475` (กรอบ · โลโก้ · ตาราง · title block · คลาสสไตล์) แล้วปรับตามที่เคาะ:
-//  · ความสูง 693 = สัดส่วน A4 จริง (980 × 693 ≈ √2) ไม่ใช่ 640 ของ Appsale · ภาพ 3 มิติซ้าย + ภาพฉาย 2 มิติขวาเสมอ (ไม่มีภาพแยกชิ้น)
+//  · ความสูง 693 = สัดส่วน A4 จริง (980 × 693 ≈ √2) ไม่ใช่ 640 ของ Appsale · **ใบละอย่าง** (`view` · เจ้าของ 2026-10-09):
+//    ใบ 3 มิติ = ภาพนิ่งเต็มกรอบ `PIC_3D` · ใบ 2 มิติ = ภาพฉายเต็มกรอบ · ใบคู่ = สองแผ่นต่อกัน (คนเรียกเรียกสองครั้ง) · ไม่มีภาพแยกชิ้น
+//    การ์ดแอดมินแสดงใบ 3 มิติที่ไม่มีภาพนิ่ง (กรอบว่าง) เป็นพื้น แล้ววางตัวดูทับ `PIC_3D` พอดี ⇒ ภาพบนจอ = ภาพในไฟล์
 //  · title block 9 ช่อง (เพิ่ม "เลขที่แบบ") · บรรทัดกำกับ "แบบอ้างอิงตามแคตตาล็อก … ไม่ใช่แบบผลิต" · **ไม่มีราคา · ไม่มีหมายเหตุของแบบ**
 //    (หมายเหตุเห็นเฉพาะการ์ดแอดมิน — เจ้าของเคาะ mockup รอบ 5 ข้อ 2)
 //  · ระยะบรรทัดตารางขั้นต่ำ 15 (สระบน-ล่างภาษาไทยชนกันที่ 14) · ข้อความยาวบีบด้วย `textLength` ไม่ให้ล้นกรอบ
 //
 //  ภาพ 3 มิติไม่ได้สร้างที่นี่ — คนเรียกส่ง "ภาพนิ่ง" มา (`still`: PNG + ป้ายชื่อ/ขนาดเป็น SVG ในพิกัดของภาพ) จากตัวดูชุดเดียวกับจอ
-//  ⇒ มุมกล้อง/ซูมที่ผู้ใช้ตั้งบนจอติดไปกับไฟล์ (A12–A13) · ไม่มีภาพนิ่ง = ภาพฉาย 2 มิติเต็มกรอบ
+//  ⇒ มุมกล้อง/ซูมที่ผู้ใช้ตั้งบนจอติดไปกับไฟล์ (A12–A13) · ไม่ส่ง `view` = ใบ 3 มิติเมื่อมีภาพนิ่ง ไม่งั้นใบ 2 มิติ
 //  · ขนาดตัวอักษรที่ต้องการทับคลาสเขียนเป็น `style=` (CSS ของคลาสชนะ attribute `font-size` — ใน Appsale ค่าเหล่านั้นไม่เคยมีผล)
 //  · ใช้ numeric entity เท่านั้นใน SVG (Appsale เคยพังทั้งไฟล์เพราะ named entity) · ข้อความจากผู้ใช้ผ่าน `esc()` ทุกตัว
 // ─────────────────────────────────────────────────────────────────────────────
@@ -21,6 +23,8 @@ import { SHEET_DEFS, SHEET_FONT } from './views/style.js';
 
 /** ความสูงกระดาษ — สัดส่วน A4 แนวนอน */
 export const SHEET_H = 693;
+/** ความกว้างกระดาษ (หน่วยกระดาษ) — การ์ดใช้ตั้งสัดส่วนกระดาษบนจอ */
+export const SHEET_W = SW;
 
 /**
  * ป้ายบนภาพนิ่ง (พิกัดพิกเซลของภาพ) — **ตัวเลข + ข้อความ ไม่ใช่ SVG** · โมดูลสร้าง SVG เองแล้ว escape ทุกข้อความ
@@ -111,10 +115,21 @@ export interface SheetMeta {
   date?: string | null;
 }
 
+/** กรอบภาพ 3 มิติบนกระดาษแบบ 3 มิติ (หน่วยกระดาษ) — การ์ดวางตัวดูทับกรอบนี้พอดี ⇒ ภาพบนจอ = ภาพในไฟล์ */
+export const PIC_3D = { x: 64, y: 78, w: 852, h: 352 } as const;
+/** ขนาดภาพนิ่งที่การ์ดถ่าย (= กรอบ × 2) */
+export const STILL_3D = { w: PIC_3D.w * 2, h: PIC_3D.h * 2 } as const;
+
+/** ชนิดกระดาษ: ภาพ 3 มิติ หรือภาพฉาย 2 มิติ — ใบละอย่าง (เจ้าของ 2026-10-09) */
+export type SheetView = '3d' | '2d';
+
 export interface SheetInput {
   spec: DrawingSpec;
   /** รหัสสินค้าที่คิดราคา */
   code: string;
+  /** ไม่ส่ง = 3 มิติเมื่อมีภาพนิ่ง ไม่งั้น 2 มิติ */
+  view?: SheetView;
+  /** ภาพนิ่ง 3 มิติ · กระดาษ 3 มิติที่ไม่มีภาพนิ่ง = กรอบว่าง (พื้นของการ์ดบนจอ ซึ่งวางตัวดูทับ) */
   still: SheetStill | null;
   meta: SheetMeta;
   /** โลโก้ Primus (data URL) — ใบของ THT ก็ใช้หัว Primus (เจ้าของเคาะ 2026-10-06) */
@@ -144,16 +159,15 @@ const field = (s: string | null | undefined) => (s && s.trim() ? esc(s) : DASH);
 export function renderSheet(input: SheetInput): string {
   const { spec, code, still, meta, logo } = input;
   const H = SHEET_H;
+  const view: SheetView = input.view ?? (still ? '3d' : '2d');
   let g: string, scale: string, mode: string;
-  if (still) {
-    const ortho = orthoView(spec, SHEET_BOX.right, code);
-    const bx = 34, by = 96, bw = 436, bh = bw * still.h / still.w;
-    g = `<svg x="${bx}" y="${by}" width="${bw}" height="${bh}" viewBox="0 0 ${still.w} ${still.h}" overflow="visible">`
-      + `<image href="${still.png}" x="0" y="0" width="${still.w}" height="${still.h}" preserveAspectRatio="xMidYMid meet"/>${stillOverlay(still.marks)}</svg>`
-      + `<text class="viewtx" x="252" y="440" text-anchor="middle">ภาพ 3 มิติ ${DASH} ไม่ตามมาตราส่วน</text>`
-      + `<line class="ext" x1="490" y1="92" x2="490" y2="436"/>` + ortho.svg;
-    scale = `3D ไม่ตามมาตราส่วน / 2D ${ortho.scale}`;
-    mode = '3 มิติ + ภาพฉาย';
+  if (view === '3d') {
+    const P = PIC_3D;
+    g = still ? `<svg x="${P.x}" y="${P.y}" width="${P.w}" height="${P.h}" viewBox="0 0 ${still.w} ${still.h}" preserveAspectRatio="xMidYMid meet" overflow="visible">`
+      + `<image href="${still.png}" x="0" y="0" width="${still.w}" height="${still.h}" preserveAspectRatio="xMidYMid meet"/>${stillOverlay(still.marks)}</svg>` : '';
+    g += `<text class="viewtx" x="490" y="444" text-anchor="middle">ภาพ 3 มิติ ${DASH} ไม่ตามมาตราส่วน</text>`;
+    scale = 'ไม่ตามมาตราส่วน';
+    mode = 'ภาพ 3 มิติ';
   } else {
     const ortho = orthoView(spec, SHEET_BOX.single, code);
     g = ortho.svg;
