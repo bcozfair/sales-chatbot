@@ -1008,7 +1008,8 @@ npx tsx scripts/pricebook/seedCatalogSubcodes.ts --apply --by admin
 · แถวรหัสย่อย `TM###` (ทรานสมิตเตอร์ · ค่าว่าง) **ฐาน PMSV เขียนแล้ว 2026-10-07** · ฐานอื่น: `npx tsx scripts/pricebook/seedCatalogSubcodes.ts --apply --by admin` (เขียนเฉพาะแถวที่ยังไม่มี) ⇒ `TSP-08(S4)6x100-KBU-TM000` = ยังไม่มีราคา (ราคาเท่าที่คิดได้ 2,380)
 
 **TS_-09 / TS_-09 S** (ตรวจ 2026-10-09 · `docs/pricing-code-ts-catalog.md` หัวข้อ TS_-09) — **รุ่นใหม่** `TSP-09` (ชีต `TS-09` · แมป 26) + `TSP-09S` (ชีต `TS-09S` · แมป 27)
-+ แถวรหัสย่อย 11 แถวของ TSP-09 (2 Element · หัว B/K/KB/S/E/SS/SB · U · TN · TM###) · เพิ่มรุ่นด้วย `--new-models` (**ห้าม `--replace-all`**) · **ฐานยังไม่เขียน** ·
++ แถวรหัสย่อย 11 แถวของ TSP-09 (2 Element · หัว B/K/KB/S/E/SS/SB · U · TN · TM###) · เพิ่มรุ่นด้วย `--new-models` (**ห้าม `--replace-all`**) ·
+**ฐาน PMSV เขียนแล้ว 2026-10-09** ตามที่เจ้าของสั่ง (การบันทึกครั้งที่ 27 + 11 แถว · สำรอง `backup/pricing-before-ts09-2026-10-09.dump`) ⇒ deploy ไม่ต้องทำซ้ำ · ฐานอื่น:
 เขียนก่อนหรือหลัง deploy ก็ได้ **รอบเดียว** — ก่อน deploy prod (`46d22d9`) ต่างจากหลัง deploy 37 รหัส TS_-09 (แกนสองขนาด 3 ตัวได้ราคาแกนแรก · ที่เหลือขอราคา/ไม่รับผลิต) · สำรอง `pricing_*` ก่อน:
 ```bash
 npx tsx scripts/pricebook/importer.ts --data <โฟลเดอร์ Excel> --new-models --out /tmp/ts09-book.json   # รายงาน — ต้องเห็น + TSP-09 (75 ช่อง) + TSP-09S (6 ช่อง)

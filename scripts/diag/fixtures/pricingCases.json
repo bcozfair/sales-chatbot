@@ -372,6 +372,14 @@
     "code": "TSPA-11 6x100+1M",
     "cfg": {
       "model": "TSK-11",
+      "catalogLimits": [
+        {
+          "id": "RTD_UNGROUND",
+          "message": "RTD แคตตาล็อกทำ Unground (U) — Ground ใช้ได้เฉพาะ Thermocouple",
+          "source": "แคตตาล็อก ตาราง Ground 'None = Ground (Standard for Thermocouple) Only · U = Unground (Standard for RTD)'",
+          "level": "warn"
+        }
+      ],
       "axes": {
         "D": "6",
         "sensor": "PT100 (Class A) (TSPA)"

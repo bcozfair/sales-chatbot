@@ -945,7 +945,7 @@ async function main(): Promise<void> {
     const pt6 = price('TSP-02(14.5)6x25+1M');
     check('TS_-02 PT100 แกน 8 (แคตตาล็อก 4.8 · 5 · 6) = เตือน แต่ยังได้ราคาตาม Excel', warnOnly(pt8.o, 'PT100_D') && pt8.o?.status === 'priced',
       `${pt8.o?.status} ${pt8.o?.violations.map((v) => `${v.id}:${v.level}`).join(' ')}`);
-    check('TS_-02 PT100 แกน 6 = ไม่เตือน', !pt6.o?.violations.some((v) => v.id.startsWith('CATALOG_LIMIT')), `${pt6.o?.violations.map((v) => v.id).join(' ')}`);
+    check('TS_-02 PT100 แกน 6 = ไม่เตือนข้อ PT100_D', !pt6.o?.violations.some((v) => v.id === 'CATALOG_LIMIT:PT100_D'), `${pt6.o?.violations.map((v) => v.id).join(' ')}`);
     const pvc = price('TSK-11 3.2x50+2M-P');
     const pvc5 = price('TSK-11 5x50+2M-P');
     check('TS_-11 สายพีวีซี แกน 3.2 (แคตตาล็อก 5 mm ขึ้นไป) = เตือน แต่ยังได้ราคา', warnOnly(pvc.o, 'PVC_MIN_D') && pvc.o?.status === 'priced',
@@ -1019,6 +1019,36 @@ async function main(): Promise<void> {
     const tmS = price('TSP-09 6x200-U-TM001');
     check('-TM### กับหัวมาตรฐาน (ไม่ใช่ Big Head) = ต้องขอราคา + บอกข้อที่ขัด · หัว B ไม่ขัด', hit(tmS.o, 'TM_BIG_HEAD', 'quoteOnRequest') &&
       !hit(tm.o, 'TM_BIG_HEAD', 'quoteOnRequest'), `${tmS.o?.violations.map((v) => v.id).join(' ')}`);
+  }
+
+  // ── 21. ข้อจำกัดของแคตตาล็อกทุกซีรีส์ (เจ้าของ 2026-10-09 "ไล่ใส่ให้ครบ") — เตือนอย่างเดียว ราคาเท่าเดิม ──
+  section('21. ข้อจำกัดของแคตตาล็อกทุกซีรีส์ — ขนาด→วัสดุ · หน้าแปลน · หัวกระโหลก/Element · ความยาว · Ground ของ RTD (เตือน ราคาไม่เปลี่ยน)');
+  {
+    const lim = (o: ReturnType<typeof price>['o'], id: string, level: 'warn' | 'quoteOnRequest') =>
+      !!o?.violations.some((v) => v.id === `CATALOG_LIMIT:${id}` && v.level === level);
+    const cases: [string, string, 'warn' | 'quoteOnRequest'][] = [
+      ['TSP-08(S2)4.8x195-U', 'MAT_BY_D', 'warn'],           // 4.8 = 316L เท่านั้น
+      ['TSK-04(S2)6.35x100+1M', 'MAT_BY_D', 'warn'],          // 6.35 = 316L / Sheath
+      ['N10-07 5x300-U', 'FLANGE_D', 'warn'],
+      ['TSP-08(S2)6x100-KBU', 'HEAD_ELEMENT', 'warn'],        // 1 Element + KB
+      ['TSK-14 10x300-U', 'HEAD_STD_D', 'warn'],
+      ['TSK-14(S4)15x1100-BU', 'L1_MAX', 'warn'],
+      ['TSK-06(S4)6x5', 'L1_MIN', 'warn'],
+      ['TSP-02(12)5x25+5M', 'RTD_UNGROUND', 'warn'],
+      ['P10-11P 6x220+1.5M-TU', 'PTC_2K', 'warn'],
+      ['TSP-18(F2)8-6x150+50-BU', 'D2_GTE_D1', 'warn'],
+      ['TSK-14 13x500-2BU', 'ELEM2_D', 'warn'],
+      ['TSK-07 7TNx100', 'TITANIUM_S4', 'quoteOnRequest'],
+    ];
+    for (const [code, id, level] of cases) {
+      const r = price(code);
+      check(`${code}: ${id} (${level === 'warn' ? 'เตือน' : 'ขอราคา'})`, lim(r.o, id, level), `${r.o?.status} ${r.o?.violations.map((v) => `${v.id}:${v.level}`).join(' ')}`);
+    }
+    const ok = price('TSP-08(S4)6x100-BU');
+    check('TSP-08(S4)6x100-BU (304 · แกน 6 · 1 Element หัว B) = ไม่มีข้อไหนขัด', !ok.o?.violations.some((v) => v.id.startsWith('CATALOG_LIMIT')),
+      `${ok.o?.violations.map((v) => v.id).join(' ')}`);
+    const w = price('TSP-08(S2)4.8x195-U');
+    check('ข้อเตือนไม่เปลี่ยนสถานะ/ราคา', w.o?.status === 'priced', `${w.o?.status}`);
   }
 
   // ── 20. TS_-09 S (2026-10-09) — ชีต TS-09S "TSP-09 S" (เจ้าของส่งภาพชีต) · แนวเดียวกับ TS_-08 S ──
