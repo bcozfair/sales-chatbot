@@ -193,7 +193,7 @@ async function main(): Promise<void> {
 
   // ข้อ 1: หัว NTC/PTC = ตาราง K/J เดียวกัน + กฎ NTC/PTC ของชีต
   const k04 = price('TSK-04(S3)6x100+1M');
-  const n04 = price('N10-04(S3)6x100+1M');
+  const n04 = price('N10-04(S3)6x100+1MU'); // NTC = Unground เท่านั้น (แคตตาล็อก) — ไม่มี U = ขัดข้อจำกัด (หัวข้อ 18)
   const ntcRule = line(n04.o, /NTC/);
   check('ข้อ 1: N10-04 = ราคาตั้งของ TSK-04 ตัวเดียวกัน + กฎ "NTC / PTC บวกเพิ่มจาก Type K/J"',
     n04.o?.status === 'priced' && base(n04.o) === base(k04.o) && ntcRule !== undefined && n04.o.unitPrice === (k04.o?.unitPrice ?? NaN) + ntcRule,
@@ -911,6 +911,34 @@ async function main(): Promise<void> {
     const form = price('TSP-08(S4)8Sx100-BU').p.tsForm;
     check('ช่องกรอก TS_-08: วัสดุ = S · ประกอบกลับเป็นรหัสเดิม', form?.values.mat === 'S' && !form.issues && buildTsCode(form) === 'TSP-08(S4)8Sx100-BU',
       `${JSON.stringify(form?.values)} ${JSON.stringify(form?.issues)}`);
+  }
+
+  // ── 18. ตัว L มีขีด + ข้อจำกัดของแคตตาล็อก — เจ้าของ 2026-10-09 ("นับด้วย" · "เตือนตามข้อจำกัด แต่ยังขอราคาและกรอกราคาได้") ─────
+  section('18. ตัว L มีขีด (-L) = หัก L · ข้อจำกัดของแคตตาล็อก = ต้องขอราคา + บอกข้อที่ขัด (เจ้าของ 2026-10-09)');
+  {
+    const dashL = price('TSP-08-L(S4)6x100-U');
+    const plainL = price('TSP-08L(S4)6x100-U');
+    check('TSP-08-L( = TSP-08L( (หัก L +100) + เตือนให้แก้รหัสใน Odoo', dashL.o?.status === 'priced' && dashL.o.unitPrice === plainL.o?.unitPrice &&
+      !!dashL.p.cfg?.options?.includes('bend:L') && dashL.p.warnings.some((w) => /Odoo/.test(w)), `${dashL.o?.unitPrice} / ${plainL.o?.unitPrice}`);
+    const k11 = price('TSK-11-L 5x254+1000+1M');
+    check('TSK-11-L (เว้นวรรคหลัง L) = หัก L ด้วย', !!k11.p.cfg?.options?.includes('bend:L'), `${k11.p.cfg?.options}`);
+    const k01 = price('TSK-01-L(M6)4.8+1M');
+    check('รุ่นที่ไม่มีกฎหัก L (TSK-01) — -L ไม่ถูกอ่านเป็นหัก L', !k01.p.cfg?.options?.includes('bend:L'), `${k01.p.cfg?.options}`);
+    const limit = (o: ReturnType<typeof price>['o'], id: string) => !!o?.violations.some((v) => v.id === `CATALOG_LIMIT:${id}` && v.level === 'quoteOnRequest');
+    const tn8 = price('TSPA-08(S8)7TNx700-KU');
+    check('Titanium + เกลียว S8 = ขัดแคตตาล็อก (เฉพาะ S4) → ต้องขอราคา ไม่ใช่ไม่รับผลิต', limit(tn8.o, 'TITANIUM_S4') && tn8.o?.status === 'quoteOnRequest',
+      `${tn8.o?.violations.map((v) => v.id).join(' ')}`);
+    const tn4 = price('TSPA-08(S4)7TNx700-KU');
+    check('Titanium + เกลียว S4 = ไม่ขัด', !tn4.o?.violations.some((v) => v.id.startsWith('CATALOG_LIMIT')), `${tn4.o?.violations.map((v) => v.id).join(' ')}`);
+    const k16 = price('TSK-12 1.6x100+1MS');
+    const j16 = price('TSJ-12 1.6x100+1MS');
+    check('TS_-12 แกน 1.6 (Type J Only) กับ Type K = ต้องขอราคา แต่ยังโชว์ราคาเท่าที่คิดได้เท่ารุ่นที่ถูก', limit(k16.o, 'J_ONLY_D') &&
+      k16.o?.status === 'quoteOnRequest' && k16.o.unitPrice === j16.o?.unitPrice && j16.o?.status === 'priced', `${k16.o?.status} ${k16.o?.unitPrice} / ${j16.o?.unitPrice}`);
+    check('ข้อที่ขัดขึ้นใน "วิธีคำนวณทีละขั้น" พร้อมที่มา', !!k16.o?.trace?.checks.some((c) => c.hit && /Type J/.test(c.message) && !!c.source),
+      `${k16.o?.trace?.checks.map((c) => c.message).join(' / ')}`);
+    const ntc = price('N2-03 6x120+1MTSU-S000');
+    check('อ่านแบบหลวม: ช่องว่างไม่ตัดสิน (N2-03 …TSU ไม่โดน "Unground เท่านั้น")', !ntc.o?.violations.some((v) => v.id === 'CATALOG_LIMIT:NTC_UNGROUND'),
+      `${ntc.o?.violations.map((v) => v.id).join(' ')}`);
   }
 }
 

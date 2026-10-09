@@ -36,7 +36,7 @@ import type { PriceBook, PriceModel, Predicate, ProductConfig } from './types.js
 import { resolveModel } from './engine.js';
 import { findSubCode, subCodeOption } from './subcodes.js';
 import { ADDONS, AMP, BH_CATALOG, SHAPE_AXIS, bhSpec, buildBhCode, sameBhCode, type BhFamily, type BhForm, type HoleSpec, type SizeKey } from './catalogBh.js';
-import { MAT_PRICE_AS, MODEL_SUFFIX, NTC_HEADS, OFF_CATALOG_SUFFIX, SUFFIX_ADDON, askSlotKey, NTC_NUMBERS, TS_ADDONS, TS_CATALOG, readTsForm, readTsFormLoose, tsFamilyOfModel, tsSpec, type TsFamily, type TsFamilySpec, type TsForm } from './catalogTs.js';
+import { catalogLimitsHit, MAT_PRICE_AS, MODEL_SUFFIX, NTC_HEADS, OFF_CATALOG_SUFFIX, SUFFIX_ADDON, askSlotKey, NTC_NUMBERS, TS_ADDONS, TS_CATALOG, readTsForm, readTsFormLoose, tsFamilyOfModel, tsSpec, type TsFamily, type TsFamilySpec, type TsForm } from './catalogTs.js';
 
 /** หนึ่งรหัสย่อยในรหัสสินค้า พร้อมคำอธิบายว่าระบบอ่านมันว่าอะไร — ใช้โชว์ให้คนตรวจก่อนเชื่อราคา */
 export interface CodePart {
@@ -1859,10 +1859,20 @@ export function parseProductCode(input: string, book: PriceBook, picks: CodePick
     const dashedMat = suffix === '' ? rest.match(/^-([A-Z])(?=\()/i) : null;
     const asOf = (l: string) => { const t = MAT_PRICE_AS[model.code]?.[l]; return !!t?.head && !!resolveModel(book, t.model); };
     const sheath = suffix && asOf(suffix) ? suffix : dashedMat && asOf(dashedMat[1]!.toUpperCase()) ? dashedMat[1]!.toUpperCase() : undefined;
+    // ตัว L หัก L เขียนแยกด้วยขีด (`TSP-08-L(S4)…` · `TSK-11-L 5x254`) — เจ้าของ 2026-10-09 "นับด้วย" ⇒ อ่านเท่า `TSP-08L(`
+    // เฉพาะรุ่นที่มีกฎหัก L (`SUFFIX_ADDON`) · รูปที่เขียนผิดจากแคตตาล็อก = รับเมื่ออ่านได้ทางเดียว + เตือนให้แก้ใน Odoo (เจ้าของ 2026-10-06)
+    const dashedAddon = suffix === '' && !off && !sheath ? rest.match(/^-([A-Z])(?=[\d( ])/i) : null;
+    const addonLetter = dashedAddon ? dashedAddon[1]!.toUpperCase() : '';
+    const addon = addonLetter && SUFFIX_ADDON[addonLetter] && hasOptionAdder(model, SUFFIX_ADDON[addonLetter]!) ? addonLetter : undefined;
     if (sheath) {
       c.sheath = sheath;
       if (dashedMat) add(c, { text: dashedMat[0], reads: `วัสดุ ${sheath} ทุกขนาดแกน — ${MAT_PRICE_AS[model.code]![sheath]!.source}`, kind: 'model' });
       readTsGeneric(c, dashedMat ? rest.slice(dashedMat[0].length) : rest, prefix, letter);
+    } else if (addon) {
+      readSuffixLetter(c, addon);
+      c.parts[c.parts.length - 1]!.text = dashedAddon![0];
+      c.warnings.push(`อ่าน ${dashedAddon![0]} เป็นตัว ${addon} ต่อท้ายเลขรุ่น (${model.code}${addon}) — รหัสในแคตตาล็อกไม่มีขีดคั่น ควรแก้รหัสใน Odoo`);
+      readTsGeneric(c, rest.slice(dashedAddon![0].length), prefix, letter);
     } else {
       readModelSuffix(c, off ? off[1]!.toUpperCase() : suffix);
       readTsGeneric(c, off ? rest.slice(off[0].length) : rest, prefix, letter);
@@ -1879,6 +1889,8 @@ export function parseProductCode(input: string, book: PriceBook, picks: CodePick
     const family = tsFamilyOfModel(model.code, c.cfg.axes?.submodel);
     const tsForm = family ? tsFormOf(c, typed, family) : undefined;
     if (tsForm) {
+      const limits = catalogLimitsHit(tsForm);
+      if (limits.length) c.cfg.catalogLimits = limits.map(({ id, message, source }) => ({ id, message, source }));
       const on = (picks.addons ?? []).filter((a) => TS_ADDONS.some((x) => x.code === a) && hasOptionAdder(model, a));
       out.tsForm = on.length ? { ...tsForm, addons: on } : tsForm;
     }
