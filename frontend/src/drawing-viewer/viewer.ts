@@ -16,6 +16,7 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import type { SheetStill } from '../../../services/drawing/sheet';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import './viewer.css';
@@ -48,10 +49,18 @@ export interface ViewerApi {
   setEdges(on: boolean): void;
   setLang(lang: Lang): void;
   reset(): void;
+  /**
+   * ภาพนิ่งสำหรับกระดาษแบบ (w × h หน่วยภาพ · คมขึ้น `px` เท่า) — มุมกล้อง + ซูม + การเลื่อนตามที่ผู้ใช้ตั้งบนจอ (A12–A13)
+   * แต่ **สภาพประกอบเสมอ** (กระดาษไม่มีภาพแยกชิ้น · แผน §5.4 ข้อ 2) · ป้ายชื่อ/ขนาดเป็นเนื้อ SVG ในพิกัด w × h
+   */
+  snapshot(w: number, h: number, px?: number): Snapshot;
   /** ผลตรวจการวางป้ายล่าสุด (ด่าน UI ใช้) */
   checks(): LayoutCheck | null;
   dispose(): void;
 }
+
+/** ภาพนิ่ง = `SheetStill` ของ services/drawing/sheet.ts (ป้ายเป็นตัวเลข + ข้อความ — โมดูลสร้าง SVG เองแล้ว escape · ไม่รับ markup) */
+export type Snapshot = SheetStill;
 
 export interface LayoutCheck {
   mode: 'assembled' | 'exploded';
@@ -669,6 +678,46 @@ export async function createViewer(host: HTMLElement, src: ModelSource, annIn: A
     setLabels(on) { labelsOn = on; layout(); },
     setEdges(on) { model.edgeRoot.visible = on; need = true; },
     setLang(l) { lang = l; layout(); },
+    snapshot(w, h, px = 2) {
+      // ทิศ + ซูม (ระยะ ÷ ระยะพอดีกรอบ) + การเลื่อน (สัดส่วนของระยะพอดีกรอบ) ของกล้องบนจอ → กรอบของภาพนิ่ง
+      const off = camera.position.clone().sub(controls.target);
+      const fitNow = home ? home.length() * k(t) : off.length();
+      const zoom = off.length() / fitNow, pan = controls.target.clone().sub(tgt(t)).multiplyScalar(1 / fitNow);
+      const dir = off.clone().normalize();
+      const cam = camera.clone();
+      const f = fitDist(cam, model.box, dir.toArray() as Vec3, w / h, ...FIT.wide);
+      cam.near = f.dist / 50; cam.far = f.dist * 30;
+      const target = f.ctr.clone().add(pan.multiplyScalar(f.dist));
+      cam.position.copy(target).add(dir.multiplyScalar(f.dist * zoom)); cam.lookAt(target);
+      cam.aspect = w / h; cam.updateProjectionMatrix(); cam.updateMatrixWorld();
+      const tKeep = t;
+      setExplode(model, 0); shadowAt(0);
+      // ป้าย: กติกาเดียวกับจอแบบกว้าง ขนาดตัวอักษร ~9.5 หน่วยกระดาษ (ภาพนิ่ง 872 กว้าง → วางในกรอบ 436)
+      const S: Settings = { narrow: false, pad: 12, gap: 22, margin: 20, lgap: 5, stub: 13, lblPx: 19, dimPx: 19, dimGap: 13 };
+      const I = renderIds(renderer, scene, model, cam, w, h, ground);
+      const L = computeLayout(I, ann, model, cam, 0, lang, S);
+      // วาดลงผืนภาพเดิมชั่วคราวในงานเดียวกัน (เบราว์เซอร์ไม่ทันวาดสภาพกลางทางให้เห็น) — ฉากใช้ PMREM ของ renderer นี้ จึงยืมตัวเดิม
+      const pr = renderer.getPixelRatio(), cw = host.clientWidth, ch = host.clientHeight;
+      renderer.setPixelRatio(1); renderer.setSize(w * px, h * px, false);
+      renderer.render(scene, cam);
+      const png = canvas.toDataURL('image/png');
+      renderer.setPixelRatio(pr); renderer.setSize(cw, ch, false);
+      setExplode(model, tKeep); shadowAt(tKeep);
+      renderer.render(scene, camera); need = true;
+      const r1 = (n: number) => Math.round(n * 10) / 10;
+      return {
+        png, w, h,
+        marks: {
+          dims: L.dims.map((d) => ({
+            lines: d.lines.map(([a, b]) => [r1(a.x), r1(a.y), r1(b.x), r1(b.y)] as [number, number, number, number]),
+            arrows: d.arrows.map((a) => ({ x: r1(a.x), y: r1(a.y), dx: a.dx, dy: a.dy })),
+            text: { x: r1(d.text.x), y: r1(d.text.y), h: r1(d.text.h), s: d.text.s },
+          })),
+          leaders: L.leaders.map((ld) => ({ pts: ld.pts.map((p) => [r1(p.x), r1(p.y)] as [number, number]) })),
+          labels: L.labels.map((l) => ({ x: r1(l.x), y: r1(l.y), w: r1(l.w), text: l.text, ...(l.sub ? { sub: l.sub } : {}) })),
+        },
+      };
+    },
     reset() {
       if (!home) return;
       // ทิ้งแรงเฉื่อยที่ค้างจากการลาก (ไม่งั้นภาพไหลต่อหลังกลับมุมเริ่มต้น) — update() แบบไม่หน่วงล้างค่าค้างทั้งหมด

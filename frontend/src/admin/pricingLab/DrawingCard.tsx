@@ -21,7 +21,7 @@ import type { BhForm, TsForm } from './types';
  *   และระหว่างแก้ช่องในหน้าคำนวณราคา การ์ดแปลง "ช่องที่กำลังแก้" เป็น spec ด้วย `fromReading` ตัวเดียวกับเซิร์ฟเวอร์ (ไม่ใช่ตัวอ่านรหัสตัวที่สอง —
  *   ช่องคือผลอ่านเดียวกับที่ส่งไปคิดราคา) แล้วเปลี่ยนภาพโดยมุมกล้องคงเดิม · คำตัดสิน/ปุ่มไฟล์/STEP ยังมาจากเซิร์ฟเวอร์เท่านั้น
  *   ภาพที่สร้างจากช่องเป็นภาพชั่วคราว คำตอบของเซิร์ฟเวอร์ (รหัสที่ประกอบจากช่องเดียวกัน) มาทับเสมอ
- * · วันนี้มีแค่ STEP — PDF / PNG / ลิงก์ลูกค้ามากับก้อนถัดไป (ไม่โชว์ปุ่มที่ยังทำงานไม่ได้)
+ * · ไฟล์วันนี้: SVG (กระดาษแบบ A4 · ภาพ 3 มิติตามมุม/ซูมที่เห็น) · STEP — PDF / PNG / ลิงก์ลูกค้ามากับก้อนถัดไป (ไม่โชว์ปุ่มที่ยังทำงานไม่ได้)
  * · ภาพ 3 มิติ / 2 มิติ / คู่ (ตั้งต้น 3 มิติ · mockup รอบ 5 ข้อ 1) — 2 มิติ = ภาพฉายของโมดูล (`views/`) ตาม spec ที่แสดง
  * · ตารางรายละเอียดสินค้า (`specRows` · ตามภาพที่แสดง จึงยืดหดตามช่องเหมือนภาพ) + หมายเหตุของแบบ — **หมายเหตุเห็นเฉพาะที่นี่**
  *   ไม่ลงกระดาษแบบ/หน้าลูกค้า (เจ้าของเคาะ mockup รอบ 5 ข้อ 2 · 2026-10-09) · ปุ่มคัดลอกรหัสข้างรหัส (mockup รอบ 5)
@@ -51,10 +51,28 @@ async function modelOf(spec: DrawingSpec) {
 }
 
 /** ตาราง/หมายเหตุ/ภาพฉาย 2 มิติ — โหลดคู่กับตัววาด (ดึงตัวสร้างรูปทรงมาด้วย ไม่ให้ก้อนหลักของแอดมินโต) */
-type SheetText = typeof import('../../../../services/drawing/sheetText') & typeof import('../../../../services/drawing/views/index');
+type SheetText = typeof import('../../../../services/drawing/sheetText') & typeof import('../../../../services/drawing/views/index') & typeof import('../../../../services/drawing/sheet');
 let sheetTextP: Promise<SheetText> | null = null;
-const loadSheetText = () => (sheetTextP ??= Promise.all([import('../../../../services/drawing/sheetText'), import('../../../../services/drawing/views/index')])
-  .then(([a, b]) => ({ ...a, ...b })));
+const loadSheetText = () => (sheetTextP ??= Promise.all([import('../../../../services/drawing/sheetText'), import('../../../../services/drawing/views/index'), import('../../../../services/drawing/sheet')])
+  .then(([a, b, c]) => ({ ...a, ...b, ...c })));
+
+/** โลโก้ Primus ของหัวกระดาษ (= data/logo.png ที่ใบเสนอราคาใช้ · เสิร์ฟที่ /logo.png) เป็น data URL — ฝังในไฟล์ ไม่อ้างลิงก์ */
+let logoP: Promise<string> | null = null;
+const loadLogo = () => (logoP ??= fetch('/logo.png').then((r) => r.blob()).then((b) => new Promise<string>((ok, bad) => {
+  const fr = new FileReader(); fr.onload = () => ok(String(fr.result)); fr.onerror = () => bad(fr.error); fr.readAsDataURL(b);
+})));
+/** ภาพนิ่ง 3 มิติของกระดาษ: 872 × 640 (= กรอบ 436 × 320 ของกระดาษ × 2) */
+const STILL = { w: 872, h: 640 };
+/** ผู้เขียนแบบ = ผู้ใช้ที่ล็อกอิน (ชื่อที่ AuthContext เก็บไว้) */
+const drawerName = (): string => { try { const u = JSON.parse(sessionStorage.getItem('admin_user') ?? 'null'); return u?.name || u?.username || ''; } catch { return ''; } };
+const thaiDate = () => new Date().toLocaleDateString('th-TH', { timeZone: 'Asia/Bangkok', day: '2-digit', month: '2-digit', year: 'numeric' });
+const saveBlob = (blob: Blob, name: string) => {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+/** ชื่อไฟล์จากรหัส — ตัดอักขระที่ระบบไฟล์ไม่รับ */
+const fileBase = (code: string) => code.trim().replace(/[\\/:*?"<>|\s]+/g, '_') || 'drawing';
 
 type ViewMode = '3d' | '2d' | 'pair';
 const VIEW_MODES: [ViewMode, string][] = [['3d', '3 มิติ'], ['2d', '2 มิติ'], ['pair', 'คู่']];
@@ -202,6 +220,21 @@ export const DrawingCard: React.FC<{ code: string; picks: Picks; headers: Record
     if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1500); }
   };
   const shownSpec: DrawingSpec | null = v.canDraw ? JSON.parse(shownKey) : null;
+  const sheetOk = fileOk && !live && !!text && !!data.spec;
+  const sheetWhy = !fileOk ? fileWhy : live || !text ? 'รอแบบ' : `กระดาษแบบ A4 (เวกเตอร์) · ${view === '2d' ? 'ภาพฉาย 2 มิติ' : 'ภาพ 3 มิติใช้มุมที่เห็น + ภาพฉาย'}`;
+
+  // กระดาษแบบ SVG — สร้างในเบราว์เซอร์ทั้งแผ่น (โมดูลเป็น TS ล้วน) · ภาพ 3 มิติ = ภาพนิ่งจากตัวดูตามมุม/ซูมที่เห็น
+  // ใช้ spec/รหัสของคำตอบเซิร์ฟเวอร์เท่านั้น (ปุ่มปิดระหว่างแก้ช่อง — ภาพชั่วคราวยังไม่ผ่านการตัดสิน) · โหมด 2 มิติ = กระดาษภาพฉายเต็มกรอบ
+  const downloadSvg = async () => {
+    if (!text || !data.spec) return;
+    try {
+      const still = view !== '2d' ? viewer.current?.snapshot(STILL.w, STILL.h) ?? null : null;
+      const svg = text.renderSheet({ spec: data.spec, code: data.code, still, logo: await loadLogo(), meta: { drawer: drawerName(), date: thaiDate() } });
+      saveBlob(new Blob([svg], { type: 'image/svg+xml' }), `${fileBase(data.code)}.svg`);
+    } catch (e: unknown) {
+      setError(`สร้างกระดาษแบบไม่สำเร็จ — ${errMsg(e)}`);
+    }
+  };
 
   const downloadStep = async () => {
     setDownloading(true);
@@ -302,6 +335,9 @@ export const DrawingCard: React.FC<{ code: string; picks: Picks; headers: Record
             </details>
           )}
           <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span title={sheetWhy}>
+              <Button icon={Download} disabled={!sheetOk} onClick={() => void downloadSvg()} aria-label={sheetWhy}>SVG</Button>
+            </span>
             <span title={fileWhy}>
               <Button icon={Download} busy={downloading} disabled={!fileOk} onClick={() => void downloadStep()} aria-label={fileWhy}>STEP</Button>
             </span>
