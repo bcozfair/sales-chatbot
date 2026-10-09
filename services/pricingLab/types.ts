@@ -65,9 +65,9 @@ export interface ProductConfig {
   offCode?: string[];
   /**
    * ข้อจำกัดของแคตตาล็อกที่รหัสนี้ขัด (`CATALOG_LIMITS` ของ `catalogTs.ts` · เจ้าของ 2026-10-09) — engine: ต้องขอราคา + บอกข้อที่ขัด
-   * ราคาเท่าที่คิดได้ยังคิดต่อ · ไม่ใช่ไม่รับผลิต
+   * ราคาเท่าที่คิดได้ยังคิดต่อ · ไม่ใช่ไม่รับผลิต · `level: 'warn'` = เตือนอย่างเดียว ราคาคิดตามปกติ
    */
-  catalogLimits?: { id: string; message: string; source: string }[];
+  catalogLimits?: { id: string; message: string; source: string; level?: 'warn' }[];
 }
 
 // ── เงื่อนไข ─────────────────────────────────────────────────────────────────

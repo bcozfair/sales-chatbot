@@ -1890,7 +1890,7 @@ export function parseProductCode(input: string, book: PriceBook, picks: CodePick
     const tsForm = family ? tsFormOf(c, typed, family) : undefined;
     if (tsForm) {
       const limits = catalogLimitsHit(tsForm);
-      if (limits.length) c.cfg.catalogLimits = limits.map(({ id, message, source }) => ({ id, message, source }));
+      if (limits.length) c.cfg.catalogLimits = limits.map(({ id, message, source, level }) => ({ id, message, source, ...(level ? { level } : {}) }));
       const on = (picks.addons ?? []).filter((a) => TS_ADDONS.some((x) => x.code === a) && hasOptionAdder(model, a));
       out.tsForm = on.length ? { ...tsForm, addons: on } : tsForm;
     }

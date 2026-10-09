@@ -914,7 +914,7 @@ async function main(): Promise<void> {
   }
 
   // ── 18. ตัว L มีขีด + ข้อจำกัดของแคตตาล็อก — เจ้าของ 2026-10-09 ("นับด้วย" · "เตือนตามข้อจำกัด แต่ยังขอราคาและกรอกราคาได้") ─────
-  section('18. ตัว L มีขีด (-L) = หัก L · ข้อจำกัดของแคตตาล็อก = ต้องขอราคา + บอกข้อที่ขัด (เจ้าของ 2026-10-09)');
+  section('18. ตัว L มีขีด (-L) = หัก L · ข้อจำกัดของแคตตาล็อก = ต้องขอราคา + บอกข้อที่ขัด · ข้อ PT100/พีวีซี = เตือนอย่างเดียว (เจ้าของ 2026-10-09)');
   {
     const dashL = price('TSP-08-L(S4)6x100-U');
     const plainL = price('TSP-08L(S4)6x100-U');
@@ -939,6 +939,20 @@ async function main(): Promise<void> {
     const ntc = price('N2-03 6x120+1MTSU-S000');
     check('อ่านแบบหลวม: ช่องว่างไม่ตัดสิน (N2-03 …TSU ไม่โดน "Unground เท่านั้น")', !ntc.o?.violations.some((v) => v.id === 'CATALOG_LIMIT:NTC_UNGROUND'),
       `${ntc.o?.violations.map((v) => v.id).join(' ')}`);
+    // เตือนอย่างเดียว (เจ้าของ 2026-10-09 "คิดราคาได้ แต่เพิ่มแจ้งเตือน") — ราคา/สถานะเท่ารหัสที่ไม่ขัด
+    const warnOnly = (o: ReturnType<typeof price>['o'], id: string) => !!o?.violations.some((v) => v.id === `CATALOG_LIMIT:${id}` && v.level === 'warn');
+    const pt8 = price('TSP-02(14.5)8x25+1M');
+    const pt6 = price('TSP-02(14.5)6x25+1M');
+    check('TS_-02 PT100 แกน 8 (แคตตาล็อก 4.8 · 5 · 6) = เตือน แต่ยังได้ราคาตาม Excel', warnOnly(pt8.o, 'PT100_D') && pt8.o?.status === 'priced',
+      `${pt8.o?.status} ${pt8.o?.violations.map((v) => `${v.id}:${v.level}`).join(' ')}`);
+    check('TS_-02 PT100 แกน 6 = ไม่เตือน', !pt6.o?.violations.some((v) => v.id.startsWith('CATALOG_LIMIT')), `${pt6.o?.violations.map((v) => v.id).join(' ')}`);
+    const pvc = price('TSK-11 3.2x50+2M-P');
+    const pvc5 = price('TSK-11 5x50+2M-P');
+    check('TS_-11 สายพีวีซี แกน 3.2 (แคตตาล็อก 5 mm ขึ้นไป) = เตือน แต่ยังได้ราคา', warnOnly(pvc.o, 'PVC_MIN_D') && pvc.o?.status === 'priced',
+      `${pvc.o?.status} ${pvc.o?.violations.map((v) => `${v.id}:${v.level}`).join(' ')}`);
+    check('TS_-11 สายพีวีซี แกน 5 = ไม่เตือน', !pvc5.o?.violations.some((v) => v.id.startsWith('CATALOG_LIMIT')), `${pvc5.o?.violations.map((v) => v.id).join(' ')}`);
+    check('ข้อเตือนขึ้นใน "วิธีคำนวณทีละขั้น" พร้อมที่มา', !!pvc.o?.trace?.checks.some((c) => c.hit && c.level === 'warn' && /พีวีซี/.test(c.message) && !!c.source),
+      `${pvc.o?.trace?.checks.filter((c) => c.hit).map((c) => c.message).join(' / ')}`);
   }
 }
 
