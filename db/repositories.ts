@@ -2150,3 +2150,24 @@ export async function replaceRolePermissions(
     );
   });
 }
+
+/**
+ * ร่างที่ user เพิ่งได้การ์ดสรุป (สร้าง/แก้ภายใน `withinSec` วินาที) — ใช้ตอบเซลส์ที่กดปุ่มเลือกรุ่นซ้ำ
+ * หลังเลือกครบแล้ว (2026-10-09) · เฉพาะ `draft` เพราะการ์ดสรุปร่างออกเมื่อสร้างร่างสำเร็จเท่านั้น
+ * (ระหว่างเลือกบริษัท/ผู้ติดต่อเป็น pending_* ซึ่งยังไม่มีการ์ดนั้น)
+ * คืนแถวดิบ — ผู้เรียกต้อง enrichQuotationData ก่อนถามว่าการ์ดมีปุ่มอะไร (ชื่อลูกค้าไม่ได้อยู่ในคอลัมน์ตรง ๆ)
+ */
+export async function getFreshDraftForUser(
+  db: DbExecutor, userId: string, withinSec: number
+): Promise<any | null> {
+  const { rows } = await db.query(
+    `SELECT *
+       FROM quotations
+      WHERE user_id = $1
+        AND status = 'draft'
+        AND COALESCE(updated_at, created_at) > NOW() - make_interval(secs => $2)
+      ORDER BY COALESCE(updated_at, created_at) DESC
+      LIMIT 1`,
+    [userId, withinSec]);
+  return rows[0] ?? null;
+}

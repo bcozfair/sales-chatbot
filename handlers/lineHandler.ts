@@ -12,6 +12,7 @@ import {
   getStaticBranches,
   getBranchesByCodes,
   getRetryableFailedText,
+  getFreshDraftForUser,
 } from '../db/repositories.js';
 import { buildPdfLink, parseQuotationNosFromText } from '../utils/quotationLink.js';
 import { getAppUrl } from '../config/appUrl.js';
@@ -87,6 +88,22 @@ const LLM_OUTAGE_REPLY = 'ขออภัย ระบบขัดข้อง�
 
 // กดปุ่ม "ลองอีกครั้ง" ของข้อความที่ไม่ใช่ข้อความพิมพ์ล่าสุดแล้ว (ทำรายการไปแล้ว / พิมพ์อย่างอื่นต่อ)
 const RETRY_STALE_REPLY = 'ปุ่มนี้ใช้กับข้อความล่าสุดเท่านั้นครับ ข้อความนั้นทำรายการไปแล้ว หรือมีข้อความใหม่กว่าแล้ว 🙏';
+
+// กดปุ่มเลือกรุ่นซ้ำหลังเลือกครบและได้การ์ดสรุปร่างแล้ว (วัด 2026-10-06..08: 4 ใน 6 ครั้งของ "เซสชันหมดอายุ"
+// คือกดซ้ำภายใน 1.4–3.4 วิ · อีก 2 ครั้งอยากเปลี่ยนรุ่น) — ข้อความเดิมสั่งให้พิมพ์ใหม่ทั้งที่ร่างสร้างเสร็จแล้ว
+// เจ้าของเคาะถ้อยคำ 2026-10-09 · ใช้เฉพาะเมื่อการ์ดมีปุ่ม "🔧 แก้ไขรายละเอียด" จริง (pickedModelReplyApplies)
+const PICKED_MODEL_REPLY = 'คุณเลือกรุ่นไปแล้วครับ ถ้าต้องการเปลี่ยนรุ่น กรุณากดปุ่ม "แก้ไข" ได้เลย';
+const PICKED_MODEL_WINDOW_SEC = 120;
+
+/**
+ * ข้อความ PICKED_MODEL_REPLY ใช้ได้ไหม — ต้องมีร่างที่เพิ่งได้การ์ดสรุป และการ์ดนั้นต้องมีปุ่มชื่อ "แก้ไข…"
+ * ปุ่มบนการ์ดเป็น "🏢 กรอกข้อมูลลูกค้า" เมื่อ isCustomerInfoIncomplete (getQuotationSummaryMessage)
+ * ⇒ กรณีนั้นถอยไปข้อความเดิม ไม่บอกให้กดปุ่มที่ไม่มีอยู่จริง
+ * `draft` ต้องผ่าน enrichQuotationData แล้ว (ตัวเดียวกับที่การ์ดใช้) — แถวดิบไม่มี customer_name
+ */
+export function pickedModelReplyApplies(draft: { status: string; customer_name?: string | null } | null): boolean {
+  return !!draft && draft.status === 'draft' && !isCustomerInfoIncomplete(draft);
+}
 
 // ตัวสำรองสำหรับ UNCLEAR ที่ไม่ได้พูดถึงการเสนอราคา (ทักทาย/ถามทั่วไป) เผื่อ LLM ไม่ส่ง reply_message มา
 const GREETING_REPLY = `สวัสดีครับ ผมเป็นบอทผู้ช่วยออกใบเสนอราคา 🙏
@@ -938,9 +955,21 @@ export async function handleEvent(
         }
 
         if (outcome === 'no_pending') {
+          // อ่านไม่สำเร็จ = ถอยไปข้อความเดิม (ห้ามทำให้ปุ่มนี้ตอบไม่ได้)
+          const freshDraft = await getFreshDraftForUser(pool, userId, PICKED_MODEL_WINDOW_SEC)
+            .then((row) => (row ? enrichQuotationData(row) : null))
+            .catch((err) => {
+              console.error('[select_product] fresh draft lookup failed (ใช้ข้อความเดิม):', err);
+              return null;
+            });
           return await lineClient.replyMessage({
             replyToken: event.replyToken,
-            messages: [{ type: 'text', text: '❌ เซสชันหมดอายุหรือไม่มีรายการที่รอเลือกรุ่น รบกวนพิมพ์คำสั่งเสนอราคาใหม่อีกครั้งครับ' }]
+            messages: [{
+              type: 'text',
+              text: pickedModelReplyApplies(freshDraft)
+                ? PICKED_MODEL_REPLY
+                : '❌ เซสชันหมดอายุหรือไม่มีรายการที่รอเลือกรุ่น รบกวนพิมพ์คำสั่งเสนอราคาใหม่อีกครั้งครับ'
+            }]
           });
         }
         if (outcome === 'invalid') {
