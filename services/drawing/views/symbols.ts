@@ -2,7 +2,7 @@
 //  สัญลักษณ์ 2 มิติที่ใช้ร่วมกันหลายรุ่น — พอร์ตจาก Appsale `engine/symbols.js` ที่ `4dd2475` ทีละบรรทัด
 //  ทุกฟังก์ชันวาดโดยอ้าง "จุดอ้างอิง + ขนาดเป็น px" (คำนวณมาตราส่วนมาแล้ว)
 //
-//  ยกมาเฉพาะที่ TS_-11 / BH-01 / BH-01C ใช้ — ที่เหลือ (เกลียว · หัวกะโหลก · หน้าแปลน · ท่อ U …) มากับรุ่นแรกที่ใช้
+//  ยกมาเฉพาะที่รุ่นที่มีแบบใช้ (TS_-11 · BH-01/01C · เกลียว+หกเหลี่ยมของ TS_-01) — ที่เหลือ (หัวกะโหลก · หน้าแปลน · ท่อ U …) มากับรุ่นแรกที่ใช้
 //  ⚠️ ห้ามจัดนิพจน์ใหม่ — ด่าน `diag:drawing-port` ส่วน จ เทียบ SVG ทั้งสตริงกับต้นฉบับ
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -46,6 +46,27 @@ export function rodSide(x: number, cy: number, len: number, dia: number, opt: { 
   d += ` L ${x} ${cy+r}`;
   d += capL === 'round' ? ` A ${r} ${r} 0 0 1 ${x} ${cy-r}` : ` Z`;
   return `<path class="part" d="${d}"/>`;
+}
+
+/** เกลียว (ภาพด้าน) — ลายเส้นเฉียง + เส้นโคนเกลียว */
+export function threadSide(x: number, cy: number, len: number, dia: number): string {
+  const r = dia/2, n = Math.max(4, Math.round(len/4.5));
+  let g = `<rect class="part" x="${x}" y="${cy-r}" width="${len}" height="${dia}"/>`;
+  for (let i = 0; i <= n; i++) {
+    const px = x + len*i/n;
+    g += `<line class="thin" x1="${px}" y1="${cy-r}" x2="${px + len/n*0.55}" y2="${cy+r}"/>`;
+  }
+  g += `<line class="thin" x1="${x}" y1="${cy-r*0.62}" x2="${x+len}" y2="${cy-r*0.62}"/>`;
+  g += `<line class="thin" x1="${x}" y1="${cy+r*0.62}" x2="${x+len}" y2="${cy+r*0.62}"/>`;
+  return g;
+}
+/** หัวน็อตหกเหลี่ยม (ภาพด้าน) */
+export function hexSide(x: number, cy: number, w: number, h: number): string {
+  const r = h/2;
+  let g = `<rect class="part" x="${x}" y="${cy-r}" width="${w}" height="${h}"/>`;
+  g += `<line class="thin" x1="${x}" y1="${cy-r*0.45}" x2="${x+w}" y2="${cy-r*0.45}"/>`;
+  g += `<line class="thin" x1="${x}" y1="${cy+r*0.45}" x2="${x+w}" y2="${cy+r*0.45}"/>`;
+  return g;
 }
 
 /** สปริงกันสายหัก (spring) */

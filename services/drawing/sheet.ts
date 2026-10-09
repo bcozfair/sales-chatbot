@@ -127,6 +127,11 @@ function titleOf(spec: DrawingSpec): string {
     case 'TS_-11': return 'หัววัดแกนตรง + สปริง (TS_-11) &#8212; แบบเสนอราคา';
     case 'BH-01':
     case 'BH-01C': return 'BAND HEATER &#8212; แบบเสนอราคา';
+    case 'TS_-01': return 'THERMOCOUPLE / RTD (TS_-01)';
+    case 'TS_-01-0': return 'Thermocouple / RTD (TS_-01-0) &#8212; แบบเสนอราคา';
+    case 'TS_-02': return 'Thermocouple / RTD (TS_-02) &#8212; แบบเสนอราคา';
+    case 'TS_-03': return 'Thermocouple / NTC / PTC (TS_-03) &#8212; แบบเสนอราคา';
+    case 'TS_-05': return 'Thermocouple / NTC / PTC (TS_-05) &#8212; แบบเสนอราคา';
   }
 }
 

@@ -13,6 +13,7 @@ import { SW, SH } from './draw.js';
 import { SHEET_DEFS, SHEET_FONT } from './style.js';
 import { bandOrtho } from './bh-01.js';
 import { ts11Ortho } from './ts-11.js';
+import { tsCableOrtho } from './tsCable.js';
 import type { OrthoBox, OrthoView } from './types.js';
 
 export type { OrthoBox, OrthoView } from './types.js';
@@ -30,6 +31,11 @@ export function orthoView(spec: DrawingSpec, box: OrthoBox, code: string): Ortho
     case 'TS_-11': return ts11Ortho(spec, box, code);
     case 'BH-01':
     case 'BH-01C': return bandOrtho(spec, box);
+    case 'TS_-01':
+    case 'TS_-01-0':
+    case 'TS_-02':
+    case 'TS_-03':
+    case 'TS_-05': return tsCableOrtho(spec, box, code);
   }
 }
 

@@ -11,7 +11,7 @@
 //  ทางที่ไม่ได้เลือก:
 //    · ยก `Solid` ของ Appsale มาแบบแปะเมธอดบนชิ้น — ชิ้นที่ส่งออกจากโมดูลนี้เป็นข้อมูลล้วน (`Part`)
 //      ตัวสร้าง (`SolidBuilder`) อยู่แค่ระหว่างประกอบ ⇒ GLB/STEP/ด่าน ไม่ต้องรู้จักเมธอด
-//    · ยก `prism` / `threadedCylinder` มาด้วย — TS_-11 ไม่ใช้ (เกลียว/หกเหลี่ยมเป็นของ TS_-01/06/08 เฟส 1)
+//    · `prism` / `threadedCylinder` ยกมาพร้อม TS_-01/02/05 (2026-10-09 · หกเหลี่ยม · วงหัวจับเขี้ยวล็อค · เกลียว)
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { Colour, Part } from '../types.js';
@@ -214,4 +214,79 @@ export function spring(parts: Part[], name: string, u0: number, length: number, 
                 t: dir(frame, pitch/TAU, -helixR*Math.sin(a), helixR*Math.cos(a)) });
   }
   tube(parts, name, path, wireR, colour, 5);
+}
+
+/** แท่งเหลี่ยม (หัวหกเหลี่ยม · วงหัวจับลายเฟืองของเขี้ยวล็อค) — acrossFlats คือระยะประกบปากประแจ */
+export function prism(parts: Part[], name: string, u0: number, u1: number, acrossFlats: number, sides: number, colour: Colour,
+                      opts: { frame?: Frame; twist?: number } = {}): void {
+  const { frame = IDENT, twist = 0 } = opts;
+  const s = new SolidBuilder(name, colour), r = acrossFlats/2/Math.cos(Math.PI/sides);
+  const ends = [u0, u1].map(u => Array.from({ length: sides }, (_, j) => {
+    const a = TAU*j/sides + twist;
+    return s.add(at(frame, u, r*Math.cos(a), r*Math.sin(a)), dir(frame, 0, Math.cos(a), Math.sin(a)));
+  }));
+  for (let j = 0; j < sides; j++) {
+    const k = (j+1)%sides, a = TAU*(j+.5)/sides + twist;
+    s.quad(ends[0][j], ends[0][k], ends[1][k], ends[1][j], dir(frame, 0, Math.cos(a), Math.sin(a)));
+    s.edges.push(...s.positions.slice(ends[0][j]*3, ends[0][j]*3+3), ...s.positions.slice(ends[1][j]*3, ends[1][j]*3+3));
+  }
+  ends.forEach(ring => s.ring(ring));
+  const caps: [number, number[]][] = [[0, ends[0]], [1, ends[1]]];
+  for (const [end, ring] of caps) {
+    const out = dir(frame, end ? 1 : -1, 0, 0);
+    const c = s.add(at(frame, end ? u1 : u0, 0, 0), out);
+    for (let j = 0; j < sides; j++) s.tri(c, ring[j], ring[(j+1)%sides], out);
+  }
+  parts.push(s.part());
+}
+
+/**
+ * ผิวเกลียวขวาแบบปิด — ร่องเกลียวเป็นรูปทรงจริง (ลง STEP ด้วย) · pitch หน่วย mm · taper = รัศมีที่โตต่อ 1 mm ตามแกน (NPT: 1/32)
+ * หน้าตัด V ตัดยอด + ช่วงหมดเกลียวเป็นรูปอ้างอิง ไม่ใช่พิกัดผลิต (คำของต้นฉบับ)
+ */
+export function threadedCylinder(parts: Part[], name: string, length: number, diameter: number, pitch: number, colour: Colour, taper = 0): void {
+  const s = new SolidBuilder(name, colour), seg = 64, steps = Math.ceil(length/pitch*24);
+  const depth = pitch*.6, fade = Math.min(pitch*.65, length/4);
+  const radius = (x: number, a: number): number => {
+    const phase = ((x/pitch - a/TAU)%1 + 1)%1;
+    const groove = Math.max(0, Math.min(1, (Math.abs(phase-.5)-.08)/.34));
+    const runout = Math.min(1, x/fade, (length-x)/fade);
+    const chamfer = Math.max(0, 1-x/fade)*depth*.5;
+    return diameter/2 - (length-x)*taper - depth*groove*runout - chamfer;
+  };
+  const point = (x: number, a: number): number[] => { const r = radius(x, a); return [x, r*Math.cos(a), r*Math.sin(a)]; };
+  const rings: number[][] = [];
+  for (let i = 0; i <= steps; i++) {
+    const x = length*i/steps;
+    rings.push(Array.from({ length: seg }, (_, j) => {
+      const a = TAU*j/seg, r = radius(x, a), e = .0001;
+      const dx = (radius(Math.min(length, x+e), a)-radius(Math.max(0, x-e), a))/(Math.min(length, x+e)-Math.max(0, x-e));
+      const da = (radius(x, a+e)-radius(x, a-e))/(2*e);
+      return s.add(point(x, a), [-r*dx, r*Math.cos(a)+da*Math.sin(a), r*Math.sin(a)-da*Math.cos(a)]);
+    }));
+  }
+  for (let i = 0; i < steps; i++) for (let j = 0; j < seg; j++) {
+    const k = (j+1)%seg, a = TAU*(j+.5)/seg;
+    s.quad(rings[i][j], rings[i][k], rings[i+1][k], rings[i+1][j], [0, Math.cos(a), Math.sin(a)]);
+  }
+  for (const end of [0, 1]) {
+    const out = [end ? 1 : -1, 0, 0], ring = rings[end ? steps : 0];
+    // ฝาปิดมี normal ของตัวเอง ⇒ ขอบบ่าคม · พิกัดยังเชื่อมกันใน CAD
+    const cap = ring.map(id => s.add(s.positions.slice(id*3, id*3+3), out));
+    const c = s.add([end ? length : 0, 0, 0], out);
+    for (let j = 0; j < seg; j++) s.tri(c, cap[j], cap[(j+1)%seg], out);
+    s.ring(cap);
+  }
+  // เส้นยอดเกลียวสองขอบตามแนวเกลียว — ภาพลายเส้น
+  for (const phase of [.42, .58]) for (let turn = -1; turn < length/pitch; turn++) {
+    let prev: number[] | null = null;
+    for (let j = 0; j <= seg; j++) {
+      const a = TAU*j/seg, x = pitch*(turn+j/seg+phase);
+      if (x < fade || x > length-fade) { prev = null; continue; }
+      const p = point(x, a);
+      if (prev) s.edges.push(...prev, ...p);
+      prev = p;
+    }
+  }
+  parts.push(s.part());
 }

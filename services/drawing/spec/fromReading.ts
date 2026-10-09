@@ -24,7 +24,7 @@
 //  แบบที่ขนาดผิดแต่ดูเรียบร้อยอันตรายกว่าไม่มีแบบ เพราะคนเชื่อภาพมากกว่าป้าย
 // ─────────────────────────────────────────────────────────────────────────────
 
-import type { BandSpec, BhFormReading, Doubt, DrawingSpec, PricingReading, Ts11Spec, TsFormReading } from '../types.js';
+import type { BandSpec, BhFormReading, Doubt, DrawingSpec, PricingReading, Ts11Spec, TsCableSpec, TsFormReading } from '../types.js';
 
 export type FromReading =
   | { ok: true; spec: DrawingSpec }
@@ -34,8 +34,19 @@ export type FromReading =
 /** ช่องของ TS_-11 ที่กำหนดรูปทรง — มี issue/ไม่ได้เขียน = วาดไม่ได้ (checks.ts ใช้แยกช่องที่เหลือ) */
 export const TS11_SHAPE_SLOTS = ['probe', 'sensor', 'spring', 'd', 'l1', 'cable'] as const;
 
+/** ช่องรูปทรงของซีรีส์ TS ต่อตระกูล (ตามชื่อช่องของหน้าคำนวณราคา) — checks.ts ใช้แยกช่องที่เหลือ */
+export const TS_SHAPE_SLOTS: Record<string, readonly string[]> = {
+  'TS_-11': TS11_SHAPE_SLOTS,
+  'TS_-01': ['sensor', 'thread', 'd', 'l1', 'cable'],
+  'TS_-01-0': ['sensor', 'hold', 'cable'],
+  'TS_-02': ['sensor', 'id', 'd', 'l1', 'cable'],
+  'TS_-03': ['probe', 'sensor', 'd', 'l1', 'cable'],
+  'TS_-05': ['sensor', 'id', 'd', 'l1', 'cable'],
+};
+
 export const SLOT_LABEL: Record<string, string> = {
   probe: 'ชนิดหัววัด', sensor: 'ชนิดเซนเซอร์', spring: 'สปริง', d: 'ขนาดแกน', l1: 'ความยาวแกน', cable: 'ชนิดสาย',
+  thread: 'ขนาดเกลียว', hold: 'ขนาด Hold Size', id: 'ขนาดเขี้ยวล็อค',
   mat: 'วัสดุ', elem: 'จำนวน Element', ground: 'Ground', cl: 'ความยาวสาย',
 };
 export const ISSUE_TEXT: Record<string, string> = {
@@ -129,6 +140,71 @@ function ts11(f: TsFormReading, bend: Doubt | null): FromReading {
   };
 }
 
+const TR_SENSORS = ['K', 'J', 'T', 'P', 'PA', 'Z'] as const;
+const TCNP_SENSORS = ['TSK', 'TSJ', 'TST', 'N2', 'N10', 'P2', 'P10'] as const;
+const LOCK_IDS = ['12', '12.7', '14.5', '15.5'] as const;
+/** ชนิดสายที่แต่ละหน้าของแคตตาล็อกมี (ตัวเลือกของหน้าคำนวณราคา) — นอกนี้ = ผลอ่านไม่ตรงกับที่ไฟล์นี้รู้จัก */
+const CABLES_OF: Record<TsCableSpec['family'], readonly TsCableSpec['cable'][]> = {
+  'TS_-01': ['NONE', 'C', 'F', 'P', 'T', 'TS'], 'TS_-01-0': ['NONE', 'C', 'F', 'P', 'T', 'TS'], 'TS_-02': ['NONE', 'C', 'F', 'P', 'T', 'TS'],
+  'TS_-03': ['NONE', 'F', 'P', 'T'], 'TS_-05': ['NONE', 'F', 'P', 'T'],
+};
+
+/**
+ * TS_-01 · TS_-01-0 · TS_-02 · TS_-03 · TS_-05 — กติกาเดียวกับ TS_-11: ช่องรูปทรงมี issue / ไม่ได้เขียน / ท่อนท้ายทับตำแหน่งสาย = วาดไม่ได้
+ * · TS_-01 ความยาวแกนว่าง = 5 mm ตามแคตตาล็อก ("None = 5 mm" · ช่องนี้ optional ในหน้าคำนวณราคา) — ค่าของแคตตาล็อก ไม่ใช่การเติม
+ */
+function tsCable(f: TsFormReading, family: TsCableSpec['family'], bend: Doubt | null): FromReading {
+  const reasons: Doubt[] = [];
+  const v = f.values;
+  if (f.headJunk) reasons.push({ key: 'headJunk', reason: `ท่อน «${f.headJunk}» หลังเลขรุ่นไม่อยู่ในแคตตาล็อก ${family}` });
+  if (bend) reasons.push(bend);
+  for (const slot of TS_SHAPE_SLOTS[family]) {
+    const issue = f.issues?.[slot];
+    if (issue) reasons.push({ key: `issue:${slot}`, reason: `${SLOT_LABEL[slot]} ${ISSUE_TEXT[issue]} — แบบต้องรู้ค่านี้` });
+    else if (f.omit?.includes(slot)) reasons.push({ key: `omit:${slot}`, reason: `รหัสไม่ได้บอก${SLOT_LABEL[slot]} — แบบต้องรู้ค่านี้ (ไม่เติมค่ามาตรฐานให้)` });
+  }
+  const hidden = v.cable === '' && !f.issues?.cable ? tailHidesCable(f.tail) : undefined;
+  if (hidden) reasons.push({ key: 'tail:cable', reason: `ท้ายรหัส «${hidden}» อยู่ตรงตำแหน่งชนิดสาย — ไม่รู้ว่าสายเป็นชนิดไหน (แบบต้องรู้ชนิดสาย ไม่เดาเป็นสแตนเลสถัก)` });
+
+  const tcnp = family === 'TS_-03';
+  const rawSensor = tcnp ? `${v.probe ?? ''}${v.sensor ?? ''}` : family === 'TS_-05' ? `TS${v.sensor ?? ''}` : (v.sensor ?? '');
+  const sensor = tcnp ? choice(rawSensor, TCNP_SENSORS)
+    : family === 'TS_-05' ? choice(rawSensor, [...TCNP_SENSORS, 'TSP', 'TSPA', 'TSZ'] as const)
+    : choice(rawSensor === '' ? undefined : rawSensor, TR_SENSORS);
+  const cable = choice(v.cable, CABLES_OF[family]);
+  const dia = family === 'TS_-01-0' ? 1 : positive(v.d);
+  const tubeLen = family === 'TS_-01-0' ? 1 : family === 'TS_-01' && v.l1 === '' ? 5 : positive(v.l1);
+  const thread = family === 'TS_-01' ? choice(v.thread, ['NONE', '5/16', 'M6', 'M8', 'M8x1.25', 'M10', 'M10x1.5'] as const) : 'NONE';
+  const hold = family === 'TS_-01-0' ? choice(v.hold, ['NONE', 'M4', 'M6', 'M8', 'M10'] as const) : 'NONE';
+  const lock = family === 'TS_-02' || family === 'TS_-05' ? choice(v.id === '' ? undefined : v.id, LOCK_IDS) : '12';
+  if (reasons.length === 0) {
+    if (!sensor) reasons.push({ key: 'value:sensor', reason: `ไม่รู้จักชนิดเซนเซอร์ «${rawSensor}» ในแบบ ${family}` });
+    if (!cable) reasons.push({ key: 'value:cable', reason: `ไม่รู้จักชนิดสาย «${v.cable}» ในแบบ ${family}` });
+    if (dia === null) reasons.push({ key: 'value:d', reason: `ขนาดแกน «${v.d ?? ''}» ไม่ใช่ตัวเลข` });
+    if (tubeLen === null) reasons.push({ key: 'value:l1', reason: `ความยาวแกน «${v.l1 ?? ''}» ไม่ใช่ตัวเลข` });
+    if (!thread) reasons.push({ key: 'value:thread', reason: `ไม่รู้จักเกลียว «${v.thread}» ในแบบ ${family}` });
+    if (!hold) reasons.push({ key: 'value:hold', reason: `ไม่รู้จัก Hold Size «${v.hold}» ในแบบ ${family}` });
+    if (!lock) reasons.push({ key: 'value:id', reason: `ไม่รู้จักขนาดเขี้ยวล็อค «${v.id ?? ''}» ในแบบ ${family}` });
+  }
+  if (reasons.length || !sensor || !cable || dia === null || tubeLen === null || !thread || !hold || !lock) return { ok: false, family, reasons };
+
+  const unit = f.clUnit === 'cm' ? 100 : f.clUnit === 'mm' ? 1000 : 1;
+  const cl = f.issues?.cl || f.omit?.includes('cl') ? null : positive(v.cl);
+  const tail = { cableLen: cl === null ? null : cl / unit, cable, ground: f.issues?.ground ? null : choice(v.ground, ['NONE', 'U'] as const) };
+  const mat = <T extends string>(allowed: readonly T[]): T | null => (f.issues?.mat ? null : choice(v.mat, allowed));
+  const elem = f.issues?.elem ? null : choice(v.elem, ['NONE', '2'] as const);
+  const tr = sensor as (typeof TR_SENSORS)[number];
+  let spec: TsCableSpec;
+  switch (family) {
+    case 'TS_-01': spec = { family, sensor: tr, thread, dia: v.d, tubeLen, mat: mat(['NONE'] as const), ...tail }; break;
+    case 'TS_-01-0': spec = { family, sensor: tr, hold, ...tail }; break;
+    case 'TS_-02': spec = { family, sensor: tr, lock, dia: v.d, mat: mat(['NONE', 'A'] as const), tubeLen, ...tail }; break;
+    case 'TS_-03': spec = { family, sensor: sensor as (typeof TCNP_SENSORS)[number], dia: v.d, mat: mat(['NONE', 'A', 'S', 'T', 'AT'] as const), tubeLen, elem, ...tail }; break;
+    case 'TS_-05': spec = { family, sensor: sensor as Extract<TsCableSpec, { family: 'TS_-05' }>['sensor'], lock, dia: v.d, mat: mat(['NONE', 'A'] as const), tubeLen, elem, ...tail }; break;
+  }
+  return { ok: true, spec };
+}
+
 function band(f: BhFormReading, family: BandSpec['family'], bend: Doubt | null): FromReading {
   const reasons: Doubt[] = [];
   if (bend) reasons.push(bend);
@@ -161,7 +237,9 @@ function band(f: BhFormReading, family: BandSpec['family'], bend: Doubt | null):
 /** ผลอ่านรหัส → spec ของแบบ หรือเหตุผลที่วาดไม่ได้ */
 export function fromReading(reading: PricingReading): FromReading {
   if (reading.tsForm) {
-    if (reading.tsForm.family === 'TS_-11') return ts11(reading.tsForm, bendReason(reading));
+    const fam = reading.tsForm.family;
+    if (fam === 'TS_-11') return ts11(reading.tsForm, bendReason(reading));
+    if (fam === 'TS_-01' || fam === 'TS_-01-0' || fam === 'TS_-02' || fam === 'TS_-03' || fam === 'TS_-05') return tsCable(reading.tsForm, fam, bendReason(reading));
     return { ok: false, family: reading.tsForm.family, reasons: [{ key: 'noFamily', reason: `รุ่น ${reading.tsForm.family} ยังไม่มีแบบ 3 มิติ` }] };
   }
   if (reading.form) {

@@ -102,8 +102,71 @@ interface BandSpecFields {
 }
 export type BandSpec = (BandSpecFields & { family: 'BH-01' }) | (BandSpecFields & { family: 'BH-01C' });
 
+/**
+ * ซีรีส์ TS แบบ "ออกสาย" ที่ใช้ตัวประกอบชุดเดียวกันของ Appsale (`ts-series-assembly.js`) — TS_-01 · TS_-01-0 · TS_-02 · TS_-03 · TS_-05
+ * (แคตตาล็อก TS-SERIES หน้า 2 · 3 · 4 · 6 · 8) · ค่ามาจากผลอ่านของหน้าคำนวณราคาเท่านั้น — **ไม่มีค่าเริ่มต้น**
+ * ชนิดเซนเซอร์เขียนตามรหัสของแต่ละหน้า: หน้า 2–4 เป็น "TS + ชนิด" (`K` · `P` = PT100) · หน้า 6/8 เป็น "ชนิดหัววัด + Sensor" (`TSK` · `N10`)
+ */
+export type TsTrSensor = 'K' | 'J' | 'T' | 'P' | 'PA' | 'Z';
+export type TsTcnpSensor = 'TSK' | 'TSJ' | 'TST' | 'N2' | 'N10' | 'P2' | 'P10';
+/** ชนิดสาย — กำหนดสีปลอก · `NONE` = สแตนเลสถัก */
+export type TsCable = 'NONE' | 'C' | 'F' | 'P' | 'T' | 'TS';
+interface TsCableTail {
+  /** ความยาวสาย (เมตร) · `null` = รหัสไม่ได้บอก — ไม่มีผลกับรูปทรง (สายวาดย่อ 120 mm) */
+  cableLen: number | null;
+  cable: TsCable;
+  /** `NONE` = Ground · `U` = Unground — ไม่มีผลกับรูปทรง · `null` = อ่านไม่ออก */
+  ground: 'NONE' | 'U' | null;
+}
+/** เขี้ยวล็อค ID (mm) ของ TS_-02 / TS_-05 */
+export type TsLock = '12' | '12.7' | '14.5' | '15.5';
+export interface Ts01Spec extends TsCableTail {
+  family: 'TS_-01';
+  sensor: TsTrSensor;
+  /** เกลียว · `NONE` = 1/4" (Standard) · `M8x1.25`/`M10x1.5` = ตัวเลือกในชีตที่ Appsale ไม่มี (ระยะพิตช์ตามชื่อ) */
+  thread: 'NONE' | '5/16' | 'M6' | 'M8' | 'M8x1.25' | 'M10' | 'M10x1.5';
+  dia: string;
+  /** ปลายแกนที่ยื่นพ้นเกลียว (mm) — แคตตาล็อก "None = 5 mm" */
+  tubeLen: number;
+  /** มีตัวเดียว (SUS 304) · `null` = อ่านไม่ออก */
+  mat: 'NONE' | null;
+}
+export interface Ts010Spec extends TsCableTail {
+  family: 'TS_-01-0';
+  sensor: TsTrSensor;
+  /** Hold Size · `NONE` = M5 (Standard) */
+  hold: 'NONE' | 'M4' | 'M6' | 'M8' | 'M10';
+}
+export interface Ts02Spec extends TsCableTail {
+  family: 'TS_-02';
+  sensor: TsTrSensor;
+  lock: TsLock;
+  dia: string;
+  mat: 'NONE' | 'A' | null;
+  tubeLen: number;
+}
+export interface Ts03Spec extends TsCableTail {
+  family: 'TS_-03';
+  sensor: TsTcnpSensor;
+  dia: string;
+  mat: 'NONE' | 'A' | 'S' | 'T' | 'AT' | null;
+  tubeLen: number;
+  elem: 'NONE' | '2' | null;
+}
+export interface Ts05Spec extends TsCableTail {
+  family: 'TS_-05';
+  /** หน้า 8 ของ Appsale มีแค่ Thermocouple/NTC/PTC · หน้าคำนวณราคาเพิ่ม RTD ตามมาตรฐาน (เจ้าของ 2026-10-06) = 3 สาย */
+  sensor: TsTcnpSensor | 'TSP' | 'TSPA' | 'TSZ';
+  lock: TsLock;
+  dia: string;
+  mat: 'NONE' | 'A' | null;
+  tubeLen: number;
+  elem: 'NONE' | '2' | null;
+}
+export type TsCableSpec = Ts01Spec | Ts010Spec | Ts02Spec | Ts03Spec | Ts05Spec;
+
 /** union ของทุกตระกูลที่มีแบบ — เพิ่มตระกูล = เพิ่มที่นี่ แล้ว registry บังคับให้ลงทะเบียน */
-export type DrawingSpec = Ts11Spec | BandSpec;
+export type DrawingSpec = Ts11Spec | BandSpec | TsCableSpec;
 
 /** หนึ่งตระกูลของแบบ */
 export interface DrawingFamily<S extends DrawingSpec> {
