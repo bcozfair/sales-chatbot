@@ -1137,6 +1137,8 @@ export interface PrintOptions {
   heightMm: number;
   /** PNG: ความกว้างเป็นพิกเซล (ความสูงตามสัดส่วนกระดาษ) */
   pngWidthPx?: number;
+  /** PDF: จำนวนหน้า (ไม่ส่ง = 1) — หน้าเนื้อหาแบ่งเองด้วย CSS `break-after:page` · PNG ถ่ายหน้าแรกเสมอ */
+  pages?: number;
 }
 
 /** พิมพ์หน้า HTML ที่ประกอบเสร็จแล้วเป็น PDF หน้าเดียว หรือ PNG ขนาดกระดาษ */
@@ -1155,7 +1157,7 @@ export async function printHtml(html: string, opts: PrintOptions): Promise<Uint8
     await page.setContent(html, { waitUntil: "load", timeout: PRINT_LOAD_TIMEOUT_MS });
     await waitForFontsReady(page);
     if (opts.kind === "pdf") {
-      return await page.pdf({ width: `${opts.widthMm}mm`, height: `${opts.heightMm}mm`, printBackground: true, pageRanges: "1", margin: { top: 0, right: 0, bottom: 0, left: 0 } });
+      return await page.pdf({ width: `${opts.widthMm}mm`, height: `${opts.heightMm}mm`, printBackground: true, pageRanges: `1-${Math.max(1, opts.pages ?? 1)}`, margin: { top: 0, right: 0, bottom: 0, left: 0 } });
     }
     return await page.screenshot({ type: "png", clip: { x: 0, y: 0, width: cssW, height: cssH } });
   } finally {
