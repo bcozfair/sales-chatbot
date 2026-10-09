@@ -242,8 +242,9 @@ export const MAT_PRICE_AS: Record<string, Record<string, { model: string; source
  * · อ่านจากช่องกรอกของรหัส (`TsForm`) — ช่องที่อ่านไม่ออกหรือว่าง ข้อนั้นไม่ตัดสิน (ไม่เดาว่าขัด)
  * · `when` ทุกช่องต้องตรง แล้ว `need` ช่องใดไม่ผ่าน = ขัด · `need` เป็นรายการค่า หรือ `{ min }` = ตัวเลขอย่างน้อยเท่านี้
  * · 2 Element แกนเล็กกว่า 6 mm ไม่อยู่ที่นี่ — ชีตเว้นช่องไว้เป็นข้อห้ามของรุ่นแล้ว (`ELEM2_MIN_DIA` · ไม่รับผลิต)
- * · ไม่ใส่ (ตัดสิน 2026-10-09): "PT100 แกน 4.8 · 5 · 6" ของ TS_-02 — ชีต TS-02 มีราคา PT100 แกน 8 เอง (Excel ขายจริง ขัดกับแคตตาล็อก) ·
- *   "พีวีซี แกน 5 mm ขึ้นไป" ของ TS_-11 — แคตตาล็อกเขียนเป็นสายมาตรฐานของ RTD ไม่ใช่ข้อห้าม (250 รหัสจริงแกน 3.2–4.8 ขายด้วยราคาตามชีต)
+ * · `level: 'warn'` = **เตือนอย่างเดียว ราคาคิดตามปกติ** (เจ้าของ 2026-10-09 "คิดราคาได้ แต่เพิ่มแจ้งเตือน") — ใช้กับข้อที่ Excel/ของที่ขายจริงไม่ขัด:
+ *   "PT100 แกน 4.8 · 5 · 6" ของ TS_-02 (ชีต TS-02 มีราคา PT100 แกน 8 เอง) ·
+ *   "พีวีซี แกน 5 mm ขึ้นไป" ของ TS_-11 (= สายมาตรฐานของ RTD ไม่ใช่ข้อห้าม · รหัสจริงแกน 3.2–4.8 ขายด้วยราคาตามชีต)
  */
 export interface CatalogLimit {
   id: string;
@@ -252,6 +253,8 @@ export interface CatalogLimit {
   need: Record<string, string[] | { min: number }>;
   message: string;
   source: string;
+  /** ไม่ใส่ = ต้องขอราคา · `'warn'` = เตือนอย่างเดียว ราคาคิดตามปกติ */
+  level?: 'warn';
 }
 export const CATALOG_LIMITS: CatalogLimit[] = [
   { id: 'TITANIUM_S4', families: ['TS_-04', 'TS_-06', 'TS_-08', 'TS_-10'], when: { mat: ['TN'] }, need: { thread: ['S4'] },
@@ -272,6 +275,10 @@ export const CATALOG_LIMITS: CatalogLimit[] = [
     message: 'แกน 1.5 mm แคตตาล็อกทำเฉพาะ Type K', source: 'แคตตาล็อก TS_-12 ตาราง Diameter Tube (1.5 mm Type K Only)' },
   { id: 'J_ONLY_D', families: ['TS_-12'], when: { d: ['1.6'] }, need: { sensor: ['J'] },
     message: 'แกน 1.6 mm แคตตาล็อกทำเฉพาะ Type J', source: 'แคตตาล็อก TS_-12 ตาราง Diameter Tube (1.6 mm Type J Only)' },
+  { id: 'PT100_D', families: ['TS_-02', 'TS_-02-SI'], when: { sensor: ['P', 'PA'] }, need: { d: ['4.8', '5', '6'] }, level: 'warn',
+    message: 'PT100 แคตตาล็อกทำแกน 4.8 · 5 · 6 mm', source: 'แคตตาล็อก TS_-02 ตาราง Diameter Tube (PT100) — ชีต TS-02 มีราคาแกนอื่น ⇒ เตือนอย่างเดียว' },
+  { id: 'PVC_MIN_D', families: ['TS_-11'], when: { cable: ['P'] }, need: { d: { min: 5 } }, level: 'warn',
+    message: 'สายพีวีซี แคตตาล็อกเขียนสำหรับแกน 5 mm ขึ้นไป', source: 'แคตตาล็อก TS_-11 ตาราง Cable (PVC Standard for RTD · แกน 5 mm ขึ้นไป) ⇒ เตือนอย่างเดียว' },
 ];
 
 /** ข้อจำกัดของแคตตาล็อกที่รหัสนี้ขัด (`CATALOG_LIMITS`) — ช่องที่อ่านไม่ออก/ว่างไม่ตัดสิน */
