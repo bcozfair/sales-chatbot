@@ -1854,9 +1854,9 @@ export function parseProductCode(input: string, book: PriceBook, picks: CodePick
     // เฉพาะตัวใน `OFF_CATALOG_SUFFIX` ของรุ่น · ไม่งั้น `S` ไปตกแถว "หัวกระโหลกเล็ก" แล้วราคาที่กรอกให้หัวจะติดมาด้วย
     const dashed = suffix === '' ? rest.match(/^-([A-Z]+)(?=\d)/i) : null;
     const off = dashed && OFF_CATALOG_SUFFIX[model.code]?.letters.includes(dashed[1]!.toUpperCase()) ? dashed : null;
-    // ตัวอักษรวัสดุต่อท้ายเลขรุ่น (`TSP-08S(…)` · มีขีด `TSP-08-S(…)`) = แกนวัสดุนั้นทุกขนาด (`MAT_PRICE_AS` · ดู `findModel`)
+    // ตัวอักษรวัสดุต่อท้ายเลขรุ่น (`TSP-08S(…)` · มีขีด `TSP-08-S(…)` · ไม่มีเกลียว `TSP-09-S 8x136`) = แกนวัสดุนั้นทุกขนาด (`MAT_PRICE_AS` · ดู `findModel`)
     // — แบบมีขีดเดิมตกเป็น "หัวกระโหลกเล็ก" ท้ายรหัส ⇒ ราคาที่กรอกให้หัว S จะติดรหัสเหล่านี้ไปด้วย
-    const dashedMat = suffix === '' ? rest.match(/^-([A-Z])(?=\()/i) : null;
+    const dashedMat = suffix === '' ? rest.match(/^-([A-Z])(?=[(\d\s])/i) : null;
     const asOf = (l: string) => { const t = MAT_PRICE_AS[model.code]?.[l]; return !!t?.head && !!resolveModel(book, t.model); };
     const sheath = suffix && asOf(suffix) ? suffix : dashedMat && asOf(dashedMat[1]!.toUpperCase()) ? dashedMat[1]!.toUpperCase() : undefined;
     // ตัว L หัก L เขียนแยกด้วยขีด (`TSP-08-L(S4)…` · `TSK-11-L 5x254`) — เจ้าของ 2026-10-09 "นับด้วย" ⇒ อ่านเท่า `TSP-08L(`
