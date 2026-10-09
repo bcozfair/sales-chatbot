@@ -1,0 +1,70 @@
+{
+  "file": "ราคาTC อัพเดต (13-05-69).xlsx",
+  "sheet": "TS-08S",
+  "code": "TSP-08S",
+  "label": "RTD TS-08 S (แกน Sheath · เกลียว + หัวกระโหลก)",
+  "aliases": ["TSPA-08S", "TSZ-08S"],
+  "standard": { "L1": 100 },
+  "base": {
+    "kind": "matrix",
+    "axes": ["D", "thread", "sensor"],
+    "rowHeaderCol": "A",
+    "rows": [16, 17],
+    "colHeaderRow": [14, 15],
+    "cols": [
+      "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N",
+      "O", "P", "Q", "R", "S", "T"
+    ]
+  },
+  "adders": [
+    {
+      "id": "len_l1",
+      "label": "ความยาวแกน L1",
+      "order": 20,
+      "kind": "perUnit",
+      "dim": "L1",
+      "step": 100,
+      "round": "ceil",
+      "unit": "mm",
+      "byAxis": "D",
+      "ratesFrom": { "col": "B", "keyCol": "A", "rows": [16, 17] },
+      "source": "TS-08S!B13 'บวกเพิ่ม 100 mm ละ'"
+    },
+    {
+      "id": "head_blacklite_s",
+      "label": "หัวกระโหลก Blacklite เล็ก",
+      "order": 50,
+      "kind": "flat",
+      "when": { "option": "head:blacklite_s" },
+      "amountFrom": "V9",
+      "source": "TS-08S!Q9:V9 'ราคาหัวกระโหลก · Blacklite เล็ก'"
+    },
+    {
+      "id": "head_alu_l",
+      "label": "หัวกระโหลก อลูมิเนียม ใหญ่",
+      "order": 50,
+      "kind": "flat",
+      "when": { "option": "head:alu_l" },
+      "amountFrom": "V10",
+      "source": "TS-08S!Q10:V10"
+    },
+    {
+      "id": "head_blacklite_l",
+      "label": "หัวกระโหลก Blacklite ใหญ่",
+      "order": 50,
+      "kind": "flat",
+      "when": { "option": "head:blacklite_l" },
+      "amountFrom": "V11",
+      "source": "TS-08S!Q11:V11"
+    }
+  ],
+  "constraints": [
+    {
+      "id": "ELEM2_SHEATH",
+      "when": { "option": "element:2" },
+      "level": "quoteOnRequest",
+      "message": "2 Element ของแกน Sheath ต้องนำรุ่น 1 Element ไปสวมในแกน 15.8 mm ขึ้นไป — ปรึกษาฝ่ายผลิต 2 ก่อน (ต้องขอราคา)",
+      "source": "TS-08S!A19 'หมายเหตุ : เนื่องจากรุ่น 2 Element จะต้องนำรุ่น 1 Element ใส่ในแกนใหญ่ … ให้ปรึกษากับทางผลิต 2 ก่อน'"
+    }
+  ]
+}

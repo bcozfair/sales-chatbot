@@ -867,6 +867,51 @@ async function main(): Promise<void> {
         `${tm.o?.status} ${tm.o?.unitPrice} ${tm.p.parts.map((x) => `${x.text}:${x.kind}`).join(" ")}`);
     }
   }
+
+  // ── 17. TS_-08 S — ชีต TS-08S (แกน Sheath 6.35S · 8S) · เจ้าของ 2026-10-09 "รุ่น TS_-08 S หมายถึงตามภาพ" ───────────────
+  // แกนวัสดุ S ของ TSP-08 คิดทั้งชิ้นจากรุ่น TSP-08S (`MAT_PRICE_AS`) · หัวรหัส `TSP-08S(…)` / `TSP-08-S(…)` = วัสดุ S ทุกขนาดแกน
+  section('17. TS_-08 S — แกน Sheath จากชีต TS-08S (6.35S · 8S) · หัวรหัส TSP-08S / TSP-08-S (เจ้าของ 2026-10-09)');
+  const p08s = book.models['TSP-08S'];
+  if (!p08s || !p08) {
+    console.log(`  ${YEL}…${RESET} เล่มนี้ยังไม่มี TSP-08S — ข้าม (ตรวจก่อนเขียนฐานด้วย -- --book <ไฟล์จาก importer.ts --new-models --out>)`);
+  } else {
+    const cellS = (d: string, thread: string, sensor: string) => p08s.base.kind === 'matrix'
+      ? p08s.base.cells[`${d} | ${thread} | ${sensor}`] ?? NaN : NaN;
+    const rateS = (id: string, key: string) => p08s.adders.find((a) => a.id === id)?.rates?.[key] ?? NaN;
+    const amtS = (id: string) => p08s.adders.find((a) => a.id === id)?.amount ?? NaN;
+    const cell08 = (d: string, thread: string, sensor: string) => p08.base.kind === 'matrix'
+      ? p08.base.cells[`${d} | ${thread} | ${sensor}`] ?? NaN : NaN;
+    const amt08 = (id: string) => p08.adders.find((a) => a.id === id)?.amount ?? NaN;
+    const real = price('TSP-08(S4)8Sx100-BU');
+    check('รหัสจริง TSP-08(S4)8Sx100-BU = ชีต TS-08S แถว 8S × 1/2” × TSP + หัว B (= ราคาในฐาน 3,290)', real.o?.status === 'priced' &&
+      real.o.unitPrice === cellS('8S', '1/2”', 'TSP') + amtS('head_alu_l') && real.o.unitPrice === 3290 && real.p.model === 'TSP-08', `${real.o?.status} ${real.o?.unitPrice}`);
+    const len = price('TSPA-08(S2)8Sx250-B');
+    check('TSPA + ความยาว (อัตราของแถว 8S · ปัดขึ้นทุก 100) + หัว B', len.o?.status === 'priced' &&
+      len.o.unitPrice === cellS('8S', '1/4”', 'TSPA') + 2 * rateS('len_l1', '8S') + amtS('head_alu_l'), `${len.o?.unitPrice}`);
+    const d635 = price('TSZ-08(S8)6.35Sx100-KB');
+    check('แกน 6.35S ไม่ไปแถว 6.35 ของ TSP-08 (คนละราคา)', d635.o?.status === 'priced' &&
+      d635.o.unitPrice === cellS('6.35S', '1”', 'TSZ') + amtS('head_blacklite_l') && d635.o.unitPrice !== cell08('6.35', '1”', 'TSZ') + amt08('head_blacklite_l'), `${d635.o?.unitPrice}`);
+    const head = price('TSP-08S(S4)6.35x100');
+    check('หัวรหัส TSP-08S + แกน 6.35 = แถว 6.35S (รุ่นในรหัสยังเป็น TSP-08)', head.o?.status === 'priced' && head.p.model === 'TSP-08' &&
+      head.o.unitPrice === cellS('6.35S', '1/2”', 'TSP') && modelOfCode('TSP-08S(S4)6.35x100', book)?.code === 'TSP-08', `${head.p.model} ${head.o?.unitPrice}`);
+    for (const code of ['TSP-08S(S4)6x160-U', 'TSP-08-S(S4)6x285-U', 'TSP-08(S4)6Sx100']) {
+      const r = price(code);
+      check(`${code}: แกนที่ชีต TS-08S ไม่มี = ต้องขอราคา (ไม่ใช้แถว 6 ของ TSP-08 · ไม่เดาเป็น 6.35S)`, r.o?.status === 'quoteOnRequest' &&
+        r.o.violations.some((v) => v.askPrice) && !r.o.breakdown.some((b) => /ราคาตั้ง/.test(b.label)), `${r.o?.status} ${r.o?.unitPrice}`);
+    }
+    const dash = price('TSP-08-S(S2)4x150-U');
+    check('TSP-08-S (มีขีด) ไม่ตกเป็นหัวกระโหลกเล็ก (S)', !dash.o?.violations.some((v) => /Small Head/.test(v.message)) && !dash.p.cfg?.options?.some((o) => /head/.test(o)),
+      `${dash.o?.violations.map((v) => v.message).join(' / ')}`);
+    const t18 = price('TSP-08(S1)8Sx100');
+    check('เกลียว 1/8” (ชีตเว้นว่าง) = ยังไม่มีราคา ไม่ใช่ไม่รับผลิต', noRate(t18.o), `${t18.o?.status}`);
+    const e2 = price('TSP-08(S4)6.35Sx100-2');
+    check('2 Element = ต้องขอราคา (หมายเหตุชีต: ปรึกษาฝ่ายผลิต 2) ไม่ใช่ราคาเต็ม', e2.o?.status === 'quoteOnRequest', `${e2.o?.status}`);
+    const plain = price('TSP-08(S4)6.35x100');
+    check('แกน 6.35 ธรรมดา (ไม่มี S) ยังคิดตาม TSP-08 เดิม', plain.o?.unitPrice === cell08('6.35', '1/2”', 'TSP'), `${plain.o?.unitPrice}`);
+    const form = price('TSP-08(S4)8Sx100-BU').p.tsForm;
+    check('ช่องกรอก TS_-08: วัสดุ = S · ประกอบกลับเป็นรหัสเดิม', form?.values.mat === 'S' && !form.issues && buildTsCode(form) === 'TSP-08(S4)8Sx100-BU',
+      `${JSON.stringify(form?.values)} ${JSON.stringify(form?.issues)}`);
+  }
 }
 
 main()
