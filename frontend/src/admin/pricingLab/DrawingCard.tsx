@@ -35,6 +35,8 @@ const BAND = 'flex flex-wrap items-start gap-x-2 gap-y-1 rounded-lg px-3 py-2 te
 // ผืนภาพเป็นพื้นอ่อนคงที่ทุกธีม (viewer.css) ⇒ ปุ่มบนภาพใช้สีคงที่ ไม่ใช้โทเคน slate ที่สลับตามธีม (ธีมมืดจะได้ตัวอักษรอ่อนบนพื้นขาว)
 const TOOL = 'h-8 inline-flex items-center gap-1.5 rounded-lg border px-2 text-[12px] font-semibold bg-white text-[#3D5261] border-[#c3ccd3] hover:border-[#00764A] hover:text-[#00764A]';
 const TOOL_ON = 'border-[#00764A] text-[#00764A] bg-[#e9f4ee]';
+/** จอสัมผัสเป็นหลัก (มือถือ/แท็บเล็ต) — คำแนะนำการเลื่อนภาพต่างจากเมาส์ */
+const TOUCH = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
 
 /** ท่อนในเครื่องหมาย «…» ของเหตุผล — ใช้ทำชิปสั้น ๆ บนแถบยืนยัน */
 const tokensOf = (ds: Doubt[]) => ds.flatMap((d) => [...d.reason.matchAll(/«([^»]+)»/g)].map((m) => m[1]));
@@ -213,7 +215,7 @@ export const DrawingCard: React.FC<{ code: string; picks: Picks; headers: Record
               <Tool on={edges} tip="เส้นขอบ" onClick={() => { viewer.current?.setEdges(!edges); setEdges(!edges); }}><Hash className="w-4 h-4" /></Tool>
               <Tool on={false} tip="กลับมุมเริ่มต้น" onClick={() => viewer.current?.reset()}><RotateCcw className="w-4 h-4" /></Tool>
             </div>
-            <span className="absolute left-2.5 bottom-2.5 z-[3] text-[11px] text-[#3D5261] bg-white/85 rounded-lg px-2 py-0.5">ลากเพื่อหมุน</span>
+            <span className="absolute left-2.5 bottom-2.5 z-[3] text-[11px] text-[#3D5261] bg-white/85 rounded-lg px-2 py-0.5">{TOUCH ? 'ลาก = หมุน · สองนิ้ว = ซูม/เลื่อน' : 'ลาก = หมุน · คลิกขวาลาก = เลื่อน'}</span>
           </div>
           <div ref={list} className="mt-2.5 empty:hidden" />
           <div className="mt-3 flex flex-wrap items-center gap-2">

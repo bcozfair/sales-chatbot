@@ -81,8 +81,18 @@ const browser = await puppeteer.launch({ args: ['--no-sandbox', '--use-angle=swi
 
 const stageState = (page: Page) => page.evaluate(() => {
   const s = document.querySelector<HTMLElement>('[data-testid="drawing-card"] .dv-stage');
-  return s ? { box: (s.dataset.dvBox ?? '').split(',').map(Number), builds: Number(s.dataset.dvBuilds ?? 0), cam: (s.dataset.dvCam ?? '').split(',').map(Number), canvases: s.querySelectorAll('canvas').length } : null;
+  return s ? { box: (s.dataset.dvBox ?? '').split(',').map(Number), builds: Number(s.dataset.dvBuilds ?? 0), cam: (s.dataset.dvCam ?? '').split(',').map(Number), pan: Number(s.dataset.dvPan ?? 0), canvases: s.querySelectorAll('canvas').length } : null;
 });
+/** รอจนภาพนิ่ง (แรงเฉื่อยของกล้องหมด) — swiftshader วาดช้า เวลาที่รอตายตัวจึงอ่านกล้องตอนยังไหลอยู่ */
+const settle = async (page: Page) => {
+  let prev = '', same = 0;
+  for (let i = 0; i < 80 && same < 3; i++) {
+    await later(150);
+    const s = await stageState(page); const cur = s ? `${s.cam.join()}|${s.pan}` : '';
+    same = cur === prev ? same + 1 : 0; prev = cur;
+  }
+  return (await stageState(page))!;
+};
 const setL1 = async (page: Page, v: string) => {
   const sel = 'input[aria-label="ความยาวแกน"]';
   await page.click(sel, { count: 3 });
@@ -116,8 +126,7 @@ try {
   // หมุนกล้องด้วยเมาส์จริง แล้วกดแยกชิ้น
   const box = await page.$eval('[data-testid="drawing-card"] .dv-stage canvas', (c) => { const r = c.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
   await page.mouse.move(box.x, box.y); await page.mouse.down(); await page.mouse.move(box.x + 140, box.y + 40, { steps: 12 }); await page.mouse.up();
-  await later(900);
-  const camBefore = (await stageState(page))!.cam;
+  const camBefore = (await settle(page)).cam;
   await page.evaluate(() => [...document.querySelectorAll<HTMLButtonElement>('[data-testid="drawing-card"] button')].find((b) => b.getAttribute('aria-label') === 'แยกชิ้น')?.click());
   await later(900);
 
@@ -144,7 +153,32 @@ try {
   const s3 = (await stageState(page))!;
   ok('   เปลี่ยนส่วนประกอบ (ถอดสปริง) ภาพก็ตามทันที', s3.box.join() !== s2.box.join(), `${s2.box.join(' × ')} → ${s3.box.join(' × ')}`);
 
-  ok('6 · ไม่มี error ในหน้า', pageErrors.length === 0, pageErrors.join(' | '));
+  console.log('\n── ซูมแล้วเลื่อนดู (เจ้าของ 2026-10-09) ──────────');
+  await page.evaluate(() => [...document.querySelectorAll<HTMLButtonElement>('[data-testid="drawing-card"] button')].find((b) => b.getAttribute('aria-label') === 'กลับมุมเริ่มต้น')?.click());
+  await settle(page);
+  const cv = await page.$eval('[data-testid="drawing-card"] .dv-stage canvas', (c) => { const r = c.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
+  const p0 = (await stageState(page))!.pan;
+  // ล้อเมาส์ที่มุมซ้ายบนของภาพ — ซูมเข้าหาจุดใต้เมาส์ จุดหมุนต้องขยับออกจากกลาง
+  await page.mouse.move(cv.x + cv.w * 0.25, cv.y + cv.h * 0.3);
+  for (let i = 0; i < 4; i++) { await page.mouse.wheel({ deltaY: -200 }); await later(60); }
+  const p1 = (await settle(page)).pan;
+  ok('7 · ซูมเข้าหาจุดใต้เมาส์ (ไม่ใช่กลางจอ)', p0 < 0.5 && p1 > 2, `จุดหมุนห่างกลาง ${p0} → ${p1} mm`);
+  // คลิกขวาลาก = เลื่อน · ทิศกล้องต้องไม่เปลี่ยน (ไม่ใช่หมุน)
+  const camZ = (await settle(page)).cam;
+  await page.mouse.move(cv.x + cv.w * 0.5, cv.y + cv.h * 0.5);
+  await page.mouse.down({ button: 'right' }); await page.mouse.move(cv.x + cv.w * 0.5 + 160, cv.y + cv.h * 0.5 + 60, { steps: 12 }); await page.mouse.up({ button: 'right' });
+  const s4 = await settle(page);
+  const dPanCam = Math.max(...s4.cam.map((x, i) => Math.abs(x - camZ[i])));
+  ok('8 · คลิกขวาลาก = เลื่อนภาพ ไม่หมุน', Math.abs(s4.pan - p1) > 2 && dPanCam <= 0.01, `จุดหมุน ${p1} → ${s4.pan} mm · ทิศกล้องคลาด ${dPanCam.toFixed(4)}`);
+  await page.evaluate(() => [...document.querySelectorAll<HTMLButtonElement>('[data-testid="drawing-card"] button')].find((b) => /^(แยกชิ้น|ประกอบกลับ)$/.test(b.getAttribute('aria-label') ?? ''))?.click());
+  await later(800);
+  const s5 = await settle(page);
+  ok('9 · แยกชิ้น/ประกอบแล้วภาพไม่ดีดกลับกลางจอ', s5.pan > 2, `จุดหมุนห่างกลาง ${s5.pan} mm`);
+  await page.evaluate(() => [...document.querySelectorAll<HTMLButtonElement>('[data-testid="drawing-card"] button')].find((b) => b.getAttribute('aria-label') === 'กลับมุมเริ่มต้น')?.click());
+  const s6 = await settle(page);
+  ok('   ปุ่มกลับมุมเริ่มต้นล้างการเลื่อน', s6.pan < 0.5, `${s6.pan} mm`);
+
+  ok('10 · ไม่มี error ในหน้า', pageErrors.length === 0, pageErrors.join(' | '));
 } catch (e) {
   fail++;
   console.log('  ✗ ด่านล้มกลางทาง:', e instanceof Error ? e.message : e);
