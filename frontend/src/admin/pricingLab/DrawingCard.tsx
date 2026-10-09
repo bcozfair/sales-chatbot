@@ -240,14 +240,24 @@ export const DrawingCard: React.FC<{ code: string; picks: Picks; headers: Record
   };
 
   // PDF/PNG — เซิร์ฟเวอร์อ่านรหัสซ้ำแล้วประกอบกระดาษเอง (กติกาเดียวกับ STEP) · ส่งไปแค่ภาพนิ่ง 3 มิติตามมุม/ซูมที่เห็น
+  //  PDF เปิดในแท็บใหม่ให้พิมพ์/บันทึกจากตัวดู PDF ของเบราว์เซอร์ แบบเดียวกับพรีวิวใบเสนอราคา (เจ้าของ 2026-10-09) · PNG ยังดาวน์โหลด
   const downloadPrint = async (format: 'pdf' | 'png') => {
     setPrinting(format);
+    // เปิดแท็บ "ตอนกด" ไม่ใช่หลัง await — เบราว์เซอร์บล็อก window.open ที่ไม่ได้เกิดจากการกดโดยตรง
+    const tab = format === 'pdf' ? window.open('', '_blank') : null;
     try {
       const still = view !== '2d' ? viewer.current?.snapshot(STILL.w, STILL.h) ?? null : null;
       const res = await fetch('/api/admin/drawing/sheet', { method: 'POST', headers, body: JSON.stringify({ code: data.code, picks, confirmed, format, still }) });
       if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? 'สร้างไฟล์ไม่สำเร็จ');
-      saveBlob(await res.blob(), `${fileBase(data.code)}.${format}`);
+      const blob = await res.blob();
+      if (format === 'png') return saveBlob(blob, `${fileBase(data.code)}.png`);
+      const url = URL.createObjectURL(blob);
+      if (tab) tab.location.href = url;
+      else window.open(url, '_blank');
+      // คืน objectURL ทีหลัง ไม่ใช่ทันที — คืนเร็วไปแท็บที่เพิ่งเปิดจะได้ไฟล์ว่าง
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (e: unknown) {
+      tab?.close();
       setError(errMsg(e));
     } finally {
       setPrinting(null);
@@ -354,7 +364,7 @@ export const DrawingCard: React.FC<{ code: string; picks: Picks; headers: Record
           )}
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <span title={sheetOk ? `แบบ A4 · ${sheetView}` : sheetWhy}>
-              <Button icon={Printer} busy={printing === 'pdf'} disabled={!sheetOk || !!printing} onClick={() => void downloadPrint('pdf')} aria-label={sheetOk ? `แบบ A4 · ${sheetView}` : sheetWhy}>PDF</Button>
+              <Button icon={Printer} busy={printing === 'pdf'} disabled={!sheetOk || !!printing} onClick={() => void downloadPrint('pdf')} aria-label={sheetOk ? `เปิดแบบ A4 เพื่อพิมพ์ · ${sheetView}` : sheetWhy}>PDF</Button>
             </span>
             <span title={sheetOk ? `ภาพกระดาษแบบ · ${sheetView}` : sheetWhy}>
               <Button icon={Download} busy={printing === 'png'} disabled={!sheetOk || !!printing} onClick={() => void downloadPrint('png')} aria-label={sheetOk ? `ภาพกระดาษแบบ · ${sheetView}` : sheetWhy}>PNG</Button>

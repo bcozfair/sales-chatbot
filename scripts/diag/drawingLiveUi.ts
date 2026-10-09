@@ -255,10 +255,32 @@ try {
     ok('   สัญลักษณ์เส้นผ่านศูนย์กลางเป็น Ø (ฟอนต์ที่ฝัง/ในกล่อง prod ไม่มี ∅)', !has(/&#8709;|\u2205/) && has(/&#216;D1 6/));
     ok('   SVG เป็น XML ที่อ่านได้ (ไม่มี named entity)', !has(/&(?!#\d+;|amp;|lt;|gt;|quot;)[a-z]+;/));
     for (const fmt of ['PDF', 'PNG'] as const) {
+      // PDF เปิดในแท็บใหม่แบบพรีวิวใบเสนอราคา (ไม่ดาวน์โหลด) ⇒ แทน window.open ด้วยแท็บจำลองที่จำ URL ไว้ แล้วอ่าน blob จากหน้าเดิม
+      if (fmt === 'PDF') await page.evaluate(() => {
+        const w = window as unknown as { __pdfTab: { href: string; opened: number; closed: boolean } };
+        w.__pdfTab = { href: '', opened: 0, closed: false };
+        window.open = ((u?: string | URL) => {
+          w.__pdfTab.opened++;
+          if (u) { w.__pdfTab.href = String(u); return null; }
+          return { location: { set href(v: string) { w.__pdfTab.href = v; } }, close() { w.__pdfTab.closed = true; } } as unknown as Window;
+        }) as typeof window.open;
+      });
       await page.evaluate((l: string) => [...document.querySelectorAll<HTMLButtonElement>('[data-testid="drawing-card"] button')].find((b) => b.textContent?.trim() === l)?.click(), fmt);
       let f = '';
-      for (let i = 0; i < 100 && !f; i++) { await later(100); f = readdirSync(dlDir).find((x) => x.endsWith(`.${fmt.toLowerCase()}`)) ?? ''; }
-      const bytes = f ? readFileSync(join(dlDir, f)) : Buffer.alloc(0);
+      let bytes = Buffer.alloc(0);
+      if (fmt === 'PDF') {
+        for (let i = 0; i < 100 && !f; i++) { await later(100); f = await page.evaluate(() => (window as unknown as { __pdfTab: { href: string } }).__pdfTab.href); }
+        const tabInfo = await page.evaluate(() => (window as unknown as { __pdfTab: { opened: number; closed: boolean } }).__pdfTab);
+        const b64 = f.startsWith('blob:') ? await page.evaluate(async (u: string) => {
+          const b = new Uint8Array(await (await fetch(u)).arrayBuffer()); let s = ''; for (const x of b) s += String.fromCharCode(x); return btoa(s);
+        }, f) : '';
+        bytes = Buffer.from(b64, 'base64');
+        const downloaded = readdirSync(dlDir).some((x) => x.endsWith('.pdf'));
+        ok('   ปุ่ม PDF: เปิดแท็บใหม่ตอนกด 1 แท็บ แล้วพาไปที่ไฟล์ PDF (ไม่ดาวน์โหลด)', tabInfo.opened === 1 && !tabInfo.closed && f.startsWith('blob:') && !downloaded, `เปิด ${tabInfo.opened} · ${f || 'ไม่มี URL'}`);
+      } else {
+        for (let i = 0; i < 100 && !f; i++) { await later(100); f = readdirSync(dlDir).find((x) => x.endsWith(`.${fmt.toLowerCase()}`)) ?? ''; }
+        bytes = f ? readFileSync(join(dlDir, f)) : Buffer.alloc(0);
+      }
       const sig = fmt === 'PDF' ? bytes.subarray(0, 5).toString() === '%PDF-' : bytes.subarray(1, 4).toString() === 'PNG';
       const sent = sheets.find((x) => x.format === fmt.toLowerCase());
       ok(`   ปุ่ม ${fmt}: ภาพนิ่งที่การ์ดส่งผ่านตัวตรวจของเซิร์ฟเวอร์ · ได้ไฟล์`, sig && sent?.still === 'ok', `${f || 'ไม่มีไฟล์'} · ${(bytes.length / 1024).toFixed(0)} KB · ภาพนิ่ง ${sent?.still ?? '-'}`);
