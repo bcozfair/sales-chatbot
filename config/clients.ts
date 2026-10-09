@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'async_hooks';
 import * as line from '@line/bot-sdk';
 import * as dotenv from 'dotenv';
 import { OpenAI } from 'openai';
+import { llmCircuit, LlmUnavailableError, CIRCUIT_OPEN_MS } from './llmCircuit.js';
 
 dotenv.config();
 
@@ -70,6 +71,14 @@ export const LLM_MODEL = 'deepseek-v4-flash';
  */
 export async function createChatCompletion(params: Record<string, any>): Promise<any> {
   const timing = llmTimingStore.getStore();
+  // AI ล่มต่อเนื่อง (config/llmCircuit.ts) — ล้มทันทีแทนการรอเพดาน 20 วิซ้ำ ๆ
+  // ไม่นับเป็น call (ไม่ได้ยิงจริง) แต่นับเป็น err ⇒ บรรทัด [queue] ยังเห็นว่ามีการล้ม
+  const openMs = llmCircuit.openRemainingMs();
+  if (openMs > 0) {
+    if (timing) timing.errors++;
+    console.warn(`[llm] 🔌 งดเรียก AI อีก ${Math.ceil(openMs / 1000)} วิ (ล่มต่อเนื่อง) — ล้มทันทีไม่ยิงจริง`);
+    throw new LlmUnavailableError(openMs);
+  }
   const t0 = timing ? Date.now() : 0;
   // `signal` ไม่ใช่ field ของ body — ต้องแยกออกไปเป็น request option ไม่งั้น SDK ส่งขึ้นไปกับ JSON
   const { signal: callerSignal, ...body } = params;
@@ -86,6 +95,7 @@ export async function createChatCompletion(params: Record<string, any>): Promise
       temperature: 0,
       ...body,
     } as any, { signal });
+    llmCircuit.recordSuccess();
     // G#2 — นับ token เฉพาะครั้งที่สำเร็จ ครั้งที่พังไม่มี usage ให้อ่านอยู่แล้ว
     // อ่าน prompt_cache_hit_tokens ก่อน (ฟิลด์ของ DeepSeek) แล้วค่อยตกไป
     // prompt_tokens_details.cached_tokens ซึ่งเป็นชื่อฝั่ง OpenAI — เผื่อวันที่สลับ baseURL กลับ
@@ -102,6 +112,9 @@ export async function createChatCompletion(params: Record<string, any>): Promise
     // นับด้วย: docker logs primus-chatbot-app-1 | grep -c '\[llm\] ⏱️'
     if (capSignal.aborted) {
       console.warn(`[llm] ⏱️ ตัดที่เพดาน ${LLM_HARD_CAP_MS}ms — ปลายทางตอบช้าเกินงบ (ผู้เรียกจะลองใหม่ถ้างบเหลือพอ)`);
+      if (llmCircuit.recordCapHit() === 'opened') {
+        console.warn(`[llm] 🔌 ล่มต่อเนื่อง — งดเรียก AI ${CIRCUIT_OPEN_MS / 1000} วิ`);
+      }
     }
     throw err;
   } finally {

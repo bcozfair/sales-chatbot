@@ -10,7 +10,7 @@
  */
 import { pool, withTransaction, type DbExecutor } from '../config/db.js';
 import { companyKeysSql, matchesKeysSql } from './companyIdentity.js';
-import { excludeWebhookFillSql, isWebhookFillType } from './messageKinds.js';
+import { excludeWebhookFillSql, isWebhookFillType, webhookFillType } from './messageKinds.js';
 import { UNDELIVERED_REQUEST_IDS_SQL } from './logRepositories.js';
 
 function logErr(fn: string, err: any): void {
@@ -561,6 +561,36 @@ export async function getRecentMessages(userId: string, limit = 10, db: DbExecut
        WHERE user_id = $1 AND ${excludeWebhookFillSql()} ORDER BY created_at DESC LIMIT $2`, [userId, limit]);
     return rows;
   } catch (err) { logErr('getRecentMessages', err); return []; }
+}
+
+/**
+ * ข้อความที่ปุ่ม "ลองอีกครั้ง" (AI ขัดข้อง) จะรันใหม่ — คืน content ก็ต่อเมื่อ
+ * ข้อความ `messageId` ยังเป็น **ข้อความพิมพ์ล่าสุด** ของผู้ใช้ และบอทตอบมันด้วย `failedReply`
+ * ไม่งั้นคืน null (ทำรายการสำเร็จไปแล้ว · พิมพ์อย่างอื่นต่อแล้ว · ปุ่มของข้อความอื่น)
+ * ⇒ กดปุ่มเก่าซ้ำไม่สร้างร่างใบซ้ำ · คิวรันทีละ event ต่อผู้ใช้ จึงไม่มีสองรอบแซงกัน
+ *
+ * นับแถวเติม `wh_text` ด้วย — ข้อความที่ handler ไม่ได้เขียนแถวเองก็ยังเป็น "ข้อความที่ใหม่กว่า"
+ * ใช้ idx_messages_user_created
+ */
+export async function getRetryableFailedText(userId: string, messageId: string, failedReply: string): Promise<string | null> {
+  try {
+    const { rows } = await pool.query(
+      `SELECT message_id, content, reply_content FROM messages
+       WHERE user_id = $1 AND type = ANY($2::text[])
+       ORDER BY created_at DESC, id DESC LIMIT 1`,
+      [userId, ['text', webhookFillType('text')]]);
+    return pickRetryableText(rows[0], messageId, failedReply);
+  } catch (err) { logErr('getRetryableFailedText', err); return null; }
+}
+
+/** ส่วนตัดสินของ getRetryableFailedText — แยกออกมาให้ด่าน diag:llm-circuit ทดสอบได้โดยไม่ต้องมีฐาน */
+export function pickRetryableText(
+  last: { message_id?: unknown; content?: unknown; reply_content?: unknown } | undefined,
+  messageId: string,
+  failedReply: string,
+): string | null {
+  if (!last || !messageId || last.message_id !== messageId || last.reply_content !== failedReply) return null;
+  return typeof last.content === 'string' && last.content.trim() ? last.content : null;
 }
 
 // ═══════════════════════════ quotations ═══════════════════════════

@@ -11,6 +11,7 @@ import {
   getRecentConfirmedQuotations,
   getStaticBranches,
   getBranchesByCodes,
+  getRetryableFailedText,
 } from '../db/repositories.js';
 import { buildPdfLink, parseQuotationNosFromText } from '../utils/quotationLink.js';
 import { getAppUrl } from '../config/appUrl.js';
@@ -24,7 +25,8 @@ import {
   createCartConfirmationFlex,
   appendReviseFrom,
   createRevisionFlex,
-  isCustomerInfoIncomplete
+  isCustomerInfoIncomplete,
+  createLlmOutageRetryFlex
 } from '../utils/flexTemplates.js';
 import { findProduct } from '../services/productService.js';
 import { applyThaiSuffixVariants } from '../services/thaiSuffixVariant.js';
@@ -77,6 +79,14 @@ const PRODUCT_INFO_HINT_REPLY = `ต้องการเช็คสต๊อ�
 
 // คำที่บ่งว่าเซลส์อยากเช็คข้อมูลสินค้า — เช็คหลัง "เสนอราคา" เสมอ เพราะ "เสนอราคา" มีคำว่า "ราคา" อยู่ด้วย
 const PRODUCT_INFO_KEYWORDS = ['ราคา', 'เช็คของ', 'เช็คสินค้า', 'มีของ', 'ของมี', 'สต็อก', 'สต๊อก', 'stock'];
+
+// AI ขัดข้องจนสกัดข้อความไม่สำเร็จ (extraction_failed) — ส่งคู่ปุ่ม "ลองอีกครั้ง" (createLlmOutageRetryFlex)
+// เจ้าของเคาะถ้อยคำ 2026-10-08 · ห้ามแก้แบบไม่ตั้งใจ: getRetryableFailedText ใช้ค่านี้ยืนยันว่าแถวไหนคือข้อความที่ล้ม
+// (แถวที่บันทึกก่อนเปลี่ยนถ้อยคำจะกดปุ่มไม่ได้ — ยอมรับได้ ปุ่มเก่าหมดความหมายไปพร้อมกัน)
+const LLM_OUTAGE_REPLY = 'ขออภัยระบบ AI ขัดข้องชั่วคราว กรุณารอสักครู่ แล้วลองใหม่อีกครั้งนะครับ 🙏';
+
+// กดปุ่ม "ลองอีกครั้ง" ของข้อความที่ไม่ใช่ข้อความพิมพ์ล่าสุดแล้ว (ทำรายการไปแล้ว / พิมพ์อย่างอื่นต่อ)
+const RETRY_STALE_REPLY = 'ปุ่มนี้ใช้กับข้อความล่าสุดเท่านั้นครับ ข้อความนั้นทำรายการไปแล้ว หรือมีข้อความใหม่กว่าแล้ว 🙏';
 
 // ตัวสำรองสำหรับ UNCLEAR ที่ไม่ได้พูดถึงการเสนอราคา (ทักทาย/ถามทั่วไป) เผื่อ LLM ไม่ส่ง reply_message มา
 const GREETING_REPLY = `สวัสดีครับ ผมเป็นบอทผู้ช่วยออกใบเสนอราคา 🙏
@@ -332,6 +342,26 @@ export async function handleEvent(
       const params = new URLSearchParams(data);
       const action = params.get('action');
       const quoteIdParam = params.get('id') || params.get('quoteId') || '';
+
+      // ปุ่ม "ลองอีกครั้ง" ตอน AI ขัดข้อง — รันข้อความเดิมใหม่ทั้งเส้นเหมือนเซลส์พิมพ์เอง
+      // ใช้ replyToken ของ postback นี้ (ใหม่ ยังไม่ถูกใช้) และงบเวลาของ event นี้
+      // message id ใหม่ต่อการกดหนึ่งครั้ง ⇒ ถ้ายังล่มอยู่ ปุ่มของรอบใหม่ชี้แถวของรอบนี้ ไม่ใช่แถวเดิม
+      if (action === 'retry_text') {
+        const mid = params.get('mid') || '';
+        const text = mid ? await getRetryableFailedText(userId, mid, LLM_OUTAGE_REPLY) : null;
+        if (!text) {
+          return await lineClient.replyMessage({
+            replyToken: event.replyToken,
+            messages: [{ type: 'text', text: RETRY_STALE_REPLY }],
+          });
+        }
+        const retryEvent = {
+          ...event,
+          type: 'message',
+          message: { type: 'text', id: `retry_${event.webhookEventId || Date.now()}`, text },
+        };
+        return await handleEvent(retryEvent, opts);
+      }
 
 
 
@@ -1901,10 +1931,12 @@ export async function handleEvent(
           // เลือกคำแนะนำตามสิ่งที่เซลส์พิมพ์มา (เรียงลำดับสำคัญ: "เสนอราคา" ต้องมาก่อน "ราคา")
           // - เอ่ยถึง "เสนอราคา" แต่ข้อมูลไม่พอ → ส่งแบบฟอร์มให้ก๊อปไปกรอก
           // - ถามเช็คราคา/เช็คของ แต่ไม่ได้ระบุรุ่น → บอกให้พิมพ์รหัสรุ่นมาด้วย
-          // - นอกนั้น (ทักทาย/ถามทั่วไป/ระบบสกัดล่ม) → ตอบตามบริบทที่ LLM สร้างมา
+          // - ระบบสกัดล่ม (AI ขัดข้อง) → ขออภัย + ปุ่มรันข้อความเดิมใหม่ (action=retry_text)
+          // - นอกนั้น (ทักทาย/ถามทั่วไป) → ตอบตามบริบทที่ LLM สร้างมา
           const lowerContent = content.toLowerCase();
           if (aiResult.extraction_failed) {
-            botReplyText = aiResult.reply_message || GREETING_REPLY;
+            botReplyText = LLM_OUTAGE_REPLY;
+            customMessages = [createLlmOutageRetryFlex(LLM_OUTAGE_REPLY, messageId)];
           } else if (content.includes('เสนอราคา')) {
             botReplyText = QUOTATION_FORM_REPLY;
           } else if (PRODUCT_INFO_KEYWORDS.some(kw => lowerContent.includes(kw))) {
