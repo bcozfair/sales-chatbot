@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-//  "การสั่งซื้อ" ของแคตตาล็อก TS — ลำดับท่อนของรหัส + ตัวเลือกของแต่ละท่อน (16 ตาราง · TS_-02 กับ TS_-02-SI ใช้รุ่นเดียวกัน)
+//  "การสั่งซื้อ" ของแคตตาล็อก TS — ลำดับท่อนของรหัส + ตัวเลือกของแต่ละท่อน (17 ตาราง · TS_-02 กับ TS_-02-SI ใช้รุ่นเดียวกัน)
 //
 //  โมดูล "คิดราคาสินค้า" — ถอดออกได้ทั้งก้อน ดู services/pricingLab/README.md · docs/pricing-code-ts-catalog.md
 //
@@ -27,7 +27,7 @@
 
 import type { CatalogOption } from './catalogBh.js';
 
-export type TsFamily = 'TS_-01' | 'TS_-01-0' | 'TS_-02' | 'TS_-02-SI' | 'TS_-03' | 'TS_-04' | 'TS_-05' | 'TS_-06' | 'TS_-07' | 'TS_-08' | 'TS_-10' | 'TS_-11' | 'TS_-12' | 'TS_-12R' | 'TS_-14' | 'TS_-18';
+export type TsFamily = 'TS_-01' | 'TS_-01-0' | 'TS_-02' | 'TS_-02-SI' | 'TS_-03' | 'TS_-04' | 'TS_-05' | 'TS_-06' | 'TS_-07' | 'TS_-08' | 'TS_-09' | 'TS_-10' | 'TS_-11' | 'TS_-12' | 'TS_-12R' | 'TS_-14' | 'TS_-18';
 
 export interface TsSlot {
   label: string;
@@ -543,6 +543,27 @@ export const TS_CATALOG: TsFamilySpec[] = [
     askPrice: { d: 'D' },
   },
   {
+    // แคตตาล็อก `Catalogue_RTD_PT100_TS_-09.pdf` + ชีต `TS-09` (2026-10-09 · docs/pricing-code-ts-catalog.md หัวข้อ TS_-09) —
+    // RTD หน้าแปลนปีกนก + หัวกระโหลก · ท่อนเหมือน TS_-08 แต่ไม่มีเกลียว · รหัสจริงเว้นวรรคหลังเลขรุ่น (`TSP-09 6x100-U` · ทุกตัวในฐาน)
+    // ราคาหัวกระโหลกรายขนาดแกน (คอลัมน์ G–I) แบบ TS-07
+    family: 'TS_-09', head: 'TS_-09', name: 'RTD · Flange + RTD Head', model: 'TSP-09',
+    layout: [{ fixed: 'TS' }, { slot: 'sensor' }, { sep: '-09 ' }, { slot: 'd' }, { slot: 'mat' }, { sep: 'x' }, { slot: 'l1' },
+      { sep: '-' }, { slot: 'elem' }, { sep: '-' }, { slot: 'hd' }, { slot: 'ground' }],
+    slots: {
+      sensor: ch('ชนิดของ RTD', RTD),
+      // แคตตาล็อกเขียน "7 mm Titanium *ทำได้เฉพาะเกลียว S4" ทั้งที่ TS_-09 ไม่มีเกลียว (ก๊อปจากหน้า TS_-08) ⇒ ไม่ใส่ข้อจำกัด TITANIUM_S4
+      d: ch('ขนาดแกน', mm(D_RTD, { '7': '(Titanium)' })),
+      // B / I = แถว `21.3B`/`21.3I` ของชีต (ตาราง Diameter Tube: 15.8 = SUS 310S · 21.3 = SUS 310S, Inconel) แบบ TS_-08
+      mat: ch('วัสดุ', [...MAT_RTD.slice(0, 2), o('B', 'SUS 310S (แกน 15.8 · 21.3)'), o('I', 'Inconel (แกน 21.3)'), ...MAT_RTD.slice(2)]),
+      l1: L1, elem: ch('จำนวน Element', ELEMENT, 'ทำ 2 Element ได้ตั้งแต่แกน 6 mm'),
+      hd: ch('ชนิดหัวกระโหลก', HEADS), ground: ch('Ground', GROUND_RTD),
+    },
+    defaults: { sensor: 'P', d: '6', mat: '', l1: '100', elem: '', hd: '', ground: 'U' },
+    addons: TS_ADDONS,
+    // ขนาดแกนที่ทั้งแคตตาล็อกและชีตไม่มี (`10.2` · `10.2A` · `12A` …) = ต้องขอราคา + แถวสีส้ม แบบ TS_-02–08
+    askPrice: { d: 'D' },
+  },
+  {
     family: 'TS_-10', head: 'TS_-10', name: 'RTD · Thread + Spring + Cable', model: 'TSP-10',
     layout: [{ fixed: 'TS' }, { slot: 'sensor' }, { sep: '-10(' }, { slot: 'thread' }, { sep: ')' }, { slot: 'd' }, { slot: 'mat' }, { sep: 'x' }, { slot: 'l1' },
       { sep: '-' }, { slot: 'elem' }, { sep: '+' }, { slot: 'cl' }, { sep: 'M' }, { slot: 'cable' }, { slot: 'ground' }],
@@ -720,6 +741,10 @@ export function buildTsCode(form: TsForm): string {
     case 'TS_-08':
       code = `TS${s('sensor')}-08${hj}${par('thread')}${s('d')}${s('mat')}${xl1}${elem}${headGround}`;
       break;
+    case 'TS_-09':
+      // เว้นวรรคหลังเลขรุ่นแบบรหัสจริง (`TSP-09 6x100-U` · ทุกตัวในฐาน 2026-10-09)
+      code = `TS${s('sensor')}-09${hj} ${s('d')}${s('mat')}${xl1}${elem}${headGround}`;
+      break;
     case 'TS_-10':
       code = `TS${s('sensor')}-10${hj}${par('thread')}${s('d')}${s('mat')}${xl1}${elem}${cable}`;
       break;
@@ -811,6 +836,7 @@ function grammar(spec: TsFamilySpec, loose = false): RegExp {
     case 'TS_-06': body = `${head}${num('06')}${paren('thread')}${dm()}${L1}${elem}${hd()}`; break;
     case 'TS_-07': body = `${head}${num('07')}${dm()}${L1}${elem}${hd()}`; break;
     case 'TS_-08': body = `${head}${num('08')}${paren('thread')}${dm()}${L1}${elem}${hd()}`; break;
+    case 'TS_-09': body = `${head}${num('09')}${dm()}${L1}${elem}${hd()}`; break;
     case 'TS_-10': body = `${head}${num('10')}${paren('thread')}${dm()}${L1}${elem}${cable()}`; break;
     case 'TS_-11': body = `${head}-11(?<spring>P)?${hj}${dm()}${L1}${elem}\\+(?<cl>${NUM})${unit}(?:(?<dash>-)?(?=[A-Z])${g('cable', 'cable')}${g('ground', 'ground')})?`;
       if (loose) body = body.replace(`\\+(?<cl>${NUM})${unit}`, `(?:\\+(?<cl>${NUM})${unit}`) + ')?';
