@@ -125,7 +125,7 @@ import {
 import { handleEvent } from './handlers/lineHandler.js';
 import { buildAddressParts, buildThaiAddress } from './utils/address.js';
 import { buildPdfLink, buildPdfPath } from './utils/quotationLink.js';
-import { generateQuotationPDF, closePdfBrowser, formatPersonNameWithSuffix } from './pdfGenerator.js';
+import { generateQuotationPDF, closePdfBrowser, closePrintBrowser, printHtml, formatPersonNameWithSuffix } from './pdfGenerator.js';
 import { Parser } from 'json2csv';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -299,7 +299,7 @@ app.use('/api/admin/pricing', adminAuthMiddleware, requireCapability('page.prici
 app.use('/api/admin/pricebook', adminAuthMiddleware, requireCapability('page.pricebook'), pricebookRouter);
 // แบบ 3 มิติ (docs/plan-product-drawing-3d.md · เฟส 1 ใช้ภายใน) — การ์ดในหน้าคำนวณราคา จึงใช้สิทธิ์เดียวกับหน้านั้น
 // ตัวคิดราคาฉีดเข้าไปตรงนี้ (`quoteForCode`) ⇒ โมดูลแบบไม่ import pricingLab · ถอดโมดูลแบบ = ลบสองบรรทัดนี้ + import
-app.use('/api/admin/drawing', adminAuthMiddleware, requireCapability('page.pricing'), createDrawingRouter({ quote: quoteForCode }));
+app.use('/api/admin/drawing', adminAuthMiddleware, requireCapability('page.pricing'), createDrawingRouter({ quote: quoteForCode, print: printHtml }));
 
 // ── "เพิ่มผู้ติดต่อใหม่เอง" (local_contacts) — ดู routes/localContacts.ts ────────────────────
 // แผน: docs/plan-local-contacts.md ก้อน I2 · ยังไม่มี UI เรียก (ปุ่มมาที่ I3 · หน้ารายการที่ I4)
@@ -5762,6 +5762,8 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     await closePdfBrowser().catch((e: any) =>
       console.error('[shutdown] ปิด Chrome ไม่สำเร็จ:', e?.message || e)
     );
+    // Chrome ตัวแยกของกระดาษแบบ 3 มิติ (printHtml · ปกติปิดเองเมื่อว่าง 60 วิ)
+    await closePrintBrowser().catch(() => {});
     console.log(`[shutdown] ปิดเรียบร้อยใน ${Date.now() - t0}ms`);
     process.exit(0);
   });
