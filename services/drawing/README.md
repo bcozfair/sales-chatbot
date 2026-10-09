@@ -33,6 +33,7 @@ types.ts  ←  geometry/tsPrimitives.ts  ←  families/tsParts.ts  ←  families
          ←  spec/fromReading.ts (ผลอ่านรหัส → spec · วาดได้ไหม)  ←  checks.ts (ส่งลูกค้าได้ไหม)
 annotate.ts      (spec → ป้ายชื่อ ไทย/อังกฤษ · ทิศ/ระยะแยกชิ้น · ป้ายขนาด — ตัวเลขจาก spec · ตัวดูไม่รู้จักตระกูล)
 sheetText.ts     (spec → ตารางรายละเอียดสินค้า ไทย/อังกฤษ = `specRows` ของ Appsale · หมายเหตุของแบบ — เห็นเฉพาะการ์ดแอดมิน)
+views/           (spec → ภาพฉาย 2 มิติ SVG = `views.ortho` ของ Appsale ทีละตระกูล · draw/symbols = `engine/draw.js`/`symbols.js` · TS อ่านจุดยึดจาก `ts11Anchors`)
 writers/step.ts  (รับ StepSolid[] — ไม่รู้จักตระกูล)
 writers/glb.ts   (รับ DrawingModel — ใช้ parts ที่มี normal)
 ```
@@ -101,6 +102,7 @@ sqrt · ห้ามสลับลำดับบวก/คูณ · ห้า�
 | BH-01 · BH-01C | `products/bh-01-mesh.js` (`buildBandMesh` ทั้งไฟล์ · ผ่าครึ่ง = `split`) · `weldSolid` ของ `engine/step.js` (seal = false) · ความหนา 4 mm ตามแคตตาล็อก | **exact** — ชิ้นดิบ + ชิ้นที่รวมจุดแล้ว + STEP ตรงต้นฉบับทุกไบต์ (รวมรูเจาะและ termPos) | `diag:drawing-port` |
 | writers/step | `engine/step.js` `colouredStep` (ทางสามเหลี่ยม) | **exact** ยกเว้นบรรทัด FILE_NAME (ชื่อระบบ "Primus Quotation System" · เวลา) | `diag:drawing-port` |
 | writers/glb | — (ของใหม่ · Appsale ไม่มีไฟล์สำหรับเว็บ) | glTF 2.0 ไบนารี · node ราก scale 0.001 · หนึ่ง node/mesh/วัสดุ ต่อชิ้น · ผลนิ่ง · วัสดุเฟส 0 = สีของชิ้น ไม่เงา (สี sRGB ยังไม่แปลงเป็น linear — ตัดสินพร้อม PBR เฟส 1 ที่ `materialFor()`) | `diag:drawing-glb` · `diag:drawing-coverage` |
+| views (ภาพฉาย 2 มิติ) | `products/ts-11-drawing.js` (`orthoStraight` kind 11) · `ortho` ใน `products/bh-01.js` · `engine/draw.js` · `engine/symbols.js` (เฉพาะที่ใช้) · `<defs>` ของ `engine/sheet.js` · จุดยึด `assemble`/`tailAnchors` ของ `ts-11-model.js` (= `ts11Anchors`) | **exact** — SVG + ป้ายมาตราส่วนตรงต้นฉบับทั้งสตริงทุกชุดค่า × 4 กรอบ (ยกเว้น CL1 ที่รหัสไม่บอก = `-` · Appsale ไม่มีค่าว่าง) · ⚠️ มุมขั้วไฟ 2 มิติของ BH-01C = 270° ไม่ใช่ 152°/332° ของโมเดล (ต้นฉบับเป็นแบบนี้ทั้งสองที่) | `diag:drawing-port` ส่วน จ |
 | spec/fromReading | — (แทนตัวอ่านรหัสของ Appsale) | ผลอ่านที่สะอาดทั้งสองตัวอ่าน → ค่าเท่ากับ `parse()` ของ Appsale ทุกช่อง (ยกเว้นข้อเดียวที่ตั้งใจ: BH-01C ไม่บอกการต่อ — Appsale เติม `PL` เราเก็บ `''`) | `diag:drawing-port` ส่วน ค |
 
 `exact` = ยังเหมือนต้นฉบับทุกไบต์และด่านยังครอบ · `improved` = ปรับปรุงโดยตั้งใจแล้ว (ต้องถอดออกจากด่าน port
@@ -109,13 +111,12 @@ sqrt · ห้ามสลับลำดับบวก/คูณ · ห้า�
 ### ที่ไม่ได้ยกมา (และทำไม)
 
 - **ตัวอ่านรหัสของ Appsale** (`parse`/`build`/`code.js`) — แบบรับผลอ่านของหน้าคำนวณราคาแทน (แผน §2.5 ข้อ 1)
-- **ภาพ 2 มิติ/กระดาษแบบ** (`*-drawing.js` · `sheet.js` · `cad-camera.js` · `symbols.js` · `draw.js`) — เฟส 1
-  (`symbols.js`/`draw.js` เป็นงาน 2D ทั้งหมด ไม่ใช่ geometry ของโมเดล)
+- **กระดาษแบบ/ภาพ 3 มิติแบบเส้นของ Appsale** (`sheet.js` · `cad-camera.js` · `*-camera.js`) — เฟส 1 ก้อน 2 (ภาพฉาย 2 มิติยกมาแล้วที่ `views/`)
 - **`solids.js`** — TS_-11 / BH-01 ไม่ได้ใช้ (BH-02/03 ใช้ · เฟส 1)
 - **TS_-11L และ TS-12 ที่อยู่ไฟล์เดียวกับ TS_-11** — หน้าคำนวณราคาไม่มีตาราง TS_-11L (อ่านรหัส 11L/LP/LPS
   เป็น TS_-11 + `headJunk`) · TS-12 ของ Appsale ตรงกับ TS_-12R ของหน้าคำนวณราคา ไม่ใช่ TS_-12
 - **`head()` หัวกะโหลกจาก CAD** — import mesh ~15 MB ทั้งก้อน ⇒ ทำพร้อมตัวแปลง mesh เป็นไบนารีในเฟส 1
-- `assemble`/`tailAnchors` (จุดยึดเส้นบอกขนาด 2D) · mesh รวมสำหรับกล้อง 2D ของ BH · cache ระดับโมดูล
+- mesh รวม (`assemble().mesh`) สำหรับกล้อง 2D · cache ระดับโมดูล (จุดยึดของ TS_-11 ยกมาแล้ว = `ts11Anchors`)
 
 ### ตำแหน่งขั้วไฟของ BH-01 = ค่าอ้างอิงของ Appsale
 
@@ -133,7 +134,7 @@ sqrt · ห้ามสลับลำดับบวก/คูณ · ห้า�
 
 | ด่าน | พิสูจน์อะไร | ฐาน |
 | --- | --- | --- |
-| `npm run diag:drawing-port` | ค่าชุดเดียวกันเข้าโมดูลเรากับต้นฉบับ Appsale ที่คอมมิตต้นแบบ → ทุกชิ้น (ชื่อ/สี/positions/normals/triangles/edges) `Object.is` ทีละตัว + STEP ทั้งไฟล์ (ยกเว้น FILE_NAME) · **ส่วน ค** ตัวแปลงช่องอ่านเท่าต้นแบบ · **ส่วน ง** ตารางรายละเอียดสินค้า (`sheetText.ts`) ภาษาไทยเท่า `specRows` ของต้นฉบับทุกตัวอักษรหลังถอด entity — ทุกชุดค่า ไม่ตัดซ้ำด้วยรูปทรง (ชุดควบคุม: `SUS304` → `SUS 304` ตก 18/31) · ไม่มีรีโป/คอมมิต = **ตอบไม่ได้ exit 1** · `-- --quick` ไม่แตะฐาน | SELECT อย่างเดียว (READ ONLY + statement_timeout) · เขียนแค่ tmpdir แล้วลบ |
+| `npm run diag:drawing-port` | ค่าชุดเดียวกันเข้าโมดูลเรากับต้นฉบับ Appsale ที่คอมมิตต้นแบบ → ทุกชิ้น (ชื่อ/สี/positions/normals/triangles/edges) `Object.is` ทีละตัว + STEP ทั้งไฟล์ (ยกเว้น FILE_NAME) · **ส่วน ค** ตัวแปลงช่องอ่านเท่าต้นแบบ · **ส่วน จ** ภาพฉาย 2 มิติ (`views/`) เท่า `views.ortho()` ทั้งสตริงทุกชุดค่า × 4 กรอบ (สามกรอบของกระดาษ + กรอบแคบที่ TS ใช้คำย่อ · ชุดควบคุม: +0.0001 ในระยะเส้นบอกขนาด/สัดส่วนกรอบ ตก 103/124) · **ส่วน ง** ตารางรายละเอียดสินค้า (`sheetText.ts`) ภาษาไทยเท่า `specRows` ของต้นฉบับทุกตัวอักษรหลังถอด entity — ทุกชุดค่า ไม่ตัดซ้ำด้วยรูปทรง (ชุดควบคุม: `SUS304` → `SUS 304` ตก 18/31) · ไม่มีรีโป/คอมมิต = **ตอบไม่ได้ exit 1** · `-- --quick` ไม่แตะฐาน | SELECT อย่างเดียว (READ ONLY + statement_timeout) · เขียนแค่ tmpdir แล้วลบ |
 | `npm run diag:drawing-live-ui` | **หน้าจอ** — หน้าคำนวณราคาจริง (build แล้ว) + API จำลองที่อ่านด้วยโค้ดจริง (`readTsForm` · `buildTsCode` · `judge`) หน่วง 900 ms · แก้ความยาวแกนแล้วภาพยาวขึ้นก่อนเซิร์ฟเวอร์ตอบ · ทิศกล้องคงเดิม · ตัวดูไม่ถูกสร้างใหม่ · แยกชิ้นค้างได้ · คำตอบมาแล้วไม่กระตุก · ถอดสปริงภาพก็ตาม · `/preview` เป็น spec < 2 KB · **ซูมเข้าหาจุดใต้เมาส์ · คลิกขวาลาก = เลื่อน (ทิศไม่เปลี่ยน) · แยกชิ้นแล้วไม่ดีดกลับกลาง · ปุ่มกลับมุมล้างการเลื่อน** (เจ้าของ 2026-10-09) · อ่านกล้องหลังภาพนิ่ง (`settle` — เดิมรอเวลาตายตัว ข้อ 3 ตกเองบน swiftshader) · `DL_DEBUG=1` พิมพ์ทุกคำขอ + console | ไม่แตะ · ต้อง build frontend ก่อน |
 | `npm run diag:drawing-glb` | `writeGlb` → ตัวถอดของด่านเอง (ไม่ใช้โค้ดตัวเขียน) ตรวจโครง (magic · ความยาว · ตัวเติม chunk · bufferView ในขอบ/หาร 4 · min/max · index < จุด · normal ยาว 1 ±5e-4) แล้วถอดกลับ = `Math.fround(ต้นฉบับ)` · **gltf-validator ของ Khronos 0 error 0 warning** · เขียนซ้ำได้ไบต์เดิม · ชิ้นสังเคราะห์ 90,000 จุดบังคับทาง index uint32 | ไม่แตะ |
 | `npm run diag:drawing-coverage` | **ถาวร** — รหัสจริงทุกตัว → อ่าน+คิดราคาแบบหน้าคำนวณราคา → `judge` → โมเดล/GLB/STEP ครั้งเดียวต่อรูปทรง · รายงานวาดได้ / ส่งได้ทันที / ส่งได้หลังยืนยัน / เหตุผลต่อตระกูล (ไม่มีเกณฑ์ขั้นต่ำ) · **ต้องจริงเสมอ 8 ข้อ** (หัวไฟล์) รวม "สามทางตรงกัน": ค่าที่วัดจาก mesh = ช่องหน้าคำนวณราคา = ค่าที่คิดเงิน · แกนหักจาก `cfg.options` ต้องวาดไม่ได้ · ความหลวมที่ปิดการส่งต้องส่งไม่ได้ (6ก) · ส่วนท้ายที่ยืนยันได้ต้องอยู่ใน `confirm` ครบ (6ข) · ทิศการพึ่งพา · keyof สองทางกับ `TsForm`/`BhForm` + `cfg.options` ของ `ProductConfig` (ล้มที่ tsc) | SELECT อย่างเดียว (READ ONLY + statement_timeout) · ไม่เขียนไฟล์ |

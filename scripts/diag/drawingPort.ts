@@ -40,6 +40,7 @@ import { listSubCodes } from '../../db/pricingLabRepo.js';
 import { loosenessOf } from '../../services/drawing/checks.js';
 import { buildModel } from '../../services/drawing/families/registry.js';
 import { specRows } from '../../services/drawing/sheetText.js';
+import { SHEET_BOX, orthoView } from '../../services/drawing/views/index.js';
 import { fromReading } from '../../services/drawing/spec/fromReading.js';
 import { withSubCodes } from '../../services/pricingLab/bookStore.js';
 import { parseProductCode } from '../../services/pricingLab/code.js';
@@ -70,6 +71,7 @@ interface AppProduct {
   modelParts(v: AppValues): AppPart[];
   exportStep(v: AppValues): string;
   specRows(v: AppValues): [string, string][];
+  views: { ortho(v: AppValues, box: { cx: number; cy: number; w: number; h: number }): { svg: string; scale: string } };
 }
 interface AppSolid { name: string; colour: number[]; positions: number[]; triangles: number[] }
 interface AppRegistry { PRODUCTS: AppProduct[]; canonical(code: string): string; findProduct(code: string): AppProduct | null }
@@ -361,6 +363,43 @@ function partD(app: { byId(id: string): AppProduct }, cases: Case[]): { lines: s
   return { lines, fail, compared };
 }
 
+/** กรอบที่ส่วน จ ใช้ — สามกรอบของกระดาษ + กรอบแคบ (TS ใช้คำย่อเมื่อกว้าง < 520) */
+const ORTHO_BOXES = { ...SHEET_BOX, narrow: { cx: 200, cy: 180, w: 360, h: 260 } };
+
+/** ส่วน จ — ภาพฉาย 2 มิติ (`views/`) เท่า `views.ortho()` ของต้นฉบับทั้งสตริง (SVG + ป้ายมาตราส่วน) ทุกกรอบ · ทุกชุดค่าที่ไม่ซ้ำ */
+function partE(app: { byId(id: string): AppProduct }, cases: Case[]): { lines: string[]; fail: number; compared: number } {
+  const seen = new Set<string>();
+  let compared = 0, fail = 0, skipped = 0;
+  const diffs: string[] = [];
+  for (const c of cases) {
+    const key = JSON.stringify([c.family, c.values]);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (c.family === 'TS-11' && c.values.mat === 'S') { skipped++; continue; }
+    const p = app.byId(c.family);
+    for (const [name, box] of Object.entries(ORTHO_BOXES)) {
+      compared++;
+      let problem: string | null = null;
+      try {
+        const theirs = p.views.ortho(c.values, box);
+        const ours = orthoView(COVERED[c.family].toSpec(c.values), box, p.build(c.values));
+        if (theirs.scale !== ours.scale) problem = `มาตราส่วน Appsale ${JSON.stringify(theirs.scale)} · เรา ${JSON.stringify(ours.scale)}`;
+        else if (theirs.svg !== ours.svg) {
+          let i = 0;
+          while (i < theirs.svg.length && theirs.svg[i] === ours.svg[i]) i++;
+          problem = `SVG ต่างที่ตัวที่ ${i}: Appsale …${JSON.stringify(theirs.svg.slice(Math.max(0, i - 40), i + 40))}… · เรา …${JSON.stringify(ours.svg.slice(Math.max(0, i - 40), i + 40))}…`;
+        }
+      } catch (e) {
+        problem = `โยน error: ${e instanceof Error ? e.message : String(e)}`;
+      }
+      if (problem) { fail++; if (diffs.length < MAX_REPORT) diffs.push(`${c.family} · ${c.label} · กรอบ ${name}: ${problem}`); }
+    }
+  }
+  const lines = [`${fail ? RED + '✗' : GREEN + '✓'}${RESET} ส่วน จ: ภาพฉาย 2 มิติ ${compared.toLocaleString()} ภาพ (${Object.keys(ORTHO_BOXES).length} กรอบ) — ไม่ตรงต้นฉบับ ${fail}${skipped ? ` ${DIM}· ข้ามวัสดุ S ${skipped}${RESET}` : ''}`];
+  for (const d of diffs) lines.push(`    ${RED}${d}${RESET}`);
+  return { lines, fail, compared };
+}
+
 async function main(): Promise<void> {
   const useVendor = existsSync(join(VENDOR, 'SOURCE.json'));
   console.log(`\n${BOLD}ด่านพอร์ตแบบ 3 มิติจาก Appsale${RESET} ${DIM}(คอมมิต ${APPSALE_COMMIT} · ${useVendor ? `สำเนา ${VENDOR}` : `รีโป ${REPO}`})${RESET}\n`);
@@ -484,6 +523,9 @@ async function main(): Promise<void> {
     console.log('');
     for (const l of d.lines) console.log(`  ${l}`);
     const dFail = d.fail + (d.compared === 0 ? 1 : 0);
+    const e = partE({ byId }, cases);
+    for (const l of e.lines) console.log(`  ${l}`);
+    const eFail = e.fail + (e.compared === 0 ? 1 : 0);
 
     let cFail = 0;
     if (!QUICK) {
@@ -494,8 +536,8 @@ async function main(): Promise<void> {
       if (c.compared === 0) console.log(`  ${RED}ส่วน ค ตอบไม่ได้${RESET} — ไม่มีรหัสที่สะอาดทั้งสองฝั่ง`);
     }
 
-    const pass = total > 0 && totalFail === 0 && cFail === 0 && dFail === 0;
-    console.log(`\n${'─'.repeat(70)}\nสรุป: ${pass ? `${GREEN}ผ่าน${RESET} — ทุกชุดตรงกับต้นฉบับทุกไบต์${QUICK ? '' : ' และตัวแปลงช่องอ่านเหมือนต้นแบบ'}` : total === 0 ? `${RED}ตอบไม่ได้${RESET} — ไม่มีเคสให้ตรวจ` : `${RED}ตก${RESET} — ${totalFail} ชุดไม่ตรงกับต้นฉบับ · ส่วน ค ${cFail} · ส่วน ง ${dFail}`}\n${'─'.repeat(70)}\n`);
+    const pass = total > 0 && totalFail === 0 && cFail === 0 && dFail === 0 && eFail === 0;
+    console.log(`\n${'─'.repeat(70)}\nสรุป: ${pass ? `${GREEN}ผ่าน${RESET} — ทุกชุดตรงกับต้นฉบับทุกไบต์${QUICK ? '' : ' และตัวแปลงช่องอ่านเหมือนต้นแบบ'}` : total === 0 ? `${RED}ตอบไม่ได้${RESET} — ไม่มีเคสให้ตรวจ` : `${RED}ตก${RESET} — ${totalFail} ชุดไม่ตรงกับต้นฉบับ · ส่วน ค ${cFail} · ส่วน ง ${dFail} · ส่วน จ ${eFail}`}\n${'─'.repeat(70)}\n`);
     process.exitCode = pass ? 0 : 1;
   } finally {
     rmSync(tmp, { recursive: true, force: true });
