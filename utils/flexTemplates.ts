@@ -1523,3 +1523,39 @@ export function createCartConfirmationFlex(quoteIdsStr: string, itemCount: numbe
     }
   };
 }
+
+/**
+ * AI ขัดข้องจนสกัดข้อความไม่สำเร็จ (`extraction_failed`) — ข้อความ + ปุ่มรันข้อความเดิมใหม่
+ * (เจ้าของเคาะถ้อยคำ 2026-10-08 · mockups/llm-outage-retry.html)
+ * ปุ่มอยู่ใน bubble ไม่ใช่ quick reply เพราะ quick reply ไม่ขึ้นบน LINE PC ซึ่งเซลส์ใช้วางแบบฟอร์มยาว
+ * postback ได้ replyToken ใหม่ ⇒ ตอบได้ฟรีไม่ต้อง push · ตัวรับคือ action=retry_text ใน lineHandler
+ */
+export function createLlmOutageRetryFlex(text: string, messageId: string) {
+  return {
+    type: "flex" as const,
+    altText: text,
+    contents: {
+      type: "bubble",
+      body: {
+        type: "box",
+        layout: "vertical",
+        spacing: "md",
+        contents: [
+          { type: "text", text, wrap: true, size: "sm", color: "#1F2937" },
+          {
+            type: "button",
+            action: {
+              type: "postback",
+              label: "🔄 ลองอีกครั้ง",
+              data: `action=retry_text&mid=${encodeURIComponent(messageId)}`,
+              displayText: "🔄 ลองอีกครั้ง"
+            },
+            style: "primary",
+            color: "#2563EB",
+            height: "sm"
+          }
+        ]
+      }
+    }
+  };
+}

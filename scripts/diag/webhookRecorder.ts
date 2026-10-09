@@ -522,6 +522,7 @@ function part3(): void {
   // 3g ผู้อ่าน messages ฝั่งแอป — ตัวใหม่ต้องถูกตัดสินว่ากรองไหม แล้วเติมชื่อในรายการนี้
   const KNOWN_READERS = new Set([
     'db/repositories.ts',                // getRecentMessages (กรอง) · insertWebhookFillMessage · getMessageMetaById (ตาม id)
+                                         // · getRetryableFailedText (นับ wh_text เป็น "ข้อความที่ใหม่กว่า" โดยตั้งใจ · ไม่ป้อน LLM)
     'services/salespersonPicker.ts',     // max(created_at) — กดปุ่ม = ใช้งานล่าสุด ถูกความหมาย (แผน B.11)
     'scripts/logworker/trafficDailyJob.ts', // นับทุกแถวตามที่เจ้าของเคาะ (แผน B.12)
     'db/logRepositories.ts',             // หน้าบันทึก เฟส 2 (listChatRowsForRequests) — ต้องเห็นแถวเติมด้วย · ไม่ป้อน LLM

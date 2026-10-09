@@ -19,6 +19,7 @@
 //  ไม่มีด่านยกเลิก — เส้นทาง CLI/diag/เว็บ จึงเรียกได้โดยไม่ต้องปลอม deadline ของ LINE
 // ─────────────────────────────────────────────────────────────────────────────
 import { createChatCompletion } from '../config/clients.js';
+import { isLlmUnavailable } from '../config/llmCircuit.js';
 import { getRecentMessages, deletePendingQuotations } from '../db/repositories.js';
 import { findProduct, CANDIDATE_LIMIT } from './productService.js';
 import { applyThaiSuffixVariants } from './thaiSuffixVariant.js';
@@ -330,6 +331,8 @@ export async function extractQuoteFromText(params: ExtractQuoteParams): Promise<
         } catch (e) {
           lastExtractionErr = e;
           console.warn(`[extraction] attempt ${attempt}/${MAX_EXTRACTION_ATTEMPTS} ล้มเหลว:`, (e as any)?.message || e);
+          // งดเรียก AI อยู่ (config/llmCircuit.ts) — attempt ถัดไปก็ล้มทันทีเหมือนกัน
+          if (isLlmUnavailable(e)) break;
         }
       }
       if (!aiResult) {

@@ -56,6 +56,7 @@
     "diag:customer-search": "tsx scripts/diag/customerSearchEval.ts",
     "diag:log-worker": "tsx scripts/diag/logWorkerSmoke.ts",
     "diag:llm-timeout": "tsx scripts/diag/llmTimeout.ts",
+    "diag:llm-circuit": "tsx scripts/diag/llmCircuit.ts",
     "diag:redelivery": "tsx scripts/diag/redelivery.ts",
     "diag:webhook-recorder": "tsx scripts/diag/webhookRecorder.ts",
     "diag:log-chat": "tsx scripts/diag/logChatView.ts",
