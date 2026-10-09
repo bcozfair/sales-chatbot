@@ -81,9 +81,9 @@ const PRODUCT_INFO_HINT_REPLY = `ต้องการเช็คสต๊อ�
 const PRODUCT_INFO_KEYWORDS = ['ราคา', 'เช็คของ', 'เช็คสินค้า', 'มีของ', 'ของมี', 'สต็อก', 'สต๊อก', 'stock'];
 
 // AI ขัดข้องจนสกัดข้อความไม่สำเร็จ (extraction_failed) — ส่งคู่ปุ่ม "ลองอีกครั้ง" (createLlmOutageRetryFlex)
-// เจ้าของเคาะถ้อยคำ 2026-10-08 · ห้ามแก้แบบไม่ตั้งใจ: getRetryableFailedText ใช้ค่านี้ยืนยันว่าแถวไหนคือข้อความที่ล้ม
+// เจ้าของเคาะถ้อยคำ 2026-10-08 · เปลี่ยนเป็นข้อความกลาง (ไม่มีคำว่า AI) 2026-10-09 · ห้ามแก้แบบไม่ตั้งใจ: getRetryableFailedText ใช้ค่านี้ยืนยันว่าแถวไหนคือข้อความที่ล้ม
 // (แถวที่บันทึกก่อนเปลี่ยนถ้อยคำจะกดปุ่มไม่ได้ — ยอมรับได้ ปุ่มเก่าหมดความหมายไปพร้อมกัน)
-const LLM_OUTAGE_REPLY = 'ขออภัยระบบ AI ขัดข้องชั่วคราว กรุณารอสักครู่ แล้วลองใหม่อีกครั้งนะครับ 🙏';
+const LLM_OUTAGE_REPLY = 'ขออภัย ระบบขัดข้องชั่วคราว กรุณารอสักครู่ แล้วลองใหม่อีกครั้งนะครับ 🙏';
 
 // กดปุ่ม "ลองอีกครั้ง" ของข้อความที่ไม่ใช่ข้อความพิมพ์ล่าสุดแล้ว (ทำรายการไปแล้ว / พิมพ์อย่างอื่นต่อ)
 const RETRY_STALE_REPLY = 'ปุ่มนี้ใช้กับข้อความล่าสุดเท่านั้นครับ ข้อความนั้นทำรายการไปแล้ว หรือมีข้อความใหม่กว่าแล้ว 🙏';
@@ -613,7 +613,7 @@ export async function handleEvent(
             console.error("confirmQuotationAtomic error:", err);
             replyMessages.push({
               type: 'text',
-              text: `❌ เกิดข้อผิดพลาดในการยืนยันใบเสนอราคา ID: ${qId}`
+              text: '❌ เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้งครับ'
             });
             continue;
           }
@@ -933,7 +933,7 @@ export async function handleEvent(
           console.error('[select_product] transaction error:', err);
           return await lineClient.replyMessage({
             replyToken: event.replyToken,
-            messages: [{ type: 'text', text: '❌ เกิดข้อผิดพลาด รบกวนลองใหม่อีกครั้งครับ' }]
+            messages: [{ type: 'text', text: '❌ เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้งครับ' }]
           });
         }
 
