@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Box, Boxes, Download, Hash, RotateCcw, Tag } from 'lucide-react';
+import { AlertTriangle, Box, Boxes, Check, ChevronDown, Copy, Download, Hash, RotateCcw, Tag } from 'lucide-react';
 import { Button } from '../Button';
 import { errMsg } from '../logs/format';
 // three.js (~650 KB) โหลดเฉพาะตอนการ์ดมีภาพ — import แบบ type อย่างเดียวที่นี่ ตัวจริงโหลดใน effect (หน้าอื่นของแอดมินไม่ต้องจ่าย)
@@ -22,6 +22,8 @@ import type { BhForm, TsForm } from './types';
  *   ช่องคือผลอ่านเดียวกับที่ส่งไปคิดราคา) แล้วเปลี่ยนภาพโดยมุมกล้องคงเดิม · คำตัดสิน/ปุ่มไฟล์/STEP ยังมาจากเซิร์ฟเวอร์เท่านั้น
  *   ภาพที่สร้างจากช่องเป็นภาพชั่วคราว คำตอบของเซิร์ฟเวอร์ (รหัสที่ประกอบจากช่องเดียวกัน) มาทับเสมอ
  * · วันนี้มีแค่ STEP — PDF / PNG / ลิงก์ลูกค้ามากับก้อนถัดไป (ไม่โชว์ปุ่มที่ยังทำงานไม่ได้)
+ * · ตารางรายละเอียดสินค้า (`specRows` · ตามภาพที่แสดง จึงยืดหดตามช่องเหมือนภาพ) + หมายเหตุของแบบ — **หมายเหตุเห็นเฉพาะที่นี่**
+ *   ไม่ลงกระดาษแบบ/หน้าลูกค้า (เจ้าของเคาะ mockup รอบ 5 ข้อ 2 · 2026-10-09) · ปุ่มคัดลอกรหัสข้างรหัส (mockup รอบ 5)
  * · แยกชิ้นค้างไว้ได้ระหว่างแก้ช่อง (ตัวดูไม่ถูกสร้างใหม่) — เดิมกลับเป็นประกอบทุกครั้ง
  */
 
@@ -47,6 +49,11 @@ async function modelOf(spec: DrawingSpec) {
   return { src: { parts: buildModel(spec).parts }, ann: annotate(spec) };
 }
 
+/** ตาราง/หมายเหตุ — โหลดคู่กับตัววาด (ดึงตัวสร้างรูปทรงมาด้วย ไม่ให้ก้อนหลักของแอดมินโต) */
+type SheetText = typeof import('../../../../services/drawing/sheetText');
+let sheetTextP: Promise<SheetText> | null = null;
+const loadSheetText = () => (sheetTextP ??= import('../../../../services/drawing/sheetText'));
+
 /** ปุ่มบนภาพ — ไอคอน (+ คำเดียวถ้ามี) · คำอธิบายใน tooltip = aria-label */
 const Tool: React.FC<{ on: boolean; tip: string; word?: string; onClick: () => void; children: React.ReactNode }> = ({ on, tip, word, onClick, children }) => (
   <button type="button" className={`${TOOL} ${on ? TOOL_ON : ''}`} aria-label={tip} title={tip} aria-pressed={on} onClick={onClick}>
@@ -62,6 +69,8 @@ export const DrawingCard: React.FC<{ code: string; picks: Picks; headers: Record
   const [labels, setLabels] = useState(true);
   const [edges, setEdges] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [text, setText] = useState<SheetText | null>(null);
   const stage = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const viewer = useRef<ViewerApi | null>(null);
@@ -140,6 +149,7 @@ export const DrawingCard: React.FC<{ code: string; picks: Picks; headers: Record
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shownKey, canDraw, error]);
   useEffect(() => drop, []);
+  useEffect(() => { if (canDraw && !text) void loadSheetText().then(setText, () => {}); }, [canDraw, text]);
 
   if (error) return <div className="bg-card border border-slate-200 rounded-2xl px-5 py-4 text-sm text-red-700">{error}</div>;
   if (!data) return null;
@@ -153,6 +163,19 @@ export const DrawingCard: React.FC<{ code: string; picks: Picks; headers: Record
   const needConfirm = v.canSend && v.confirm.length > 0;
   const fileOk = v.canSend && (!needConfirm || confirmed);
   const fileWhy = !v.canDraw ? 'วาดไม่ได้' : !v.canSend ? `ส่งไม่ได้ — ${v.noSend.map((d) => d.reason).join(' · ')}` : needConfirm && !confirmed ? 'ติ๊กยืนยันก่อน' : 'ไฟล์ 3 มิติสำหรับโปรแกรม CAD';
+
+  // clipboard API ใช้ได้เฉพาะ https/localhost — ถอยไป execCommand (ไม่ตั้ง error: error ทับทั้งการ์ด)
+  const copyCode = async () => {
+    let ok = false;
+    try { await navigator.clipboard.writeText(data.code); ok = true; } catch {
+      const ta = document.createElement('textarea'); ta.value = data.code; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { ok = document.execCommand('copy'); } catch { ok = false; }
+      ta.remove();
+    }
+    if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1500); }
+  };
+  const shownSpec: DrawingSpec | null = v.canDraw ? JSON.parse(shownKey) : null;
 
   const downloadStep = async () => {
     setDownloading(true);
@@ -176,6 +199,10 @@ export const DrawingCard: React.FC<{ code: string; picks: Picks; headers: Record
         <Box className="w-4 h-4 text-slate-500" />
         <h3 className="text-[14px] font-bold text-slate-900">แบบ 3 มิติ</h3>
         <span className="font-mono text-[11.5px] text-slate-500 truncate">{data.code}</span>
+        <button type="button" onClick={() => void copyCode()} aria-label={copied ? 'คัดลอกแล้ว' : 'คัดลอกรหัส'} title={copied ? 'คัดลอกแล้ว' : 'คัดลอกรหัส'}
+                className="shrink-0 w-6 h-6 inline-flex items-center justify-center rounded-md text-slate-500 hover:text-[#00764A] hover:bg-slate-100">
+          {copied ? <Check className="w-3.5 h-3.5 text-[#00764A]" /> : <Copy className="w-3.5 h-3.5" />}
+        </button>
       </div>
 
       {!v.canDraw && (
@@ -218,6 +245,25 @@ export const DrawingCard: React.FC<{ code: string; picks: Picks; headers: Record
             <span className="absolute left-2.5 bottom-2.5 z-[3] text-[11px] text-[#3D5261] bg-white/85 rounded-lg px-2 py-0.5">{TOUCH ? 'ลาก = หมุน · สองนิ้ว = ซูม/เลื่อน' : 'ลาก = หมุน · คลิกขวาลาก = เลื่อน'}</span>
           </div>
           <div ref={list} className="mt-2.5 empty:hidden" />
+          {shownSpec && text && (
+            <details open className="group mt-2.5 border border-slate-200 rounded-xl bg-slate-50" data-testid="drawing-spec">
+              <summary className="cursor-pointer list-none flex items-center gap-2 px-3 py-2 text-[12.5px] font-bold text-slate-900 [&::-webkit-details-marker]:hidden">
+                รายละเอียดสินค้า
+                <ChevronDown className="w-3.5 h-3.5 ml-auto text-slate-500 transition-transform group-open:rotate-180" />
+              </summary>
+              <dl className="m-0 px-3 pb-2 grid grid-cols-[max-content_minmax(0,1fr)] max-sm:grid-cols-1 gap-x-4 gap-y-0.5 text-[12.5px]">
+                {text.specRows(shownSpec).map(([k, val]) => (
+                  <React.Fragment key={k}>
+                    <dt className="text-slate-500">{k}</dt>
+                    <dd className="m-0 text-slate-900 [overflow-wrap:anywhere] max-sm:mb-1">{val}</dd>
+                  </React.Fragment>
+                ))}
+              </dl>
+              <p className="m-0 px-3 pb-2.5 text-[11.5px] leading-relaxed text-slate-500" data-testid="drawing-note">
+                <b className="text-slate-700">หมายเหตุของแบบ</b> (เห็นเฉพาะในระบบ) · {text.sheetNote(shownSpec)}
+              </p>
+            </details>
+          )}
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <span title={fileWhy}>
               <Button icon={Download} busy={downloading} disabled={!fileOk} onClick={() => void downloadStep()} aria-label={fileWhy}>STEP</Button>
