@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Box, Boxes, Check, ChevronDown, Copy, Download, Hash, RotateCcw, Tag } from 'lucide-react';
 import { Button } from '../Button';
 import { errMsg } from '../logs/format';
@@ -22,6 +22,7 @@ import type { BhForm, TsForm } from './types';
  *   ช่องคือผลอ่านเดียวกับที่ส่งไปคิดราคา) แล้วเปลี่ยนภาพโดยมุมกล้องคงเดิม · คำตัดสิน/ปุ่มไฟล์/STEP ยังมาจากเซิร์ฟเวอร์เท่านั้น
  *   ภาพที่สร้างจากช่องเป็นภาพชั่วคราว คำตอบของเซิร์ฟเวอร์ (รหัสที่ประกอบจากช่องเดียวกัน) มาทับเสมอ
  * · วันนี้มีแค่ STEP — PDF / PNG / ลิงก์ลูกค้ามากับก้อนถัดไป (ไม่โชว์ปุ่มที่ยังทำงานไม่ได้)
+ * · ภาพ 3 มิติ / 2 มิติ / คู่ (ตั้งต้น 3 มิติ · mockup รอบ 5 ข้อ 1) — 2 มิติ = ภาพฉายของโมดูล (`views/`) ตาม spec ที่แสดง
  * · ตารางรายละเอียดสินค้า (`specRows` · ตามภาพที่แสดง จึงยืดหดตามช่องเหมือนภาพ) + หมายเหตุของแบบ — **หมายเหตุเห็นเฉพาะที่นี่**
  *   ไม่ลงกระดาษแบบ/หน้าลูกค้า (เจ้าของเคาะ mockup รอบ 5 ข้อ 2 · 2026-10-09) · ปุ่มคัดลอกรหัสข้างรหัส (mockup รอบ 5)
  * · แยกชิ้นค้างไว้ได้ระหว่างแก้ช่อง (ตัวดูไม่ถูกสร้างใหม่) — เดิมกลับเป็นประกอบทุกครั้ง
@@ -49,10 +50,33 @@ async function modelOf(spec: DrawingSpec) {
   return { src: { parts: buildModel(spec).parts }, ann: annotate(spec) };
 }
 
-/** ตาราง/หมายเหตุ — โหลดคู่กับตัววาด (ดึงตัวสร้างรูปทรงมาด้วย ไม่ให้ก้อนหลักของแอดมินโต) */
-type SheetText = typeof import('../../../../services/drawing/sheetText');
+/** ตาราง/หมายเหตุ/ภาพฉาย 2 มิติ — โหลดคู่กับตัววาด (ดึงตัวสร้างรูปทรงมาด้วย ไม่ให้ก้อนหลักของแอดมินโต) */
+type SheetText = typeof import('../../../../services/drawing/sheetText') & typeof import('../../../../services/drawing/views/index');
 let sheetTextP: Promise<SheetText> | null = null;
-const loadSheetText = () => (sheetTextP ??= import('../../../../services/drawing/sheetText'));
+const loadSheetText = () => (sheetTextP ??= Promise.all([import('../../../../services/drawing/sheetText'), import('../../../../services/drawing/views/index')])
+  .then(([a, b]) => ({ ...a, ...b })));
+
+type ViewMode = '3d' | '2d' | 'pair';
+const VIEW_MODES: [ViewMode, string][] = [['3d', '3 มิติ'], ['2d', '2 มิติ'], ['pair', 'คู่']];
+
+/**
+ * ภาพฉาย 2 มิติ (SVG จากโมดูล · พื้นขาวคงที่ทุกธีม) — ตัดกรอบตามเนื้อภาพจริงด้วย getBBox
+ * (viewBox ของกระดาษทั้งแผ่นเหลือขอบว่างครึ่งกรอบ ⇒ ตัวหนังสือเล็กจนอ่านไม่ออก · mockup รอบ 5)
+ */
+const Ortho2D: React.FC<{ svg: string; pair: boolean }> = ({ svg, pair }) => {
+  const box = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = box.current?.querySelector('svg');
+    if (!el) return;
+    let b: DOMRect;
+    try { b = el.getBBox(); } catch { return; }
+    if (!b.width || !b.height) return;
+    const pad = Math.max(b.width, b.height) * 0.04;
+    el.setAttribute('viewBox', `${b.x - pad} ${b.y - pad} ${b.width + pad * 2} ${b.height + pad * 2}`);
+  }, [svg]);
+  return <div ref={box} data-testid="drawing-2d" className={`rounded-xl border border-slate-200 bg-white overflow-hidden [&>svg]:block [&>svg]:w-full ${pair ? '[&>svg]:h-auto [&>svg]:max-h-[380px]' : 'h-[420px] max-sm:h-[320px] [&>svg]:h-full'}`}
+              dangerouslySetInnerHTML={{ __html: svg }} />;
+};
 
 /** ปุ่มบนภาพ — ไอคอน (+ คำเดียวถ้ามี) · คำอธิบายใน tooltip = aria-label */
 const Tool: React.FC<{ on: boolean; tip: string; word?: string; onClick: () => void; children: React.ReactNode }> = ({ on, tip, word, onClick, children }) => (
@@ -71,6 +95,8 @@ export const DrawingCard: React.FC<{ code: string; picks: Picks; headers: Record
   const [downloading, setDownloading] = useState(false);
   const [copied, setCopied] = useState(false);
   const [text, setText] = useState<SheetText | null>(null);
+  // ภาพตั้งต้น = 3 มิติ (เจ้าของเคาะ mockup รอบ 5 ข้อ 1) · 2 มิติ/คู่ สลับเอง
+  const [view, setView] = useState<ViewMode>('3d');
   const stage = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const viewer = useRef<ViewerApi | null>(null);
@@ -123,7 +149,7 @@ export const DrawingCard: React.FC<{ code: string; picks: Picks; headers: Record
   useEffect(() => {
     const spec: DrawingSpec | null = JSON.parse(shownKey);
     const host = stage.current;
-    if (!spec || !host) return;
+    if (!spec || !host) { if (!host) drop(); return; }   // โหมด 2 มิติ = ไม่มีผืนภาพ 3 มิติ ทิ้งตัวดู (WebGL context มีจำกัด)
     let alive = true;
     void (async () => {
       try {
@@ -147,7 +173,7 @@ export const DrawingCard: React.FC<{ code: string; picks: Picks; headers: Record
     return () => { alive = false; };
     // code อยู่ใน aria-label เท่านั้น — โมเดลเปลี่ยนเมื่อ spec เปลี่ยน
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shownKey, canDraw, error]);
+  }, [shownKey, canDraw, error, view]);
   useEffect(() => drop, []);
   useEffect(() => { if (canDraw && !text) void loadSheetText().then(setText, () => {}); }, [canDraw, text]);
 
@@ -166,7 +192,7 @@ export const DrawingCard: React.FC<{ code: string; picks: Picks; headers: Record
 
   // clipboard API ใช้ได้เฉพาะ https/localhost — ถอยไป execCommand (ไม่ตั้ง error: error ทับทั้งการ์ด)
   const copyCode = async () => {
-    let ok = false;
+    let ok: boolean;
     try { await navigator.clipboard.writeText(data.code); ok = true; } catch {
       const ta = document.createElement('textarea'); ta.value = data.code; ta.style.position = 'fixed'; ta.style.opacity = '0';
       document.body.appendChild(ta); ta.select();
@@ -198,11 +224,21 @@ export const DrawingCard: React.FC<{ code: string; picks: Picks; headers: Record
       <div className="flex items-center gap-2 mb-2.5">
         <Box className="w-4 h-4 text-slate-500" />
         <h3 className="text-[14px] font-bold text-slate-900">แบบ 3 มิติ</h3>
-        <span className="font-mono text-[11.5px] text-slate-500 truncate">{data.code}</span>
+        <span className="font-mono text-[11.5px] text-slate-500 truncate min-w-0">{data.code}</span>
         <button type="button" onClick={() => void copyCode()} aria-label={copied ? 'คัดลอกแล้ว' : 'คัดลอกรหัส'} title={copied ? 'คัดลอกแล้ว' : 'คัดลอกรหัส'}
                 className="shrink-0 w-6 h-6 inline-flex items-center justify-center rounded-md text-slate-500 hover:text-[#00764A] hover:bg-slate-100">
           {copied ? <Check className="w-3.5 h-3.5 text-[#00764A]" /> : <Copy className="w-3.5 h-3.5" />}
         </button>
+        {v.canDraw && (
+          <div role="tablist" aria-label="รูปแบบภาพ" className="ml-auto shrink-0 inline-flex border border-slate-300 rounded-[10px] p-0.5 bg-slate-50">
+            {VIEW_MODES.map(([m, label]) => (
+              <button key={m} type="button" role="tab" aria-selected={view === m} onClick={() => setView(m)}
+                      className={`px-3 py-1 rounded-lg text-[12px] font-semibold whitespace-nowrap ${view === m ? 'bg-card text-[#00764A] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {!v.canDraw && (
@@ -232,7 +268,7 @@ export const DrawingCard: React.FC<{ code: string; picks: Picks; headers: Record
 
       {v.canDraw && (
         <>
-          <div ref={stage} className="dv-stage rounded-xl border border-slate-200 h-[420px] max-sm:h-[320px]">
+          {view !== '2d' && <div ref={stage} className={`dv-stage rounded-xl border border-slate-200 ${view === 'pair' ? 'h-[400px] max-sm:h-[300px]' : 'h-[420px] max-sm:h-[320px]'}`}>
             <div className="absolute top-2.5 right-2.5 z-[3] flex gap-1.5">
               <Tool on={exploded} tip={exploded ? 'ประกอบกลับ' : 'แยกชิ้น'} word={exploded ? 'ประกอบ' : 'แยกชิ้น'}
                     onClick={() => setExploded(viewer.current?.toggleExplode() ?? false)}>
@@ -243,8 +279,9 @@ export const DrawingCard: React.FC<{ code: string; picks: Picks; headers: Record
               <Tool on={false} tip="กลับมุมเริ่มต้น" onClick={() => viewer.current?.reset()}><RotateCcw className="w-4 h-4" /></Tool>
             </div>
             <span className="absolute left-2.5 bottom-2.5 z-[3] text-[11px] text-[#3D5261] bg-white/85 rounded-lg px-2 py-0.5">{TOUCH ? 'ลาก = หมุน · สองนิ้ว = ซูม/เลื่อน' : 'ลาก = หมุน · คลิกขวาลาก = เลื่อน'}</span>
-          </div>
-          <div ref={list} className="mt-2.5 empty:hidden" />
+          </div>}
+          {view !== '3d' && shownSpec && text && <div className={view === 'pair' ? 'mt-2.5' : ''}><Ortho2D svg={text.orthoSvg(shownSpec, data.code)} pair={view === 'pair'} /></div>}
+          {view !== '2d' && <div ref={list} className="mt-2.5 empty:hidden" />}
           {shownSpec && text && (
             <details open className="group mt-2.5 border border-slate-200 rounded-xl bg-slate-50" data-testid="drawing-spec">
               <summary className="cursor-pointer list-none flex items-center gap-2 px-3 py-2 text-[12.5px] font-bold text-slate-900 [&::-webkit-details-marker]:hidden">

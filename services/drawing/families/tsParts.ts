@@ -26,11 +26,14 @@ export const cableRadius = (d: string | number): number => Math.max(2.5, Number(
 /** ความยาวสปริงตามขนาดแกน (TS_-03/11 · ตาราง Diameter Tube): แกน < 5 → 50 · ≥ 5 → 130 */
 export const SPRING_TS03 = (d: string | number): number => (Number(d) < 5 ? 50 : 130);
 
-/** ระยะที่ "วาดย่อ" — สายจริงยาวเป็นเมตร */
-const CABLE_SHOWN = 120, BRAID_SHOWN = 40, LEAD_SHOWN = 14.5;
+/** ระยะที่ "วาดย่อ" — สายจริงยาวเป็นเมตร (export ให้จุดยึดของภาพ 2 มิติ · `tailAnchors` ของต้นฉบับ) */
+export const CABLE_SHOWN = 120, BRAID_SHOWN = 40;
+const LEAD_SHOWN = 14.5;
 /** ความยาวสายที่วาด (ปลอกสาย + ปลายถัก) นับจากจุดเริ่มสาย — ป้าย CL ของ annotate.ts ใช้ ⇒ ต้องตามรูปทรงจริง ห้ามใส่ตัวเลขเอง */
 export const CABLE_TAIL_SHOWN = CABLE_SHOWN + BRAID_SHOWN;
 const LEAD_ANGLE = 20*Math.PI/180, BARREL_LEN = 7, BARREL_R = 1.5, LUG_LEN = 10.5;
+/** ระยะตามแกนจากจุดแยกสายถึงปลายหางปลา (`TAIL_AFTER_SPLIT` ของ `ts-series-parts.js`) */
+export const TAIL_AFTER_SPLIT = (LEAD_SHOWN/Math.cos(LEAD_ANGLE) + BARREL_LEN + LUG_LEN)*Math.cos(LEAD_ANGLE);
 
 /** แกนวัด: ปลายมนตามรูปในแคตตาล็อก ยาว L1 จบที่ x = 0 */
 export function probe(parts: Part[], d: string | number, l1: number, colour: Colour = C.steel, name = 'probe_tube'): void {

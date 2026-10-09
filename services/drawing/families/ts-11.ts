@@ -18,7 +18,7 @@
 
 import type { DrawingFamily, Part, Ts11Spec } from '../types.js';
 import { COLOURS as C, spring } from '../geometry/tsPrimitives.js';
-import { JACKETS, SPRING_TS03, cableRadius, cableTail, probe } from './tsParts.js';
+import { BRAID_SHOWN, CABLE_SHOWN, JACKETS, SPRING_TS03, TAIL_AFTER_SPLIT, cableRadius, cableTail, probe } from './tsParts.js';
 
 /** จำนวนสายตามชนิดเซนเซอร์ — Thermocouple / NTC / PTC = 2 (+ −) · RTD = 3 (A B b) */
 export const SENSOR_LEADS: Record<Ts11Spec['sensor'], number> = {
@@ -31,6 +31,26 @@ const springHelix = (cableR: number): number => cableR + THIN_SPRING.wireR + THI
 
 /** ความยาวสปริง (mm) — `P` = None Spring */
 export const springLength = (spec: Ts11Spec): number => (spec.spring === 'P' ? 0 : SPRING_TS03(spec.dia));
+
+/** เส้นผ่านศูนย์กลางนอกของสปริง (`springOuterDia` ของต้นฉบับ) */
+const springOuterDia = (cableR: number): number => 2*(springHelix(cableR) + THIN_SPRING.wireR);
+
+/**
+ * จุดยึดของภาพ 2 มิติ (mm ตามแกน x · แกนวัดจบที่ 0) — ค่าที่ `assemble(parts, anchors)` ของ `BUILDERS['11']` คืนคู่กับชิ้นส่วน
+ * แยกเป็นฟังก์ชันของตัวเลขล้วน (ไม่สร้างชิ้นส่วน) เพราะภาพ 2 มิติใช้แค่ตำแหน่ง — ด่าน port ส่วน จ ครอบผ่าน SVG
+ */
+export function ts11Anchors(spec: Ts11Spec) {
+  const dia = Number(spec.dia), tubeLen = spec.tubeLen;
+  const cableR = cableRadius(dia), springLen = springLength(spec);
+  const runFrom = 0 + springLen;
+  // tailAnchors(runFrom, leads, 0)
+  const split = runFrom + CABLE_SHOWN + BRAID_SHOWN, end = split + TAIL_AFTER_SPLIT;
+  return {
+    tubeDia: dia, tubeLen, tip: [-tubeLen, 0, 0], shoulder: [0, 0, 0], cableR,
+    springLen, springOD: springOuterDia(cableR), springStart: [0, 0, 0], springEnd: [runFrom, 0, 0],
+    cableStart: [0, 0, 0], cableEnd: [runFrom + CABLE_SHOWN, 0, 0], braidEnd: [split, 0, 0], leadEnd: [end, 0, 0],
+  };
+}
 
 export const TS11: DrawingFamily<Ts11Spec> = {
   id: 'TS_-11',

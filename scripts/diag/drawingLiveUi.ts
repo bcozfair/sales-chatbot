@@ -190,7 +190,27 @@ try {
   await later(200);
   const copied = await page.evaluate(() => [...document.querySelectorAll('[data-testid="drawing-card"] button')].some((b) => b.getAttribute('aria-label') === 'คัดลอกแล้ว'));
   ok('10 · ปุ่มคัดลอกรหัส', copied);
-  if (process.env.DL_SHOT) { const card = await page.$('[data-testid="drawing-card"]'); await card?.screenshot({ path: process.env.DL_SHOT }); }
+  // สลับ 3 มิติ / 2 มิติ / คู่ (ตั้งต้น 3 มิติ — เจ้าของเคาะ mockup รอบ 5 ข้อ 1)
+  const tab = (label: string) => page.evaluate((l: string) => [...document.querySelectorAll<HTMLButtonElement>('[data-testid="drawing-card"] [role="tab"]')].find((b) => b.textContent === l)?.click(), label);
+  const viewState = () => page.evaluate(() => {
+    const card = document.querySelector('[data-testid="drawing-card"]')!;
+    const sel = card.querySelector('[role="tab"][aria-selected="true"]')?.textContent ?? '';
+    const svg = card.querySelector('[data-testid="drawing-2d"] svg');
+    return { sel, canvases: card.querySelectorAll('canvas').length, svgText: svg?.textContent ?? '', vb: svg?.getAttribute('viewBox') ?? '' };
+  });
+  const v0 = await viewState();
+  ok('12 · ภาพตั้งต้น = 3 มิติ', v0.sel === '3 มิติ' && v0.canvases === 1 && !v0.svgText);
+  await tab('2 มิติ'); await later(400);
+  const v1 = await viewState();
+  ok('   2 มิติ: ภาพฉายตามช่องที่แก้ (L1 300) · ไม่มีภาพ 3 มิติค้าง · ตัดกรอบตามเนื้อภาพ', v1.canvases === 0 && /L1 300 mm\./.test(v1.svgText) && v1.vb !== '' && v1.vb !== '0 0 980 640', `canvas ${v1.canvases} · viewBox ${v1.vb}`);
+  await tab('คู่');
+  await page.waitForFunction(() => Number(document.querySelector<HTMLElement>('[data-testid="drawing-card"] .dv-stage')?.dataset.dvBuilds ?? 0) >= 1, { timeout: 10000 });
+  const v2 = await viewState();
+  ok('   คู่: 3 มิติบน + 2 มิติล่าง', v2.canvases === 1 && /L1 300 mm\./.test(v2.svgText));
+  await tab('3 มิติ'); await later(300);
+  const v3 = await viewState();
+  ok('   กลับ 3 มิติ: ตัวดูตัวเดียว', v3.canvases === 1 && !v3.svgText, `canvas ${v3.canvases}`);
+  if (process.env.DL_SHOT) { const card = await page.$('[data-testid="drawing-card"]'); await card?.screenshot({ path: process.env.DL_SHOT }); await tab('คู่'); await later(1500); await card?.screenshot({ path: process.env.DL_SHOT.replace(/\.png$/, '-pair.png') }); await tab('3 มิติ'); await later(300); }
 
   ok('11 · ไม่มี error ในหน้า', pageErrors.length === 0, pageErrors.join(' | '));
 } catch (e) {
