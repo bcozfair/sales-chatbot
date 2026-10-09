@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Box, Boxes, Check, ChevronDown, Copy, Download, Hash, RotateCcw, Tag } from 'lucide-react';
+import { AlertTriangle, Box, Boxes, Check, ChevronDown, Copy, Download, Hash, Printer, RotateCcw, Tag } from 'lucide-react';
 import { Button } from '../Button';
 import { errMsg } from '../logs/format';
 // three.js (~650 KB) โหลดเฉพาะตอนการ์ดมีภาพ — import แบบ type อย่างเดียวที่นี่ ตัวจริงโหลดใน effect (หน้าอื่นของแอดมินไม่ต้องจ่าย)
@@ -21,7 +21,8 @@ import type { BhForm, TsForm } from './types';
  *   และระหว่างแก้ช่องในหน้าคำนวณราคา การ์ดแปลง "ช่องที่กำลังแก้" เป็น spec ด้วย `fromReading` ตัวเดียวกับเซิร์ฟเวอร์ (ไม่ใช่ตัวอ่านรหัสตัวที่สอง —
  *   ช่องคือผลอ่านเดียวกับที่ส่งไปคิดราคา) แล้วเปลี่ยนภาพโดยมุมกล้องคงเดิม · คำตัดสิน/ปุ่มไฟล์/STEP ยังมาจากเซิร์ฟเวอร์เท่านั้น
  *   ภาพที่สร้างจากช่องเป็นภาพชั่วคราว คำตอบของเซิร์ฟเวอร์ (รหัสที่ประกอบจากช่องเดียวกัน) มาทับเสมอ
- * · ไฟล์วันนี้: SVG (กระดาษแบบ A4 · ภาพ 3 มิติตามมุม/ซูมที่เห็น) · STEP — PDF / PNG / ลิงก์ลูกค้ามากับก้อนถัดไป (ไม่โชว์ปุ่มที่ยังทำงานไม่ได้)
+ * · ไฟล์: PDF · PNG (เซิร์ฟเวอร์พิมพ์ · ฟอนต์ฝัง) · SVG (สร้างในเบราว์เซอร์) — กระดาษแบบ A4 ภาพ 3 มิติตามมุม/ซูมที่เห็น · STEP
+ *   ลิงก์ลูกค้ามากับเฟส 2 (ไม่โชว์ปุ่มที่ยังทำงานไม่ได้)
  * · ภาพ 3 มิติ / 2 มิติ / คู่ (ตั้งต้น 3 มิติ · mockup รอบ 5 ข้อ 1) — 2 มิติ = ภาพฉายของโมดูล (`views/`) ตาม spec ที่แสดง
  * · ตารางรายละเอียดสินค้า (`specRows` · ตามภาพที่แสดง จึงยืดหดตามช่องเหมือนภาพ) + หมายเหตุของแบบ — **หมายเหตุเห็นเฉพาะที่นี่**
  *   ไม่ลงกระดาษแบบ/หน้าลูกค้า (เจ้าของเคาะ mockup รอบ 5 ข้อ 2 · 2026-10-09) · ปุ่มคัดลอกรหัสข้างรหัส (mockup รอบ 5)
@@ -111,6 +112,7 @@ export const DrawingCard: React.FC<{ code: string; picks: Picks; headers: Record
   const [labels, setLabels] = useState(true);
   const [edges, setEdges] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [printing, setPrinting] = useState<'pdf' | 'png' | null>(null);
   const [copied, setCopied] = useState(false);
   const [text, setText] = useState<SheetText | null>(null);
   // ภาพตั้งต้น = 3 มิติ (เจ้าของเคาะ mockup รอบ 5 ข้อ 1) · 2 มิติ/คู่ สลับเอง
@@ -221,7 +223,8 @@ export const DrawingCard: React.FC<{ code: string; picks: Picks; headers: Record
   };
   const shownSpec: DrawingSpec | null = v.canDraw ? JSON.parse(shownKey) : null;
   const sheetOk = fileOk && !live && !!text && !!data.spec;
-  const sheetWhy = !fileOk ? fileWhy : live || !text ? 'รอแบบ' : `กระดาษแบบ A4 (เวกเตอร์) · ${view === '2d' ? 'ภาพฉาย 2 มิติ' : 'ภาพ 3 มิติใช้มุมที่เห็น + ภาพฉาย'}`;
+  const sheetView = view === '2d' ? 'ภาพฉาย 2 มิติ' : 'ภาพ 3 มิติใช้มุมที่เห็น + ภาพฉาย';
+  const sheetWhy = !fileOk ? fileWhy : live || !text ? 'รอแบบ' : `กระดาษแบบ A4 (เวกเตอร์) · ${sheetView}`;
 
   // กระดาษแบบ SVG — สร้างในเบราว์เซอร์ทั้งแผ่น (โมดูลเป็น TS ล้วน) · ภาพ 3 มิติ = ภาพนิ่งจากตัวดูตามมุม/ซูมที่เห็น
   // ใช้ spec/รหัสของคำตอบเซิร์ฟเวอร์เท่านั้น (ปุ่มปิดระหว่างแก้ช่อง — ภาพชั่วคราวยังไม่ผ่านการตัดสิน) · โหมด 2 มิติ = กระดาษภาพฉายเต็มกรอบ
@@ -233,6 +236,21 @@ export const DrawingCard: React.FC<{ code: string; picks: Picks; headers: Record
       saveBlob(new Blob([svg], { type: 'image/svg+xml' }), `${fileBase(data.code)}.svg`);
     } catch (e: unknown) {
       setError(`สร้างกระดาษแบบไม่สำเร็จ — ${errMsg(e)}`);
+    }
+  };
+
+  // PDF/PNG — เซิร์ฟเวอร์อ่านรหัสซ้ำแล้วประกอบกระดาษเอง (กติกาเดียวกับ STEP) · ส่งไปแค่ภาพนิ่ง 3 มิติตามมุม/ซูมที่เห็น
+  const downloadPrint = async (format: 'pdf' | 'png') => {
+    setPrinting(format);
+    try {
+      const still = view !== '2d' ? viewer.current?.snapshot(STILL.w, STILL.h) ?? null : null;
+      const res = await fetch('/api/admin/drawing/sheet', { method: 'POST', headers, body: JSON.stringify({ code: data.code, picks, confirmed, format, still }) });
+      if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? 'สร้างไฟล์ไม่สำเร็จ');
+      saveBlob(await res.blob(), `${fileBase(data.code)}.${format}`);
+    } catch (e: unknown) {
+      setError(errMsg(e));
+    } finally {
+      setPrinting(null);
     }
   };
 
@@ -335,6 +353,12 @@ export const DrawingCard: React.FC<{ code: string; picks: Picks; headers: Record
             </details>
           )}
           <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span title={sheetOk ? `แบบ A4 · ${sheetView}` : sheetWhy}>
+              <Button icon={Printer} busy={printing === 'pdf'} disabled={!sheetOk || !!printing} onClick={() => void downloadPrint('pdf')} aria-label={sheetOk ? `แบบ A4 · ${sheetView}` : sheetWhy}>PDF</Button>
+            </span>
+            <span title={sheetOk ? `ภาพกระดาษแบบ · ${sheetView}` : sheetWhy}>
+              <Button icon={Download} busy={printing === 'png'} disabled={!sheetOk || !!printing} onClick={() => void downloadPrint('png')} aria-label={sheetOk ? `ภาพกระดาษแบบ · ${sheetView}` : sheetWhy}>PNG</Button>
+            </span>
             <span title={sheetWhy}>
               <Button icon={Download} disabled={!sheetOk} onClick={() => void downloadSvg()} aria-label={sheetWhy}>SVG</Button>
             </span>

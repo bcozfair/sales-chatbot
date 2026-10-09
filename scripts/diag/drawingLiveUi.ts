@@ -25,6 +25,9 @@ import { extname, join, normalize } from 'node:path';
 import { TS_CATALOG, buildTsCode, readTsForm, type TsForm } from '../../services/pricingLab/catalogTs.js';
 import { judge } from '../../services/drawing/checks.js';
 import type { PricingReading } from '../../services/drawing/types.js';
+import { checkStill, renderSheet } from '../../services/drawing/sheet.js';
+import { A4_LANDSCAPE, sheetHtml } from '../../services/drawing/render/sheetHtml.js';
+import { closePrintBrowser, printHtml } from '../../pdfGenerator.js';
 
 const PUBLIC = fileURLToPath(new URL('../../public/', import.meta.url));
 const ORIGIN = 'http://dl-probe.local';
@@ -73,8 +76,22 @@ async function route(req: HTTPRequest) {
     await later(DELAY);
     return req.respond({ status: 200, contentType: 'application/json', body });
   }
+  if (path === '/api/admin/drawing/sheet') {
+    // ส่วนประกอบจริงของ /sheet (checkStill · renderSheet · sheetHtml · printHtml) — พิสูจน์ว่าภาพนิ่งที่การ์ดส่งมาผ่านตัวตรวจของเซิร์ฟเวอร์
+    const body = JSON.parse(req.postData() ?? '{}');
+    const r = readingOf(body);
+    const v = judge(r.parsed, { status: 'priced' });
+    const still = body.still == null ? null : checkStill(body.still);
+    sheets.push({ format: body.format, still: typeof still === 'string' ? still : still ? 'ok' : 'none' });
+    if (typeof still === 'string' || !v.spec) return req.respond({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: typeof still === 'string' ? still : 'no spec' }) });
+    const svg = renderSheet({ spec: v.spec, code: r.code, still, logo: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==', meta: { drawer: 'Probe', date: '09/10/2569' } });
+    const kind = body.format === 'png' ? 'png' : 'pdf';
+    const file = await printHtml(sheetHtml(svg), { kind, widthMm: A4_LANDSCAPE.w, heightMm: A4_LANDSCAPE.h, pngWidthPx: 1754 });
+    return req.respond({ status: 200, contentType: kind === 'pdf' ? 'application/pdf' : 'image/png', headers: { 'Content-Disposition': `attachment; filename="x.${kind}"` }, body: Buffer.from(file) });
+  }
   return json(req, {});
 }
+const sheets: { format: string; still: string }[] = [];
 
 const TOKEN_PAYLOAD = Buffer.from(JSON.stringify({ id: 1, role: 'admin', exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url');
 const FAKE_TOKEN = `eyJhbGciOiJIUzI1NiJ9.${TOKEN_PAYLOAD}.probe`;
@@ -230,6 +247,16 @@ try {
     ok('   ไม่มีหมายเหตุของแบบ (เห็นเฉพาะในระบบ) · ไม่มีราคา', !has(/หมายเหตุของแบบ|สปริงลวด/) && !has(/บาท|฿/));
     ok('   สัญลักษณ์เส้นผ่านศูนย์กลางเป็น Ø (ฟอนต์ที่ฝัง/ในกล่อง prod ไม่มี ∅)', !has(/&#8709;|\u2205/) && has(/&#216;D1 6/));
     ok('   SVG เป็น XML ที่อ่านได้ (ไม่มี named entity)', !has(/&(?!#\d+;|amp;|lt;|gt;|quot;)[a-z]+;/));
+    for (const fmt of ['PDF', 'PNG'] as const) {
+      await page.evaluate((l: string) => [...document.querySelectorAll<HTMLButtonElement>('[data-testid="drawing-card"] button')].find((b) => b.textContent?.trim() === l)?.click(), fmt);
+      let f = '';
+      for (let i = 0; i < 100 && !f; i++) { await later(100); f = readdirSync(dlDir).find((x) => x.endsWith(`.${fmt.toLowerCase()}`)) ?? ''; }
+      const bytes = f ? readFileSync(join(dlDir, f)) : Buffer.alloc(0);
+      const sig = fmt === 'PDF' ? bytes.subarray(0, 5).toString() === '%PDF-' : bytes.subarray(1, 4).toString() === 'PNG';
+      const sent = sheets.find((x) => x.format === fmt.toLowerCase());
+      ok(`   ปุ่ม ${fmt}: ภาพนิ่งที่การ์ดส่งผ่านตัวตรวจของเซิร์ฟเวอร์ · ได้ไฟล์`, sig && sent?.still === 'ok', `${f || 'ไม่มีไฟล์'} · ${(bytes.length / 1024).toFixed(0)} KB · ภาพนิ่ง ${sent?.still ?? '-'}`);
+      if (process.env.DL_SHOT && fmt === 'PNG' && bytes.length) (await import('node:fs')).writeFileSync(process.env.DL_SHOT.replace(/\.png$/, '-print.png'), bytes);
+    }
     if (process.env.DL_SHOT && svg) {
       const pg = await browser.newPage();
       await pg.setViewport({ width: 1470, height: 1040 });
@@ -254,6 +281,7 @@ try {
   if (pageErrors.length) console.log('    error ในหน้า:', pageErrors.join(' | '));
 } finally {
   await browser.close();
+  await closePrintBrowser();
 }
 console.log(fail ? `\nไม่ผ่าน ${fail} ข้อ` : '\nผ่านทุกข้อ');
 process.exit(fail ? 1 : 0);

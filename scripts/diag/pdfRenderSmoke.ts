@@ -155,6 +155,9 @@ console.log(`\n── ผล (${RUNS} รอบ หลังอุ่นเค�
 console.log(`เวลา: ${times.join(' / ')} ms (เร็วสุด ${Math.min(...times)})` +
             ` · ขนาด ${last!.bytes} ไบต์ · ${last!.streams} stream`);
 console.log(`ฟอนต์ที่ฝัง: ${last!.fonts.join(', ') || '(ไม่มี)'}`);
+// ลายนิ้วมือของเนื้อหา (คำสั่งวาด + ฟอนต์ที่ฝัง) — เทียบก่อน/หลังแก้ได้ด้วยตา: รันใบเดียวกัน (`-- <quoteId>`) แล้วค่าต้องเท่าเดิม
+// (แผนแบบ 3 มิติ §5.3: แตะ pdfGenerator.ts แล้ว PDF ใบเสนอราคาห้ามเปลี่ยนสักบรรทัด)
+console.log(`ลายนิ้วมือเนื้อหา: ${crypto.createHash('sha256').update(baseHashes).digest('hex').slice(0, 16)}`);
 
 console.log('\n── ตรวจ ──');
 for (const f of REQUIRED_FONTS) {

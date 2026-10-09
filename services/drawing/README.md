@@ -3,7 +3,7 @@
 สร้างโมเดล 3 มิติของสินค้าสั่งทำจาก **ผลอ่านรหัสของหน้าคำนวณราคา** แล้วเขียนเป็นไฟล์ STEP (ส่งลูกค้า/เปิดใน CAD)
 และ GLB (หน้าเว็บหมุนดูได้) · แผนรวมและเหตุผลทั้งหมด: `docs/plan-product-drawing-3d.md`
 
-**สถานะ (2026-10-09): เฟส 1 ก้อน 2 กำลังทำ** — ตารางรายละเอียด · หมายเหตุ (เฉพาะแอดมิน) · ภาพฉาย 2 มิติ · สลับ 3 มิติ/2 มิติ/คู่ · กระดาษแบบ SVG แล้ว · PDF/PNG ถัดไป · **ก้อน 1 (2026-10-06)** — TS_-11 · BH-01 · BH-01C · การ์ด "แบบ 3 มิติ" ในหน้าคำนวณราคา (ภาพหมุนได้ · แยกชิ้น ·
+**สถานะ (2026-10-09): เฟส 1 ก้อน 2 กระดาษแบบเสร็จ** — ตารางรายละเอียด · หมายเหตุ (เฉพาะแอดมิน) · ภาพฉาย 2 มิติ · สลับ 3 มิติ/2 มิติ/คู่ · กระดาษแบบ A4 เป็น PDF/PNG/SVG ตามมุมกล้องที่เห็น · **ก้อน 1 (2026-10-06)** — TS_-11 · BH-01 · BH-01C · การ์ด "แบบ 3 มิติ" ในหน้าคำนวณราคา (ภาพหมุนได้ · แยกชิ้น ·
 ป้ายชื่อ/ขนาด · โหลด STEP) ผ่าน `routes/drawing.ts` ที่ index.ts ฉีดตัวคิดราคาเข้าไป (`quoteForCode`) · ยังไม่มี PDF/PNG/ลิงก์ลูกค้า/ตาราง
 · **เป้าตรวจรับ: ทำได้ครบทุกอย่างที่ Appsale ทำได้** (เจ้าของ 2026-10-06) — รายการและสถานะรายข้อที่ `docs/plan-product-drawing-3d.md` §2.6 (ทำข้อไหนเสร็จ ติ๊กที่นั่นในคอมมิตเดียวกัน)
 
@@ -14,10 +14,11 @@
 | ลบ | อะไร |
 | --- | --- |
 | `services/drawing/` | โฟลเดอร์นี้ |
-| `scripts/diag/drawingPort.ts` · `drawingGlb.ts` · `drawingGlbLib.ts` · `drawingCoverage.ts` · `drawingLiveUi.ts` · `gltf-validator.d.ts` | ด่านของโมดูล |
-| `routes/drawing.ts` + 2 บรรทัดใน `index.ts` (import + mount `/api/admin/drawing`) | API ของการ์ด |
+| `scripts/diag/drawingPort.ts` · `drawingGlb.ts` · `drawingGlbLib.ts` · `drawingCoverage.ts` · `drawingLiveUi.ts` · `drawingSheet.ts` · `gltf-validator.d.ts` | ด่านของโมดูล |
+| `routes/drawing.ts` + 3 จุดใน `index.ts` (import · mount `/api/admin/drawing` ที่ฉีด `quoteForCode`/`printHtml` · `closePrintBrowser` ตอนปิด) | API ของการ์ด |
+| ใน `pdfGenerator.ts` ท่อนท้าย "พิมพ์เอกสารอื่นที่ไม่ใช่ใบเสนอราคา" (`printHtml` · `closePrintBrowser` · Chrome ตัวแยก) | ตัวพิมพ์ PDF/PNG ของกระดาษแบบ — ไม่ได้ใช้ร่วมกับใบเสนอราคา |
 | `frontend/src/drawing-viewer/` · `frontend/src/admin/pricingLab/DrawingCard.tsx` + 2 บรรทัดใน `PricingLab.tsx` · dependency `three` ของ frontend | ตัวดู + การ์ด |
-| ใน `package.json` | `diag:drawing-port` · `diag:drawing-glb` · `diag:drawing-coverage` · `diag:drawing-live-ui` · devDependency `gltf-validator` |
+| ใน `package.json` | `diag:drawing-port` · `diag:drawing-glb` · `diag:drawing-coverage` · `diag:drawing-live-ui` · `diag:drawing-sheet` · devDependency `gltf-validator` |
 | `Dockerfile` | บรรทัด `COPY services/drawing/` ใน stage frontend |
 
 **สิ่งที่ทำให้ตารางนี้จริง: การพึ่งพาเป็นทางเดียว** — โค้ดเดิมเข้าโฟลเดอร์นี้ได้ทาง `routes/drawing.ts` ทางเดียว (ไฟล์นั้นก็ไม่ import ตัวคิดราคา) และโฟลเดอร์นี้
@@ -35,6 +36,7 @@ annotate.ts      (spec → ป้ายชื่อ ไทย/อังกฤษ
 sheetText.ts     (spec → ตารางรายละเอียดสินค้า ไทย/อังกฤษ = `specRows` ของ Appsale · หมายเหตุของแบบ — เห็นเฉพาะการ์ดแอดมิน)
 sheet.ts         (spec + ภาพนิ่ง 3 มิติจากตัวดู → กระดาษแบบ A4 SVG ทั้งแผ่น · โครงจาก `engine/sheet.js` · ไม่มีหมายเหตุ/ราคา ·
                   ป้ายบนภาพนิ่งรับเป็นตัวเลข+ข้อความ ไม่รับ SVG (`checkStill` ก่อนเซิร์ฟเวอร์พิมพ์) · ∅ → Ø ทั้งแผ่น — ฟอนต์ที่ฝัง/ในกล่อง prod ไม่มี ∅)
+render/          (ฝั่งเซิร์ฟเวอร์เท่านั้น · node:fs — SVG กระดาษ → หน้า HTML พิมพ์ได้ + ฟอนต์ IBM Plex Sans Thai ฝังเป็น data URL · `fonts/` OFL)
 views/           (spec → ภาพฉาย 2 มิติ SVG = `views.ortho` ของ Appsale ทีละตระกูล · draw/symbols = `engine/draw.js`/`symbols.js` · TS อ่านจุดยึดจาก `ts11Anchors`)
 writers/step.ts  (รับ StepSolid[] — ไม่รู้จักตระกูล)
 writers/glb.ts   (รับ DrawingModel — ใช้ parts ที่มี normal)
@@ -138,6 +140,7 @@ sqrt · ห้ามสลับลำดับบวก/คูณ · ห้า�
 | --- | --- | --- |
 | `npm run diag:drawing-port` | ค่าชุดเดียวกันเข้าโมดูลเรากับต้นฉบับ Appsale ที่คอมมิตต้นแบบ → ทุกชิ้น (ชื่อ/สี/positions/normals/triangles/edges) `Object.is` ทีละตัว + STEP ทั้งไฟล์ (ยกเว้น FILE_NAME) · **ส่วน ค** ตัวแปลงช่องอ่านเท่าต้นแบบ · **ส่วน จ** ภาพฉาย 2 มิติ (`views/`) เท่า `views.ortho()` ทั้งสตริงทุกชุดค่า × 4 กรอบ (สามกรอบของกระดาษ + กรอบแคบที่ TS ใช้คำย่อ · ชุดควบคุม: +0.0001 ในระยะเส้นบอกขนาด/สัดส่วนกรอบ ตก 103/124) · **ส่วน ง** ตารางรายละเอียดสินค้า (`sheetText.ts`) ภาษาไทยเท่า `specRows` ของต้นฉบับทุกตัวอักษรหลังถอด entity — ทุกชุดค่า ไม่ตัดซ้ำด้วยรูปทรง (ชุดควบคุม: `SUS304` → `SUS 304` ตก 18/31) · ไม่มีรีโป/คอมมิต = **ตอบไม่ได้ exit 1** · `-- --quick` ไม่แตะฐาน | SELECT อย่างเดียว (READ ONLY + statement_timeout) · เขียนแค่ tmpdir แล้วลบ |
 | `npm run diag:drawing-live-ui` | **หน้าจอ** — หน้าคำนวณราคาจริง (build แล้ว) + API จำลองที่อ่านด้วยโค้ดจริง (`readTsForm` · `buildTsCode` · `judge`) หน่วง 900 ms · แก้ความยาวแกนแล้วภาพยาวขึ้นก่อนเซิร์ฟเวอร์ตอบ · ทิศกล้องคงเดิม · ตัวดูไม่ถูกสร้างใหม่ · แยกชิ้นค้างได้ · คำตอบมาแล้วไม่กระตุก · ถอดสปริงภาพก็ตาม · `/preview` เป็น spec < 2 KB · **ซูมเข้าหาจุดใต้เมาส์ · คลิกขวาลาก = เลื่อน (ทิศไม่เปลี่ยน) · แยกชิ้นแล้วไม่ดีดกลับกลาง · ปุ่มกลับมุมล้างการเลื่อน** (เจ้าของ 2026-10-09) · อ่านกล้องหลังภาพนิ่ง (`settle` — เดิมรอเวลาตายตัว ข้อ 3 ตกเองบน swiftshader) · `DL_DEBUG=1` พิมพ์ทุกคำขอ + console | ไม่แตะ · ต้อง build frontend ก่อน |
+| `npm run diag:drawing-sheet` | **PDF/PNG ฝั่งเซิร์ฟเวอร์** — Chrome ตัวแยกของ `printHtml` จริง: PDF หน้าเดียว A4 แนวนอน · ฝัง IBM Plex Sans Thai · ไม่มีฟอนต์สำรอง (Loma/Garuda/…) · PNG 1754×1240 · ฝังลิงก์ภาพ/สไตล์/iframe ไปเซิร์ฟเวอร์ในเครื่องตรง ๆ แล้วได้คำขอ **0** · `checkStill` ปฏิเสธภาพนิ่งผิดรูป 7 แบบ + ทิ้งช่องที่ไม่รู้จัก + escape ข้อความ · ไม่มี ∅ · ไม่มีหมายเหตุ/ราคา · เส้น POST `/sheet` ตัวจริง 200/400/409 (~5 วิ) | ไม่แตะ |
 | `npm run diag:drawing-glb` | `writeGlb` → ตัวถอดของด่านเอง (ไม่ใช้โค้ดตัวเขียน) ตรวจโครง (magic · ความยาว · ตัวเติม chunk · bufferView ในขอบ/หาร 4 · min/max · index < จุด · normal ยาว 1 ±5e-4) แล้วถอดกลับ = `Math.fround(ต้นฉบับ)` · **gltf-validator ของ Khronos 0 error 0 warning** · เขียนซ้ำได้ไบต์เดิม · ชิ้นสังเคราะห์ 90,000 จุดบังคับทาง index uint32 | ไม่แตะ |
 | `npm run diag:drawing-coverage` | **ถาวร** — รหัสจริงทุกตัว → อ่าน+คิดราคาแบบหน้าคำนวณราคา → `judge` → โมเดล/GLB/STEP ครั้งเดียวต่อรูปทรง · รายงานวาดได้ / ส่งได้ทันที / ส่งได้หลังยืนยัน / เหตุผลต่อตระกูล (ไม่มีเกณฑ์ขั้นต่ำ) · **ต้องจริงเสมอ 8 ข้อ** (หัวไฟล์) รวม "สามทางตรงกัน": ค่าที่วัดจาก mesh = ช่องหน้าคำนวณราคา = ค่าที่คิดเงิน · แกนหักจาก `cfg.options` ต้องวาดไม่ได้ · ความหลวมที่ปิดการส่งต้องส่งไม่ได้ (6ก) · ส่วนท้ายที่ยืนยันได้ต้องอยู่ใน `confirm` ครบ (6ข) · ทิศการพึ่งพา · keyof สองทางกับ `TsForm`/`BhForm` + `cfg.options` ของ `ProductConfig` (ล้มที่ tsc) | SELECT อย่างเดียว (READ ONLY + statement_timeout) · ไม่เขียนไฟล์ |
 
