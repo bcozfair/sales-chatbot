@@ -742,6 +742,13 @@ export function computePrice(cfg: ProductConfig, book: PriceBook): PriceOutcome 
     }
   }
 
+  // ข้อจำกัดที่แคตตาล็อกเขียนเป็นประโยค (Titanium เฉพาะ S4 …) — ต้องขอราคา ราคาเท่าที่คิดได้คิดต่อ (เจ้าของ 2026-10-09)
+  for (const l of cfg.catalogLimits ?? []) {
+    const message = `${l.message} — รหัสนี้อยู่นอกข้อจำกัดของแคตตาล็อก ต้องขอราคาจากฝ่ายผลิต`;
+    checks.push({ message, hit: true, level: 'quoteOnRequest', condition: 'อ่านจากช่องของรหัส', source: l.source });
+    violations.push({ id: 'CATALOG_LIMIT:' + l.id, level: 'quoteOnRequest', message });
+  }
+
   const breakdown: BreakdownLine[] = [];
   let running = 0;
 

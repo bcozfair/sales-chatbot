@@ -210,6 +210,7 @@ export const OFF_CATALOG_SUFFIX: Record<string, { num: string; head: string; let
  *   TSP-10L 10 · TSP-12L 9 · TSP-08L 2 · วัด 2026-10-06) ⇒ เจ้าของสั่ง 2026-10-06 *"ทุกรหัสที่มีกฎหัก L เหมือนกัน ให้บวกตามที่ excel ระบุ"*
  *   · เงินอยู่ที่กฎ `bend_l` ของรุ่น (แก้ที่หน้าสมุดราคา) · รุ่นที่ไม่มีกฎนี้ = ตัว L ยังเป็นท่อนนอกแคตตาล็อกตามเดิม (`TSJ-02L`)
  *   · ตัวเลขหลัง L1 (`6x50+700` = ความยาวขาที่สอง) ชีตไม่ได้เขียนราคา ⇒ ยังไม่คิด (ท่อนไม่รู้จัก)
+ *   · เขียนแยกด้วยขีด (`TSP-08-L(` · `TSK-11-L 5x…`) = ตัวเดียวกัน + เตือนให้แก้รหัสใน Odoo (เจ้าของ 2026-10-09 "นับด้วย")
  * อยู่ในโค้ด ไม่ใช่ตารางรหัสย่อย ด้วยเหตุผลเดียวกับ `MODEL_SUFFIX` (ตัวอักษรเดียวกันตำแหน่งอื่นเป็นคนละเรื่อง) และไม่ต้องเขียนฐานเพิ่ม
  * — ช่องติ๊ก "หัก L" บนหน้าคำนวณราคาไม่ติ๊กตาม (ค่าที่ติ๊กติดไปกับรหัสถัดไปที่พิมพ์ ⇒ ติ๊กให้เอง = รหัสที่ไม่มี L ได้ +100 ตาม)
  */
@@ -233,6 +234,73 @@ export const MAT_PRICE_AS: Record<string, Record<string, { model: string; source
   // (TS_-08 S ตามภาพชีต 2026-10-09) · `TSK-03S` ไม่ได้ตั้ง ⇒ ยังเป็น "ตัวอักษรท้ายเลขรุ่นที่ยังไม่ได้ตั้งค่า" ตามเดิม
   'TSP-08': { S: { model: 'TSP-08S', source: "ชีต TS-08S 'TS_-08 S' (แกน Sheath 6.35S · 8S)", head: true } },
 };
+
+/**
+ * ข้อจำกัดที่แคตตาล็อกเขียนไว้เป็นประโยค (ไม่ใช่ช่องว่างในตารางราคา) — เจ้าของสั่ง 2026-10-09 *"ควรให้เตือนด้วย ตามข้อจำกัดต่าง ๆ
+ * ที่มีระบุในแคตตาล็อกและ Excel แต่ยังคงขอราคาและกรอกราคาเพิ่มได้"* ⇒ รหัสที่ขัดข้อใดข้อหนึ่ง = **ต้องขอราคา + บอกข้อที่ขัด**
+ * ราคาเท่าที่คิดได้ยังขึ้นตามปกติ (ไม่ใช่ "ไม่รับผลิต" — ไม่รับผลิตเหลือเฉพาะข้อห้ามในชีต) และช่องราคาในตารางยังกรอกได้ตามเดิม
+ * · อ่านจากช่องกรอกของรหัส (`TsForm`) — ช่องที่อ่านไม่ออกหรือว่าง ข้อนั้นไม่ตัดสิน (ไม่เดาว่าขัด)
+ * · `when` ทุกช่องต้องตรง แล้ว `need` ช่องใดไม่ผ่าน = ขัด · `need` เป็นรายการค่า หรือ `{ min }` = ตัวเลขอย่างน้อยเท่านี้
+ * · 2 Element แกนเล็กกว่า 6 mm ไม่อยู่ที่นี่ — ชีตเว้นช่องไว้เป็นข้อห้ามของรุ่นแล้ว (`ELEM2_MIN_DIA` · ไม่รับผลิต)
+ * · ไม่ใส่ (ตัดสิน 2026-10-09): "PT100 แกน 4.8 · 5 · 6" ของ TS_-02 — ชีต TS-02 มีราคา PT100 แกน 8 เอง (Excel ขายจริง ขัดกับแคตตาล็อก) ·
+ *   "พีวีซี แกน 5 mm ขึ้นไป" ของ TS_-11 — แคตตาล็อกเขียนเป็นสายมาตรฐานของ RTD ไม่ใช่ข้อห้าม (250 รหัสจริงแกน 3.2–4.8 ขายด้วยราคาตามชีต)
+ */
+export interface CatalogLimit {
+  id: string;
+  families: TsFamily[];
+  when: Record<string, string[]>;
+  need: Record<string, string[] | { min: number }>;
+  message: string;
+  source: string;
+}
+export const CATALOG_LIMITS: CatalogLimit[] = [
+  { id: 'TITANIUM_S4', families: ['TS_-04', 'TS_-06', 'TS_-08', 'TS_-10'], when: { mat: ['TN'] }, need: { thread: ['S4'] },
+    message: 'วัสดุ Titanium (TN) แคตตาล็อกทำเฉพาะเกลียว 1/2” NPT (S4)', source: 'แคตตาล็อก ตาราง Diameter Tube — 7 mm (Titanium) เฉพาะเกลียว S4' },
+  { id: 'NTC_MIN_D', families: ['TS_-03', 'TS_-04', 'TS_-06', 'TS_-07', 'TS_-11'], when: { probe: ['N', 'P'] }, need: { d: { min: 5 } },
+    message: 'NTC/PTC แคตตาล็อกทำแกนตั้งแต่ 5 mm ขึ้นไป', source: 'แคตตาล็อก ตาราง Diameter Tube — NTC/PTC แกน 5 mm ขึ้นไป' },
+  { id: 'NTC_UNGROUND', families: ['TS_-03', 'TS_-04', 'TS_-06', 'TS_-07'], when: { probe: ['N', 'P'] }, need: { ground: ['U'] },
+    message: 'NTC/PTC แคตตาล็อกทำเฉพาะ Unground (U)', source: 'แคตตาล็อก ตาราง Ground — NTC/PTC Unground เท่านั้น' },
+  { id: 'SHEATH_TC_ONLY', families: ['TS_-03', 'TS_-04', 'TS_-06', 'TS_-07'], when: { mat: ['S'] }, need: { probe: ['TS'] },
+    message: 'วัสดุ Sheath 316 (S) แคตตาล็อกทำเฉพาะ Thermocouple', source: 'แคตตาล็อก ตาราง Type of Material — Sheath 316 (Thermocouple เท่านั้น)' },
+  { id: 'TEFLON_D', families: ['TS_-03'], when: { mat: ['T', 'AT'] }, need: { d: ['4', '6'] },
+    message: 'เคลือบเทปล่อน (T · AT) แคตตาล็อกทำเฉพาะแกน 4 · 6 mm', source: 'แคตตาล็อก TS_-03 ตาราง Type of Material' },
+  { id: 'TYPE_T_CABLE', families: ['TS_-02', 'TS_-02-SI'], when: { sensor: ['T'] }, need: { cable: ['', 'T'] },
+    message: 'Type T แคตตาล็อกทำเฉพาะสายสแตนเลสถักและเทปล่อน', source: 'แคตตาล็อก TS_-02 ตาราง Cable' },
+  { id: 'TYPE_T_CABLE', families: ['TS_-03', 'TS_-05'], when: { sensor: ['T'] }, need: { cable: [''] },
+    message: 'Type T แคตตาล็อกทำเฉพาะสายสแตนเลสถัก', source: 'แคตตาล็อก ตาราง Cable' },
+  { id: 'K_ONLY_D', families: ['TS_-12'], when: { d: ['1.5'] }, need: { sensor: ['K'] },
+    message: 'แกน 1.5 mm แคตตาล็อกทำเฉพาะ Type K', source: 'แคตตาล็อก TS_-12 ตาราง Diameter Tube (1.5 mm Type K Only)' },
+  { id: 'J_ONLY_D', families: ['TS_-12'], when: { d: ['1.6'] }, need: { sensor: ['J'] },
+    message: 'แกน 1.6 mm แคตตาล็อกทำเฉพาะ Type J', source: 'แคตตาล็อก TS_-12 ตาราง Diameter Tube (1.6 mm Type J Only)' },
+];
+
+/** ข้อจำกัดของแคตตาล็อกที่รหัสนี้ขัด (`CATALOG_LIMITS`) — ช่องที่อ่านไม่ออก/ว่างไม่ตัดสิน */
+export function catalogLimitsHit(form: TsForm): CatalogLimit[] {
+  // อ่านแบบหลวม (`readTsFormLoose`) ช่องว่างอาจแปลว่า "ท่อนนั้นหลุดไปอยู่ท้ายรหัส" ไม่ใช่ None ⇒ ไม่ตัดสินจากค่าว่าง
+  // (`N2-03 6x120+1MTSU` อ่านหลวมแล้ว Ground ว่างทั้งที่รหัสเขียน U)
+  const loose = !!(form.written || form.issues || form.tail || form.headJunk);
+  const val = (k: string): string | undefined => {
+    if (form.issues?.[k]) return undefined;
+    const v = form.written?.[k] ?? form.values[k];
+    if (v === undefined || (v === '' && loose)) return undefined;
+    return v.toUpperCase();
+  };
+  return CATALOG_LIMITS.filter((l) => {
+    if (!l.families.includes(form.family)) return false;
+    for (const [k, list] of Object.entries(l.when)) {
+      const v = val(k);
+      if (v === undefined || !list.includes(v)) return false;
+    }
+    return Object.entries(l.need).some(([k, need]) => {
+      const v = val(k);
+      if (v === undefined) return false;
+      if (Array.isArray(need)) return !need.includes(v);
+      if (v === '') return false;
+      const n = Number(v.match(/^\d+(?:\.\d+)?/)?.[0]);
+      return Number.isFinite(n) && n < need.min;
+    });
+  });
+}
 
 /**
  * ช่องที่แคตตาล็อก TS_-02 กับ TS_-02-SI เขียนเหมือนกัน (สองหน้า ตารางชุดเดียวกัน) — ขนาดแกนของ TS_-02 อยู่ที่นี่ด้วย
