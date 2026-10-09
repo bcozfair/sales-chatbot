@@ -39,6 +39,7 @@ import { pool } from '../../config/db.js';
 import { listSubCodes } from '../../db/pricingLabRepo.js';
 import { loosenessOf } from '../../services/drawing/checks.js';
 import { buildModel } from '../../services/drawing/families/registry.js';
+import { specRows } from '../../services/drawing/sheetText.js';
 import { fromReading } from '../../services/drawing/spec/fromReading.js';
 import { withSubCodes } from '../../services/pricingLab/bookStore.js';
 import { parseProductCode } from '../../services/pricingLab/code.js';
@@ -68,6 +69,7 @@ interface AppProduct {
   build(v: AppValues): string;
   modelParts(v: AppValues): AppPart[];
   exportStep(v: AppValues): string;
+  specRows(v: AppValues): [string, string][];
 }
 interface AppSolid { name: string; colour: number[]; positions: number[]; triangles: number[] }
 interface AppRegistry { PRODUCTS: AppProduct[]; canonical(code: string): string; findProduct(code: string): AppProduct | null }
@@ -326,6 +328,39 @@ async function partC(clean: { raw: string; family: string; values: AppValues }[]
   return { lines, fail, compared };
 }
 
+/** HTML entity ของ Appsale → ตัวอักษรจริง (ตารางของเราเก็บตัวอักษรจริง) */
+const ENTITY: Record<string, string> = { deg: '°', sup2: '²', micro: 'µ', lt: '<', gt: '>', amp: '&', quot: '"' };
+const decode = (s: string): string => s.replace(/&#(\d+);/g, (_, n: string) => String.fromCodePoint(Number(n))).replace(/&([a-z0-9]+);/g, (m, k: string) => ENTITY[k] ?? m);
+
+/** ส่วน ง — ตารางรายละเอียดสินค้า (`specRows`) ภาษาไทยเท่าต้นฉบับทุกตัวอักษร · ทุกเคส (ไม่ตัดซ้ำด้วยรูปทรง — ตารางมีช่องที่ไม่ใช่รูปทรง) */
+function partD(app: { byId(id: string): AppProduct }, cases: Case[]): { lines: string[]; fail: number; compared: number } {
+  const seen = new Set<string>();
+  let compared = 0, fail = 0, skipped = 0;
+  const diffs: string[] = [];
+  for (const c of cases) {
+    const key = JSON.stringify([c.family, c.values]);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (c.family === 'TS-11' && c.values.mat === 'S') { skipped++; continue; }   // วัสดุ S ไม่มีในตาราง TS_-11 ของเรา (ส่วนบน)
+    compared++;
+    let problem: string | null = null;
+    try {
+      const theirs = app.byId(c.family).specRows(c.values).map(([k, v]) => [decode(k), decode(v)]);
+      const ours = specRows(COVERED[c.family].toSpec(c.values), 'th');
+      const n = Math.max(theirs.length, ours.length);
+      for (let i = 0; i < n && !problem; i++) {
+        if (JSON.stringify(theirs[i]) !== JSON.stringify(ours[i])) problem = `แถว ${i + 1}: Appsale ${JSON.stringify(theirs[i])} · เรา ${JSON.stringify(ours[i])}`;
+      }
+    } catch (e) {
+      problem = `โยน error: ${e instanceof Error ? e.message : String(e)}`;
+    }
+    if (problem) { fail++; if (diffs.length < MAX_REPORT) diffs.push(`${c.family} · ${c.label}: ${problem}`); }
+  }
+  const lines = [`${fail ? RED + '✗' : GREEN + '✓'}${RESET} ส่วน ง: ตารางรายละเอียดสินค้า ${compared.toLocaleString()} ชุดค่า — ไม่ตรงต้นฉบับ ${fail}${skipped ? ` ${DIM}· ข้ามวัสดุ S ${skipped}${RESET}` : ''}`];
+  for (const d of diffs) lines.push(`    ${RED}${d}${RESET}`);
+  return { lines, fail, compared };
+}
+
 async function main(): Promise<void> {
   const useVendor = existsSync(join(VENDOR, 'SOURCE.json'));
   console.log(`\n${BOLD}ด่านพอร์ตแบบ 3 มิติจาก Appsale${RESET} ${DIM}(คอมมิต ${APPSALE_COMMIT} · ${useVendor ? `สำเนา ${VENDOR}` : `รีโป ${REPO}`})${RESET}\n`);
@@ -445,6 +480,11 @@ async function main(): Promise<void> {
     for (const f of failures) console.log(`\n  ${RED}✗${RESET} ${f}`);
     if (totalFail > MAX_REPORT) console.log(`\n  ${DIM}… และอีก ${totalFail - MAX_REPORT} ชุด${RESET}`);
 
+    const d = partD({ byId }, cases);
+    console.log('');
+    for (const l of d.lines) console.log(`  ${l}`);
+    const dFail = d.fail + (d.compared === 0 ? 1 : 0);
+
     let cFail = 0;
     if (!QUICK) {
       const c = await partC(cleanAppsale);
@@ -454,8 +494,8 @@ async function main(): Promise<void> {
       if (c.compared === 0) console.log(`  ${RED}ส่วน ค ตอบไม่ได้${RESET} — ไม่มีรหัสที่สะอาดทั้งสองฝั่ง`);
     }
 
-    const pass = total > 0 && totalFail === 0 && cFail === 0;
-    console.log(`\n${'─'.repeat(70)}\nสรุป: ${pass ? `${GREEN}ผ่าน${RESET} — ทุกชุดตรงกับต้นฉบับทุกไบต์${QUICK ? '' : ' และตัวแปลงช่องอ่านเหมือนต้นแบบ'}` : total === 0 ? `${RED}ตอบไม่ได้${RESET} — ไม่มีเคสให้ตรวจ` : `${RED}ตก${RESET} — ${totalFail} ชุดไม่ตรงกับต้นฉบับ · ส่วน ค ${cFail}`}\n${'─'.repeat(70)}\n`);
+    const pass = total > 0 && totalFail === 0 && cFail === 0 && dFail === 0;
+    console.log(`\n${'─'.repeat(70)}\nสรุป: ${pass ? `${GREEN}ผ่าน${RESET} — ทุกชุดตรงกับต้นฉบับทุกไบต์${QUICK ? '' : ' และตัวแปลงช่องอ่านเหมือนต้นแบบ'}` : total === 0 ? `${RED}ตอบไม่ได้${RESET} — ไม่มีเคสให้ตรวจ` : `${RED}ตก${RESET} — ${totalFail} ชุดไม่ตรงกับต้นฉบับ · ส่วน ค ${cFail} · ส่วน ง ${dFail}`}\n${'─'.repeat(70)}\n`);
     process.exitCode = pass ? 0 : 1;
   } finally {
     rmSync(tmp, { recursive: true, force: true });

@@ -15,7 +15,7 @@
    5. คำตอบเซิร์ฟเวอร์มาถึงแล้วภาพไม่กระตุก (ขนาดเท่าเดิม) · เปลี่ยนชนิดหัว (ส่วนประกอบ) ภาพก็ตาม
    6. ไม่มี error ในหน้า
 
-   รัน: `npm run build --prefix frontend` ก่อน แล้ว `npm run diag:drawing-live-ui`
+   รัน: `npm run build --prefix frontend` ก่อน แล้ว `npm run diag:drawing-live-ui` (`DL_SHOT=<ไฟล์.png>` = ถ่ายภาพการ์ดตอนจบ)
    ───────────────────────────────────────────────────────────────────────────── */
 import puppeteer, { type HTTPRequest, type Page } from 'puppeteer';
 import { existsSync, readFileSync } from 'node:fs';
@@ -141,6 +141,14 @@ try {
   const dCam = Math.max(...s1.cam.map((x, i) => Math.abs(x - camBefore[i])));
   ok('3 · ทิศกล้องเท่าเดิม', dCam <= 0.01, `คลาด ${dCam.toFixed(4)}`);
   ok('   ไม่สร้างตัวดูใหม่ (canvas ตัวเดิม)', s1.canvases === 1);
+  const probeRow = await page.evaluate(() => {
+    const dl = document.querySelector('[data-testid="drawing-spec"] dl');
+    const dts = [...(dl?.querySelectorAll('dt') ?? [])];
+    const i = dts.findIndex((d) => d.textContent === 'แกนวัด');
+    return { rows: dts.length, probe: i < 0 ? '' : dl!.querySelectorAll('dd')[i].textContent ?? '', note: document.querySelector('[data-testid="drawing-note"]')?.textContent ?? '' };
+  });
+  ok('   ตารางรายละเอียดตามช่องทันที (แกนวัด ยาว 300)', probeRow.rows >= 8 && /ยาว 300 mm/.test(probeRow.probe), `${probeRow.rows} แถว · แกนวัด "${probeRow.probe}"`);
+  ok('   หมายเหตุของแบบ (เห็นเฉพาะในระบบ)', /หมายเหตุของแบบ.*เห็นเฉพาะในระบบ.*สปริงกันสายหัก/.test(probeRow.note));
   const stillExploded = await page.evaluate(() => [...document.querySelectorAll('[data-testid="drawing-card"] button')].some((b) => b.getAttribute('aria-label') === 'ประกอบกลับ'));
   ok('4 · แยกชิ้นค้างอยู่ระหว่างแก้', stillExploded);
 
@@ -178,7 +186,13 @@ try {
   const s6 = await settle(page);
   ok('   ปุ่มกลับมุมเริ่มต้นล้างการเลื่อน', s6.pan < 0.5, `${s6.pan} mm`);
 
-  ok('10 · ไม่มี error ในหน้า', pageErrors.length === 0, pageErrors.join(' | '));
+  await page.evaluate(() => [...document.querySelectorAll<HTMLButtonElement>('[data-testid="drawing-card"] button')].find((b) => b.getAttribute('aria-label') === 'คัดลอกรหัส')?.click());
+  await later(200);
+  const copied = await page.evaluate(() => [...document.querySelectorAll('[data-testid="drawing-card"] button')].some((b) => b.getAttribute('aria-label') === 'คัดลอกแล้ว'));
+  ok('10 · ปุ่มคัดลอกรหัส', copied);
+  if (process.env.DL_SHOT) { const card = await page.$('[data-testid="drawing-card"]'); await card?.screenshot({ path: process.env.DL_SHOT }); }
+
+  ok('11 · ไม่มี error ในหน้า', pageErrors.length === 0, pageErrors.join(' | '));
 } catch (e) {
   fail++;
   console.log('  ✗ ด่านล้มกลางทาง:', e instanceof Error ? e.message : e);
