@@ -160,6 +160,9 @@ npm run logworker                                          # worker เขีย
 `npm test` เป็น stub (`exit 1`) โดยตั้งใจ — **ด่านตรวจของโปรเจคนี้คือ typecheck + `scripts/diag/*`**
 (วัด 2026-09-21: 65 รายการใน `scripts/diag/` · 46 npm script `diag:*`) ดูรายการเต็มใน `package.json`
 และดูว่าตัวไหนเป็น gate ใน `AGENTS.md` ข้อ 6
+**ก่อนส่งงานหรือ merge ทุกครั้ง: `docs/qa-release.md`** (`AGENTS.md` B9 · 2026-10-10) — ห้าชั้น · สถานะ PASS/FAIL/BLOCKED/NOT TESTED ·
+ด่านที่เขียนฐานรันกับฐานของเครื่อง dev หลังผ่านคำสั่งเช็กเท่านั้น · server ทดสอบอยู่ที่ :3099 ใช้ค่า LINE ปลอม (`APP_URL` ใน `.env` ของ dev
+ชี้ ngrok ⇒ ด่านที่ยิง server ต้องส่ง `APP_URL` ทับ) · `diag:llm-circuit` กับ `diag:webhook-recorder` ตกบน Windows เพราะ CRLF ไม่ใช่โค้ดผิด
 
 ---
 
@@ -564,6 +567,7 @@ chatbot/
 หัวข้อที่ยาวอยู่ในไฟล์ของตัวเอง เปิดอ่านเฉพาะไฟล์ที่เกี่ยวกับงานตรงหน้า
 
 - **`AGENTS.md`** — กฎ git · หลาย session ในทรีเดียว · ขอบเขตการอนุมัติ · ด่าน verify
+- **`docs/qa-release.md`** — ด่านก่อนส่งมอบ ห้าชั้น (อัตโนมัติ · ฐาน QA + server :3099 · สี่พื้นผิว · สิ่งที่ระบบนี้พังได้ · เจ้าของลองเอง) + รูปแบบรายงาน · บังคับโดย `AGENTS.md` B9
 - **`docs/design.md`** — กติกาหน้าตาของสี่พื้นผิว (Admin · LIFF · Flex · PDF)
 - **`docs/agent-team.md`** — ทีม agent 7 ตัวใน `.claude/agents/` · เกณฑ์ `effort`/`isolation` · loop ของงาน
 - **`docs/dev-preview.md`** — **พรีวิวร่วมบน PMSV ที่ `localhost:5180`** = โค้ดของ main (ไม่ใช่ worktree) ทั้ง backend+frontend

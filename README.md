@@ -1,5 +1,9 @@
 ## สรุปโครงสร้างโปรเจกต์ Primus Quotation System
 
+**การทดสอบก่อนส่งงาน** — รีโปนี้ไม่มี unit test suite (`npm test` เป็น stub โดยตั้งใจ) ด่านคือ typecheck + `scripts/diag/*` ·
+ทุกงานที่จะ merge ต้องผ่าน [`docs/qa-release.md`](docs/qa-release.md) ทุกชั้นที่งานแตะถึง และรายงานผลเป็น
+PASS / FAIL / BLOCKED / NOT TESTED (`AGENTS.md` B9) · diag ตัวไหนคุมเรื่องไหนอยู่ในตาราง `AGENTS.md` B5
+
 ---
 
 ### 1. API Endpoints ทั้งหมด
