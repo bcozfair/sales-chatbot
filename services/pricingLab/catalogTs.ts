@@ -252,7 +252,7 @@ export interface CatalogLimit {
   id: string;
   families: TsFamily[];
   when: Record<string, string[]>;
-  need: Record<string, string[] | { min: number }>;
+  need: Record<string, string[] | { min: number } | { max: number } | { gteOf: string }>;
   message: string;
   source: string;
   /** ไม่ใส่ = ต้องขอราคา · `'warn'` = เตือนอย่างเดียว ราคาคิดตามปกติ */
@@ -262,21 +262,44 @@ export interface CatalogLimit {
 }
 
 /**
- * ตาราง Diameter Tube ของแคตตาล็อก TS_-09 — ขนาดแกน → วัสดุที่ทำได้ (`''` = SUS 304 · A = 316L · B = 310S · I = Inconel · TN = Titanium)
- * เคลือบเทปล่อนนับตามวัสดุแกน (T = 304 · AT = 316) · S (Sheath) ของ 6.35/8 = ตาราง TSP-09 S ใน Excel · ชีต TS-09 มีราคาแถวที่ขัดตารางนี้หลายแถว (`3.2A` · `4.8` · `6.35` · `8` · `15.8`)
- * และขายจริง ⇒ เตือนอย่างเดียว (แนว PT100_D · เจ้าของ 2026-10-09 "คิดราคาได้ แต่เพิ่มแจ้งเตือน")
+ * ตาราง Diameter Tube ของแคตตาล็อก — ขนาดแกน → วัสดุที่ทำได้ (`''` = SUS 304 · A = 316L · B = 310S · I = Inconel · S = Sheath 316 · TN = Titanium)
+ * คัดจาก PDF ทุกแถว (`backup/Catalogue/` · อ่าน 2026-10-09) · เคลือบเทปล่อนนับตามวัสดุแกน (T = 304 · AT = 316) · AL (TS_-10) = 316L
+ * ชีต Excel มีราคาแถวที่ขัดตารางเหล่านี้หลายแถวและขายจริง ⇒ **เตือนอย่างเดียว** (แนว PT100_D · เจ้าของ 2026-10-09
+ * "ถ้ามีข้อจำกัดระบุไว้ในไฟล์แค็ตตาล็อค pdf ต้องใส่เสมอ" + "คิดราคาได้ แต่เพิ่มแจ้งเตือน")
  */
-const TS09_MAT_BY_D: Record<string, string[]> = {
+const MAT_TC_04: Record<string, string[]> = {
+  '2': [''], '3': ['', 'A', 'S'], '3.2': ['', 'A', 'S'], '4': ['', 'A'], '4.8': ['A', 'S'], '5': [''], '6': ['', 'A', 'S'], '6.35': ['A', 'S'],
+  '7': ['TN'], '8': ['A', 'S'], '9.5': ['', 'A'], '10': ['A'], '12.7': ['', 'A'], '15.8': ['', 'A'], '15.97': ['B'], '17.5': ['A'], '19': [''],
+  '21.3': ['B', 'A', 'I'],
+};
+const MAT_RTD_08: Record<string, string[]> = {
   '3.2': [''], '4': ['', 'A'], '4.8': ['A'], '5': [''], '6': ['', 'A'], '6.35': ['A'], '7': ['TN'], '8': ['A'], '9.5': ['', 'A'],
   '10': ['A'], '12.7': ['', 'A'], '15.8': ['B', 'A'], '17.5': ['A'], '19': [''], '21.3': ['B', 'A', 'I'],
 };
-const matLabelTs = (m: string) => ({ '': 'SUS 304', A: 'SUS 316L', B: 'SUS 310S', I: 'Inconel', TN: 'Titanium' } as Record<string, string>)[m] ?? m;
-const TS09_MAT_LIMITS: CatalogLimit[] = Object.entries(TS09_MAT_BY_D).map(([d, mats]) => ({
-  id: 'MAT_BY_D', families: ['TS_-09'] as TsFamily[], when: { d: [d] },
-  need: { mat: [...mats, ...(mats.includes('') ? ['T'] : []), ...(mats.includes('A') ? ['AT'] : []), ...(d === '6.35' || d === '8' ? ['S'] : [])] }, level: 'warn' as const,
-  message: `แกน ${d} mm แคตตาล็อกทำวัสดุ ${mats.map(matLabelTs).join(', ')}`,
-  source: 'แคตตาล็อก TS_-09 ตาราง Diameter Tube (ขนาด → วัสดุ) — ชีต TS-09 มีราคาแถวอื่น ⇒ เตือนอย่างเดียว',
-}));
+const MAT_BY_D_TABLES: { families: TsFamily[]; d: string; table: Record<string, string[]>; sheathRows?: string[] }[] = [
+  { families: ['TS_-03'], d: 'd', table: { '2': [''], '3': ['', 'A', 'S'], '3.2': ['', 'A', 'S'], '4': ['', 'A'], '4.8': ['A', 'S'], '5': [''],
+    '6': ['', 'A', 'S'], '6.35': ['', 'A', 'S'], '7': ['TN'], '8': ['A', 'S'], '9.5': ['', 'A'], '10': ['A'] } },
+  { families: ['TS_-04', 'TS_-06', 'TS_-07'], d: 'd', table: MAT_TC_04 },
+  { families: ['TS_-05'], d: 'd', table: { '4': [''], '4.8': ['', 'A'], '6': ['', 'A'], '8': ['', 'A'] } },
+  // S ของ TS_-08/09 แกน 6.35/8 = ตาราง "S" ใน Excel (TSP-08S · TSP-09S) ไม่ใช่ของแคตตาล็อก — ไม่เตือน
+  { families: ['TS_-08', 'TS_-09'], d: 'd', table: MAT_RTD_08, sheathRows: ['6.35', '8'] },
+  { families: ['TS_-10'], d: 'd', table: MAT_RTD_08 },
+  { families: ['TS_-11'], d: 'd', table: { '2': [''], '3': ['', 'A', 'S'], '3.2': ['', 'A', 'S'], '4': ['', 'A'], '4.8': ['A', 'S'], '5': [''],
+    '6': ['', 'A', 'S'], '6.35': ['', 'A', 'S'], '7': ['TN'], '8': ['A', 'S'], '9.5': ['', 'A'], '10': ['A'] } },
+  { families: ['TS_-12R'], d: 'd', table: { '2': [''], '3': ['', 'A'], '3.2': [''], '4': ['', 'A'], '4.8': ['A'], '5': [''], '6': ['', 'A'],
+    '6.35': ['', 'A'], '8': ['A'], '9.5': ['', 'A'], '10': ['A'] } },
+  { families: ['TS_-18'], d: 'd1', table: Object.fromEntries(Object.entries(MAT_TC_04).filter(([d]) => d !== '7')) },
+];
+const matLabelTs = (m: string) => ({ '': 'SUS 304', A: 'SUS 316L', B: 'SUS 310S', I: 'Inconel', S: 'Sheath 316', TN: 'Titanium' } as Record<string, string>)[m] ?? m;
+const MAT_BY_D_LIMITS: CatalogLimit[] = MAT_BY_D_TABLES.flatMap(({ families, d: dSlot, table, sheathRows }) =>
+  Object.entries(table).map(([d, mats]) => ({
+    id: 'MAT_BY_D', families, when: { [dSlot]: [d] },
+    need: { mat: [...mats, ...(mats.includes('') ? ['T'] : []), ...(mats.includes('A') ? ['AT', 'AL'] : []), ...(sheathRows?.includes(d) ? ['S'] : [])] },
+    level: 'warn' as const,
+    message: `แกน ${d} mm แคตตาล็อกทำวัสดุ ${mats.map(matLabelTs).join(', ')}`,
+    source: `แคตตาล็อก ${families.join(' · ')} ตาราง Diameter Tube (ขนาด → วัสดุ) — ชีต Excel มีราคาแถวอื่น ⇒ เตือนอย่างเดียว`,
+  })));
+const L1_MIN_FAMILIES: TsFamily[] = ['TS_-03', 'TS_-04', 'TS_-05', 'TS_-06', 'TS_-07', 'TS_-08', 'TS_-09', 'TS_-10', 'TS_-11', 'TS_-12', 'TS_-12R'];
 export const CATALOG_LIMITS: CatalogLimit[] = [
   { id: 'TITANIUM_S4', families: ['TS_-04', 'TS_-06', 'TS_-08', 'TS_-10'], when: { mat: ['TN'] }, need: { thread: ['S4'] },
     message: 'วัสดุ Titanium (TN) แคตตาล็อกทำเฉพาะเกลียว 1/2” NPT (S4)', source: 'แคตตาล็อก ตาราง Diameter Tube — 7 mm (Titanium) เฉพาะเกลียว S4' },
@@ -286,8 +309,8 @@ export const CATALOG_LIMITS: CatalogLimit[] = [
     message: 'NTC/PTC แคตตาล็อกทำเฉพาะ Unground (U)', source: 'แคตตาล็อก ตาราง Ground — NTC/PTC Unground เท่านั้น' },
   { id: 'SHEATH_TC_ONLY', families: ['TS_-03', 'TS_-04', 'TS_-06', 'TS_-07'], when: { mat: ['S'] }, need: { probe: ['TS'] },
     message: 'วัสดุ Sheath 316 (S) แคตตาล็อกทำเฉพาะ Thermocouple', source: 'แคตตาล็อก ตาราง Type of Material — Sheath 316 (Thermocouple เท่านั้น)' },
-  { id: 'TEFLON_D', families: ['TS_-03', 'TS_-09'], when: { mat: ['T', 'AT'] }, need: { d: ['4', '6'] },
-    message: 'เคลือบเทปล่อน (T · AT) แคตตาล็อกทำเฉพาะแกน 4 · 6 mm', source: 'แคตตาล็อก TS_-03 ตาราง Type of Material' },
+  { id: 'TEFLON_D', families: ['TS_-03', 'TS_-04', 'TS_-06', 'TS_-07', 'TS_-08', 'TS_-09', 'TS_-10', 'TS_-11', 'TS_-12R'], when: { mat: ['T', 'AT'] }, need: { d: ['4', '6'] },
+    message: 'เคลือบเทปล่อน (T · AT) แคตตาล็อกทำเฉพาะแกน 4 · 6 mm', source: 'แคตตาล็อก คุณสมบัติ "แกนเคลือบเทปล่อน (เฉพาะแกน 4 mm และ 6 mm)"' },
   { id: 'TYPE_T_CABLE', families: ['TS_-02', 'TS_-02-SI'], when: { sensor: ['T'] }, need: { cable: ['', 'T'] },
     message: 'Type T แคตตาล็อกทำเฉพาะสายสแตนเลสถักและเทปล่อน', source: 'แคตตาล็อก TS_-02 ตาราง Cable' },
   { id: 'TYPE_T_CABLE', families: ['TS_-03', 'TS_-05'], when: { sensor: ['T'] }, need: { cable: [''] },
@@ -302,15 +325,50 @@ export const CATALOG_LIMITS: CatalogLimit[] = [
     message: 'สายพีวีซี แคตตาล็อกเขียนสำหรับแกน 5 mm ขึ้นไป', source: 'แคตตาล็อก TS_-11 ตาราง Cable (PVC Standard for RTD · แกน 5 mm ขึ้นไป) ⇒ เตือนอย่างเดียว' },
   // TS_-09 ไม่มีเกลียว แต่แคตตาล็อกยังเขียน "7 mm Titanium *ทำได้เฉพาะเกลียว S4" (ก๊อปจากหน้า TS_-08) — เจ้าของ 2026-10-09
   // "ถ้ามีข้อจำกัดระบุไว้ในไฟล์แค็ตตาล็อค pdf ต้องใส่เสมอ" ⇒ Titanium ของ TS_-09 = ขัดเสมอ (ไม่มีเกลียว S4 ให้เลือก) → ต้องขอราคา
-  { id: 'TITANIUM_S4', families: ['TS_-09'], when: { mat: ['TN'] }, need: { mat: [] },
-    message: 'วัสดุ Titanium (TN) แคตตาล็อกเขียนว่าทำได้เฉพาะเกลียว S4 — รุ่นนี้ไม่มีเกลียว', source: 'แคตตาล็อก TS_-09 ตาราง Diameter Tube — 7 mm (Titanium) *ทำได้เฉพาะเกลียว S4' },
-  ...TS09_MAT_LIMITS,
-  { id: 'FLANGE_D', families: ['TS_-09'], when: {}, need: { d: ['4', '4.8', '6', '8', '9.5', '12.7', '15.8', '15.97'] }, level: 'warn',
+  { id: 'TITANIUM_S4', families: ['TS_-07', 'TS_-09'], when: { mat: ['TN'] }, need: { mat: [] },
+    message: 'วัสดุ Titanium (TN) แคตตาล็อกเขียนว่าทำได้เฉพาะเกลียว S4 — รุ่นนี้ไม่มีเกลียว', source: 'แคตตาล็อก TS_-07 · TS_-09 ตาราง Diameter Tube — 7 mm (Titanium) *ทำได้เฉพาะเกลียว S4' },
+  ...MAT_BY_D_LIMITS,
+  { id: 'FLANGE_D', families: ['TS_-07', 'TS_-09'], when: {}, need: { d: ['4', '4.8', '6', '8', '9.5', '12.7', '15.8', '15.97'] }, level: 'warn',
     message: 'แคตตาล็อกมีหน้าแปลนปีกนกให้เฉพาะแกน 4 · 4.8 · 6 · 8 · 9.5 · 12.7 mm และหน้าแปลนกลม (แถม) แกน 15.8 · 15.97 mm',
-    source: 'แคตตาล็อก TS_-09 หมายเหตุใต้ภาพหน้าแปลน — ชีต TS-09 มีราคาแกนอื่นและขายจริง ⇒ เตือนอย่างเดียว' },
-  { id: 'TM_BIG_HEAD', families: ['TS_-08', 'TS_-09'], when: {}, need: { hd: ['B', 'E', 'KB', 'SB'] }, extra: /^TM\d+$/,
+    source: 'แคตตาล็อก TS_-07 · TS_-09 หมายเหตุใต้ภาพหน้าแปลน — ชีต Excel มีราคาแกนอื่นและขายจริง ⇒ เตือนอย่างเดียว' },
+  { id: 'TM_BIG_HEAD', families: ['TS_-06', 'TS_-07', 'TS_-08', 'TS_-09', 'TS_-14', 'TS_-18'], when: {}, need: { hd: ['B', 'E', 'KB', 'SB'] }, extra: /^TM\d+$/,
     message: 'ฝังทรานสมิตเตอร์ TM-012 ในหัว แคตตาล็อกให้ใช้หัวกระโหลกแบบ Big Head (B · E · KB · SB)',
     source: "แคตตาล็อก หมายเหตุ 'กรณีต้องการฝัง Temperature Sensor Transmitter (TM-012-Series) ในหัวกระโหลก ชนิดหัวกระโหลกต้องเป็น Big Head'" },
+  // ── ไล่ครบทุกซีรีส์ 2026-10-09 (เจ้าของ "ไล่ใส่ให้ครบ") — คัดจาก PDF `backup/Catalogue/` ทีละหน้า · docs/pricing-code-ts-catalog.md "ข้อจำกัดของแคตตาล็อก" ──
+  { id: 'TYPE_T_CABLE', families: ['TS_-01', 'TS_-01-0'], when: { sensor: ['T'] }, need: { cable: ['', 'T'] }, level: 'warn',
+    message: 'Type T แคตตาล็อกทำเฉพาะสายสแตนเลสถักและเทปล่อน', source: "แคตตาล็อก TS_-01 · TS_-01-0 '* Thermocouple Type T จะมีเฉพาะสายสแตนเลสถัก และเทปล่อน'" },
+  { id: 'CABLE_C_SENSOR', families: ['TS_-01', 'TS_-02', 'TS_-02-SI'], when: { cable: ['C'] }, need: { sensor: ['K', 'P', 'PA', 'Z'] }, level: 'warn',
+    message: 'สายซิลิโคน (C) แคตตาล็อกเขียนสำหรับ RTD และ Thermocouple Type K', source: "แคตตาล็อก TS_-01 · 02 · 02-SI ตาราง Cable Type 'C = ซิลิโคน (0-105 ˚C RTD & Thermocouple Type K)'" },
+  { id: 'RTD_UNGROUND', families: ['TS_-01', 'TS_-01-0', 'TS_-02', 'TS_-02-SI', 'TS_-11', 'TS_-18'], when: { sensor: ['P', 'PA', 'Z'] }, need: { ground: ['U'] }, level: 'warn',
+    message: 'RTD แคตตาล็อกทำ Unground (U) — Ground ใช้ได้เฉพาะ Thermocouple', source: "แคตตาล็อก ตาราง Ground 'None = Ground (Standard for Thermocouple) Only · U = Unground (Standard for RTD)'" },
+  // TS_-11 เพิ่ม 2026-10-09 — ชีต TS-11 คิดราคา NTC ไม่ดู Ground และขายจริง ⇒ เตือนอย่างเดียว (03/04/06/07 เป็นขอราคาตามเดิม)
+  { id: 'NTC_UNGROUND', families: ['TS_-11'], when: { probe: ['N', 'P'] }, need: { ground: ['U'] }, level: 'warn',
+    message: 'NTC/PTC แคตตาล็อกทำเฉพาะ Unground (U)', source: "แคตตาล็อก TS_-11 '***NTC/PTC Unground Only'" },
+  { id: 'PTC_2K', families: ['TS_-03', 'TS_-04', 'TS_-06', 'TS_-07', 'TS_-11'], when: { probe: ['P'] }, need: { sensor: ['2'] }, level: 'warn',
+    message: 'PTC แคตตาล็อกมีเฉพาะ 2K', source: "แคตตาล็อก คุณสมบัติ 'NTC (2K, 10K) • PTC (2K)'" },
+  { id: 'SHEATH_TC_ONLY', families: ['TS_-18'], when: { mat: ['S'] }, need: { sensor: ['K', 'J', 'T', 'R', 'S'] },
+    message: 'วัสดุ Sheath 316 (S) แคตตาล็อกทำเฉพาะ Thermocouple', source: "แคตตาล็อก TS_-18 ตาราง Type of Material 'S = Shealth 316 for Thermo-couple Only'" },
+  // 2 Element — ซีรีส์ที่ชีตไม่มีข้อห้าม ELEM2_MIN_DIA ในแมป (TS_-06 · 14 · 18) · ซีรีส์อื่นห้ามที่แมปแล้ว
+  { id: 'ELEM2_D', families: ['TS_-06'], when: { elem: ['2'] }, need: { d: { min: 6 } }, level: 'warn',
+    message: '2 Element แคตตาล็อกทำได้ตั้งแต่แกน 6 mm ขึ้นไป', source: "แคตตาล็อก TS_-06 '* สามารถทำ 2 Element ได้ตั้งแต่แกน 6 mm. ขึ้นไป'" },
+  { id: 'ELEM2_D', families: ['TS_-18'], when: { elem: ['2'] }, need: { d1: { min: 6 } }, level: 'warn',
+    message: '2 Element แคตตาล็อกทำได้ตั้งแต่แกน 6 mm ขึ้นไป', source: "แคตตาล็อก TS_-18 '*สามารถทำ 2 Element ได้ตั้งแต่แกน 6 mm.ขึ้นไป'" },
+  { id: 'ELEM2_D', families: ['TS_-14'], when: { elem: ['2'] }, need: { d: { min: 15 } }, level: 'warn',
+    message: '2 Element แคตตาล็อกทำได้ตั้งแต่ Ø 15 mm ขึ้นไป', source: "แคตตาล็อก TS_-14 'สามารถสั่งทำได้ทั้ง 2 Element ตั้งแต่ ø 15 mm. ขึ้นไปได้'" },
+  { id: 'HEAD_STD_D', families: ['TS_-14'], when: { hd: [''] }, need: { d: ['6'] }, level: 'warn',
+    message: 'หัวกระโหลก Aluminium (Standard) แคตตาล็อกใช้กับแกน 6 mm เท่านั้น', source: "แคตตาล็อก TS_-14 ตาราง Type of Head 'None = Aluminium (Standard) for Diameter Tube 6mm. Only.'" },
+  { id: 'L1_MAX', families: ['TS_-14', 'TS_-18'], when: {}, need: { l1: { max: 1000 } }, level: 'warn',
+    message: 'ความยาวแกน (L1) แคตตาล็อกทำได้สูงสุด 1000 mm', source: "แคตตาล็อก TS_-14 · TS_-18 ตาราง Tube Length '*ความยาวสูงสุด 1000 mm.'" },
+  { id: 'L1_MIN', families: L1_MIN_FAMILIES, when: {}, need: { l1: { min: 10 } }, level: 'warn',
+    message: 'ความยาวแกน (L1) แคตตาล็อกทำได้ต่ำสุด 10 mm', source: "แคตตาล็อก ตาราง Tube Length '*ความยาวแกนที่ต่ำสุด 10 mm.'" },
+  { id: 'D2_GTE_D1', families: ['TS_-18'], when: {}, need: { d2: { gteOf: 'd1' } }, level: 'warn',
+    message: 'แกน Sleeve (D2) ไม่ควรเล็กกว่าแกน (D1)', source: "แคตตาล็อก TS_-18 '***หมายเหตุ : Diameter Tube (D2) Sleeve Length ไม่ควรขนาดเล็กกว่า (D1)'" },
+  // หัวกระโหลกตามจำนวน Element — แคตตาล็อกเขียนเป็นชื่อรุ่นหัว (KSE/KBS/KNE/KB) ไม่ใช่รหัส Type of Head · เจ้าของ 2026-10-09 "ให้แจ้งเตือน"
+  // จับคู่ได้แน่ชัดแค่เบกาไลต์: KB = Bakelite Big Head (หัวของ 2 Element) · K = Bakelite ธรรมดา ⇒ อลูมิเนียม (KSE/KNE) ไม่เดาว่าเป็นรหัสไหน
+  { id: 'HEAD_ELEMENT', families: ['TS_-06', 'TS_-07', 'TS_-08', 'TS_-09'], when: { elem: [''], hd: ['KB'] }, need: { hd: [] }, level: 'warn',
+    message: '1 Element แคตตาล็อกใช้หัว KSE (Aluminium) / KBS (Bakelite) — KB เป็นหัวของ 2 Element', source: "แคตตาล็อก 'สามารถสั่งทำ Element • 1 Element ใช้กับ Head รุ่น KSE (Aluminium) และรุ่น KBS (Bakelite) • 2 Element ใช้กับ Head รุ่น KNE (Aluminium) และรุ่น KB (Bakelite)'" },
+  { id: 'HEAD_ELEMENT', families: ['TS_-06', 'TS_-07', 'TS_-08', 'TS_-09'], when: { elem: ['2'], hd: ['K'] }, need: { hd: [] }, level: 'warn',
+    message: '2 Element แคตตาล็อกใช้หัว KNE (Aluminium) / KB (Bakelite Big Head)', source: "แคตตาล็อก 'สามารถสั่งทำ Element • 1 Element ใช้กับ Head รุ่น KSE (Aluminium) และรุ่น KBS (Bakelite) • 2 Element ใช้กับ Head รุ่น KNE (Aluminium) และรุ่น KB (Bakelite)'" },
 ];
 
 /** ข้อจำกัดของแคตตาล็อกที่รหัสนี้ขัด (`CATALOG_LIMITS`) — ช่องที่อ่านไม่ออก/ว่างไม่ตัดสิน */
@@ -336,8 +394,13 @@ export function catalogLimitsHit(form: TsForm): CatalogLimit[] {
       if (v === undefined) return false;
       if (Array.isArray(need)) return !need.includes(v);
       if (v === '') return false;
-      const n = Number(v.match(/^\d+(?:\.\d+)?/)?.[0]);
-      return Number.isFinite(n) && n < need.min;
+      const num = (x: string | undefined) => Number(x?.match(/^\d+(?:\.\d+)?/)?.[0]);
+      const n = num(v);
+      if (!Number.isFinite(n)) return false;
+      if ('min' in need) return n < need.min;
+      if ('max' in need) return n > need.max;
+      const other = num(val(need.gteOf));
+      return Number.isFinite(other) && n < other;
     });
   });
 }
