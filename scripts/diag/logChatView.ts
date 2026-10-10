@@ -95,6 +95,7 @@ function part1(): void {
     ['action=edit_btn&target=salesperson&field=phone', 'กดแก้ไขข้อมูลเซลส์ (เบอร์โทร)'],
     ['action=edit_profile', 'กดแก้ไขข้อมูลส่วนตัว'],
     ['action=confirm_profile', 'กดยืนยันข้อมูลลงทะเบียน'],
+    ['action=retry_text&mid=msg-1', 'กดลองอีกครั้ง (หลัง AI ขัดข้อง)'],
     ['[กดปุ่ม] action=select_company&custId=1', 'กดเลือกบริษัท'],
     ['action=something_new&x=1', 'กดปุ่ม (action=something_new)'],
     ['', 'กดปุ่ม (action=?)'],

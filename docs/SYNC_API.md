@@ -139,13 +139,14 @@ curl -H "Authorization: Bearer $KEY" \
 
 ตัวใหญ่สุดในกลุ่มนี้คือ `product_stock_rules` 536 kB ถูกกว่าการทำ tombstone มาก
 
-### ตารางทั้งหมด (23 ตาราง)
+### ตารางทั้งหมด (30 ตาราง · ตรวจกับ `TABLE_REGISTRY` 2026-10-10)
 
 | ตาราง | โหมด | pk | poll hint | ขนาด/แถว | หมายเหตุ |
 |---|---|---|---|---|---|
 | `sale_orders` | incremental | `order_reference` | 600 | 429 MB / 316k | ก้อนใหญ่สุด |
 | `customers` | incremental | `company_id`,`contact_id` | 600 | 84 MB / 78k | |
 | `products` | incremental | `product_template_id` | 600 | 47 MB / 51k | |
+| `sale_order_details` | incremental | `sale_order_id` | 600 | 301 MB / 319k (dev 2026-10-10) | บรรทัดสินค้า/ใบแจ้งหนี้/MO ของใบสั่งขาย (jsonb `lines`) · เปิด 2026-10-10 · ต้องมี index `idx_sale_order_details_sync_cursor` (migration `2026-10-10_01`) ไม่งั้นทุกหน้าเป็น Seq Scan |
 | `quotations` | incremental | `id` | 600 | 4.2 MB / 1.2k | **ลบแถวได้ → ต้อง `/ids`** |
 | `messages` | append | `id` | 600 | 3.8 MB / 4.7k | ตัด `reply_token` ออก |
 | `api_logs` | append | `id` | 3600 | 4.8 MB / 16k | |
@@ -159,15 +160,23 @@ curl -H "Authorization: Bearer $KEY" \
 | `shipping_fee_config` | snapshot | `id` | 900 | เล็ก | |
 | `product_stock_rules` | snapshot | `internal_reference` | 900 | 536 kB / 5.3k | |
 | `product_moq_rules` | snapshot | `internal_reference` | 900 | เล็ก | |
+| `product_block_rules` | snapshot | `id` | 900 | เล็ก | |
 | `product_optional_links` | snapshot | `id` | 900 | เล็ก | |
 | `sync_settings` | snapshot | `id` | 900 | เล็ก | |
 | `sync_state` | snapshot | `resource` | 900 | เล็ก | |
 | `customers_data_view_state` | snapshot | `id` | 900 | เล็ก | |
 | `quotation_export_log` | snapshot | `id` | 900 | 560 kB / 2.9k | แถวถูก UPDATE ทีหลังได้ (ถอนการส่งออก) |
 | `quotation_export_batches` | snapshot | `id` | 900 | เล็ก | เหตุผลเดียวกัน |
+| `local_contacts` | snapshot | `contact_id` | 900 | เล็ก | ผู้ติดต่อที่แอดมินเพิ่มเอง · เปิด 2026-10-10 |
+| `local_products` | snapshot | `product_template_id` | 900 | เล็ก | สินค้าที่แอดมินเพิ่มเอง · **ส่งทุกคอลัมน์รวม `pricebook_price`** (เจ้าของเลือก 2026-10-10) |
+| `customer_quote_company` | snapshot | `company_id` | 900 | เล็ก | บัญชีเสนอในนาม PM · เปิด 2026-10-10 |
+| `admin_user_salespersons` | snapshot | `admin_user_id`,`salesperson_id` | 3600 | เล็ก | แอดมิน → เซลส์ที่ออกใบในนามได้ · เปิด 2026-10-10 |
+| `role_permissions` | snapshot | `role`,`capability` | 3600 | เล็ก | เมทริกซ์สิทธิ์ต่อ role · เปิด 2026-10-10 |
 | `customers_data_view` | snapshot | `company_id`,`contact_id` | 86400 | 41 MB / 82k | ตารางสรุป — ดู `generation` ข้างล่าง |
 
-ตารางที่ **ไม่อยู่ในทะเบียน** ตอบ 404 เสมอ (`sync_api_keys` จงใจไม่เปิด — ไม่ส่งกุญแจของตัวเองออกไป)
+ตารางที่ **ไม่อยู่ในทะเบียน** ตอบ 404 เสมอ — ที่จงใจไม่เปิดพร้อมเหตุผลอยู่ใน `scripts/diag/syncApiSmoke.ts` ข้อ 1:
+`sync_api_keys` (ไม่ส่งกุญแจของตัวเองออกไป) · กอง log ภายใน (`system_logs` `audit_logs` `log_worker_state` `traffic_daily`
+`backup_runs` `webhook_events` `liff_auth_observations`) · สมุดราคา `pricing_*` ทั้งเล่ม
 ตารางใหม่ที่ migration สร้างขึ้นจะไม่หลุดออกไปเองจนกว่าจะมีคนใส่ทะเบียนใน `TABLE_REGISTRY`
 
 ---

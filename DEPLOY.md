@@ -29,7 +29,7 @@ git push origin main
 ### 1.2 dump database ออกจาก PostgreSQL ในเครื่อง
 ```powershell
 $env:PGPASSWORD = "database"
-& "C:\Program Files\PostgreSQL\18\bin\pg_dump.exe" -h localhost -p 5432 -U postgres -d chatbot_primus -Fc -f "$HOME\chatbot_primus.dump"
+& "C:\Program Files\PostgreSQL\18\bin\pg_dump.exe" -h localhost -p 5432 -U postgres -d chatbot_primus_dev -Fc -f "$HOME\chatbot_primus.dump"
 ```
 > เครื่อง dev นี้ใช้ PostgreSQL **18** → docker-compose ตั้ง `postgres:18` ให้ตรงกันแล้ว (major version ต้องตรง ไม่งั้น restore ไม่ได้)
 
@@ -482,6 +482,10 @@ done
   · โค้ดใหม่ที่เจอว่ายังไม่มีคอลัมน์ **พักเขียนเอง 10 นาที** (บรรทัด `[webhookEvents.…] พักเขียนคอลัมน์บันทึกผล`)
   ใบรับ/การตัดสินการส่งซ้ำไม่เกี่ยว · แถวเติม `wh_*` ใน `messages` ไม่พึ่งไฟล์นี้ · รันหลัง deploy = event ช่วงก่อนรันไม่มีค่าในสี่คอลัมน์
   · ตรวจ: `we_reply` ในคำสั่งข้างบนต้องเป็น `t` แล้ว `npm run diag:redelivery` ข้อ 7 ต้องไม่มีบรรทัด ⏭️ ของ 2026-10-02_01
+- **ข้อยกเว้น: `2026-10-10_01_sale_order_details_sync_cursor.sql` รันได้ทุกเวลา และสลับลำดับกับ deploy ได้ (แนะนำรันก่อน)**
+  index อย่างเดียว `CREATE INDEX CONCURRENTLY` (ไม่บล็อกการเขียน · ~1 วิ บน 319k แถวของเครื่อง dev 2026-10-10) ⇒ **ต้องรันด้วย psql
+  ตามหัวไฟล์ ห้ามผ่าน `runMigration.ts`** · ยังไม่รัน = ระบบภายนอกดึง `sale_order_details` ได้ถูกต้องแต่ทุกหน้าเป็น Seq Scan
+  · ตรวจ: `npm run diag:sync-api` ข้อ 8 ต้องขึ้น `sale_order_details: ใช้ Index Scan` · ล้มกลางทาง = index ค้าง INVALID ⇒ `DROP INDEX` แล้วรันใหม่
 - **ข้อยกเว้น: `2026-09-02_03_quotations_odoo_import_link.sql` รันได้ทุกเวลา และรัน "ก่อน" deploy โค้ดใหม่ได้**
   เพิ่ม `quotations.odoo_imported_at` / `odoo_so_id` = สถานะ "นำเข้า Odoo แล้ว" ของหน้าประวัติใบเสนอราคา
   `ADD COLUMN` nullable ไม่มี DEFAULT บนตาราง ~1.3k แถว จบในไม่กี่ ms

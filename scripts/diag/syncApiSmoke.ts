@@ -56,10 +56,14 @@ async function main() {
   //   pricing_subcodes / pricing_book_revisions / pricing_models / pricing_model_history
   //     สมุดราคาของโมดูล "คิดราคาสินค้า" = ราคาจริงของบริษัททั้งเล่ม ⇒ ห้ามส่งออกให้ระบบภายนอกเด็ดขาด
   //     (docs/plan-pricebook-db.md §7 · เพิ่ม 2026-09-23 — ใครย้ายเข้าทะเบียน ข้อ 1b ข้างล่างล้ม)
+  //   backup_runs / webhook_events / liff_auth_observations  (เจ้าของเคาะ 2026-10-10)
+  //     log ภายในกลุ่มเดียวกับ system_logs — ประวัติสำรอง (ชื่อไฟล์ · พื้นที่ดิสก์) · ใบรับ webhook ของ LINE
+  //     (มี reply_token + LINE userId + เนื้อข้อความ ซึ่งเนื้อแชทออกทาง messages อยู่แล้ว) · ตัวนับการตรวจตัวตน LIFF
   const PRICE_TABLES = ['pricing_subcodes', 'pricing_book_revisions', 'pricing_models', 'pricing_model_history'];
   const INTENTIONALLY_OUT = new Set([
     'sync_api_keys',
     'system_logs', 'log_worker_state', 'audit_logs', 'traffic_daily',
+    'backup_runs', 'webhook_events', 'liff_auth_observations',
     ...PRICE_TABLES,
   ]);
 
@@ -158,7 +162,7 @@ async function main() {
 
   // ── 6. ไล่หน้าแล้วต้องได้เท่ากับอ่านรวดเดียว ────────────────────────────────
   console.log('\n── 6. keyset pagination ไม่ข้าม ไม่ซ้ำ (แม้ timestamp ซ้ำกันทั้งกอง) ──');
-  for (const tableName of ['sale_orders', 'customers', 'quotations']) {
+  for (const tableName of ['sale_orders', 'customers', 'quotations', 'sale_order_details']) {
     const def = getTableDef(tableName)!;
     const order = orderColumns(def);
     const key = (r: any) => def.pk.map((c) => String(r[c])).join('|');

@@ -34,7 +34,7 @@
  * โปรเซสจะออกเงียบ ๆ exit 0 ก่อนถึง assert (เกิดจริงตอนเขียนด่านนี้) ⇒ `keepAlive` ด้านล่าง
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import type pg from 'pg';
@@ -74,7 +74,11 @@ const skipped = (label: string, why: string): void => {
   console.log(`  ${Y}⏭️${X}  ${label}  ${D}— ${why}${X}`);
 };
 const section = (t: string) => console.log(`\n${B}${t}${X}`);
-const read = (rel: string) => readFileSync(join(ROOT, rel), 'utf8');
+// ทรีบน Windows เป็น CRLF (core.autocrlf) และตัวคั่น path เป็น `\` — ข้อ 3 ตัดฟังก์ชันด้วย `\n}\n` และเทียบ path
+// กับรายการที่เขียนด้วย `/` ⇒ ยุบทั้งสองอย่างก่อนเทียบ ไม่งั้นตกบนเครื่อง dev ทั้งที่โค้ดถูก
+const readAbs = (abs: string) => readFileSync(abs, 'utf8').replace(/\r\n/g, '\n');
+const read = (rel: string) => readAbs(join(ROOT, rel));
+const relPosix = (abs: string) => relative(ROOT, abs).split(sep).join('/');
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const tick = () => new Promise<void>((r) => setImmediate(r));
 
@@ -498,9 +502,9 @@ function part3(): void {
       .map(d => join(ROOT, d)).filter(d => { try { return statSync(d).isDirectory(); } catch { return false; } })
       .flatMap(d => walk(d))];
   const lit = new RegExp(`['"\`]${WEBHOOK_FILL_PREFIX}`);
-  const offenders = files.filter(f => relative(ROOT, f) !== join('db', 'messageKinds.ts'))
-    .filter(f => lit.test(stripComments(readFileSync(f, 'utf8'))))
-    .map(f => relative(ROOT, f));
+  const offenders = files.filter(f => relPosix(f) !== 'db/messageKinds.ts')
+    .filter(f => lit.test(stripComments(readAbs(f))))
+    .map(relPosix);
   check(`3e. prefix ของแถวเติมเขียนเป็นสตริงตรง ๆ ได้แค่ใน db/messageKinds.ts (ตรวจ ${files.length} ไฟล์)`,
     offenders.length === 0 && lit.test(read('db/messageKinds.ts')), offenders.join(', '));
 
@@ -527,9 +531,9 @@ function part3(): void {
     'scripts/logworker/trafficDailyJob.ts', // นับทุกแถวตามที่เจ้าของเคาะ (แผน B.12)
     'db/logRepositories.ts',             // หน้าบันทึก เฟส 2 (listChatRowsForRequests) — ต้องเห็นแถวเติมด้วย · ไม่ป้อน LLM
   ]);
-  const appFiles = files.filter(f => !relative(ROOT, f).startsWith('scripts/') || relative(ROOT, f).startsWith('scripts/logworker/'));
-  const readers = appFiles.filter(f => /\b(FROM|JOIN)\s+messages\b/i.test(stripComments(readFileSync(f, 'utf8'))))
-    .map(f => relative(ROOT, f));
+  const appFiles = files.filter(f => !relPosix(f).startsWith('scripts/') || relPosix(f).startsWith('scripts/logworker/'));
+  const readers = appFiles.filter(f => /\b(FROM|JOIN)\s+messages\b/i.test(stripComments(readAbs(f))))
+    .map(relPosix);
   const unknown = readers.filter(f => !KNOWN_READERS.has(f));
   check('3g. ผู้อ่านตาราง messages ฝั่งแอปมีแค่ที่ตัดสินแล้วว่ากรอง/ไม่กรอง', unknown.length === 0,
     unknown.length ? `ตัวใหม่: ${unknown.join(', ')} — ตัดสินว่าต้อง excludeWebhookFillSql ไหม แล้วเติมใน KNOWN_READERS` : readers.join(', '));

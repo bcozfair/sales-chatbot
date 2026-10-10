@@ -161,8 +161,9 @@ npm run logworker                                          # worker เขีย
 (วัด 2026-09-21: 65 รายการใน `scripts/diag/` · 46 npm script `diag:*`) ดูรายการเต็มใน `package.json`
 และดูว่าตัวไหนเป็น gate ใน `AGENTS.md` ข้อ 6
 **ก่อนส่งงานหรือ merge ทุกครั้ง: `docs/qa-release.md`** (`AGENTS.md` B9 · 2026-10-10) — ห้าชั้น · สถานะ PASS/FAIL/BLOCKED/NOT TESTED ·
-ด่านที่เขียนฐานรันกับฐานของเครื่อง dev หลังผ่านคำสั่งเช็กเท่านั้น · server ทดสอบอยู่ที่ :3099 ใช้ค่า LINE ปลอม (`APP_URL` ใน `.env` ของ dev
-ชี้ ngrok ⇒ ด่านที่ยิง server ต้องส่ง `APP_URL` ทับ) · `diag:llm-circuit` กับ `diag:webhook-recorder` ตกบน Windows เพราะ CRLF ไม่ใช่โค้ดผิด
+ด่านที่เขียนฐานรันกับฐานของเครื่อง dev หลังผ่านคำสั่งเช็กเท่านั้น (ฐาน dev ชื่อ **`chatbot_primus_dev`** · ของร้าน `chatbot_primus` · คำสั่งเช็กดู
+Postgres ของ Windows + ชื่อฐาน + `NODE_ENV=development` พร้อมกัน) · server ทดสอบอยู่ที่ :3099 ใช้ค่า LINE ปลอม (`APP_URL` ใน `.env` ของ dev
+ชี้ ngrok ⇒ ด่านที่ยิง server ต้องส่ง `APP_URL` ทับ) · ด่านที่อ่านซอร์สต้องยุบ CRLF/`\` ก่อนเทียบ (ทรี Windows)
 
 ---
 

@@ -50,26 +50,14 @@
 **ห้ามเขียนว่า "พร้อม merge" หรือ "พร้อม deploy"** ถ้ายังมี FAIL ร้ายแรง หรือมีข้อ BLOCKED/NOT TESTED
 ในเรื่องที่งานรอบนี้เปลี่ยน
 
-### ด่านที่ผลบนเครื่อง dev เชื่อไม่ได้ (วัด 2026-10-10)
+### ด่านบนเครื่อง dev ที่เคยตก (แก้แล้ว 2026-10-10)
 
-ทรีบนเครื่อง Windows เป็น CRLF (`core.autocrlf=true` ในค่าระบบของ Git for Windows) แต่ด่านสองตัวอ่านซอร์สด้วย
-regex ที่หา `\n}\n` และเทียบ path ด้วย `/` ⇒ **ตกบนเครื่อง dev ทั้งที่โค้ดถูก**
-
-| ด่าน | ข้อที่ตกเพราะ CRLF/path | หลักฐานว่าไม่ใช่โค้ดผิด |
-| --- | --- | --- |
-| `diag:llm-circuit` | 5a · 5b | ทรีเดียวกันที่แปลงเป็น LF ผ่านครบ |
-| `diag:webhook-recorder` | 3b · 3d · 3f · 3g | ในทรี LF ผ่าน 76 ตก 1 (3g ยังตกเพราะ `\` ใน path) |
-
-⇒ ถ้างานแตะเรื่องที่สองด่านนี้คุม ห้ามรายงานว่า PASS จากเครื่อง dev และห้ามรายงานว่า FAIL ของงาน
-ให้รายงานข้อเหล่านั้นเป็น **BLOCKED (ด่านอ่านซอร์สแบบ LF)** แล้วให้เจ้าของรันซ้ำบน PMSV (ทั้งสองตัวไม่เขียนฐานจริง
-⇒ รันบน PMSV ได้ตาม B2) · ข้ออื่นของสองด่านนี้ใช้ผลจากเครื่อง dev ได้ตามปกติ · การแก้ด่านเป็นงานแยก
-
-**ด่านที่ตกอยู่แล้วบน `dev` เพราะเป็นช่องว่างจริง (2026-10-10 · ยังไม่แก้ · เป็นงานแยก)** — งานที่ไม่ได้แตะเรื่องนี้
-ให้รายงานว่า "ตกก่อนแก้อยู่แล้ว" ตามกติกาข้อ 5:
-- `diag:log-chat` ข้อ 1b — action `retry_text` (ปุ่ม "ลองอีกครั้ง" · 2026-10-08) ยังไม่มีคำแปลใน `utils/postbackLabel.ts`
-- `diag:sync-api` ข้อ 1 — มี 9 ตารางที่ไม่อยู่ในทะเบียน sync (`backup_runs` `sale_order_details` `webhook_events`
-  `customer_quote_company` `local_contacts` `local_products` `admin_user_salespersons` `role_permissions`
-  `liff_auth_observations`) ต้องให้เจ้าของตัดสินว่าตารางไหนส่งออก ตารางไหนกันไว้
+สำรวจ 2026-10-10 ได้ 24/28 ผ่าน · สี่ตัวที่ตกแก้แล้วในวันเดียวกัน ⇒ **ตอนนี้ไม่มีด่านที่รู้ว่าตกอยู่แล้ว** ด่านที่ตกคือของงาน
+- `diag:llm-circuit` 5a/5b · `diag:webhook-recorder` 3b–3g — ทรี Windows เป็น CRLF (`core.autocrlf=true`) และตัวคั่น path เป็น `\`
+  ด่านอ่านซอร์สด้วย `\n}\n` และเทียบ path ด้วย `/` ⇒ ตอนนี้ยุบเป็น LF/`/` ก่อนเทียบ (ยังจับของผิดที่ฝังลงไปได้ — ลองแล้ว)
+  **ด่านใหม่ที่อ่านซอร์สต้องทำแบบเดียวกัน** ไม่งั้นตกบนเครื่อง dev ทั้งที่โค้ดถูก
+- `diag:log-chat` 1b — ปุ่ม `retry_text` ได้คำแปลใน `utils/postbackLabel.ts` แล้ว
+- `diag:sync-api` ข้อ 1 — เจ้าของตัดสินทั้ง 9 ตาราง (เปิด 6 · กันไว้ 3 พร้อมเหตุผลในตัวด่าน · `docs/SYNC_API.md`)
 
 ---
 
@@ -96,22 +84,30 @@ npm --prefix frontend run build     # typecheck + build ลง public/ · 13 ว
 
 **ยังไม่มี test runner และตั้งใจให้เป็นแบบนั้น** (`npm test` เป็น stub) — ตัดสิน 2026-10-10: ด่านที่ต้องรันขึ้นกับว่า
 งานแตะอะไร ถ้ามีชุดคำสั่งตายตัว คนจะรันชุดนั้นแทนชุดที่ตรงกับงาน · ถ้าวันหนึ่งต้องมีจริง ทางที่ไม่ต้องติดตั้งอะไรเพิ่ม
-คือ `node:test` ผ่าน `tsx --test` · เรื่องนี้ค่อยกลับมาคิดหลังแก้ด่าน CRLF เสร็จ
+คือ `node:test` ผ่าน `tsx --test` · ด่าน CRLF แก้แล้ว (2026-10-10) แต่เหตุผลข้างบนยังอยู่ ⇒ ยังไม่เพิ่ม
 
 ## ชั้นที่ 2 — ฐาน QA และ server สำหรับทดสอบ
 
-**ฐาน QA = `chatbot_primus` บน Postgres ของเครื่อง dev** (เจ้าของเลือก 2026-10-10) — เป็นสำเนาที่กู้มาจาก dump
+**ฐาน QA = `chatbot_primus_dev` บน Postgres ของเครื่อง dev** (เจ้าของเลือก 2026-10-10 · เปลี่ยนชื่อจาก `chatbot_primus`
+วันเดียวกัน) — เป็นสำเนาที่กู้มาจาก dump
 ของ prod (`backup/*.dump`) ไม่ใช่ฐานของร้าน · **บน PMSV ไม่มีฐาน QA** ฐานที่นั่นคือของจริง (B2) ⇒ ข้อของชั้นนี้ที่ต้อง
 เขียนฐานให้รายงานเป็น BLOCKED ถ้า session อยู่บน PMSV
 
-**ชื่ออย่างเดียวแยกสองฐานนี้ไม่ได้** — ฐานของร้านก็ชื่อ `chatbot_primus` เหมือนกัน และด่านเดิมใน `scripts/dev/`
-ที่เช็กว่า "ชื่อมีคำว่า prod ไหม" จับฐานของร้านไม่ได้ ⇒ ก่อนรันอะไรที่เขียนฐาน ให้ถามเซิร์ฟเวอร์ว่าเป็นตัวไหน
-(Postgres ของ dev เป็นตัว Windows · ของร้านอยู่ในกล่อง Linux):
+**ด่านเช็กดูสามอย่างที่ต้องตรงพร้อมกัน** — ข้อเดียวไม่พอ เพราะ `.env` ถูกก๊อปข้ามเครื่องได้:
+
+| สัญญาณ | เครื่อง dev | PMSV (ฐานของร้าน) |
+| --- | --- | --- |
+| ตัวเซิร์ฟเวอร์ Postgres (`version()`) | `x86_64-windows` | กล่อง Linux |
+| ชื่อฐาน | `chatbot_primus_dev` | `chatbot_primus` |
+| `NODE_ENV` | `development` (`.env`) | `production` (`docker-compose.yml` + `Dockerfile` ตั้งให้กล่อง) |
+
+ด่านบังคับ `NODE_ENV` ต้องเป็น `development` เป๊ะ ไม่ใช่แค่ "ไม่ใช่ production" ⇒ ไม่ได้ตั้ง = หยุด ·
+ด่านเดิมใน `scripts/dev/` ที่ดูแค่ว่าชื่อมีคำว่า "prod" ไหม ยังจับฐานของร้านไม่ได้ ⇒ ใช้คำสั่งนี้ก่อนทุกครั้ง:
 
 ```bash
 uname -s                            # ต้องขึ้น MINGW… / MSYS… (A1)
-node --input-type=module -e "import pg from 'pg';import d from 'dotenv';d.config({quiet:true});const c=new pg.Client({host:process.env.PG_HOST,port:+process.env.PG_PORT,user:process.env.PG_USER,password:process.env.PG_PASSWORD,database:process.env.PG_DATABASE});await c.connect();const {rows:[r]}=await c.query('select current_database() db, version() v');await c.end();const ok=/windows/i.test(r.v)&&/^(localhost|127\.0\.0\.1)$/.test(process.env.PG_HOST)&&process.env.NODE_ENV!=='production';console.log(ok?'QA-DB OK':'STOP: ไม่ใช่ฐาน dev',r.db,'|',r.v.split(',')[0]);process.exit(ok?0:1)"
-# → QA-DB OK chatbot_primus | PostgreSQL 18.4 on x86_64-windows   (2026-10-10)
+node --input-type=module -e "import pg from 'pg';import d from 'dotenv';d.config({quiet:true});const c=new pg.Client({host:process.env.PG_HOST,port:+process.env.PG_PORT,user:process.env.PG_USER,password:process.env.PG_PASSWORD,database:process.env.PG_DATABASE});await c.connect();const {rows:[r]}=await c.query('select current_database() db, version() v');await c.end();const ok=/windows/i.test(r.v)&&r.db==='chatbot_primus_dev'&&/^(localhost|127\.0\.0\.1)$/.test(process.env.PG_HOST)&&process.env.NODE_ENV==='development';console.log(ok?'QA-DB OK':'STOP: ไม่ใช่ฐาน dev',r.db,'|',r.v.split(',')[0],'| NODE_ENV='+process.env.NODE_ENV);process.exit(ok?0:1)"
+# → QA-DB OK chatbot_primus_dev | PostgreSQL 18.4 on x86_64-windows | NODE_ENV=development   (2026-10-10)
 ```
 
 ขึ้น `STOP` = หยุดทั้งชั้น ห้ามหาทางเลี่ยง
@@ -188,14 +184,14 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST http://127.0.0.1:3099/callback 
 | ราคา · สมุดราคา | ราคาเดิมของรหัสจริงทุกตัวต้องไม่ขยับ ยกเว้นที่ตั้งใจ · รายงานความใกล้เคียงกับ `products.sales_price` | `diag:pricing` · `diag:pricing-diff` · `diag:pricing-coverage` |
 | ราคาขั้นต่ำ · สต็อก · MOQ · กฎบล็อก | ใบจาก LINE ต้องยังถูกบล็อกเหมือนเดิม · server ตรวจทุกบรรทัด · client ห้ามบล็อกจากสต็อกดิบ | `diag:quote-validation` (PASS) · `stock-rule` (PASS) · `stock-rule-put` (PASS) · `block-rule` (PASS) · `block-parity` (PASS) · `price-approval` (ชั้นที่ 2 · **ข้อ 1 ห้ามล้ม**) |
 | ยอดท้ายใบ | จอกับ PDF ใช้ `quotationDocumentTotals()` ตัวเดียว | `diag:web-quote` ข้อ 9 (ชั้นที่ 2) |
-| สิทธิ์ตาม role | ไม่มี token → 401 · role ที่ไม่มีช่องนั้น → 403 · ไม่ใช่ admin ต้องไม่ได้เนื้อแชท · route ใหม่ใต้ `/api/admin/*` ต้องมีด่าน | `diag:role-permissions` (PASS) · `diag:log-chat` (ตกก่อนแก้อยู่แล้ว ข้อ 1b) · ยิงจริงบน server QA ด้วย token จาก `mintAdminToken.ts` (วัด: ไม่มี token → 401 · token QA → 200) |
+| สิทธิ์ตาม role | ไม่มี token → 401 · role ที่ไม่มีช่องนั้น → 403 · ไม่ใช่ admin ต้องไม่ได้เนื้อแชท · route ใหม่ใต้ `/api/admin/*` ต้องมีด่าน | `diag:role-permissions` (PASS) · `diag:log-chat` (PASS) · ยิงจริงบน server QA ด้วย token จาก `mintAdminToken.ts` (วัด: ไม่มี token → 401 · token QA → 200) |
 | ตัวตนของ LIFF | ขั้น 0 "นับ ไม่บล็อก" ต้องยังไม่บล็อก · เส้นที่บังคับต้องปฏิเสธ token ผิด | `diag:liff-auth` (PASS) |
-| webhook ส่งซ้ำ | ของที่ตอบแล้วต้องไม่ถูกทำซ้ำ · ของที่รอบแรกไม่มาถึงต้องไม่หายเงียบ · ไม่มีทาง "ทำให้เงียบ ๆ" · `pushMessage` = 0 | `diag:redelivery` (PASS · มีเช็ก `pushMessage` ในตัว) · `diag:webhook-recorder` (ดู "ด่านที่ผลบนเครื่อง dev เชื่อไม่ได้") |
-| คิว · งบ 48 วิ · LLM ช้า | งานที่หมดงบต้องหยุดจริง · ปิดเครื่องแล้วคิวที่ค้างต้องตอบจนจบ · เพดาน 20 วิ ครอบช่วงโหลด body · ตัวตัดเร็ว | `diag:queue-sim` (PASS) · `abort-check` (PASS) · `shutdown-check` (PASS) · `llm-timeout` (PASS · 81 วิ บนเครื่องนี้) · `llm-circuit` (5a/5b BLOCKED บน Windows) |
+| webhook ส่งซ้ำ | ของที่ตอบแล้วต้องไม่ถูกทำซ้ำ · ของที่รอบแรกไม่มาถึงต้องไม่หายเงียบ · ไม่มีทาง "ทำให้เงียบ ๆ" · `pushMessage` = 0 | `diag:redelivery` (PASS · มีเช็ก `pushMessage` ในตัว) · `diag:webhook-recorder` (PASS · 77 ข้อ) |
+| คิว · งบ 48 วิ · LLM ช้า | งานที่หมดงบต้องหยุดจริง · ปิดเครื่องแล้วคิวที่ค้างต้องตอบจนจบ · เพดาน 20 วิ ครอบช่วงโหลด body · ตัวตัดเร็ว | `diag:queue-sim` (PASS) · `abort-check` (PASS) · `shutdown-check` (PASS) · `llm-timeout` (PASS · 81 วิ บนเครื่องนี้) · `llm-circuit` (PASS) |
 | raw body ของ `/callback` | ห้ามมี `express.json()` แบบ global · ลายเซ็นผิดต้องถูกปฏิเสธ | `curl` ลายเซ็นผิดในชั้นที่ 2 |
 | ยืนยันใบ · เลขที่ใบ | เลขไม่ซ้ำเมื่อกดพร้อมกัน · ห้ามเขียนทับ `created_at` · กันยืนยันข้ามเจ้าของ | `diag:confirm-race` (PASS บน server QA) + `diag:odoo-export` |
 | ส่งออก Odoo | ชื่อลูกค้า/ผู้ติดต่อห้ามถูก trim · `rule_overrides` ห้ามใช้กรองไฟล์ · Sales Team อ่านค่าที่ตรึงไว้ก่อน | `diag:odoo-export` (PASS · ตรวจ 4 / 40 / 75 ชื่อ) · `diag:export-tracking` |
-| sync API ให้ระบบภายนอก | ทุกตารางอยู่ในทะเบียนหรือกันไว้โดยตั้งใจ · คอลัมน์ลับไม่หลุด · ไล่หน้าไม่ข้ามไม่ซ้ำ | `diag:sync-api` (ตกก่อนแก้อยู่แล้ว ข้อ 1) |
+| sync API ให้ระบบภายนอก | ทุกตารางอยู่ในทะเบียนหรือกันไว้โดยตั้งใจ · คอลัมน์ลับไม่หลุด · ไล่หน้าไม่ข้ามไม่ซ้ำ | `diag:sync-api` (PASS · ตารางใหม่ = ใส่ทะเบียนหรือกันไว้พร้อมเหตุผล ซึ่งเจ้าของเป็นคนเลือก) |
 | sync จาก Odoo | ยอดทั้งใบ `order_*` · ไม่แตะ `sync_state` ตอนทดสอบ | `diag:saleorder-v3` (PASS) · `sync:saleorders -- --v3-dry-run` **ยิง gateway จริง** (อ่านอย่างเดียว · gateway เปิด 07:00–18:00) |
 | วันที่ · timezone | ผลเท่ากันทุกโซนทั้งสองฝั่ง | `diag:date-filter` (PASS) |
 | เครดิต · blacklist | fail-closed: ฐานล่ม = ห้ามออกใบ | `diag:credit-hold` (PASS) · `diag:web-credit-dormant` |

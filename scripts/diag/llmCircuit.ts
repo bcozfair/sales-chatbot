@@ -26,7 +26,8 @@ const { pickRetryableText } = await import('../../db/repositories.js');
 const { createLlmOutageRetryFlex } = await import('../../utils/flexTemplates.js');
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..');
-const read = (f: string) => readFileSync(join(ROOT, f), 'utf8');
+// ทรีบน Windows เป็น CRLF (core.autocrlf) — ข้อ 5 ตัดฟังก์ชันด้วย `\n}\n` ⇒ ยุบเป็น LF ก่อน ไม่งั้นตกทั้งที่โค้ดถูก
+const read = (f: string) => readFileSync(join(ROOT, f), 'utf8').replace(/\r\n/g, '\n');
 
 let failed = 0;
 const check = (name: string, ok: boolean, detail = '') => {

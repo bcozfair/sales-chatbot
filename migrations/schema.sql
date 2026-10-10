@@ -27,6 +27,7 @@
 -- 2026-10-05: ยุบ 2026-10-05_01 (sale_orders + 7 คอลัมน์ · sale_order_details + pkey + index)
 --   เขียนตามรูปที่ pg_dump พ่น ยังไม่ได้เทียบฐานจริง (migration ยังไม่ได้รัน ณ วันที่ยุบ)
 -- 2026-10-07: ยุบ 2026-10-07_01 (liff_auth_observations + pkey) — รันบนฐาน dev แล้ว ตรวจด้วย \d ตรงไฟล์
+-- 2026-10-10: ยุบ 2026-10-10_01 (idx_sale_order_details_sync_cursor) — รันบนฐาน dev แล้ว ตรวจด้วย pg_indexes ตรงไฟล์
 -- ตรวจล่าสุด 2026-08-25 (ผ่าน — ยุบ 2026-08-25_01 นิยาม last_order_at ใหม่ + 2026-08-25_02 ปลดโหมด warn เข้าไปแล้ว)
 -- ก่อนหน้า 2026-08-21 (รอบนั้นพบว่าขาด quotation_counters, sync_settings, index 6 ตัว
 -- และ role 'subadmin' — ยุบเข้าครบแล้ว)
@@ -1967,6 +1968,7 @@ CREATE INDEX idx_sale_orders_sync_cursor ON public.sale_orders (updated_at, orde
 CREATE INDEX idx_customers_sync_cursor   ON public.customers (updated_at, company_id, contact_id);
 CREATE INDEX idx_products_sync_cursor    ON public.products (updated_at, product_template_id);
 CREATE INDEX idx_quotations_sync_cursor  ON public.quotations (updated_at, id);
+CREATE INDEX idx_sale_order_details_sync_cursor ON public.sale_order_details (updated_at, sale_order_id); -- 2026-10-10_01
 
 
 --

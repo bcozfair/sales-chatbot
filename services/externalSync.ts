@@ -64,6 +64,9 @@ export const TABLE_REGISTRY: SyncTableDef[] = [
   { table: 'sale_orders', mode: 'incremental', pk: ['order_reference'], cursor: 'updated_at', pollHintSeconds: 600 },
   { table: 'customers',   mode: 'incremental', pk: ['company_id', 'contact_id'], cursor: 'updated_at', pollHintSeconds: 600 },
   { table: 'products',    mode: 'incremental', pk: ['product_template_id'], cursor: 'updated_at', pollHintSeconds: 600 },
+  // บรรทัดสินค้า/ใบแจ้งหนี้/MO ของใบสั่งขาย (sync v3 · jsonb `lines`) — เจ้าของเปิด 2026-10-10
+  // upsert ล้วน updated_at ขยับเฉพาะเมื่อต้นทางเปลี่ยน · index คู่ cursor = migration 2026-10-10_01
+  { table: 'sale_order_details', mode: 'incremental', pk: ['sale_order_id'], cursor: 'updated_at', pollHintSeconds: 600 },
 
   // ใบเสนอราคา — incremental แต่ "ลบได้จริง" (ล้างใบค้าง pending, ยกเลิกใบ)
   // ปลายทางต้องเรียก /ids เป็นรอบ ๆ เพื่อไล่ลบใบที่หายไป ไม่งั้นใบผีจะค้างที่ปลายทางตลอดกาล
@@ -99,6 +102,14 @@ export const TABLE_REGISTRY: SyncTableDef[] = [
   // ไม่ใช่ append ทั้งที่หน้าตาเหมือน log — append จะไม่มีวันเห็นการถอนเลย
   { table: 'quotation_export_log',     mode: 'snapshot', pk: ['id'],                 pollHintSeconds: 900 },
   { table: 'quotation_export_batches', mode: 'snapshot', pk: ['id'],                 pollHintSeconds: 900 },
+  // 6 ตารางที่เจ้าของเปิดเพิ่ม 2026-10-10 — ทุกตัวมี DELETE ในโค้ดหรือแถวน้อย จึงเป็น snapshot
+  //   local_products ส่งทุกคอลัมน์รวม pricebook_price ตามที่เจ้าของเลือก (ราคาของสินค้าทีละตัว
+  //   ไม่ใช่สมุดราคาทั้งเล่ม — ตาราง pricing_* ยังห้ามออกเหมือนเดิม ด่าน sync-api ข้อ 1b)
+  { table: 'local_contacts',           mode: 'snapshot', pk: ['contact_id'],         pollHintSeconds: 900 },
+  { table: 'local_products',           mode: 'snapshot', pk: ['product_template_id'], pollHintSeconds: 900 },
+  { table: 'customer_quote_company',   mode: 'snapshot', pk: ['company_id'],         pollHintSeconds: 900 },
+  { table: 'admin_user_salespersons',  mode: 'snapshot', pk: ['admin_user_id', 'salesperson_id'], pollHintSeconds: 3600 },
+  { table: 'role_permissions',         mode: 'snapshot', pk: ['role', 'capability'], pollHintSeconds: 3600 },
 
   // ── ตารางสรุปที่ถูกสร้างใหม่ทั้งใบทุกรอบ refresh ──────────────────────────────────────
   // 82k แถว/41 MB และไม่มี updated_at รายแถว → ดึงทั้งใบอย่างเดียว จึงตั้ง hint เป็นวันละครั้ง

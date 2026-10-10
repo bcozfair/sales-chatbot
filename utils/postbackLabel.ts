@@ -9,7 +9,7 @@
  * โดยตั้งใจ — ชื่อสินค้า/บริษัทหาย้อนหลังไม่ได้ (select_product ชี้ตำแหน่ง ไม่ใช่รหัส) และคำแปลเปลี่ยนได้
  * โดยไม่ต้องแก้ข้อมูลเก่า · ⇒ ไม่ query ฐานเพิ่ม: คำอ่านบอก "กดอะไร" ไม่บอก "กดตัวไหน" (ข้อมูลดิบอยู่ใต้คำอ่านเสมอ)
  *
- * action ที่รู้จัก = ทุกตัวที่ handlers/lineHandler.ts + utils/flexTemplates.ts สร้าง (ไล่ 2026-10-05) ·
+ * action ที่รู้จัก = ทุกตัวที่ handlers/lineHandler.ts + utils/flexTemplates.ts สร้าง (ไล่ 2026-10-05 · + retry_text 2026-10-10) ·
  * ไม่รู้จัก = "กดปุ่ม (action=…)" ไม่เดา · ฟังก์ชันบริสุทธิ์ ไม่ import อะไร ⇒ สคริปต์ดึงไปใช้ได้โดยไม่ลาก pool มาด้วย
  */
 
@@ -55,6 +55,7 @@ export function postbackLabel(data: string | null | undefined): string {
     case 'edit_btn': return `กดแก้ไขข้อมูลเซลส์${EDIT_FIELD[p.get('field') ?? ''] ?? ''}`;
     case 'edit_profile': return 'กดแก้ไขข้อมูลส่วนตัว';
     case 'confirm_profile': return 'กดยืนยันข้อมูลลงทะเบียน';
+    case 'retry_text': return 'กดลองอีกครั้ง (หลัง AI ขัดข้อง)';
     default: return `กดปุ่ม (action=${action || '?'})`;
   }
 }
